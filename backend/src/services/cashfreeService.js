@@ -1,0 +1,172 @@
+import crypto from "crypto";
+
+const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID || "";
+const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY || "";
+const CASHFREE_ENV = (process.env.CASHFREE_ENV || "TEST").toUpperCase();
+const CASHFREE_API_VERSION = process.env.CASHFREE_API_VERSION || "2023-08-01";
+
+/**
+ * Service Wrapper for Cashfree Payment Gateway (PG API v2023-08-01)
+ */
+async function cashfreeRequest(path, { method = "GET", body, headers = {} } = {}) {
+  const appId = process.env.CASHFREE_APP_ID || CASHFREE_APP_ID;
+  const secretKey = process.env.CASHFREE_SECRET_KEY || CASHFREE_SECRET_KEY;
+  const apiVersion = process.env.CASHFREE_API_VERSION || CASHFREE_API_VERSION || "2023-08-01";
+  const env = (process.env.CASHFREE_ENV || CASHFREE_ENV || "TEST").toUpperCase();
+  const baseUrl = env === "PROD" || env === "PRODUCTION"
+    ? "https://api.cashfree.com/pg"
+    : "https://sandbox.cashfree.com/pg";
+
+  if (!appId || !secretKey) {
+    throw new Error("Cashfree credentials are not configured");
+  }
+
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: {
+      "x-client-id": appId,
+      "x-client-secret": secretKey,
+      "x-api-version": apiVersion,
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      data.message || data.error?.message || `Cashfree request failed with status ${response.status}`
+    );
+  }
+  return data;
+}
+
+/**
+ * Create a new Cashfree Order and generate a payment_session_id
+ */
+export async function createCashfreeOrder({
+  orderId,
+  amount,
+  currency = "INR",
+  customer = {},
+  returnUrl,
+  notifyUrl,
+  notes = {},
+}) {
+  const sanitizedOrderId = String(orderId).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 45);
+  const customerId = String(customer.id || customer.email || customer.phone || "cust_guest")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 45);
+  const customerPhone = String(customer.phone || "9999999999").replace(/[^0-9]/g, "").slice(-10) || "9999999999";
+  const customerEmail = customer.email || "guest@ideaholiday.in";
+  const customerName = customer.name || "Idea Holiday Traveler";
+
+  const orderPayload = {
+    order_id: sanitizedOrderId,
+    order_amount: Math.round(Number(amount) * 100) / 100,
+    order_currency: currency,
+    customer_details: {
+      customer_id: customerId,
+      customer_name: customerName,
+      customer_email: customerEmail,
+      customer_phone: customerPhone,
+    },
+    order_meta: {
+      return_url: returnUrl || null,
+      notify_url: notifyUrl || null,
+    },
+    order_note: typeof notes === "string" ? notes : notes.note || notes.description || `Booking ${orderId}`,
+    order_tags: typeof notes === "object" ? notes : {},
+  };
+
+  const order = await cashfreeRequest("/orders", {
+    method: "POST",
+    body: orderPayload,
+  });
+
+  return {
+    success: true,
+    orderId: order.order_id,
+    cfOrderId: order.cf_order_id,
+    paymentSessionId: order.payment_session_id,
+    orderStatus: order.order_status,
+    orderAmount: order.order_amount,
+    orderCurrency: order.order_currency,
+    appId: process.env.CASHFREE_APP_ID || CASHFREE_APP_ID,
+    environment: (process.env.CASHFREE_ENV || CASHFREE_ENV).toUpperCase(),
+  };
+}
+
+/**
+ * Fetch Order details from Cashfree
+ */
+export async function getCashfreeOrder(orderId) {
+  const sanitized = encodeURIComponent(orderId);
+  return cashfreeRequest(`/orders/${sanitized}`, { method: "GET" });
+}
+
+/**
+ * Fetch Payments list for an Order from Cashfree
+ */
+export async function getCashfreePayments(orderId) {
+  const sanitized = encodeURIComponent(orderId);
+  return cashfreeRequest(`/orders/${sanitized}/payments`, { method: "GET" });
+}
+
+/**
+ * Verify Webhook Signature sent by Cashfree
+ */
+export function verifyCashfreeWebhookSignature(rawBody, signature, timestamp) {
+  const secretKey = process.env.CASHFREE_SECRET_KEY || CASHFREE_SECRET_KEY;
+  if (!rawBody || !signature || !timestamp || !secretKey) return false;
+
+  try {
+    const payload = `${timestamp}${rawBody}`;
+    const expectedSignature = crypto
+      .createHmac("sha256", secretKey)
+      .update(payload)
+      .digest("base64");
+
+    const expected = Buffer.from(expectedSignature);
+    const received = Buffer.from(String(signature));
+    return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Process a refund through Cashfree Refund API (works on active or settled orders)
+ */
+export async function processCashfreeRefund({ orderId, refundId, amount, reason }) {
+  const sanitizedOrderId = encodeURIComponent(orderId);
+  const refundIdGen = refundId || `rfnd_${Date.now()}`;
+
+  const refund = await cashfreeRequest(`/orders/${sanitizedOrderId}/refunds`, {
+    method: "POST",
+    body: {
+      refund_id: refundIdGen,
+      refund_amount: Math.round(Number(amount) * 100) / 100,
+      refund_note: (reason || "Traveler cancellation").slice(0, 100),
+      refund_speed: "STANDARD",
+    },
+  });
+
+  return {
+    success: true,
+    refundId: refund.refund_id || refundIdGen,
+    cfRefundId: refund.cf_refund_id,
+    amount: refund.refund_amount,
+    status: refund.refund_status || "PROCESSED",
+  };
+}
+
+/**
+ * Fetch Refund status from Cashfree
+ */
+export async function getCashfreeRefundStatus(orderId, refundId) {
+  const sanitizedOrderId = encodeURIComponent(orderId);
+  const sanitizedRefundId = encodeURIComponent(refundId);
+  return cashfreeRequest(`/orders/${sanitizedOrderId}/refunds/${sanitizedRefundId}`, { method: "GET" });
+}

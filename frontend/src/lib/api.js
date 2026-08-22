@@ -1,0 +1,114 @@
+const BASE = "/api";
+
+export function authHeaders() {
+  const token = localStorage.getItem("wi_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export function authenticatedFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: { ...(options.headers || {}), ...authHeaders() },
+  });
+}
+
+// In-flight and cached requests to avoid duplicate network fetches
+const memoryCache = new Map();
+const inFlightRequests = new Map();
+
+async function handle(res) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || "Something went wrong");
+    err.code = data.code || null;
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+function cachedFetch(url, options = {}, ttlMs = 30000) {
+  const key = `${options.method || "GET"}:${url}`;
+  const now = Date.now();
+
+  const cached = memoryCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return Promise.resolve(cached.data);
+  }
+
+  if (inFlightRequests.has(key)) {
+    return inFlightRequests.get(key);
+  }
+
+  const promise = fetch(url, options)
+    .then(handle)
+    .then((data) => {
+      memoryCache.set(key, { data, expiresAt: now + ttlMs });
+      inFlightRequests.delete(key);
+      return data;
+    })
+    .catch((err) => {
+      inFlightRequests.delete(key);
+      throw err;
+    });
+
+  inFlightRequests.set(key, promise);
+  return promise;
+}
+
+export const api = {
+  getDestinations: () => cachedFetch(`${BASE}/destinations`, {}, 300000), // 5 min cache
+  getCities: () => cachedFetch(`${BASE}/cities`, {}, 300000),
+  getActivities: (params = {}) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v))).toString();
+    const url = `${BASE}/activities?${qs}`;
+    return cachedFetch(url, {}, 30000); // 30 sec cache
+  },
+  getActivity: (id) => cachedFetch(`${BASE}/activities/${id}`, {}, 60000),
+  signup: (payload) => fetch(`${BASE}/auth/signup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
+  supplierSignup: (payload) => fetch(`${BASE}/auth/supplier-signup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
+  login: (payload) => fetch(`${BASE}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
+  createBooking: (payload) =>
+    fetch(`${BASE}/bookings`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getBookingQuote: (payload) =>
+    fetch(`${BASE}/bookings/quote`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  completeDemoPayment: (payload) =>
+    fetch(`${BASE}/checkout/demo-payment`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  createCashfreeOrder: (payload) =>
+    fetch(`${BASE}/checkout/cashfree/create-order`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  verifyCashfreePayment: (payload) =>
+    fetch(`${BASE}/checkout/cashfree/verify`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  verifyPickupOtp: (ref, otp) =>
+    fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/pickup-otp/verify`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ otp }) }).then(handle),
+  getMyBookings: () => fetch(`${BASE}/bookings`, { headers: authHeaders() }).then(handle),
+  getMyNotifications: () => fetch(`${BASE}/bookings/notifications`, { headers: authHeaders() }).then(handle),
+  getNotificationPreferences: () => fetch(`${BASE}/bookings/notification-preferences`, { headers: authHeaders() }).then(handle),
+  updateNotificationPreferences: (payload) => fetch(`${BASE}/bookings/notification-preferences`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getBooking: (ref) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}`, { headers: authHeaders() }).then(handle),
+  getBookingDocuments: (ref) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/documents`, { headers: authHeaders() }).then(handle),
+  resendGuestNotification: (ref, eventType = "DOCUMENTS") => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/notifications/resend`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ eventType }) }).then(handle),
+  getSupportCases: (params = {}) => {
+    const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value)).toString();
+    return fetch(`${BASE}/support/cases${query ? `?${query}` : ""}`, { headers: authHeaders() }).then(handle);
+  },
+  getSupportCase: (ref) => fetch(`${BASE}/support/cases/${encodeURIComponent(ref)}`, { headers: authHeaders() }).then(handle),
+  createSupportCase: (payload) => fetch(`${BASE}/support/cases`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  addSupportMessage: (ref, payload) => fetch(`${BASE}/support/cases/${encodeURIComponent(ref)}/messages`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  addSupportEvidence: (ref, payload) => fetch(`${BASE}/support/cases/${encodeURIComponent(ref)}/evidence`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getEligibleReviews: () => fetch(`${BASE}/reviews/eligible`, { headers: authHeaders() }).then(handle),
+  getMyReviews: () => fetch(`${BASE}/reviews/mine`, { headers: authHeaders() }).then(handle),
+  createReview: (payload) => fetch(`${BASE}/reviews`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getProductReviews: (id) => fetch(`${BASE}/reviews/product/${encodeURIComponent(id)}`).then(handle),
+  getSupplierReviews: (id) => fetch(`${BASE}/reviews/supplier/${encodeURIComponent(id)}`, { headers: authHeaders() }).then(handle),
+  respondToReview: (id, response) => fetch(`${BASE}/reviews/${encodeURIComponent(id)}/response`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ response }) }).then(handle),
+  updateSupplierProductPrice: (supplierId, productId, payload) =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/products/${encodeURIComponent(productId)}/price`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  cancelSupplierBooking: (supplierId, bookingId, payload) =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/bookings/${encodeURIComponent(bookingId)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  sendSupplierGuestNotification: (supplierId, bookingId, eventType = "BOOKING_CONFIRMED") =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/bookings/${encodeURIComponent(bookingId)}/notifications/resend`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ eventType }) }).then(handle),
+  calculateRefund: (payload) =>
+    fetch(`${BASE}/checkout/calculate-refund`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  cancelTravelerBooking: (payload) =>
+    fetch(`${BASE}/checkout/cancel-booking`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+};

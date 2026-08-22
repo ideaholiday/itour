@@ -1,0 +1,28 @@
+{
+  "name": "viator-india-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test 'test/**/*.test.js'",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=70 --test-coverage-functions=70 'test/**/*.test.js'",
+    "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sesv2": "^3.1111.0",
+    "@supabase/supabase-js": "^2.112.3",
+    "better-sqlite3": "^11.3.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.6.2",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "nanoid": "^5.0.7",
+    "pg": "^8.23.0",
+    "winston": "^3.19.0",
+    "zod": "^4.4.3"
+  }
+}

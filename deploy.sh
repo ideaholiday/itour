@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+
+set -e
+
+PROJECT_ID="my-project-8591-489308"
+REGION="us-central1"
+SERVICE_NAME="idea-holiday-marketplace"
+DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest"
+
+if [ -f "backend/.env" ]; then
+  source backend/.env
+fi
+
+SUPABASE_URL="${SUPABASE_URL:-https://jidknptoyloucgldaool.supabase.co}"
+SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-sb_publishable_WwdMLSfWZE8fErjAKcs6UQ_tIBSHZcA}"
+MAPPLS_API_KEY="${MAPPLS_API_KEY:-${MAPMYINDIA_API_KEY:-}}"
+MAPPLS_ORIGIN="${MAPPLS_ORIGIN:-https://ideaholiday.in}"
+CASHFREE_APP_ID="${CASHFREE_APP_ID:-}"
+CASHFREE_SECRET_KEY="${CASHFREE_SECRET_KEY:-}"
+CASHFREE_ENV="${CASHFREE_ENV:-TEST}"
+CASHFREE_API_VERSION="${CASHFREE_API_VERSION:-2023-08-01}"
+DEMO_PAYMENT_ONLY="${DEMO_PAYMENT_ONLY:-false}"
+ENABLE_DEMO_PAYMENT="${ENABLE_DEMO_PAYMENT:-true}"
+
+DEPLOY_ENV_VARS="SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY},CASHFREE_APP_ID=${CASHFREE_APP_ID},CASHFREE_SECRET_KEY=${CASHFREE_SECRET_KEY},CASHFREE_ENV=${CASHFREE_ENV},CASHFREE_API_VERSION=${CASHFREE_API_VERSION},DEMO_PAYMENT_ONLY=${DEMO_PAYMENT_ONLY},ENABLE_DEMO_PAYMENT=${ENABLE_DEMO_PAYMENT},DATABASE_ENGINE=postgres,POSTGRES_SCHEMA=marketplace"
+
+# Keep the production runtime aligned with locally configured transactional
+# notification providers. Long-lived credentials should be moved to Secret
+# Manager when they are rotated; this preserves the existing deployment flow.
+for key in \
+  WHATSAPP_CLOUD_API_ENABLED WHATSAPP_API_VERSION WHATSAPP_BASE_URL \
+  WHATSAPP_PHONE_NUMBER_ID WHATSAPP_BUSINESS_ACCOUNT_ID WHATSAPP_ACCESS_TOKEN \
+  WHATSAPP_DEFAULT_COUNTRY_CODE WHATSAPP_SENDER_PHONE WHATSAPP_TIMEOUT \
+  WHATSAPP_APP_SECRET WHATSAPP_WEBHOOK_VERIFY_TOKEN WHATSAPP_TEMPLATE_LANGUAGE \
+  WHATSAPP_TEMPLATE_BOOKING_CONFIRMED WHATSAPP_TEMPLATE_BOOKING_DOCUMENTS \
+  WHATSAPP_TEMPLATE_SUPPLIER_ASSIGNMENT WHATSAPP_TEMPLATE_SUPPLIER_ACCEPTED \
+  WHATSAPP_TEMPLATE_DRIVER_ASSIGNED WHATSAPP_TEMPLATE_DRIVER_TRIP \
+  WHATSAPP_TEMPLATE_SUPPLIER_STATUS WHATSAPP_TEMPLATE_OPS_ALERT \
+  WHATSAPP_TEMPLATE_TRIP_STATUS WHATSAPP_TEMPLATE_REFUND_STATUS \
+  WHATSAPP_TEMPLATE_PAYOUT_STATUS WHATSAPP_TEMPLATE_SUPPORT_CASE \
+  WHATSAPP_TEMPLATE_PRODUCT_PUBLISHED PUBLIC_APP_URL DOCUMENT_LINK_SECRET; do
+  value="${!key:-}"
+  if [ -n "$value" ]; then
+    DEPLOY_ENV_VARS="${DEPLOY_ENV_VARS},${key}=${value}"
+  fi
+done
+
+if [ -n "$MAPPLS_API_KEY" ]; then
+  DEPLOY_ENV_VARS="${DEPLOY_ENV_VARS},MAPPLS_ORIGIN=${MAPPLS_ORIGIN}"
+else
+  echo "⚠️  MAPPLS_API_KEY is empty. Pickup autocomplete will use the manual map-pin fallback."
+fi
+
+echo "🚀 Deploying $SERVICE_NAME to Cloud Run ($PROJECT_ID / $REGION)..."
+
+gcloud run deploy "$SERVICE_NAME" \
+  --source . \
+  --project "$PROJECT_ID" \
+  --region "$REGION" \
+  --port 8080 \
+  --allow-unauthenticated \
+  --execution-environment gen2 \
+  --max-instances 10 \
+  --set-env-vars "$DEPLOY_ENV_VARS" \
+  --set-secrets "$DEPLOY_SECRETS" \
+  --quiet
+
+SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format="value(status.url)")
+
+echo "✅ Deployed successfully! Live URL: $SERVICE_URL"
