@@ -61,6 +61,9 @@ gcloud run deploy "$SERVICE_NAME" \
   --allow-unauthenticated \
   --execution-environment gen2 \
   --max-instances 10 \
+  --memory 2Gi \
+  --cpu 2 \
+  --timeout 900 \
   --set-env-vars "$DEPLOY_ENV_VARS" \
   --set-secrets "$DEPLOY_SECRETS" \
   --quiet

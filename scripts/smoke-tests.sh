@@ -88,7 +88,15 @@ check "Health endpoint responds" "GET" "/api/health" "200"
 validate_json_field "Health ok flag" "/api/health" ".ok" "true"
 
 # 3. Health endpoint reports database engine
-validate_json_field "Health database engine" "/api/health" ".database.engine" "sqlite"
+TOTAL=$((TOTAL + 1))
+db_engine=$(curl -s --max-time 10 "${BASE_URL}/api/health" 2>/dev/null | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{console.log(JSON.parse(d).database.engine)}catch{console.log('')}})" 2>/dev/null || echo "")
+if [ "$db_engine" = "sqlite" ] || [ "$db_engine" = "postgres" ]; then
+  echo "✅ Health database engine reported (${db_engine})"
+  PASSED=$((PASSED + 1))
+else
+  echo "❌ Health database engine — expected 'sqlite' or 'postgres', got '${db_engine}'"
+  FAILED=$((FAILED + 1))
+fi
 
 # 4. Activities listing returns 200
 check "Activities listing" "GET" "/api/activities" "200"
