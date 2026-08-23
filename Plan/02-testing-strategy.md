@@ -1,14 +1,15 @@
 # 02. Testing Strategy & Coverage
 
-## Implementation checkpoint — 22 Aug 2026
+## Implementation checkpoint — 23 Aug 2026
 
-The backend now has 80 deterministic `node:test` tests. `npm run test:coverage` uses Node's built-in coverage engine, currently reports 77.84% lines and 80.12% functions, and fails below 70% for either measure. `.github/workflows/ci.yml` runs this gate plus the backend production dependency audit and the Vite/Next.js production builds on every push and pull request to `main` or `master`. Full HTTP integration suites, browser E2E journeys, and hosted PR coverage comments remain open.
+The backend now has 100 deterministic `node:test` checks. `npm run test:coverage` uses Node's built-in coverage engine, currently reports 80.30% lines and 82.10% functions, and enforces a 70% line/function floor. `npm run test:integration` starts the real Express server with an isolated SQLite database and runs five critical traveler HTTP checks, including protected metrics scraping and Web Vital ingestion. Root `npm run test:e2e` starts isolated backend/Vite servers and runs three Chromium journeys: traveler booking through automatic cancellation/refund, supplier acceptance of a paid assignment, and operations task/support review through refund approval. `.github/workflows/ci.yml` runs all suites, dependency audits, root lint, the Vite bundle budget, and both builds on every push and pull request to `main` or `master`. Hosted PR coverage comments remain open.
 
 ## Current State
 - ✅ Backend has a structured deterministic test suite (`backend/test/*.test.js`)
 - ✅ Coverage reporting and 70% CI gates are active
-- ❌ No integration tests
-- ❌ No E2E tests
+- ✅ Isolated real-HTTP integration test for the critical traveler API path
+- ✅ Playwright E2E test for the critical traveler browser path
+- ✅ Supplier, operations, cancellation, and refund browser journeys
 
 ## Target Testing Pyramid
 
@@ -175,6 +176,8 @@ describe('NotificationService', () => {
 
 ### Coverage Targets: **70%+ per critical path**
 
+Implemented in `backend/integration/criticalFlows.test.js` with reusable lifecycle support in `backend/integration/helpers/serverHarness.js`. It never copies the developer database or contacts live providers, and it verifies request IDs, validation errors, ignored legacy headers, `401`/`403`, ownership, quote/create/idempotency, demo payment, signed documents, private OTP handling, and durable audits.
+
 #### Critical Paths to Test:
 
 1. **End-to-End Booking Flow**
@@ -235,6 +238,8 @@ describe('Payment Verification', () => {
 ## E2E Tests (Full User Journey)
 
 ### Tools: **Playwright** (for headless browser testing)
+
+Implemented in `e2e/traveler-booking.spec.js` and `e2e/role-workspaces.spec.js`. Playwright launches a temporary backend database plus the real Vite app and verifies signup, filtered discovery, demo checkout, paid confirmation, pickup-code visibility, My Trips, policy-backed automatic cancellation/refund, supplier assignment acceptance, operations task access, support-case review, and controlled refund approval. The harness seeds only deterministic STAFF data; traveler bookings and disputes are created through the real APIs. Failure traces/screenshots/videos and an HTML report are retained by CI.
 
 #### Test Scenarios:
 
@@ -302,14 +307,14 @@ cd backend && npm test
 # Backend with coverage
 cd backend && npm run test:coverage
 
+# Backend real-HTTP integration journey
+cd backend && npm run test:integration
+
 # Frontend unit tests
 cd frontend && npm run test
 
 # E2E tests (local)
 npm run test:e2e
-
-# E2E tests (headless for CI)
-npm run test:e2e:ci
 ```
 
 ---
@@ -326,10 +331,10 @@ npm run test:e2e:ci
 
 ## Success Criteria
 
-- ✅ All critical paths have unit + integration tests
-- ✅ All API routes are covered by E2E tests
+- ✅ Critical traveler path has unit, integration, and browser coverage
+- ✅ Supplier, operations, cancellation, and refund paths have browser coverage
 - ✅ No code merge without passing test suite
-- ✅ Coverage reports visible in PR comments
+- ⏳ Coverage reports visible in PR comments
 - ✅ <5 min test execution time
 - ✅ Tests pass consistently (no flaky tests)
 

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import logger, { redactSensitive } from "../config/logger.js";
+import { beginHttpMetrics } from "../config/metrics.js";
 
 const requestIdPattern = /^[A-Za-z0-9._-]{1,100}$/;
 
-function normalizedRoute(req) {
+export function normalizedRoute(req) {
   const routePath = req.route?.path;
   if (routePath) return `${req.baseUrl || ""}${routePath}` || "/";
   const path = String(req.originalUrl || req.path || "/").split("?")[0];
@@ -52,6 +53,7 @@ export function stableErrorResponses(req, res, next) {
 
 export function requestLogger(req, res, next) {
   const startedAt = process.hrtime.bigint();
+  const finishMetrics = beginHttpMetrics();
   res.once("finish", () => {
     const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
     const slowThreshold = Number(process.env.SLOW_REQUEST_MS) || 1_000;
@@ -69,6 +71,14 @@ export function requestLogger(req, res, next) {
     };
     const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 || durationMs >= slowThreshold ? "warn" : "info";
     logger.log(level, "HTTP request completed", meta);
+    finishMetrics({
+      method: req.method,
+      route: meta.route,
+      statusCode: res.statusCode,
+      actorRole: req.user?.role,
+      durationSeconds: durationMs / 1_000,
+      body: req.body,
+    });
   });
   next();
 }

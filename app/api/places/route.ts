@@ -19,11 +19,11 @@ function numberOrNull(value: unknown) {
   return value !== null && value !== undefined && Number.isFinite(number) ? number : null;
 }
 
-function normalizeMappls(place: any): Suggestion {
-  const label = place.placeName ?? place.name ?? place.poi ?? 'Unnamed place';
-  const description = place.placeAddress ?? place.address ?? '';
+function normalizeMappls(place: Record<string, unknown>): Suggestion {
+  const label = String(place.placeName ?? place.name ?? place.poi ?? 'Unnamed place');
+  const description = String(place.placeAddress ?? place.address ?? '');
   return {
-    id: place.eLoc ?? place.eloc ?? place.mapplsPin ?? '', label, description,
+    id: String(place.eLoc ?? place.eloc ?? place.mapplsPin ?? ''), label, description,
     category: category(`${place.type ?? ''} ${label} ${description}`),
     lat: numberOrNull(place.latitude ?? place.lat ?? place.entryLatitude ?? place.entry_lat),
     lng: numberOrNull(place.longitude ?? place.lng ?? place.lon ?? place.entryLongitude ?? place.entry_lon),
@@ -66,7 +66,13 @@ async function searchGoogle(query: string, apiKey: string, lat: number | null, l
     headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': 'suggestions.placePrediction.placeId,suggestions.placePrediction.structuredFormat,suggestions.placePrediction.text,suggestions.placePrediction.types' },
     body: JSON.stringify({ input: query, includedRegionCodes: ['in'], languageCode: 'en', regionCode: 'IN', locationBias }),
   });
-  return (data.suggestions ?? []).flatMap((entry: any) => {
+  type GooglePrediction = {
+    placeId?: string;
+    structuredFormat?: { mainText?: { text?: string }; secondaryText?: { text?: string } };
+    text?: { text?: string };
+    types?: string[];
+  };
+  return (data.suggestions ?? []).flatMap((entry: { placePrediction?: GooglePrediction }) => {
     const place = entry.placePrediction;
     if (!place) return [];
     const label = place.structuredFormat?.mainText?.text ?? place.text?.text ?? '';

@@ -158,7 +158,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
           traveler_name, traveler_phone, traveler_email, amount_inr, tolls_and_tax_amount,
           commission_amount, commission_rate_snapshot, supplier_payout_amount, payment_method, payment_status, status,
           supplier_assignment_status, supplier_assignment_method, supplier_assignment_score, supplier_assignment_reason, assigned_supplier_product_id, supplier_assigned_at, otp_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'pending_payment', 'RESERVED_PENDING_PAYMENT', 'RULE_ENGINE_V1', ?, ?, ?, datetime('now'), NULL)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'pending_payment', 'RESERVED_PENDING_PAYMENT', 'RULE_ENGINE_V1', ?, ?, ?, datetime('now'), NULL)`
       ).run(
         bookingId, ref, clientRequestId, userId, quote.product.id, selectedSupplier.supplierId,
         quote.product.product_code || quote.product.id, quote.product.supplier_code || selectedSupplier.supplierId,

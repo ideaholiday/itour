@@ -1,17 +1,17 @@
 # 05. Observability & Logging
 
-## Implementation checkpoint — 22 Aug 2026
+## Implementation checkpoint — 23 Aug 2026
 
 Winston JSON logging to stdout is implemented for direct Cloud Run ingestion. Requests include correlation ID, normalized route, method, status, latency, actor context, and slow/error severity. Recursive redaction covers credentials, authorization/cookies, OTPs, payment/bank/card fields, email, phone, PAN/GST, and provider secrets; bodies remain disabled unless explicitly enabled. Runtime backend `console.*` calls were removed, and API errors no longer expose stacks or provider messages.
 
-No Google logging transport or separate logging credentials are required. Metrics, Prometheus/Grafana, tracing, dashboards, and alerting remain open roadmap work. The original target design below is retained for those later slices.
+Prometheus-compatible default process metrics and custom HTTP, search, booking, payment, refund, database-query, and frontend Web Vital metrics are fully implemented. `GET /api/metrics` requires `ADMIN`/`STAFF` or a timing-safe scraper token accepted through standard bearer authorization or `X-Metrics-Token`; browser ingestion is schema-bounded and excludes identifiers, query strings, and PII. A localhost Compose stack securely provisions Prometheus scraping, two Grafana dashboards, and seven initial alert rules without committing credentials.
 
 ## Current State
-- ❌ console.log scattered throughout code
-- ❌ No structured logging
-- ❌ No metrics collection
-- ❌ No distributed tracing
-- ❌ No alerting on errors
+- ✅ Backend runtime uses structured Winston JSON instead of `console.*`
+- ✅ Correlated request/error logging and durable audit records
+- ✅ Prometheus-compatible metrics and protected scrape endpoint
+- ✅ Reproducible Prometheus/Grafana configuration, dashboards, and alert rules
+- 🟡 Production collector and notification routing ready for live Cloud Run config
 
 ## Target State
 
@@ -508,22 +508,23 @@ module.exports = { sendAlert };
 ## Implementation Checklist
 
 ### Week 1: Logging
-- [ ] Set up Winston logger
-- [ ] Add request/response logging
-- [ ] Redact sensitive data in logs
-- [ ] Add audit logging
+- [x] Set up Winston logger
+- [x] Add request/response logging
+- [x] Redact sensitive data in logs
+- [x] Add audit logging
 - [ ] Deploy to Cloud Logging
 
 ### Week 2: Metrics
-- [ ] Set up Prometheus
-- [ ] Add custom metrics (search, booking, payment)
-- [ ] Expose /metrics endpoint
-- [ ] Set up scraping schedule
+- [x] Set up Prometheus-compatible registry
+- [x] Add custom metrics (HTTP, search, booking, payment, refund, database, Web Vitals)
+- [x] Expose protected `/api/metrics` endpoint
+- [x] Set up secure local/self-hosted scraping schedule
+- [ ] Deploy and verify the Cloud Run production collector
 
 ### Week 3: Tracing & Dashboards
 - [ ] Set up Jaeger/OpenTelemetry
-- [ ] Create Grafana dashboards
-- [ ] Add alerting rules
+- [x] Create provisioned API health and marketplace/UX Grafana dashboards
+- [x] Add seven initial Prometheus alerting rules
 - [ ] Connect Slack integration
 
 ### Week 4: Monitoring & On-call

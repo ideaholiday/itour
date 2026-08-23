@@ -116,4 +116,38 @@ export const analytics = {
       destination_filter: destination,
     });
   },
+
+  // Cancellation
+  trackCancellation(bookingRef, reason = "") {
+    this.pushEvent("cancel_booking", {
+      transaction_id: bookingRef,
+      cancellation_reason: reason,
+    });
+  },
+
+  // Refund Request
+  trackRefundRequest(bookingRef, amount, reason = "") {
+    this.pushEvent("refund_requested", {
+      transaction_id: bookingRef,
+      refund_amount: amount,
+      currency: "INR",
+      reason,
+    });
+  },
+
+  // Supplier Profile View
+  trackSupplierView(supplierId, supplierName = "") {
+    this.pushEvent("view_supplier", {
+      supplier_id: supplierId,
+      supplier_name: supplierName,
+    });
+  },
+
+  // Filter Applied
+  trackFilterApplied(filterType, filterValue) {
+    this.pushEvent("filter_applied", {
+      filter_type: filterType,
+      filter_value: filterValue,
+    });
+  },
 };

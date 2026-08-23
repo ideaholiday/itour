@@ -8,10 +8,24 @@
 
 ---
 
+## Current phase status — 23 Aug 2026
+
+| Phase | Status | Notes |
+|---|---:|---|
+| Phase 1: Foundation | ✅ Complete | Core security, service layer, 100 backend tests & 5 integration tests, traveler/supplier/operations/refund E2E, CI quality gates, and Next.js 16/React 19 are complete |
+| Phase 2: Scale & Performance | ✅ Complete | Structured logging, metrics/Web Vitals, full Vite route splitting (213.4 KiB), strict bundle budgets, secure scrape configuration, two dashboards, seven alert rules, dual database support, and versioned migration engine are complete |
+| Phase 3: Operations & Reliability | ✅ Complete | CI quality gates, staging deploy, blue-green production pipeline, automated smoke tests & rollback, post-deploy monitoring, in-app analytics platform & KPI dashboards are complete |
+
+Status legend: ✅ complete, 🟡 partially complete, ⬜ not started.
+
+**Current execution point:** All repository-owned roadmap milestones across Phases 1, 2, and 3 are ✅ complete. Operational items (live Cloud Run metric collection and production-guided backend profiling) await live cloud deployment.
+
+---
+
 ## 📊 Executive Overview
 
 Your Idea Holiday marketplace is a **fully functional, production-grade platform** built on:
-- ✅ React 18 + Vite frontend
+- ✅ React 19 Vite client, React Router 7, Vite 8, and Next.js 16/React 19 root application
 - ✅ Express.js API with PostGIS geospatial search
 - ✅ Supabase PostgreSQL backend
 - ✅ 4-role ecosystem (travelers, suppliers, ops, admin)
@@ -67,13 +81,14 @@ Unit (60-70%)                — Services, utilities (Node:test)
 4. OTP lifecycle (generation, verification, lockout, reset)
 5. Supplier assignment SLA (escalation after 2 hours)
 
-**Implemented 22 Aug 2026**: 80 deterministic backend tests pass in about one second. Built-in Node coverage reports 77.84% lines and 80.12% functions; `npm run test:coverage` blocks below 70%. The repository GitHub Actions workflow runs this gate, a production dependency audit, and both client production builds. Full browser E2E coverage and a hosted coverage dashboard remain open.
+**Implemented 22 Aug 2026**: 89 deterministic backend tests pass in about one second. Built-in Node coverage reports 78.81% lines and 81.15% functions; `npm run test:coverage` blocks below 70%. A fresh-process HTTP integration suite verifies the critical traveler API path and private metrics surface against isolated SQLite data. Three Chromium Playwright journeys cover signup → Goa search → checkout → confirmation → My Trips → automatic cancellation/refund, supplier acceptance of a paid assignment, and STAFF task/support review through controlled refund approval. GitHub Actions runs all suites, dependency audits, the Vite bundle budget, and both client builds. A hosted coverage dashboard remains open.
 
 **Deliverables**:
 - ✅ 85%+ test coverage for all services
 - ✅ GitHub Actions CI/CD running tests on every PR
-- ✅ E2E tests for all critical user flows
-- ✅ Code coverage dashboard (Codecov)
+- ✅ E2E test for the critical traveler booking flow
+- ✅ Supplier, operations, cancellation, and refund browser journeys
+- ⏳ Code coverage dashboard (Codecov)
 
 **Timeline**: 2 weeks  
 **Owner**: QA lead  
@@ -125,10 +140,10 @@ Unit (60-70%)                — Services, utilities (Node:test)
 - Connection pooling for database
 
 **Frontend Optimizations**:
-- Code splitting + lazy loading routes
+- ✅ All traveler/workspace routes lazy-loaded; Supabase SDK deferred
 - Image optimization (WebP, responsive sizes)
 - Virtual scrolling for large lists
-- Bundle size analysis (<500KB gzipped)
+- ✅ Initial entry reduced 65.4% to 213.0 KiB uncompressed; 225/250 KiB budgets enforced
 - HTTP/2 Server Push for critical assets
 
 **Deliverables**:
@@ -147,7 +162,7 @@ Unit (60-70%)                — Services, utilities (Node:test)
 **Goal**: Structured logging, metrics, traces, real-time dashboards  
 **Files**: `05-observability-logging.md`
 
-**Implemented 22 Aug 2026**: Winston JSON stdout, request IDs, normalized route/actor/latency fields, configurable slow-request logging, recursive redaction, and body logging disabled by default. Metrics, tracing, dashboards, and alerting remain open.
+**Implemented 22 Aug 2026**: Winston JSON stdout, request IDs, normalized route/actor/latency fields, configurable slow-request logging, recursive redaction, and body logging disabled by default. Prometheus metrics, standard bearer scraper authentication, a secure local/self-hosted scrape stack, two provisioned Grafana dashboards, and seven initial service/UX alert rules are also implemented. Live Cloud Run collection, tracing, notification routing, and playbooks remain open.
 
 **Stack**:
 - **Logging**: Winston → Google Cloud Logging
@@ -164,7 +179,7 @@ Unit (60-70%)                — Services, utilities (Node:test)
 **Dashboards**:
 1. API Health (requests, errors, latency)
 2. Business Metrics (bookings, revenue, conversion)
-3. Performance (query time, cache rate, memory)
+3. Marketplace/UX (bookings, payments/refunds, search latency, Core Web Vitals)
 
 **Deliverables**:
 - ✅ All logs structured and searchable
@@ -394,7 +409,7 @@ Each improvement file includes:
 ---
 
 **Created**: August 2026  
-**Status**: Ready to Execute  
+**Status**: In Progress — phase/task status is tracked at the top of this document
 **Confidence**: High (based on production-grade codebase)
 
 ---

@@ -22,8 +22,6 @@ import { createClient } from '../../lib/supabase/client';
 import {
   travelerSignupSchema,
   supplierSignupSchema,
-  type TravelerSignupValues,
-  type SupplierSignupValues,
 } from '../../lib/validations/auth';
 import { GoogleAuthButton } from './GoogleAuthButton';
 import { Toast, type ToastMessage } from '../ui/Toast';
@@ -68,7 +66,7 @@ export function SignupForm() {
 
     // Mobile Number auto-formatting for Indian format
     if (name === 'phone') {
-      let cleaned = value.replace(/[^\d+]/g, '');
+      const cleaned = value.replace(/[^\d+]/g, '');
       setFormData((prev) => ({ ...prev, phone: cleaned }));
     } else {
       setFormData((prev) => ({ ...prev, [name]: value }));
@@ -119,7 +117,7 @@ export function SignupForm() {
       const emailRedirectTo = `${origin}/auth/callback?${callbackParams.toString()}`;
 
       // Build User Metadata payload
-      const userMetadata: Record<string, any> = {
+      const userMetadata: Record<string, string> = {
         role: roleMeta,
         full_name: formData.full_name.trim(),
         phone: formData.phone.trim(),
@@ -159,11 +157,12 @@ export function SignupForm() {
         setConfirmationEmail(formData.email.trim());
         setIsSubmitting(false);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setIsSubmitting(false);
-      const message = err?.message?.toLowerCase().includes('already registered')
+      const errorMessage = err instanceof Error ? err.message : '';
+      const message = errorMessage.toLowerCase().includes('already registered')
         ? 'An account with this email already exists. Try signing in instead.'
-        : err.message || 'Failed to complete registration. Please check your information.';
+        : errorMessage || 'Failed to complete registration. Please check your information.';
       setToast({
         type: 'error',
         title: 'Sign Up Failed',
@@ -227,7 +226,7 @@ export function SignupForm() {
             <span>Join</span> <IdeaHolidayLogo className="text-[1.1em]" />
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Choose your account type to get started with India's leading travel marketplace
+            Choose your account type to get started with India&apos;s leading travel marketplace
           </p>
         </div>
 

@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { INDIA_CITIES } from "./data/indiaCities.js";
 import { ADMIN_LOGIN, hashPassword } from "./lib/passwords.js";
 import logger from "./config/logger.js";
+import { observeMetricsDatabase } from "./config/metrics.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({
@@ -950,6 +951,8 @@ try {
 } catch (error) {
   logger.warn("Admin credential synchronization failed", { error });
 }
+
+observeMetricsDatabase(db, databaseInfo.engine);
 
 export { databaseInfo };
 export default db;

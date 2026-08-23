@@ -37,8 +37,76 @@ export function corsOptions(environment = process.env) {
   };
 }
 
-export function createRateLimiter({ windowMs, limit, scope }) {
-  return rateLimit({
+export function buildCspDirectives(environment = process.env) {
+  const allowed = allowedOrigins(environment);
+  const connectSources = [
+    "'self'",
+    "https://*.supabase.co",
+    "https://apis.mappls.com",
+    "https://outpost.mappls.com",
+    "https://sandbox.cashfree.com",
+    "https://api.cashfree.com",
+    "https://api.razorpay.com",
+    "https://*.google-analytics.com",
+    "https://*.analytics.google.com",
+    "https://*.googletagmanager.com",
+    ...allowed,
+  ];
+
+  const directives = {
+    defaultSrc: ["'self'"],
+    scriptSrc: [
+      "'self'",
+      "'unsafe-inline'",
+      "https://apis.mappls.com",
+      "https://sdk.cashfree.com",
+      "https://checkout.razorpay.com",
+      "https://www.googletagmanager.com",
+    ],
+    styleSrc: [
+      "'self'",
+      "'unsafe-inline'",
+      "https://fonts.googleapis.com",
+      "https://unpkg.com",
+      "https://apis.mappls.com",
+    ],
+    imgSrc: [
+      "'self'",
+      "data:",
+      "blob:",
+      "https:",
+      "https://*.tile.openstreetmap.org",
+      "https://apis.mappls.com",
+      "https://images.unsplash.com",
+    ],
+    fontSrc: [
+      "'self'",
+      "data:",
+      "https://fonts.gstatic.com",
+    ],
+    connectSrc: [...new Set(connectSources)],
+    frameSrc: [
+      "'self'",
+      "https://sdk.cashfree.com",
+      "https://api.cashfree.com",
+      "https://api.razorpay.com",
+      "https://checkout.razorpay.com",
+    ],
+    objectSrc: ["'none'"],
+    baseUri: ["'self'"],
+    formAction: ["'self'"],
+    frameAncestors: ["'none'"],
+  };
+
+  if (environment.NODE_ENV === "production") {
+    directives.upgradeInsecureRequests = [];
+  }
+
+  return directives;
+}
+
+export function createRateLimiter({ windowMs, limit, scope, store = null }) {
+  const options = {
     windowMs,
     limit,
     standardHeaders: "draft-7",
@@ -51,7 +119,13 @@ export function createRateLimiter({ windowMs, limit, scope }) {
         retryAfterSeconds: Math.ceil(windowMs / 1000),
       });
     },
-  });
+  };
+
+  if (store) {
+    options.store = store;
+  }
+
+  return rateLimit(options);
 }
 
 export function configureSecurity(app, environment = process.env) {
@@ -60,11 +134,15 @@ export function configureSecurity(app, environment = process.env) {
   }
   app.disable("x-powered-by");
 
+  // Configure Helmet with hardened security headers & tailored CSP directives
   app.use(helmet({
-    // The Vite client currently loads third-party maps, images and payment
-    // scripts. Add a tested allowlist before enabling Helmet's default CSP.
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      directives: buildCspDirectives(environment),
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
   }));
+
   app.use(cors(corsOptions(environment)));
 
   const globalLimiter = createRateLimiter({

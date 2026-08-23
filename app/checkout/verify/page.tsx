@@ -10,14 +10,12 @@ function VerifyContent() {
   const orderId = searchParams.get('order_id');
   const bookingRef = searchParams.get('bookingRef');
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(orderId));
   const [success, setSuccess] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(orderId ? '' : 'Order reference is missing.');
 
   useEffect(() => {
     if (!orderId) {
-      setError('Order reference is missing.');
-      setLoading(false);
       return;
     }
 

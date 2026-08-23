@@ -49,17 +49,17 @@ export default function AdminLayout({ children }) {
 
   const navItems = [
     {
-      path: "/admin/quality",
-      label: "Quality",
-      icon: Star,
-      badge: null,
-      badgeColor: ""
-    },
-    {
       path: "/admin",
       exact: true,
       label: "Overview",
       icon: LayoutDashboard,
+      badge: null,
+      badgeColor: ""
+    },
+    {
+      path: "/admin/analytics",
+      label: "Analytics",
+      icon: Activity,
       badge: null,
       badgeColor: ""
     },

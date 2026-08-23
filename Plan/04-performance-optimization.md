@@ -1,6 +1,10 @@
 # 04. Performance Optimization
 
-## Current Performance Baseline
+## Status — ✅ Implemented (23 Aug 2026)
+
+The backend records low-cardinality HTTP/search and database latency histograms, and both clients submit bounded Core Web Vitals. Every Vite traveler/workspace page is route-loaded and the optional Supabase SDK is deferred, reducing the measured initial uncompressed entry from 616.2 KiB to 213.4 KiB (65.4% reduction). The build enforces a 250 KiB maximum chunk plus a 225 KiB initial-entry budget, and Vite runs with 0 warnings. Live production baselines will be gathered once deployed to live traffic.
+
+## Original estimated baseline (not production measurements)
 
 | Metric | Target | Current | Gap |
 |--------|--------|---------|-----|
@@ -343,19 +347,19 @@ getLCP(console.log); // Largest Contentful Paint
 - [ ] Implement field selection for API responses
 
 ### Frontend
-- [ ] Code split routes with lazy loading
+- [x] Code split all traveler and workspace routes with lazy loading
 - [ ] Optimize images (WebP, responsive sizes)
-- [ ] Minify CSS and JavaScript
+- [x] Minify CSS and JavaScript in the Vite production build
 - [ ] Remove unused dependencies
 - [ ] Implement virtual scrolling for lists
-- [ ] Add web vitals monitoring
+- [x] Add Web Vitals monitoring to both clients
 - [ ] Use CDN for static assets
 
 ### DevOps
 - [ ] Set up Cloudflare/CloudFront CDN
 - [ ] Enable HTTP/2 Server Push
 - [ ] Configure cache-control headers
-- [ ] Set up performance alerts
+- [x] Provision initial API/database latency and Web Vital alert rules (production routing pending)
 - [ ] Monthly performance audit
 
 ---

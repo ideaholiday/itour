@@ -56,7 +56,7 @@ function HeroSlide({ src, label, active }) {
       className={`absolute inset-0 transition-opacity duration-1000 ${active ? "opacity-100" : "opacity-0"}`}
       aria-hidden={!active}
     >
-      <img src={src} alt={label} className="h-full w-full object-cover" fetchpriority="high" />
+      <img src={src} alt={label} className="h-full w-full object-cover" fetchPriority="high" />
       <div className="absolute inset-0 bg-gradient-to-b from-slate-950/55 via-slate-950/30 to-slate-950/80" />
     </div>
   );

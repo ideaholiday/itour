@@ -1,9 +1,9 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
-import supabase from "./supabaseClient.js";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
+  const supabaseRef = useRef(null);
   const [user, setUser] = useState(() => {
     const raw = localStorage.getItem("wi_user");
     if (raw) {
@@ -31,7 +31,14 @@ export function AuthProvider({ children }) {
 
   // Sync Supabase Auth session if available
   useEffect(() => {
-    if (supabase) {
+    let active = true;
+    let subscription;
+
+    const connectSupabase = async () => {
+      const { default: supabase } = await import("./supabaseClient.js");
+      if (!active || !supabase) return;
+      supabaseRef.current = supabase;
+
       const syncSupabaseSession = async (session) => {
         if (!session?.user) return;
         localStorage.setItem("wi_token", session.access_token);
@@ -44,6 +51,7 @@ export function AuthProvider({ children }) {
           return;
         }
         const { user: principal } = await response.json();
+        if (!active) return;
         setUser({
           ...principal,
           user_metadata: {
@@ -53,23 +61,28 @@ export function AuthProvider({ children }) {
         });
       };
 
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          syncSupabaseSession(session).catch(() => setUser(null));
-        }
-      });
+      const { data: { session } } = await supabase.auth.getSession();
+      if (active && session?.user) {
+        await syncSupabaseSession(session);
+      }
 
-      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        if (session?.user) {
-          syncSupabaseSession(session).catch(() => setUser(null));
+      const authState = supabase.auth.onAuthStateChange((event, nextSession) => {
+        if (nextSession?.user) {
+          syncSupabaseSession(nextSession).catch(() => setUser(null));
         } else if (event === "SIGNED_OUT") {
           localStorage.removeItem("wi_token");
           setUser(null);
         }
       });
+      subscription = authState.data.subscription;
+    };
 
-      return () => subscription?.unsubscribe();
-    }
+    connectSupabase().catch(() => undefined);
+
+    return () => {
+      active = false;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   const login = (token, u) => {
@@ -83,7 +96,11 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     localStorage.removeItem("wi_token");
-    if (supabase) supabase.auth.signOut();
+    if (supabaseRef.current) {
+      supabaseRef.current.auth.signOut();
+    } else {
+      import("./supabaseClient.js").then(({ default: supabase }) => supabase?.auth.signOut());
+    }
     setUser(null);
   };
 

@@ -29,23 +29,28 @@ export const authSchemas = {
   login: object({ email, password: z.string().min(1).max(128) }),
 };
 
-export const bookingQuoteSchema = object({
+const bookingQuoteFields = {
   product_id: id.optional(), activity_id: id.optional(), activity_date: date,
   adults: count.optional(), passengers: count.optional(), children: count.optional(), luggage: count.optional(), luggage_bags: count.optional(),
   pickup_time: time.optional(), pickup_location: optionalText(500), drop_location: optionalText(500),
   pickup_lat: optionalCoordinate(-90, 90), pickup_lng: optionalCoordinate(-180, 180),
   drop_lat: optionalCoordinate(-90, 90), drop_lng: optionalCoordinate(-180, 180),
   vehicle_category: optionalText(80), variant_name: optionalText(160),
-}).superRefine((value, ctx) => {
-  if (!value.product_id && !value.activity_id) ctx.addIssue({ code: "custom", path: ["product_id"], message: "Product is required" });
-});
+};
 
-export const bookingCreateSchema = bookingQuoteSchema.and(object({
+const requireBookingProduct = (value, ctx) => {
+  if (!value.product_id && !value.activity_id) ctx.addIssue({ code: "custom", path: ["product_id"], message: "Product is required" });
+};
+
+export const bookingQuoteSchema = object(bookingQuoteFields).superRefine(requireBookingProduct);
+
+export const bookingCreateSchema = object({
+  ...bookingQuoteFields,
   traveler_name: text(2, 120), traveler_email: email, traveler_phone: phone,
   pickup_location: text(2, 500), pickup_instructions: optionalText(1_000), drop_instructions: optionalText(1_000),
   special_requests: optionalText(2_000), promo_code: optionalText(80), client_request_id: optionalText(160),
   flight_number: optionalText(40), terminal_gate: optionalText(80), payment_method: optionalText(40),
-}));
+}).superRefine(requireBookingProduct);
 
 export const bookingSchemas = {
   notificationPreferences: object({ emailEnabled: booleanValue.optional(), whatsappEnabled: booleanValue.optional(), email_enabled: booleanValue.optional(), whatsapp_enabled: booleanValue.optional() }),
@@ -125,3 +130,14 @@ export const transferSchema = object({
   dropLat: optionalCoordinate(-90, 90), dropLng: optionalCoordinate(-180, 180),
   passengers: count.optional(), luggage: count.optional(), vehicleCategory: optionalText(80), routeType: optionalText(80), date: date.optional(), pickupTime: time.optional(),
 });
+
+export const metricsSchemas = {
+  webVital: z.object({
+    app: z.enum(["next", "vite"]),
+    name: z.enum(["CLS", "FCP", "INP", "LCP", "TTFB"]),
+    value: z.number().finite().min(0).max(3_600_000),
+    rating: z.enum(["good", "needs-improvement", "poor"]),
+    route: z.string().trim().startsWith("/").max(160),
+    navigationType: z.string().trim().max(40).optional(),
+  }).strict(),
+};

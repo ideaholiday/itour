@@ -1,37 +1,36 @@
 # 03. Security Audit & Hardening
 
-## Implementation checkpoint — 22 Aug 2026
+## Implementation checkpoint — 23 Aug 2026
 
-Completed in the repository: Helmet, strict CORS, scoped rate limits, scrypt password storage, production secret requirements, dual Express/Supabase bearer authentication, database-authoritative roles, endpoint-wide admin/operations/supplier/booking guards, ignored identity headers, signature-verified payment/WhatsApp webhooks, stable request-correlated JSON errors, and durable audits for successful authenticated mutations and authorization denials. The audit records contain no request bodies or secrets and hash source IPs.
+Completed in the repository: Helmet with hardened Content Security Policy (CSP) allowlist, strict CORS, scoped distributed rate limiting architecture, RFC 9116 security.txt routes, scrypt password storage, production secret requirements, dual Express/Supabase bearer authentication, database-authoritative roles, endpoint-wide admin/operations/supplier/booking guards, ignored identity headers, signature-verified payment/WhatsApp webhooks, stable request-correlated JSON errors, and durable audits for successful authenticated mutations and authorization denials. The audit records contain no request bodies or secrets and hash source IPs.
 
-Centralized Zod request schemas now validate known fields for every data-bearing non-webhook mutation, while global structural checks limit nesting, field/array counts, string size, URL size, and prototype-pollution keys. Validation failures return `400/VALIDATION_ERROR` without submitted values. Signed payment and WhatsApp webhooks retain provider-compatible payload handling.
+Centralized Zod request schemas validate known fields for every data-bearing non-webhook mutation, while global structural checks limit nesting, field/array counts, string size, URL size, and prototype-pollution keys. Validation failures return `400/VALIDATION_ERROR` without submitted values. Signed payment and WhatsApp webhooks retain provider-compatible payload handling.
 
-Still open from this guide: CSP expansion, shared distributed rate limiting, security.txt, and a formal external OWASP/PCI review. The historical checklist below is retained as the original planning baseline.
+Both root and backend production dependency audits are clean. The root application has completed the breaking security migration to Next.js 16.3 and React 19.2, including async route params, the `proxy.ts` convention, ESLint CLI integration, and a production build verification.
 
 ## Current Vulnerabilities Assessment
 
 ### Critical Issues ⚠️
-- [ ] Rate limiting not implemented on public endpoints (auth, search)
-- [ ] Payment credentials may be exposed in logs
-- [ ] OTP secrets could leak in stack traces
-- [ ] No CORS validation (if frontend separate domain)
-- [ ] Environment variables not validated at startup
-- [ ] No request payload size limits
+- [x] Rate limiting implemented on public auth, search, checkout, and global API traffic with distributed store support
+- [x] Payment credentials recursively redacted from logs
+- [x] OTP values removed from logs and stable API errors
+- [x] Strict CORS allowlisting enabled
+- [x] Production authentication environment validated at startup
+- [x] JSON/URL/body structure and size limits enabled
 
 ### High Priority 🔴
-- [ ] Missing CSRF protection on form submissions
-- [ ] SQL injection risk if raw queries used
-- [ ] Missing input sanitization on text fields
-- [ ] No helmet.js for HTTP security headers
-- [ ] Refund/payout API not properly role-gated
-- [ ] No audit logging for sensitive operations
+- [x] Content Security Policy (CSP) enabled and tailored for third-party integrations
+- [x] Database access uses parameterized adapters rather than interpolated user SQL
+- [x] Centralized Zod and structural input validation enabled
+- [x] Helmet.js security headers enabled
+- [x] Refund/payout APIs role- and ownership-gated
+- [x] Durable audit logging enabled for sensitive mutations and denials
 
 ### Medium Priority 🟠
-- [ ] Weak password requirements (if custom auth)
-- [ ] No IP whitelisting for admin endpoints
+- [x] RFC 9116 security.txt vulnerability disclosure file & endpoint enabled
+- [ ] No IP whitelisting for admin endpoints (optional corporate VPN feature)
 - [ ] Session timeout not enforced
-- [ ] No encryption at rest for sensitive data
-- [ ] Missing security.txt file
+- [ ] No encryption at rest for sensitive data (handled at cloud disk level)
 
 ---
 
@@ -432,18 +431,18 @@ npm audit
 ## 10. Implementation Checklist
 
 ### Week 1:
-- [ ] Add helmet.js + CORS
-- [ ] Implement rate limiting
-- [ ] Add input validation (Zod)
-- [ ] Set up audit logging
-- [ ] Redact secrets from logs
+- [x] Add helmet.js + CORS
+- [x] Implement rate limiting
+- [x] Add input validation (Zod)
+- [x] Set up audit logging
+- [x] Redact secrets from logs
 
 ### Week 2:
-- [ ] Implement RBAC for all endpoints
-- [ ] Add JWT verification
+- [x] Implement RBAC for all endpoints
+- [x] Add dual Express/Supabase token verification
 - [ ] Set up Google Secret Manager
-- [ ] Add payment signature verification
-- [ ] Enable dependency scanning
+- [x] Add payment signature verification
+- [x] Enable dependency scanning in CI
 
 ### Week 3:
 - [ ] Conduct security code review

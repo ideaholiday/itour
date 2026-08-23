@@ -2,6 +2,7 @@ import express from "express";
 import db from "../db.js";
 import {
   createRazorpayOrder,
+  processRazorpayRefund,
   verifyRazorpaySignature,
   verifyRazorpayWebhookSignature
 } from "../services/razorpayService.js";
@@ -44,6 +45,7 @@ function confirmPaidBooking(booking, { method, orderId, paymentId, signature, ca
     return { otp: null, alreadyPaid: true, supplierResponseDeadline: booking.supplier_response_deadline || null };
   }
   const pickupOtp = activatePickupOtp(booking);
+  const usesRazorpayReference = ["RAZORPAY", "DEMO"].includes(method);
   let supplierResponseDeadline = null;
   db.transaction(() => {
     db.prepare(
@@ -54,9 +56,9 @@ function confirmPaidBooking(booking, { method, orderId, paymentId, signature, ca
        WHERE id = ? AND payment_status = 'PENDING'`
     ).run(
       method,
-      method === "RAZORPAY" ? orderId : booking.razorpay_order_id || null,
-      method === "RAZORPAY" ? paymentId : booking.razorpay_payment_id || null,
-      method === "RAZORPAY" ? signature : booking.razorpay_signature || null,
+      usesRazorpayReference ? orderId : booking.razorpay_order_id || null,
+      usesRazorpayReference ? paymentId : booking.razorpay_payment_id || null,
+      usesRazorpayReference ? signature : booking.razorpay_signature || null,
       method === "CASHFREE" ? (cashfreeOrderId || orderId) : null,
       method === "CASHFREE" ? (cashfreePaymentId || paymentId) : null,
       pickupOtp.otpHash,

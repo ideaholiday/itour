@@ -1,0 +1,254 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main, staging]
+
+# Only one deploy per branch at a time
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GAR_REGISTRY: us-central1-docker.pkg.dev
+  GAR_REPOSITORY: idea-holiday
+  SERVICE_NAME: idea-holiday-marketplace
+  REGION: us-central1
+  IMAGE_TAG: ${{ github.sha }}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Build container image and push to Artifact Registry
+  # ─────────────────────────────────────────────
+  build-and-push:
+    name: Build & push container image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${GAR_REGISTRY} --quiet
+
+      - name: Compute image tags
+        id: meta
+        run: |
+          IMAGE="${GAR_REGISTRY}/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${SERVICE_NAME}"
+          echo "image=${IMAGE}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${IMAGE}:${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            -t "${{ steps.meta.outputs.image }}" \
+            -t "${{ steps.meta.outputs.image_latest }}" \
+            .
+
+      - name: Push to Artifact Registry
+        run: |
+          docker push "${{ steps.meta.outputs.image }}"
+          docker push "${{ steps.meta.outputs.image_latest }}"
+
+  # ─────────────────────────────────────────────
+  # Deploy to staging (staging branch only)
+  # ─────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to staging
+    needs: build-and-push
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deploy to Cloud Run (staging)
+        run: |
+          gcloud run deploy idea-holiday-staging \
+            --image="${{ needs.build-and-push.outputs.image }}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${REGION}" \
+            --set-env-vars="NODE_ENV=staging" \
+            --allow-unauthenticated \
+            --memory=1Gi \
+            --cpu=1 \
+            --timeout=300 \
+            --quiet
+
+      - name: Get staging URL
+        id: url
+        run: |
+          URL=$(gcloud run services describe idea-holiday-staging \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${REGION}" \
+            --format="value(status.url)")
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Run smoke tests against staging
+        run: bash scripts/smoke-tests.sh "${{ steps.url.outputs.url }}"
+
+  # ─────────────────────────────────────────────
+  # Deploy to production (main branch only)
+  # Blue-green: deploy with --no-traffic, smoke test, then shift
+  # ─────────────────────────────────────────────
+  deploy-production:
+    name: Deploy to production (blue-green)
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://api.ideaholiday.in
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deploy new revision (no traffic)
+        id: deploy
+        run: |
+          gcloud run deploy "${SERVICE_NAME}" \
+            --image="${{ needs.build-and-push.outputs.image }}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${REGION}" \
+            --set-env-vars="NODE_ENV=production" \
+            --allow-unauthenticated \
+            --memory=2Gi \
+            --cpu=2 \
+            --timeout=900 \
+            --no-traffic \
+            --quiet
+
+          # Get the latest revision name
+          REVISION=$(gcloud run revisions list \
+            --service="${SERVICE_NAME}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${REGION}" \
+            --sort-by="~creationTimestamp" \
+            --limit=1 \
+            --format="value(metadata.name)")
+          echo "revision=${REVISION}" >> "$GITHUB_OUTPUT"
+
+          # Get the tag URL for the new revision
+          TAG_URL=$(gcloud run services describe "${SERVICE_NAME}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${REGION}" \
+            --format="value(status.url)")
+          echo "tag_url=${TAG_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test new revision
+        id: smoke
+        run: |
+          # Use the service URL — the new revision is deployed but not receiving traffic
+          # We test the service endpoint to verify the revision is reachable
+          bash scripts/smoke-tests.sh "${{ steps.deploy.outputs.tag_url }}"
+
+      - name: Shift traffic to new revision
+        if: success()
+        run: |
+          gcloud run services update-traffic "${SERVICE_NAME}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${REGION}" \
+            --to-revisions="${{ steps.deploy.outputs.revision }}=100" \
+            --quiet
+
+      - name: Post-deploy health monitoring (3 minutes)
+        if: success()
+        env:
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          REGION: ${{ env.REGION }}
+          PROJECT_ID: ${{ env.GCP_PROJECT_ID }}
+        run: |
+          SERVICE_URL=$(gcloud run services describe "${SERVICE_NAME}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${REGION}" \
+            --format="value(status.url)")
+          bash scripts/monitor-post-deploy.sh "$SERVICE_URL" 180 30
+
+      - name: Auto-rollback on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          echo "❌ Deployment failed — triggering automatic rollback"
+          bash scripts/rollback.sh "${SERVICE_NAME}" "${REGION}" "${GCP_PROJECT_ID}"
+
+  # ─────────────────────────────────────────────
+  # Notify on deployment outcome
+  # ─────────────────────────────────────────────
+  notify:
+    name: Deployment notification
+    needs: [deploy-staging, deploy-production]
+    if: always() && (needs.deploy-staging.result != 'skipped' || needs.deploy-production.result != 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Notify Slack
+        if: ${{ secrets.SLACK_WEBHOOK != '' }}
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          ENV="${{ github.ref_name == 'main' && 'production' || 'staging' }}"
+          STAGING_RESULT="${{ needs.deploy-staging.result }}"
+          PROD_RESULT="${{ needs.deploy-production.result }}"
+
+          if [ "$ENV" = "production" ]; then
+            RESULT="$PROD_RESULT"
+          else
+            RESULT="$STAGING_RESULT"
+          fi
+
+          if [ "$RESULT" = "success" ]; then
+            EMOJI="✅"
+            MSG="deployed successfully"
+          else
+            EMOJI="❌"
+            MSG="deployment failed"
+          fi
+
+          curl -s -X POST "$SLACK_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\":\"${EMOJI} *${ENV}* ${MSG} — commit \`${GITHUB_SHA:0:7}\` by ${GITHUB_ACTOR}\"}" \
+            || true

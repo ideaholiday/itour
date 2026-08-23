@@ -104,12 +104,12 @@ export function LoginForm() {
       } else {
         router.push('/account/bookings');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setIsSubmitting(false);
       setToast({
         type: 'error',
         title: 'Login Failed',
-        message: err.message || 'Invalid email or password. Please check your credentials.',
+        message: err instanceof Error ? err.message : 'Invalid email or password. Please check your credentials.',
       });
     }
   };
@@ -241,7 +241,7 @@ export function LoginForm() {
 
         {/* Footer Toggle Link */}
         <div className="mt-6 pt-4 border-t border-slate-800 text-center text-sm text-slate-400">
-          Don't have an account?{' '}
+          Don&apos;t have an account?{' '}
           <Link
             href={redirectTo ? `/signup?redirectTo=${encodeURIComponent(redirectTo)}` : '/signup'}
             className="text-amber-400 font-semibold hover:text-amber-300 hover:underline transition-colors"

@@ -46,7 +46,10 @@ import placesRouter from "./routes/places.js";
 import notificationWebhooksRouter from "./routes/notificationWebhooks.js";
 import supportRouter from "./routes/support.js";
 import reviewsRouter from "./routes/reviews.js";
+import analyticsRouter from "./routes/analytics.js";
 import seoRouter from "./routes/seo.js";
+import securityTxtRouter from "./routes/securityTxt.js";
+import metricsRouter from "./routes/metrics.js";
 
 const app = express();
 app.use(requestContext);
@@ -61,6 +64,7 @@ app.use(express.json({
 app.use("/api", requestBoundary);
 app.use(requestLogger);
 app.use(auditMutations(db));
+app.use("/api", metricsRouter);
 
 // API Routes
 app.use("/api", activitiesRouter);
@@ -69,12 +73,14 @@ app.use("/api/bookings", bookingsRouter);
 app.use("/api/transfers", transfersRouter);
 app.use("/api/suppliers", suppliersRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/analytics", analyticsRouter);
 app.use("/api/ops", opsRouter);
 app.use("/api/checkout", checkoutRouter);
 app.use("/api/support", supportRouter);
 app.use("/api/reviews", reviewsRouter);
 app.use("/api/webhooks", notificationWebhooksRouter);
 app.use("/api", placesRouter);
+app.use("/", securityTxtRouter);
 app.use("/", seoRouter);
 
 app.get("/api/health", (req, res) =>

@@ -43,10 +43,10 @@ export function GoogleAuthButton({
       if (error) {
         throw error;
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setIsLoading(false);
       if (onError) {
-        onError(err.message || 'Failed to initialize Google Sign-In');
+        onError(err instanceof Error ? err.message : 'Failed to initialize Google Sign-In');
       }
     }
   };

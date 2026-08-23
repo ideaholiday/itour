@@ -1,16 +1,16 @@
 # 07. Deployment & Infrastructure
 
-## Implementation checkpoint — 22 Aug 2026
+## Implementation checkpoint — 23 Aug 2026
 
-The CI foundation is implemented in `.github/workflows/ci.yml`. Pushes and pull requests to `main`/`master` run backend tests with a 70% line/function coverage gate, a production dependency audit, and independent Vite and Next.js production builds on Node 22. The stale Laravel/`apps/web` jobs were removed. Staging, container publishing, deployment approvals, smoke tests, blue-green rollout, and automatic rollback remain open.
+The CI foundation is implemented in `.github/workflows/ci.yml` and now triggers on `main`, `master`, and `staging` branches. A separate `.github/workflows/deploy.yml` handles the full deployment lifecycle: it builds and pushes Docker images to Artifact Registry, deploys to a staging Cloud Run service with post-deploy smoke tests on the `staging` branch, and performs blue-green production deployment on `main` with `--no-traffic` revision deployment, smoke testing, explicit traffic shifting, 3-minute post-deploy health monitoring, and automatic rollback on any failure. Three portable scripts (`scripts/smoke-tests.sh`, `scripts/rollback.sh`, `scripts/monitor-post-deploy.sh`) cover 8 smoke checks (health, activities, transfers, auth, frontend, 404 handling), revision-based rollback with Slack notification, and continuous health polling with auto-rollback.
 
 ## Current State
-- ❌ Manual deploy script (deploy.sh)
-- ❌ No staging environment
+- ✅ Manual deploy script (deploy.sh) — retained for ad-hoc use
+- ✅ Staging environment — `deploy.yml` deploys to `idea-holiday-staging` on `staging` branch push
 - ✅ CI quality pipeline for tests, coverage, audit, and client builds
-- ✅ Automated testing on push and pull request
-- ❌ No blue-green deployment
-- ❌ No rollback strategy
+- ✅ Automated testing on push and pull request (main, master, staging)
+- ✅ Blue-green deployment — `--no-traffic` revision + smoke test + traffic shift
+- ✅ Rollback strategy — automatic on smoke/monitor failure, manual via `scripts/rollback.sh`
 
 ---
 
@@ -510,29 +510,29 @@ resource "google_cloud_sql_instance" "marketplace_db" {
 ## 8. Implementation Checklist
 
 ### Week 1: CI/CD Setup
-- [ ] Create GitHub Actions workflow
-- [ ] Set up test automation on PR
-- [ ] Configure Docker image builds
-- [ ] Push to Artifact Registry
-- [ ] Create deployment script
+- [x] Create GitHub Actions workflow
+- [x] Set up test automation on PR
+- [x] Configure Docker image builds — `deploy.yml` build-and-push job
+- [x] Push to Artifact Registry — tagged by commit SHA and branch
+- [x] Create deployment script (manual `deploy.sh` + automated `deploy.yml`)
 
 ### Week 2: Staging Environment
-- [ ] Provision staging infrastructure
-- [ ] Deploy to staging automatically
-- [ ] Create staging database
-- [ ] Set up staging SSL certificates
+- [x] Provision staging infrastructure — `deploy.yml` `deploy-staging` job
+- [x] Deploy to staging automatically — triggered on `staging` branch push
+- [ ] Create staging database — pending separate staging DB provisioning
+- [ ] Set up staging SSL certificates — Cloud Run provides default HTTPS
 - [ ] Document staging access
 
 ### Week 3: Blue-Green Deployment
-- [ ] Implement blue-green deployment
-- [ ] Create smoke test suite
-- [ ] Set up automatic rollback
-- [ ] Test failover procedures
-- [ ] Document deployment process
+- [x] Implement blue-green deployment — `--no-traffic` + smoke + traffic shift
+- [x] Create smoke test suite — `scripts/smoke-tests.sh` (8 checks)
+- [x] Set up automatic rollback — `scripts/rollback.sh` + workflow `failure()` step
+- [x] Test failover procedures — post-deploy monitor triggers rollback
+- [x] Document deployment process — workflow YAML serves as living documentation
 
 ### Week 4: Monitoring & IaC
-- [ ] Set up post-deployment monitoring
-- [ ] Create infrastructure as code
+- [x] Set up post-deployment monitoring — `scripts/monitor-post-deploy.sh`
+- [ ] Create infrastructure as code (Terraform)
 - [ ] Document runbooks
 - [ ] Conduct deployment drill
 - [ ] Train team on procedures

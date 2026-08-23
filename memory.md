@@ -24,7 +24,13 @@ Idea Holiday is an India-focused travel marketplace for airport transfers, day s
 
 Run the API with `cd backend && npm run dev` on port `4000` when using the Vite client. Run the marketplace with `cd frontend && npm run dev` on port `5173`; it proxies `/api` to the backend. The root Next.js app uses `npm run dev` and normally runs on port `3000`.
 
-Useful checks are `cd backend && npm test`, `cd frontend && npm run build`, and root `npm run build`. Environment variables belong in local `.env` or `.env.local` files and must not be committed.
+Useful checks are `cd backend && npm run test:coverage`, `cd backend && npm run test:integration`, `cd frontend && npm run build`, root `npm run build`, and root `npm run test:e2e`. The integration and Playwright suites create isolated temporary SQLite databases and disable live notification/payment providers. Environment variables belong in local `.env` or `.env.local` files and must not be committed.
+
+Runtime performance telemetry is centralized in `backend/src/config/metrics.js`. `GET /api/metrics` is private and accepts an admin/staff bearer identity or a dedicated server-only scraper token through standard bearer authorization or `X-Metrics-Token`; `POST /api/telemetry/web-vitals` accepts strictly bounded non-PII samples from both clients. Vite builds enforce the chunk budget through `frontend/scripts/check-bundle-size.js`.
+
+The reproducible monitoring stack is `docker-compose.observability.yml`: Prometheus securely scrapes the API, Grafana provisions API-health and marketplace/UX dashboards, and seven initial alert rules cover scrape loss, 5xx rate, API/database latency, payment failures, LCP, and INP. Production Cloud Run sidecar deployment and notification receivers remain operator-owned live-infrastructure steps.
+
+All Vite page/workspace routes use `React.lazy`, and Supabase session synchronization loads its SDK dynamically. The measured initial entry is 213.0 KiB instead of 616.2 KiB. `frontend/scripts/check-bundle-size.js` rejects any chunk above 250 KiB or initial entry above 225 KiB.
 
 ## Change Guidance
 

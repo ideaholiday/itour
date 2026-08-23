@@ -7,7 +7,11 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test 'test/**/*.test.js'",
+    "test:integration": "node --test 'integration/**/*.test.js'",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=70 --test-coverage-functions=70 'test/**/*.test.js'",
+    "migrate:status": "node scripts/migrate.js status",
+    "migrate:up": "node scripts/migrate.js up",
+    "migrate:down": "node scripts/migrate.js down",
     "migrate:postgres": "node scripts/migrate-sqlite-to-postgres.js"
   },
   "dependencies": {
@@ -22,7 +26,11 @@
     "jsonwebtoken": "^9.0.2",
     "nanoid": "^5.0.7",
     "pg": "^8.23.0",
+    "prom-client": "^15.1.3",
     "winston": "^3.19.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "yaml": "^2.9.0"
   }
 }

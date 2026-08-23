@@ -69,6 +69,32 @@ test("critical mutation schemas enforce dates, payment signatures, ratings and p
   }
 });
 
+test("booking creation accepts the UI payload with nullable coordinates", async () => {
+  const result = await run(bookingCreateSchema, {
+    product_id: "goa-mandovi-sunset-cruise",
+    activity_date: "2030-01-15",
+    adults: 2,
+    children: 0,
+    luggage_bags: 0,
+    pickup_time: "17:30",
+    pickup_location: "Meet at Santa Monica Jetty, Panaji",
+    pickup_lat: null,
+    pickup_lng: null,
+    drop_lat: null,
+    drop_lng: null,
+    traveler_name: "Browser Traveler",
+    traveler_email: "browser@example.com",
+    traveler_phone: "+919876543210",
+    payment_method: "DEMO",
+  });
+
+  assert.equal(result.nextCalled, true);
+  assert.equal(result.req.body.pickup_lat, undefined);
+  assert.equal(result.req.body.pickup_lng, undefined);
+  assert.equal(result.req.body.drop_lat, undefined);
+  assert.equal(result.req.body.drop_lng, undefined);
+});
+
 test("request boundary blocks prototype keys without echoing payloads", () => {
   const malicious = JSON.parse('{"__proto__":{"admin":true},"password":"must-not-leak"}');
   const req = { body: malicious, query: {}, requestId: "req-boundary", method: "POST", originalUrl: "/api/test" };
@@ -80,4 +106,3 @@ test("request boundary blocks prototype keys without echoing payloads", () => {
   assert.equal(res.payload.code, "VALIDATION_ERROR");
   assert.equal(JSON.stringify(res.payload).includes("must-not-leak"), false);
 });
-

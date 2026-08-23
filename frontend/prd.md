@@ -14,6 +14,8 @@ The Vite React application is the primary marketplace and workspace UI. It serve
 - Supplier, operations, and admin routes must provide usable dashboards for listings, coverage, bookings, dispatch, support, quality, and finance.
 - Persist the active Express or Supabase access token and route every protected API call through bearer-token authentication. Never send `X-User-Id` or `X-User-Email`, and never treat Supabase metadata as the source of operational roles.
 - Resolve Supabase sessions through the backend database-backed identity endpoint before enabling role-specific navigation. Next.js checkout proxies must forward the verified server-side Supabase bearer token and must not initiate supplier dispatch from the traveler client.
+- Report CLS, FCP, INP, LCP, and TTFB as best-effort, non-blocking telemetry with normalized routes and no query strings, identifiers, or PII.
+- Route-load every traveler and workspace page, defer optional provider SDKs, and keep the generated JavaScript within the 250 KiB per-chunk and 225 KiB initial-entry budgets.
 
 ## UX and Quality
 
@@ -21,4 +23,4 @@ Use responsive layouts, accessible labels and keyboard flows, visible loading/er
 
 ## Acceptance Criteria
 
-Every API-backed screen handles unavailable data and stable `VALIDATION_ERROR` responses gracefully; protected routes require the correct role; a refreshed URL reproduces search state; and both Vite and Next.js production builds complete in CI.
+Every API-backed screen handles unavailable data and stable `VALIDATION_ERROR` responses gracefully; protected routes require the correct role; a refreshed URL reproduces search state; and both Vite and Next.js production builds complete in CI. The Vite build must remain within both configured JavaScript budgets; the measured initial entry after route splitting is 213.0 KiB. Root `npm run test:e2e` must pass the Chromium traveler booking/cancellation/refund, supplier assignment acceptance, and operations task/support/refund journeys.

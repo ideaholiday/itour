@@ -400,14 +400,14 @@ function CounterRow({
 
 function TravellersPicker({
   adults,
-  children,
+  childrenCount,
   bags,
   onAdults,
   onChildren,
   onBags,
 }: {
   adults: number;
-  children: number;
+  childrenCount: number;
   bags: number;
   onAdults: (value: number) => void;
   onChildren: (value: number) => void;
@@ -424,11 +424,11 @@ function TravellersPicker({
     return () => document.removeEventListener('pointerdown', close);
   }, []);
 
-  const vehicle = adults + children >= 7
+  const vehicle = adults + childrenCount >= 7
     ? 'Tempo Traveller'
     : adults >= 4 || bags >= 4
       ? 'MUV / Innova'
-      : adults + children >= 3 || bags >= 3
+      : adults + childrenCount >= 3 || bags >= 3
         ? 'SUV'
         : 'Sedan';
 
@@ -445,7 +445,7 @@ function TravellersPicker({
         <span className="min-w-0 flex-1">
           <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Travellers & luggage</span>
           <span className="mt-0.5 block truncate text-sm font-semibold text-slate-900">
-            {adults + children} traveller{adults + children === 1 ? '' : 's'}, {bags} bag{bags === 1 ? '' : 's'}
+            {adults + childrenCount} traveller{adults + childrenCount === 1 ? '' : 's'}, {bags} bag{bags === 1 ? '' : 's'}
           </span>
         </span>
         <ChevronDown size={16} className={`shrink-0 text-slate-400 transition ${open ? 'rotate-180' : ''}`} />
@@ -455,7 +455,7 @@ function TravellersPicker({
         <div role="dialog" aria-label="Choose travellers and luggage" className="absolute right-0 z-50 mt-2 w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_24px_70px_-20px_rgba(15,23,42,0.38)]">
           <CounterRow label="Adults" description="Age 13+" value={adults} min={1} max={12} onChange={onAdults} />
           <div className="h-px bg-slate-100" />
-          <CounterRow label="Children" description="Age 2–12" value={children} min={0} max={8} onChange={onChildren} />
+          <CounterRow label="Children" description="Age 2–12" value={childrenCount} min={0} max={8} onChange={onChildren} />
           <div className="h-px bg-slate-100" />
           <CounterRow label="Luggage" description="Check-in bags" value={bags} min={0} max={12} onChange={onBags} />
 
@@ -582,7 +582,7 @@ export default function TravelSearchBar({ className = '' }: { className?: string
               <FieldShell icon={<Clock3 size={20} />} label="Pickup time">
                 <input required type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-0.5 w-full bg-transparent text-sm font-semibold text-slate-900 outline-none [color-scheme:light]" />
               </FieldShell>
-              <TravellersPicker adults={adults} children={children} bags={bags} onAdults={setAdults} onChildren={setChildren} onBags={setBags} />
+              <TravellersPicker adults={adults} childrenCount={children} bags={bags} onAdults={setAdults} onChildren={setChildren} onBags={setBags} />
               <SearchButton label="Find a ride" />
             </div>
           )}

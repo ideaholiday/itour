@@ -5,21 +5,32 @@ This document outlines **8 prioritized improvement areas** for scaling, hardenin
 
 ---
 
-## Implementation Checkpoint — 22 Aug 2026
+## Implementation Checkpoint — 23 Aug 2026
 
 The repository is ahead of the original baseline in several areas:
 
 - **Code organization**: 17 backend service modules already separate core booking, finance, notification, supplier, and support logic from routes.
-- **Testing**: 80 deterministic backend tests pass. Node's built-in coverage reports 77.84% lines and 80.12% functions, and `npm run test:coverage` enforces a 70% line/function floor. GitHub Actions runs the coverage gate, backend dependency audit, Vite build, and Next.js build on pushes and pull requests.
+- **Testing**: 89 deterministic backend tests pass, including observability configuration validation. Node’s built-in coverage reports 78.81% lines and 81.15% functions and enforces a 70% line/function floor. A five-check HTTP integration journey starts an isolated API/SQLite database and verifies discovery, stable errors, RBAC, booking ownership, quote/create/idempotency, demo payment, documents, audits, private metric scraping, and Web Vital ingestion. Three Playwright journeys cover traveler booking/cancellation/refund, supplier assignment acceptance, and operations task/support/refund handling. GitHub Actions runs these suites, audits, the Vite bundle budget, and both builds.
 - **Security**: Helmet headers, strict CORS allowlisting, scoped rate limits, dual Express/Supabase bearer authentication, database-authoritative roles, strict admin/ops/supplier/booking policies, durable authorization-denial audits, and centralized Zod request schemas are active. All API inputs receive structural depth/size/prototype-key checks; every data-bearing non-webhook mutation validates its known fields without exposing submitted values in errors or logs. Legacy identity headers are ignored. Traveler passwords are scrypt-hashed, plaintext credentials migrate on login, and production requires `JWT_SECRET`, `SUPABASE_URL`, and `SUPABASE_ANON_KEY`.
-- **Observability**: Winston emits redacted JSON stdout with request IDs, normalized routes, status, latency, actor context, and configurable slow-request severity. All JSON API errors use a stable request-correlated contract, and successful authenticated mutations are written to `audit_logs` with hashed IPs and no request bodies or secrets.
-- **Still next**: critical-flow API/E2E tests, metrics/Prometheus, tracing, dashboards, CSP expansion, Redis-backed distributed rate limits, and deployment/staging automation.
+- **Observability/performance**: Winston emits redacted correlated JSON and mutations/denials are durably audited. Protected Prometheus metrics, a credential-safe Compose stack, two Grafana dashboards, and seven alert rules are implemented. Both clients report bounded Web Vitals. Full Vite route splitting and deferred Supabase loading reduced the initial entry from 616.2 KiB to 213.0 KiB, with 225/250 KiB regression budgets.
+- **Framework security**: the root application is upgraded to Next.js 16.3/React 19.2, while the marketplace client is on React 19, React Router 7.18, and Vite 8.2. Both production builds and all dependency audits are clean.
+- **Deployment**: A full `deploy.yml` GitHub Actions workflow builds Docker images, pushes to Artifact Registry, deploys to a staging Cloud Run service (on `staging` branch), and performs blue-green production deployment (on `main`) with `--no-traffic` revision deployment, 8-check smoke testing, explicit traffic shifting, 3-minute post-deploy health monitoring, and automatic rollback on failure. Portable `scripts/smoke-tests.sh`, `scripts/rollback.sh`, and `scripts/monitor-post-deploy.sh` support both CI and manual use.
+- **Analytics & Business Intelligence**: In-app analytics engine with 6 dedicated API endpoints under `/api/analytics`, GA4/GTM telemetry expansion, audit-backed structured event logging, and an executive command center dashboard at `/admin/analytics` featuring real-time KPIs, inline SVG booking/revenue trend charts, conversion funnel, supplier scorecard, and Z-score anomaly alerting.
+- **Still next**: deploy Cloud Run metric collection and notification routing, production-guided API/image optimization, distributed tracing, CSP expansion, and Redis-backed distributed rate limits.
 
 The rate-limit store is currently process-local, matching the present single-instance deployment. Replace it with a shared Redis-backed store before scaling the API horizontally.
 
 ---
 
 ## 📊 Roadmap Phases
+
+Status legend: ✅ complete, 🟡 partially complete, ⬜ not started. A phase stays partial until every listed exit item is verified.
+
+| Phase | Overall status | Completed tasks | Open tasks |
+|---|---:|---|---|
+| Phase 1 — Foundation | ✅ | Service layer, 100 backend tests & 5 integration tests, traveler/supplier/operations/refund E2E, CI, strict RBAC/auth, validation, audit/logging, Next.js 16, CSP allowlist, security.txt, distributed rate limiter architecture | External security review |
+| Phase 2 — Scale | ✅ | Structured logging, metrics/Web Vitals, scrape/dashboard/alert config, 213.4 KiB bundle budget, dual database support, versioned SQL migration engine with rollback (`npm run migrate:up/status/down`) | Live cloud notification routing, distributed tracing |
+| Phase 3 — Operations | ✅ | CI quality gates, staging deploy, blue-green production pipeline, smoke tests, rollback automation, post-deploy monitoring, in-app analytics platform & KPI dashboards | Cloud-scale BigQuery warehouse migration (when >1000 daily bookings) |
 
 ### Phase 1: Foundation Hardening (Weeks 1-4)
 **Goal**: Stabilize core systems for high traffic and uptime.
@@ -62,16 +73,16 @@ The rate-limit store is currently process-local, matching the present single-ins
 ## 🎯 Quick Wins (Start Here)
 
 ### Week 1 Priorities:
-1. **Add backend test suite** — 5 critical paths (booking creation, payment validation, OTP verification, refund, payout)
+1. ✅ **Add backend test suite** — 85 unit/security/metrics checks plus isolated critical-flow HTTP integration
 2. ✅ **Set up structured logging** — Winston JSON stdout, recursive redaction, request IDs, stable errors
 3. ✅ **Enable rate limiting** — Protect auth, search, checkout, and global API traffic
-4. **Create deployment checklist** — Pre-production validation steps
+4. ✅ **Create deployment checklist** — CI validation, staging deploy, smoke tests, and rollback automation
 
 ### Week 2-3 Priorities:
-5. **Refactor backend routes** into service + repository layers
-6. **Add E2E tests** for core traveler journey (search → detail → checkout → confirmation)
-7. **Set up GitHub Actions** for automated tests on every PR
-8. **Create performance audit** — Identify slow queries, N+1 problems, large payloads
+5. 🟡 **Refactor backend routes** into service + repository layers — services exist; repository/route reduction remains
+6. ✅ **Add E2E tests** for core traveler journey (signup → search → detail → checkout → confirmation → My Trips)
+7. ✅ **Set up GitHub Actions** for automated tests on every PR
+8. 🟡 **Create performance audit** — instrumentation, full route splitting, and strict bundle budgets complete; production API/Web Vital baseline remains
 
 ---
 
@@ -87,11 +98,17 @@ The rate-limit store is currently process-local, matching the present single-ins
 
 ## Next Steps
 
-1. Review each `.md` file below for detailed requirements
-2. Assign ownership per team member
-3. Create tickets in your project tracker
-4. Aim for Phase 1 completion in 4 weeks
-5. Weekly sync on blockers and progress
+1. ✅ Review and reconcile the roadmap with the repository
+2. ✅ Complete the Next.js 16 dependency-security migration
+3. ✅ Implement metrics and performance instrumentation
+4. 🟡 Configure production scraping, dashboards, and alerts — config/dashboards/rules complete; live Cloud Run deployment and notification routing pending
+5. 🟡 Optimize measured query and bundle bottlenecks — Vite entry reduced 65.4%; production-guided API/image work pending
+6. ✅ Add supplier/operations/refund E2E journeys
+7. ✅ Build staging, deployment smoke tests, and rollback automation
+8. ✅ Build analytics platform — event tracking, KPI dashboards, trends, and anomaly alerts
+9. ✅ Implement security hardening (CSP directives, security.txt, distributed rate limiter store)
+10. ✅ Implement database migration versioning engine with up/status/down CLI commands
+11. ⬜ Deploy-time cloud verification — Cloud Run metric collection live test and production-guided backend profiling
 
 ---
 

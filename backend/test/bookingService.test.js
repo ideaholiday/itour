@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   activatePickupOtp,
@@ -34,27 +35,14 @@ test("booking state machine requires OTP path before trip completion", () => {
 });
 
 test("booking creation SQL statement has equal column and value expressions", () => {
-  const insertSql = `INSERT INTO bookings (
-    id, ref, client_request_id, user_id, product_id, supplier_id, product_type, variant_name,
-    activity_date, pickup_time, pickup_type, pickup_location, pickup_instructions, drop_location, drop_instructions,
-    pickup_lat, pickup_lng, drop_lat, drop_lng, flight_number, flight_arrival_time, terminal_gate,
-    special_requests, promo_code, adults, children, luggage_bags, vehicle_category,
-    traveler_name, traveler_phone, traveler_email, amount_inr, tolls_and_tax_amount,
-    commission_amount, commission_rate_snapshot, supplier_payout_amount, payment_method, payment_status, status,
-    supplier_assignment_status, supplier_assignment_method, supplier_assignment_score, supplier_assignment_reason, assigned_supplier_product_id, supplier_assigned_at, otp_code
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'pending_payment', 'RESERVED_PENDING_PAYMENT', 'RULE_ENGINE_V1', ?, ?, ?, datetime('now'), NULL)`;
+  const routeSource = readFileSync(new URL("../src/routes/bookings.js", import.meta.url), "utf8");
+  const insertMatch = routeSource.match(/`INSERT INTO bookings \(([\s\S]+?)\) VALUES \(([\s\S]+?)\)`/i);
+  assert.ok(insertMatch, "Should find the production booking insert");
 
-  const columnsMatch = insertSql.match(/INSERT INTO bookings \(([\s\S]+?)\) VALUES/i);
-  const valuesMatch = insertSql.match(/VALUES \(([\s\S]+?)\)$/i);
+  const columns = insertMatch[1].split(",").map((value) => value.trim()).filter(Boolean);
+  const values = insertMatch[2].split(",").map((value) => value.trim()).filter(Boolean);
 
-  assert.ok(columnsMatch, "Should find target columns");
-  assert.ok(valuesMatch, "Should find values block");
-
-  const columns = columnsMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
-  const values = valuesMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
-
-  assert.equal(columns.length, 46, "Target columns must be 46");
-  assert.equal(values.length, 46, "Values expressions must be 46");
+  assert.equal(columns.length, 48, "Production booking insert must include all 48 target columns");
+  assert.equal(values.length, 48, "Production booking insert must provide all 48 value expressions");
   assert.equal(columns.length, values.length, "Target columns count must equal value expressions count");
 });
-

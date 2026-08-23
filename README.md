@@ -1,6 +1,6 @@
 # Idea Holiday — Viator-Style Experiences & Transfer Marketplace for India
 
-A complete, full-stack production platform for Indian tours, airport transfers, day sightseeing, and multi-day packaged holidays with a **4-Role Ecosystem** (Traveler, Tour Supplier / Fleet Vendor, Ground Ops Staff, Super Admin). Built with React 18, Vite, Tailwind CSS, Node/Express, SQLite (local zero-config dev), and Supabase PostgreSQL with PostGIS extensions.
+A complete, full-stack production platform for Indian tours, airport transfers, day sightseeing, and multi-day packaged holidays with a **4-Role Ecosystem** (Traveler, Tour Supplier / Fleet Vendor, Ground Ops Staff, Super Admin). Built with React 19, Vite, Next.js, Tailwind CSS, Node/Express, SQLite (local zero-config dev), and Supabase PostgreSQL with PostGIS extensions.
 
 ---
 
@@ -91,11 +91,19 @@ Protected Express APIs accept either an existing Idea Holiday JWT or a verified 
 
 Production requires `JWT_SECRET`, `SUPABASE_URL`, and `SUPABASE_ANON_KEY`. Logging is controlled by `LOG_LEVEL`, `LOG_FORMAT`, `SLOW_REQUEST_MS`, and `LOG_REQUEST_BODY` as documented in `.env.example`.
 
+## Metrics and performance instrumentation
+
+The backend publishes Prometheus-compatible process, HTTP latency/status, in-flight request, search, booking, payment, refund, database-query, and frontend Web Vital metrics at `GET /api/metrics`. The endpoint is private: use an `ADMIN`/`STAFF` bearer token or configure a random `METRICS_TOKEN` of at least 32 characters. Scrapers can send that value as a standard bearer credential or through `X-Metrics-Token`. Never put the scraper token in either browser application.
+
+Both the Vite and Next.js clients report only bounded metric name/value/rating, normalized route, application, and navigation type to `POST /api/telemetry/web-vitals`; identifiers, query strings, emails, and other PII are not collected. Every Vite page/workspace is route-loaded and the optional Supabase SDK is deferred. This reduced the initial uncompressed JavaScript entry from 616.2 KiB to 213.0 KiB. `npm run check:bundle` enforces a 250 KiB maximum chunk and a stricter 225 KiB initial-entry budget.
+
+`docker-compose.observability.yml` starts a localhost-only Prometheus/Grafana stack with a file-backed scrape credential, seven service/UX alert rules, and two automatically provisioned dashboards. Follow `observability/README.md`; production Cloud Run sidecar deployment and notification routing still require cloud credentials and an incident destination.
+
 ## Request validation and CI quality gates
 
 Zod schemas validate authentication, booking, checkout, supplier, administration, operations, support, review, and transfer mutation payloads. Known fields are normalized and bounded while extension fields remain compatible; signed provider webhooks are not reshaped. A global boundary rejects excessive depth or collection sizes and prototype-pollution keys. Invalid input returns `400/VALIDATION_ERROR` with the current request ID and never echoes submitted values.
 
-Run `cd backend && npm run test:coverage` to execute all 80 backend tests with enforced 70% line and function coverage. GitHub Actions also runs the backend production dependency audit, the Vite production build, and the root Next.js production build.
+Run `cd backend && npm run test:coverage` to execute all 89 backend tests with enforced 70% line and function coverage. Run `cd backend && npm run test:integration` for the isolated real-HTTP traveler API journey, and root `npm run test:e2e` for the three Chromium traveler, supplier, and operations/refund journeys. GitHub Actions runs all suites, the backend production dependency audit, the Vite production build with its bundle budget, and the root Next.js production build; Playwright failure artifacts are retained for diagnosis.
 
 WhatsApp template body variables must use these orders:
 

@@ -1,0 +1,8 @@
+# RFC 9116 Security Disclosure Policy for Idea Holiday
+Contact: mailto:security@ideaholiday.in
+Expires: 2027-12-31T23:59:59.000Z
+Preferred-Languages: en, hi
+Canonical: https://ideaholiday.in/.well-known/security.txt
+Policy: https://ideaholiday.in/terms
+Acknowledgments: https://ideaholiday.in/about-us
+Hiring: https://ideaholiday.in/contact-us

@@ -23,6 +23,18 @@ import LocationMapPicker, { PinLocation } from './LocationMapPicker';
 
 type FormErrors = Partial<Record<'name' | 'phone' | 'email' | 'pickup' | 'drop' | 'flightNumber' | 'arrivalTime', string>>;
 
+type CashfreeCheckoutResult = { error?: { message?: string } };
+type CashfreeClient = {
+  checkout: (options: { paymentSessionId: string; redirectTarget: string }) => Promise<CashfreeCheckoutResult>;
+};
+type CashfreeFactory = (options: { mode: 'sandbox' | 'production' }) => CashfreeClient;
+
+declare global {
+  interface Window {
+    Cashfree?: CashfreeFactory;
+  }
+}
+
 const money = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
 const inputClass = 'mt-1.5 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 text-sm text-white outline-none placeholder:text-slate-600 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/10';
@@ -104,14 +116,17 @@ export default function CheckoutClient({ productId }: { productId: string }) {
   };
 
   const loadCashfreeSdk = () => {
-    return new Promise<any>((resolve, reject) => {
-      if (typeof window !== 'undefined' && (window as any).Cashfree) {
-        resolve((window as any).Cashfree);
+    return new Promise<CashfreeFactory>((resolve, reject) => {
+      if (typeof window !== 'undefined' && window.Cashfree) {
+        resolve(window.Cashfree);
         return;
       }
       const existing = document.getElementById('cashfree-js-sdk');
       if (existing) {
-        existing.addEventListener('load', () => resolve((window as any).Cashfree));
+        existing.addEventListener('load', () => {
+          if (window.Cashfree) resolve(window.Cashfree);
+          else reject(new Error('Cashfree SDK did not initialize'));
+        });
         existing.addEventListener('error', () => reject(new Error('Cashfree SDK failed to load')));
         return;
       }
@@ -119,7 +134,10 @@ export default function CheckoutClient({ productId }: { productId: string }) {
       script.id = 'cashfree-js-sdk';
       script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
       script.async = true;
-      script.onload = () => resolve((window as any).Cashfree);
+      script.onload = () => {
+        if (window.Cashfree) resolve(window.Cashfree);
+        else reject(new Error('Cashfree SDK did not initialize'));
+      };
       script.onerror = () => reject(new Error('Failed to load Cashfree payment gateway SDK'));
       document.body.appendChild(script);
     });
