@@ -103,7 +103,24 @@ Both the Vite and Next.js clients report only bounded metric name/value/rating, 
 
 Zod schemas validate authentication, booking, checkout, supplier, administration, operations, support, review, and transfer mutation payloads. Known fields are normalized and bounded while extension fields remain compatible; signed provider webhooks are not reshaped. A global boundary rejects excessive depth or collection sizes and prototype-pollution keys. Invalid input returns `400/VALIDATION_ERROR` with the current request ID and never echoes submitted values.
 
-Run `cd backend && npm run test:coverage` to execute all 89 backend tests with enforced 70% line and function coverage. Run `cd backend && npm run test:integration` for the isolated real-HTTP traveler API journey, and root `npm run test:e2e` for the three Chromium traveler, supplier, and operations/refund journeys. GitHub Actions runs all suites, the backend production dependency audit, the Vite production build with its bundle budget, and the root Next.js production build; Playwright failure artifacts are retained for diagnosis.
+Run `cd backend && npm run test:coverage` to execute all 100 backend tests with enforced 70% line and function coverage. Run `cd backend && npm run test:integration` for the isolated real-HTTP traveler API journey, and root `npm run test:e2e` for the three Chromium traveler, supplier, and operations/refund journeys. GitHub Actions runs all suites, the backend production dependency audit, the Vite production build with its bundle budget, and the root Next.js production build; Playwright failure artifacts are retained for diagnosis.
+
+## Analytics & Business Intelligence Command Center
+
+The platform includes an in-app executive analytics engine accessible at `/admin/analytics` backed by 6 API endpoints under `/api/analytics`:
+- **Real-Time KPIs**: Period-over-period bookings, revenue, AOV, cancellations, and active suppliers.
+- **Visual Trends**: Inline SVG time-series charts for booking volume and GMV revenue.
+- **Conversion Funnel**: Multi-stage funnel analysis from discovery through confirmed checkout.
+- **Supplier Scorecard**: Performance rankings by revenue, completed booking count, and rating.
+- **Anomaly Detection**: Z-score anomaly alerting for unusual booking or cancellation spikes.
+
+## Versioned Database Migrations
+
+The backend features a dual-engine (SQLite & PostgreSQL) versioned SQL migration runner:
+- `npm run migrate:status`: View pending vs. applied migration batches.
+- `npm run migrate:up`: Incrementally apply versioned schema changes from `backend/migrations/`.
+- `npm run migrate:down`: Safely rollback the last migration batch.
+- `_schema_migrations`: Immutable database ledger recording migration versions, checksums, and execution timestamps.
 
 WhatsApp template body variables must use these orders:
 
@@ -165,7 +182,11 @@ Open http://localhost:5173 in your browser.
 To connect and seed a Supabase PostgreSQL database:
 
 1. Configure `DATABASE_URL` in `backend/.env`.
-2. Execute the Supabase master SQL schema in `backend/src/supabase_schema.sql`.
+2. Run database migrations:
+```bash
+cd backend
+npm run migrate:up
+```
 3. Run the Supabase seeder script:
 ```bash
 cd backend
@@ -174,36 +195,23 @@ node seed-supabase.js
 
 ---
 
-## ☁️ Cloud Run Deployment
+## ☁️ Cloud Run Deployment & CI/CD
 
-Cloud Run runs the application while Supabase PostgreSQL stores all persistent
-marketplace data in the isolated `marketplace` schema. `DATABASE_URL` is
-injected from Google Secret Manager as `idea-holiday-database-url`; it is never
-stored in the container image or deployment environment file.
+Cloud Run runs the application with **2 GiB RAM / 2 vCPUs** while Supabase PostgreSQL stores all persistent marketplace data in the isolated `marketplace` schema. `DATABASE_URL` is injected from Google Secret Manager as `idea-holiday-database-url`.
 
-Deploy with:
+### Automated CI/CD (GitHub Actions)
+- `.github/workflows/ci.yml`: Runs 100 backend tests, coverage gates, HTTP integration, 3 E2E journeys, and builds on PR/push.
+- `.github/workflows/deploy.yml`: Deploys to staging on `staging` branch, and performs zero-downtime blue-green production deployment on `main` with automated smoke test verification and rollback.
 
+### Manual / CLI Deploy
 ```bash
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-To initialize a new Supabase project from the local SQLite database, run:
-
+Post-deployment smoke testing:
 ```bash
-cd backend
-npm run migrate:postgres
-```
-
-The migration creates a separate `marketplace` schema and refuses to overwrite
-an existing migration unless `--reset` is intentionally supplied.
-
-Demo seeding is destructive and is now blocked by default. Run it only when you
-intend to replace the current database:
-
-```bash
-cd backend
-ALLOW_DESTRUCTIVE_SEED=true node src/seed.js
+bash scripts/smoke-tests.sh https://idea-holiday-marketplace-723912383049.us-central1.run.app
 ```
 
 ---
@@ -212,40 +220,51 @@ ALLOW_DESTRUCTIVE_SEED=true node src/seed.js
 
 ```
 .
+├── .github/workflows/
+│   ├── ci.yml                       # CI Quality Pipeline & Coverage Gate
+│   └── deploy.yml                   # Staging & Blue-Green Production CD
 ├── backend/
+│   ├── migrations/                  # Versioned SQL Migration Files
 │   ├── src/
 │   │   ├── engine/
-│   │   │   └── transferEngine.js   # Haversine, Ray-Casting Point-in-Polygon & Pricing Matrix
+│   │   │   └── transferEngine.js   # Haversine & Ray-Casting Geo-Fence Engine
 │   │   ├── routes/
 │   │   │   ├── activities.js        # Product Search & Detail API
-│   │   │   ├── transfers.js         # /api/transfers/search & Taxonomies API
-│   │   │   ├── suppliers.js         # Geo-Fences, KYB & Listing Builder API
-│   │   │   ├── bookings.js          # Booking Creation & Voucher API
-│   │   │   ├── ops.js               # Ground Ops & Staff Task API
-│   │   │   └── admin.js             # Admin Compliance & Payout API
-│   │   ├── db.js                    # SQLite Local Database Setup
-│   │   ├── supabase_schema.sql      # Supabase Master PostgreSQL & PostGIS Schema
+│   │   │   ├── analytics.js         # Executive Analytics & Trend Endpoints
+│   │   │   ├── transfers.js         # Transfer Routing & Quotes
+│   │   │   ├── suppliers.js         # Geo-Fences, KYB & Listing Builder
+│   │   │   ├── bookings.js          # Booking Creation & Voucher Lifecycle
+│   │   │   ├── metrics.js           # Protected Prometheus Scrape Endpoint
+│   │   │   ├── securityTxt.js       # RFC 9116 Vulnerability Disclosure
+│   │   │   └── admin.js             # Admin Compliance & Analytics API
+│   │   ├── services/                # 17 Isolated Domain Services
+│   │   │   ├── analyticsService.js
+│   │   │   ├── bookingService.js
+│   │   │   ├── migrationRunner.js
+│   │   │   └── ...
+│   │   ├── middleware/              # Auth, RBAC, Validation & Observability
+│   │   ├── db.js                    # Dual SQLite/Postgres Layer
 │   │   └── server.js                # Express App Server Entry
-│   ├── seed-supabase.js             # Supabase PostgreSQL Seeder
-│   └── package.json
+│   ├── test/                        # 100 Deterministic Backend Tests
+│   └── integration/                 # Real-HTTP Isolated Journey Tests
 ├── frontend/
 │   ├── src/
-│   │   ├── components/
-│   │   │   ├── SearchBar.jsx        # Unified Search Bar with Product Type Tabs
-│   │   │   ├── TicketCard.jsx       # Boarding Pass Style Ticket Component
-│   │   │   └── MapPicker.jsx        # Interactive Leaflet Map Component
 │   │   ├── pages/
-│   │   │   ├── Home.jsx             # Destination Grid & Bestsellers
-│   │   │   ├── Search.jsx           # Filterable Results & Type Filter Tabs
-│   │   │   ├── TransferSearch.jsx   # Geo-fence Transfer Search UI
-│   │   │   ├── ActivityDetail.jsx   # Day-Wise Accordion & Vehicle Selector
-│   │   │   ├── SupplierPortal.jsx   # Polygon Service Area & Listing Builder
-│   │   │   ├── Checkout.jsx         # Multi-Gateway Payment Checkout
-│   │   │   ├── OpsPanel.jsx         # Ground Operations Dispatch Panel
-│   │   │   └── AdminPanel.jsx       # KYB & Payout Management Panel
-│   │   ├── App.jsx
-│   │   └── main.jsx
-│   └── package.json
+│   │   │   ├── admin/
+│   │   │   │   └── AnalyticsDashboardView.jsx # Executive Analytics Dashboard
+│   │   │   ├── AdminPanel.jsx
+│   │   │   ├── Checkout.jsx
+│   │   │   └── ...
+│   │   └── lib/
+│   │       ├── analytics.js         # GA4 / GTM Telemetry Layer
+│   │       └── webVitals.js         # Core Web Vitals Reporter
+│   └── scripts/
+│       └── check-bundle-size.js     # Bundle Budget Check (213.4 KiB)
+├── observability/                   # Prometheus & Grafana Provisioning
+├── scripts/
+│   ├── smoke-tests.sh               # 8-Check Post-Deploy Smoke Runner
+│   ├── rollback.sh                  # Instant Revision Rollback Automation
+│   └── monitor-post-deploy.sh       # Post-Deploy Health Monitor
 ├── deploy.sh                        # Cloud Run Deployment Script
 └── README.md
 ```

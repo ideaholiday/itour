@@ -18,16 +18,22 @@ Run commands from each package root.
   - `npm run build` - create the production build.
   - `npm run start` - run the built app.
   - `npm run lint` - run Next.js lint checks.
+  - `npm run test:e2e` - run Playwright end-to-end browser test journeys.
 - Backend:
   - `cd backend && npm install`
   - `npm run dev` - start the API with file watching.
   - `npm start` - run the API.
-  - `npm test` - execute `node:test` suites under `backend/test/`.
+  - `npm test` - execute `node:test` suites under `backend/test/` (100 tests).
+  - `npm run test:coverage` - run tests with enforced 70% line/function coverage gate.
+  - `npm run test:integration` - execute isolated HTTP critical journey tests.
+  - `npm run migrate:status` - inspect pending/applied schema migration versions.
+  - `npm run migrate:up` - execute pending SQL migrations.
+  - `npm run migrate:down` - rollback the latest batch of schema migrations.
   - `npm run migrate:postgres` - migrate SQLite data to Postgres.
 - Frontend:
   - `cd frontend && npm install`
   - `npm run dev` - start the dev server.
-  - `npm run build` - produce the frontend bundle.
+  - `npm run build` - produce the frontend bundle and enforce bundle budgets.
   - `npm run preview` - preview the built output.
 
 ## Coding Style & Naming Conventions
