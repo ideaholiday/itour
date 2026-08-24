@@ -24,8 +24,8 @@ const object = (shape) => z.object(shape).passthrough();
 export const identifierParams = object({ id: id.optional(), ref: id.optional(), zoneId: id.optional(), productId: id.optional(), bookingId: id.optional(), driverId: id.optional(), fenceId: id.optional(), dateId: id.optional() });
 
 export const authSchemas = {
-  signup: object({ name: text(2, 120), email, password: z.string().min(8).max(128), phone: phone.optional() }),
-  supplierSignup: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100), password: z.string().min(8).max(128) }),
+  signup: object({ name: text(2, 120), email, password: z.string().min(6).max(128), phone: phone.optional(), referralCode: optionalText(60) }),
+  supplierSignup: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100), password: z.string().min(6).max(128) }),
   login: object({ email, password: z.string().min(1).max(128) }),
 };
 

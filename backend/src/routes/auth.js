@@ -7,6 +7,7 @@ import { authenticate } from "../middleware/auth.js";
 import logger from "../config/logger.js";
 import { validateBody } from "../middleware/validation.js";
 import { authSchemas } from "../validators/apiSchemas.js";
+import { recordReferralSignup } from "../services/loyaltyService.js";
 
 const router = Router();
 const SECRET = process.env.JWT_SECRET
@@ -27,12 +28,14 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || "");
   const phone = normalizeText(req.body.phone) || null;
+  const referralCode = normalizeText(req.body.referralCode || req.body.ref);
+
   if (!name || !email || !password) return res.status(400).json({ error: "name, email, password required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: "Enter a valid email address" });
   }
-  if (password.length < 8) {
-    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  if (password.length < 6) {
+    return res.status(400).json({ error: "Password must be at least 6 characters" });
   }
 
   const existing = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(email);
@@ -41,6 +44,14 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   const id = nanoid(10);
   db.prepare("INSERT INTO users (id,name,email,password,phone) VALUES (?,?,?,?,?)")
     .run(id, name, email, hashPassword(password), phone);
+
+  if (referralCode) {
+    try {
+      recordReferralSignup(db, { newUserId: id, referralCode });
+    } catch (refErr) {
+      logger.warn("Referral tracking error on signup", { error: refErr.message, referralCode });
+    }
+  }
 
   const token = jwt.sign({ id, email, name, role: "TRAVELER" }, SECRET, { expiresIn: "30d" });
   res.json({ token, user: { id, name, email, phone, role: "TRAVELER" } });

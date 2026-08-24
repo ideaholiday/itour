@@ -96,6 +96,7 @@ function AppContent() {
             <Route path="/circuit-planner" element={<CircuitPlanner />} />
             <Route path="/plan-trip" element={<CircuitPlanner />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Login initialMode="signup" />} />
             <Route path="/how-it-works" element={<HowItWorks />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/cancellation" element={<CancellationPage />} />

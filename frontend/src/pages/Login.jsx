@@ -1,22 +1,33 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { Gift, Sparkles } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 import GoogleAuthButton from "../components/GoogleAuthButton.jsx";
 
-export default function Login() {
+export default function Login({ initialMode = "login" }) {
   const location = useLocation();
   const navigate = useNavigate();
   const params = new URLSearchParams(location.search);
   const from = params.get("from") || "/";
-  const [mode, setMode] = useState(params.get("mode") === "signup" ? "signup" : "login");
+  const refCodeParam = (params.get("ref") || params.get("referral") || "").trim();
+  
+  const isExplicitSignup = initialMode === "signup" || location.pathname === "/signup" || params.get("mode") === "signup" || Boolean(refCodeParam);
+  const [mode, setMode] = useState(isExplicitSignup ? "signup" : "login");
+  const [referralCode, setReferralCode] = useState(() => {
+    if (refCodeParam) {
+      sessionStorage.setItem("ih_ref_code", refCodeParam);
+      return refCodeParam;
+    }
+    return sessionStorage.getItem("ih_ref_code") || "";
+  });
   const [form, setForm] = useState({ name: "", email: "", password: "", phone: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { user, login } = useAuth();
 
   const getRedirectTarget = (authenticatedUser) => {
-    if (from && from !== "/" && from !== "/login") {
+    if (from && from !== "/" && from !== "/login" && from !== "/signup") {
       return from;
     }
     const role = String(authenticatedUser?.role || authenticatedUser?.user_metadata?.role || "").toUpperCase();
@@ -44,7 +55,8 @@ export default function Login() {
     const next = new URLSearchParams(location.search);
     if (nextMode === "signup") next.set("mode", "signup");
     else next.delete("mode");
-    navigate({ pathname: "/login", search: next.toString() }, { replace: true });
+    const basePath = nextMode === "signup" ? "/signup" : "/login";
+    navigate({ pathname: basePath, search: next.toString() }, { replace: true });
   };
 
   const submit = async (event) => {
@@ -52,8 +64,14 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
+      const payload = {
+        ...form,
+        email: form.email.trim(),
+        name: form.name.trim(),
+        ...(mode === "signup" && referralCode ? { referralCode } : {}),
+      };
       const fn = mode === "login" ? api.login : api.signup;
-      const result = await fn({ ...form, email: form.email.trim(), name: form.name.trim() });
+      const result = await fn(payload);
       login(result.token, result.user);
       navigate(getRedirectTarget(result.user), { replace: true });
     } catch (err) {
@@ -90,6 +108,18 @@ export default function Login() {
             {isSignup ? "Join in under a minute." : "Log in to see your bookings and saved trips."}
           </p>
         </div>
+
+        {isSignup && referralCode && (
+          <div className="mb-5 flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-300/80 p-3.5 text-amber-900 shadow-xs">
+            <Gift className="h-5 w-5 text-amber-600 shrink-0" />
+            <div className="text-xs">
+              <span className="font-bold block">Referral Discount Activated! 🎉</span>
+              <span className="text-amber-800">
+                Code <strong className="font-mono font-bold bg-amber-200/70 px-1.5 py-0.5 rounded">{referralCode}</strong> applied. ₹250 welcome gift ready.
+              </span>
+            </div>
+          </div>
+        )}
 
         <GoogleAuthButton
           label={isSignup ? "Sign up with Google" : "Log in with Google"}

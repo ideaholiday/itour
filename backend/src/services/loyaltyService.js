@@ -244,6 +244,28 @@ export function deductWalletCreditsOnBooking(database = db, userId, bookingId, c
 }
 
 /**
+ * Records a pending referral when a new user signs up using a valid referral code.
+ */
+export function recordReferralSignup(database = db, { newUserId, referralCode }) {
+  if (!newUserId || !referralCode) return null;
+  const cleanCode = String(referralCode).trim().toUpperCase();
+  const referrer = database.prepare("SELECT id, name, referral_code FROM users WHERE referral_code = ?").get(cleanCode);
+  if (!referrer || referrer.id === newUserId) return null;
+
+  const existing = database.prepare("SELECT id FROM user_referrals WHERE referred_user_id = ?").get(newUserId);
+  if (existing) return existing;
+
+  const referralId = `ref_${nanoid(12)}`;
+  database.prepare(`
+    INSERT INTO user_referrals (
+      id, referrer_user_id, referred_user_id, referral_code, reward_inr, status, created_at
+    ) VALUES (?, ?, ?, ?, 250.0, 'PENDING', datetime('now'))
+  `).run(referralId, referrer.id, newUserId, cleanCode);
+
+  return { referralId, referrerId: referrer.id };
+}
+
+/**
  * Credits referral reward when the referred traveler completes their trip.
  */
 export async function creditReferralRewardOnCompletion(database = db, bookingId, { sendNotifications = true } = {}) {
