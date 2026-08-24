@@ -111,6 +111,7 @@ export function createRateLimiter({ windowMs, limit, scope, store = null }) {
     limit,
     standardHeaders: "draft-7",
     legacyHeaders: false,
+    validate: { xForwardedForHeader: false, forwardedHeader: false },
     skip: (req) => req.method === "OPTIONS",
     handler: (_req, res) => {
       res.status(429).json({
