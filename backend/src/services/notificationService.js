@@ -132,8 +132,8 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
   if (!booking) throw Object.assign(new Error("Booking not found"), { status: 404 });
 
   const eventType = String(requestedEventType || "DOCUMENTS").toUpperCase();
-  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS"].includes(eventType)) {
-    throw Object.assign(new Error("Choose booking confirmation, driver details or documents"), { status: 400 });
+  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE"].includes(eventType)) {
+    throw Object.assign(new Error("Choose booking confirmation, driver details, documents, pre-trip reminder, or review invite"), { status: 400 });
   }
   if (eventType === "DRIVER_ASSIGNED" && !booking.driver_name) {
     throw Object.assign(new Error("Assign a driver before sending driver details"), { status: 409 });
@@ -144,6 +144,12 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     id: booking.user_id, role: "TRAVELER", name: booking.traveler_name,
     email: booking.traveler_email, phone: booking.traveler_phone,
   };
+  const experienceName = booking.product_title || booking.product_type;
+  const reviewUrl = `https://ideaholiday.in/my-reviews?bookingRef=${encodeURIComponent(booking.ref)}`;
+  const driverInfo = booking.driver_name
+    ? `Driver: ${booking.driver_name} (${booking.driver_phone || "Contact via App"})\nVehicle: ${booking.vehicle_model || "Assigned Vehicle"} [${booking.vehicle_number || "Verified"}]`
+    : "Driver and vehicle details will be shared on departure morning.";
+
   const content = {
     BOOKING_CONFIRMED: {
       subject: `Booking ${booking.ref} confirmed`,
@@ -159,6 +165,16 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
       subject: `Voucher and invoice for booking ${booking.ref}`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour Idea Holiday documents are ready.\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}\n\nThese secure links expire automatically. You can generate new links from My Trips.`,
       template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_DOCUMENTS, [booking.ref, documents.voucherUrl, documents.invoiceUrl]),
+    },
+    PRE_TRIP_REMINDER: {
+      subject: `Trip Reminder: Your ${experienceName} is tomorrow (${booking.ref})`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour upcoming experience is tomorrow!\n\nBooking: ${booking.ref}\nExperience: ${experienceName}\nTravel Date: ${booking.activity_date}\nPickup Time: ${booking.pickup_time || "09:00 AM"}\nPickup Location: ${booking.pickup_location}\n\n${driverInfo}\n\nNeed assistance? 24/7 Helpline: +91 9336757106 / support@ideaholiday.in\n\nHave a memorable journey!\nIdea Holiday Team`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_REMINDER, [booking.ref, experienceName, booking.activity_date, booking.pickup_location]),
+    },
+    POST_TRIP_REVIEW_INVITE: {
+      subject: `How was your trip? Review your ${experienceName} (${booking.ref})`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nWe hope you had a wonderful journey with ${experienceName}!\n\nRate your trip and share photos here:\n${reviewUrl}\n\nThank you for choosing Idea Holiday!`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_REVIEW_REQUEST, [booking.ref, experienceName]),
     },
   }[eventType];
   const results = await sendRecipientChannels({
@@ -486,4 +502,170 @@ export async function notifyProductPublished(database, productId) {
     metadata: { productId: product.id, supplierId: product.supplier_id },
   });
   return { eventType: "PRODUCT_PUBLISHED", productId, attempted: results.length, results };
+}
+
+export async function notifyUpcomingTripReminder(database, bookingId) {
+  const booking = database.prepare(`
+    SELECT b.*, p.title AS product_title, s.company_name AS supplier_name,
+      s.contact_name AS supplier_contact_name, s.phone AS supplier_phone,
+      da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number
+    FROM bookings b
+    LEFT JOIN products p ON p.id = b.product_id
+    LEFT JOIN suppliers s ON s.id = b.supplier_id
+    LEFT JOIN driver_assignments da ON da.booking_id = b.id AND da.assignment_status != 'CANCELLED'
+    WHERE b.id = ? OR b.ref = ?
+  `).get(bookingId, bookingId);
+  if (!booking) throw new Error("Booking not found for trip reminder");
+
+  const traveler = {
+    id: booking.user_id,
+    role: "TRAVELER",
+    name: booking.traveler_name,
+    email: booking.traveler_email,
+    phone: booking.traveler_phone,
+  };
+
+  const experienceName = booking.product_title || booking.product_type;
+  const driverInfo = booking.driver_name
+    ? `Driver: ${booking.driver_name} (${booking.driver_phone || "Contact via App"})\nVehicle: ${booking.vehicle_model || "Assigned Vehicle"} [${booking.vehicle_number || "Verified"}]`
+    : "Driver and vehicle details will be shared on departure morning.";
+
+  const emailText = `Hello ${booking.traveler_name || "Traveler"},\n\nYour upcoming experience is tomorrow!\n\nBooking: ${booking.ref}\nExperience: ${experienceName}\nTravel Date: ${booking.activity_date}\nPickup Time: ${booking.pickup_time || "09:00 AM"}\nPickup Location: ${booking.pickup_location}\n\n${driverInfo}\n\nNeed assistance? 24/7 Helpline: +91 9336757106 / support@ideaholiday.in\n\nHave a memorable journey!\nIdea Holiday Team`;
+
+  const whatsappText = `Hello ${booking.traveler_name || "Traveler"} 👋\n\n⏰ Reminder: Your trip is coming up tomorrow!\n\n📋 *Booking:* ${booking.ref}\n🌴 *Tour:* ${experienceName}\n📅 *Date:* ${booking.activity_date} at ${booking.pickup_time || "09:00 AM"}\n📍 *Pickup:* ${booking.pickup_location}\n\n🚗 *Assigned Vehicle / Driver:*\n${driverInfo}\n\nHave a wonderful trip with Idea Holiday!`;
+
+  const results = await sendRecipientChannels({
+    database,
+    eventType: "PRE_TRIP_REMINDER",
+    eventKeyPrefix: `${booking.id}:PRE_TRIP_REMINDER:24H`,
+    recipient: traveler,
+    subject: `Trip Reminder: Your ${experienceName} is tomorrow (${booking.ref})`,
+    emailText,
+    whatsappText,
+    whatsappTemplate: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_REMINDER, [
+      booking.ref,
+      experienceName,
+      booking.activity_date,
+      booking.pickup_location,
+    ]),
+    metadata: { bookingId: booking.id, bookingRef: booking.ref, activityDate: booking.activity_date },
+  });
+
+  return {
+    eventType: "PRE_TRIP_REMINDER",
+    bookingId: booking.id,
+    bookingRef: booking.ref,
+    recipient: traveler.email || traveler.phone,
+    results,
+  };
+}
+
+export async function notifyPostTripReviewRequest(database, bookingId) {
+  const booking = database.prepare(`
+    SELECT b.*, p.title AS product_title, s.company_name AS supplier_name
+    FROM bookings b
+    LEFT JOIN products p ON p.id = b.product_id
+    LEFT JOIN suppliers s ON s.id = b.supplier_id
+    WHERE b.id = ? OR b.ref = ?
+  `).get(bookingId, bookingId);
+  if (!booking) throw new Error("Booking not found for post-trip review request");
+
+  const traveler = {
+    id: booking.user_id,
+    role: "TRAVELER",
+    name: booking.traveler_name,
+    email: booking.traveler_email,
+    phone: booking.traveler_phone,
+  };
+
+  const experienceName = booking.product_title || booking.product_type;
+  const reviewUrl = `https://ideaholiday.in/my-reviews?bookingRef=${encodeURIComponent(booking.ref)}`;
+
+  const emailText = `Hello ${booking.traveler_name || "Traveler"},\n\nWe hope you had a wonderful journey with ${experienceName}!\n\nYour feedback helps fellow travelers and local operators in India.\n\nRate your trip and share photos here:\n${reviewUrl}\n\nThank you for choosing Idea Holiday!`;
+
+  const whatsappText = `Hello ${booking.traveler_name || "Traveler"} ⭐\n\nHow was your recent ${experienceName} trip?\n\nHelp other travelers by sharing your honest review and vacation photos:\n👉 ${reviewUrl}\n\nThank you for traveling with Idea Holiday!`;
+
+  const results = await sendRecipientChannels({
+    database,
+    eventType: "POST_TRIP_REVIEW_INVITE",
+    eventKeyPrefix: `${booking.id}:POST_TRIP_REVIEW_INVITE`,
+    recipient: traveler,
+    subject: `How was your trip? Review your ${experienceName} (${booking.ref})`,
+    emailText,
+    whatsappText,
+    whatsappTemplate: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_REVIEW_REQUEST, [
+      booking.ref,
+      experienceName,
+    ]),
+    metadata: { bookingId: booking.id, bookingRef: booking.ref },
+  });
+
+  return {
+    eventType: "POST_TRIP_REVIEW_INVITE",
+    bookingId: booking.id,
+    bookingRef: booking.ref,
+    recipient: traveler.email || traveler.phone,
+    reviewUrl,
+    results,
+  };
+}
+
+export async function runAutomatedTripReminders(database) {
+  const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const dayAfterTomorrow = new Date(Date.now() + 48 * 3600 * 1000).toISOString().slice(0, 10);
+
+  const upcomingBookings = database.prepare(`
+    SELECT b.id, b.ref, b.activity_date
+    FROM bookings b
+    WHERE b.status IN ('confirmed', 'CONFIRMED', 'paid', 'PAID')
+      AND b.activity_date BETWEEN ? AND ?
+      AND NOT EXISTS (
+        SELECT 1 FROM notification_deliveries nd 
+        WHERE nd.event_type = 'PRE_TRIP_REMINDER' 
+          AND nd.event_key LIKE b.id || ':PRE_TRIP_REMINDER%'
+      )
+  `).all(tomorrow, dayAfterTomorrow);
+
+  const preTripResults = [];
+  for (const b of upcomingBookings) {
+    try {
+      const res = await notifyUpcomingTripReminder(database, b.id);
+      preTripResults.push(res);
+    } catch (err) {
+      logger.error("Pre-trip reminder failed for booking", { bookingId: b.id, error: err.message });
+    }
+  }
+
+  const pastSevenDays = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+  const completedBookings = database.prepare(`
+    SELECT b.id, b.ref, b.activity_date
+    FROM bookings b
+    WHERE b.status IN ('completed', 'COMPLETED')
+      AND b.activity_date BETWEEN ? AND ?
+      AND NOT EXISTS (
+        SELECT 1 FROM notification_deliveries nd 
+        WHERE nd.event_type = 'POST_TRIP_REVIEW_INVITE' 
+          AND nd.event_key LIKE b.id || ':POST_TRIP_REVIEW_INVITE%'
+      )
+  `).all(pastSevenDays, yesterday);
+
+  const postTripResults = [];
+  for (const b of completedBookings) {
+    try {
+      const res = await notifyPostTripReviewRequest(database, b.id);
+      postTripResults.push(res);
+    } catch (err) {
+      logger.error("Post-trip review invite failed for booking", { bookingId: b.id, error: err.message });
+    }
+  }
+
+  return {
+    scannedAt: new Date().toISOString(),
+    preTripRemindersSent: preTripResults.length,
+    postTripReviewInvitesSent: postTripResults.length,
+    preTripBookings: preTripResults.map((r) => r.bookingRef),
+    postTripBookings: postTripResults.map((r) => r.bookingRef),
+  };
 }

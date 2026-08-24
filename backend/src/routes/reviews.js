@@ -1,4 +1,5 @@
 import express from "express";
+import { nanoid } from "nanoid";
 import db from "../db.js";
 import { authenticate, optionalAuthMiddleware, requireRoles } from "../middleware/auth.js";
 import { createVerifiedReview, moderateReview, recalculateQualityScores, respondToReview, reviewDetails } from "../services/reviewService.js";
@@ -40,10 +41,18 @@ router.get("/eligible", authenticate, (req, res) => {
 router.get("/mine", authenticate, (req, res) => {
   const actor = requester(req);
   if (!actor) return res.status(401).json({ error: "Sign in to view reviews" });
-  const rows = db.prepare(`SELECT r.*, b.ref AS booking_ref, p.title AS product_title, s.company_name AS supplier_name, da.driver_name
+  const rows = db.prepare(`SELECT r.*, b.ref AS booking_ref, b.activity_date, p.title AS product_title, s.company_name AS supplier_name, da.driver_name
     FROM reviews r JOIN bookings b ON b.id = r.booking_id JOIN products p ON p.id = r.product_id
     JOIN suppliers s ON s.id = r.supplier_id LEFT JOIN driver_assignments da ON da.id = r.driver_assignment_id
-    WHERE r.user_id = ? OR (? != '' AND LOWER(b.traveler_email) = LOWER(?)) ORDER BY r.created_at DESC`).all(actor.id || "", actor.email || "", actor.email || "").map((row) => ({ ...row, tags: JSON.parse(row.tags || "[]") }));
+    WHERE r.user_id = ? OR (? != '' AND LOWER(b.traveler_email) = LOWER(?)) ORDER BY r.created_at DESC`).all(actor.id || "", actor.email || "", actor.email || "").map((row) => {
+      const photos = db.prepare("SELECT photo_url, caption FROM review_photos WHERE review_id = ? ORDER BY sort_order ASC").all(row.id);
+      return {
+        ...row,
+        tags: JSON.parse(row.tags || "[]"),
+        photos: photos.map((p) => p.photo_url),
+        photo_details: photos,
+      };
+    });
   return res.json({ success: true, reviews: rows });
 });
 
@@ -62,11 +71,166 @@ router.post("/", authenticate, validateBody(reviewSchemas.create), (req, res) =>
 });
 
 router.get("/product/:id", (req, res) => {
-  const reviews = db.prepare(`SELECT r.id, r.experience_rating, r.title, r.comment, r.tags, r.would_recommend,
-    r.supplier_response, r.supplier_responded_at, r.created_at, b.traveler_name
-    FROM reviews r JOIN bookings b ON b.id = r.booking_id WHERE r.product_id = ? AND r.status = 'PUBLISHED' ORDER BY r.created_at DESC LIMIT 100`).all(req.params.id).map((row) => ({ ...row, traveler_name: `${String(row.traveler_name || "Traveler").split(" ")[0]} ${String(row.traveler_name || "").split(" ")[1]?.[0] || ""}.`.trim(), tags: JSON.parse(row.tags || "[]") }));
-  const quality = db.prepare("SELECT * FROM quality_scores WHERE entity_type = 'PRODUCT' AND entity_id = ?").get(req.params.id) || null;
-  return res.json({ success: true, reviews, quality });
+  const productId = req.params.id;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
+  const offset = (page - 1) * limit;
+  const sort = String(req.query.sort || "newest").toLowerCase();
+  const ratingFilter = req.query.rating ? parseInt(req.query.rating, 10) : null;
+
+  // Aggregate overall distribution & quality metrics for this product
+  const distRow = db.prepare(`
+    SELECT 
+      COUNT(*) AS total,
+      AVG(experience_rating) AS average,
+      SUM(CASE WHEN experience_rating = 5 THEN 1 ELSE 0 END) AS count_5,
+      SUM(CASE WHEN experience_rating = 4 THEN 1 ELSE 0 END) AS count_4,
+      SUM(CASE WHEN experience_rating = 3 THEN 1 ELSE 0 END) AS count_3,
+      SUM(CASE WHEN experience_rating = 2 THEN 1 ELSE 0 END) AS count_2,
+      SUM(CASE WHEN experience_rating = 1 THEN 1 ELSE 0 END) AS count_1
+    FROM reviews 
+    WHERE product_id = ? AND status = 'PUBLISHED'
+  `).get(productId) || {};
+
+  const totalReviews = Number(distRow.total || 0);
+  const averageRating = distRow.average ? Number(Number(distRow.average).toFixed(2)) : null;
+  const distribution = {
+    5: Number(distRow.count_5 || 0),
+    4: Number(distRow.count_4 || 0),
+    3: Number(distRow.count_3 || 0),
+    2: Number(distRow.count_2 || 0),
+    1: Number(distRow.count_1 || 0)
+  };
+
+  // Build filter query
+  const whereClauses = ["r.product_id = ?", "r.status = 'PUBLISHED'"];
+  const params = [productId];
+
+  if (ratingFilter && ratingFilter >= 1 && ratingFilter <= 5) {
+    whereClauses.push("r.experience_rating = ?");
+    params.push(ratingFilter);
+  }
+
+  // Count matching reviews
+  const filteredCountRow = db.prepare(`
+    SELECT COUNT(*) AS total FROM reviews r WHERE ${whereClauses.join(" AND ")}
+  `).get(...params);
+  const filteredTotal = Number(filteredCountRow?.total || 0);
+
+  // Sorting
+  let orderBy = "r.created_at DESC";
+  if (sort === "highest") {
+    orderBy = "r.experience_rating DESC, r.created_at DESC";
+  } else if (sort === "lowest") {
+    orderBy = "r.experience_rating ASC, r.created_at DESC";
+  } else if (sort === "most_helpful") {
+    orderBy = "helpful_count DESC, r.created_at DESC";
+  }
+
+  const listParams = [...params, limit, offset];
+  const reviews = db.prepare(`
+    SELECT r.id, r.experience_rating, r.supplier_rating, r.driver_rating, r.title, r.comment, r.tags, r.would_recommend,
+      r.supplier_response, r.supplier_responded_at, r.created_at, b.traveler_name, b.activity_date,
+      COALESCE(h.helpful_count, 0) AS helpful_count,
+      COALESCE(h.unhelpful_count, 0) AS unhelpful_count
+    FROM reviews r 
+    JOIN bookings b ON b.id = r.booking_id 
+    LEFT JOIN (
+      SELECT review_id,
+        SUM(CASE WHEN is_helpful = 1 THEN 1 ELSE 0 END) AS helpful_count,
+        SUM(CASE WHEN is_helpful = 0 THEN 1 ELSE 0 END) AS unhelpful_count
+      FROM review_helpfulness
+      GROUP BY review_id
+    ) h ON h.review_id = r.id
+    WHERE ${whereClauses.join(" AND ")} 
+    ORDER BY ${orderBy} 
+    LIMIT ? OFFSET ?
+  `).all(...listParams).map((row) => {
+    const photos = db.prepare("SELECT photo_url, caption FROM review_photos WHERE review_id = ? ORDER BY sort_order ASC").all(row.id);
+    return {
+      ...row,
+      traveler_name: `${String(row.traveler_name || "Traveler").split(" ")[0]} ${String(row.traveler_name || "").split(" ")[1]?.[0] || ""}.`.trim(),
+      tags: JSON.parse(row.tags || "[]"),
+      photos: photos.map((p) => p.photo_url),
+      photo_details: photos,
+      helpful_count: Number(row.helpful_count || 0),
+      unhelpful_count: Number(row.unhelpful_count || 0)
+    };
+  });
+
+  const quality = db.prepare("SELECT * FROM quality_scores WHERE entity_type = 'PRODUCT' AND entity_id = ?").get(productId) || null;
+
+  return res.json({
+    success: true,
+    reviews,
+    pagination: {
+      page,
+      limit,
+      total: filteredTotal,
+      totalPages: Math.ceil(filteredTotal / limit) || 1,
+      hasNext: page * limit < filteredTotal,
+      hasPrev: page > 1
+    },
+    distribution,
+    totalReviews,
+    averageRating,
+    quality
+  });
+});
+
+// Helpfulness voting on reviews
+router.post("/:id/helpfulness", authenticate, (req, res) => {
+  const userId = req.user?.id;
+  const reviewId = req.params.id;
+  const isHelpful = req.body.isHelpful === false ? 0 : 1;
+
+  if (!userId) return res.status(401).json({ error: "Sign in to vote on reviews" });
+
+  try {
+    const id = `revh_${nanoid(12)}`;
+    db.prepare(`
+      INSERT INTO review_helpfulness (id, review_id, user_id, is_helpful, created_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(review_id, user_id) DO UPDATE SET is_helpful = excluded.is_helpful
+    `).run(id, reviewId, userId, isHelpful);
+
+    const counts = db.prepare(`
+      SELECT 
+        SUM(CASE WHEN is_helpful = 1 THEN 1 ELSE 0 END) as helpful_count,
+        SUM(CASE WHEN is_helpful = 0 THEN 1 ELSE 0 END) as unhelpful_count
+      FROM review_helpfulness
+      WHERE review_id = ?
+    `).get(reviewId);
+
+    return res.json({
+      success: true,
+      counts: {
+        helpful_count: Number(counts?.helpful_count || 0),
+        unhelpful_count: Number(counts?.unhelpful_count || 0)
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Helpfulness vote could not be recorded" });
+  }
+});
+
+// Photo upload on reviews
+router.get("/:id/photos", (req, res) => {
+  const photos = db.prepare("SELECT * FROM review_photos WHERE review_id = ? ORDER BY sort_order ASC").all(req.params.id);
+  return res.json({ success: true, photos });
+});
+
+router.post("/:id/photos", authenticate, (req, res) => {
+  const { photoUrl, caption = "", sortOrder = 0 } = req.body;
+  if (!photoUrl) return res.status(400).json({ error: "Photo URL is required" });
+
+  const id = `revp_${nanoid(12)}`;
+  db.prepare(`
+    INSERT INTO review_photos (id, review_id, photo_url, caption, sort_order, created_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+  `).run(id, req.params.id, photoUrl, caption, sortOrder);
+
+  return res.status(201).json({ success: true, id, photoUrl });
 });
 
 router.get("/supplier/:id", optionalAuthMiddleware, (req, res) => {

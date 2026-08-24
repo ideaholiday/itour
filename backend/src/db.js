@@ -116,6 +116,9 @@ CREATE TABLE IF NOT EXISTS kyb_documents (
   doc_url TEXT,
   status TEXT DEFAULT 'APPROVED',
   rejection_reason TEXT,
+  review_note TEXT,
+  reviewed_by TEXT,
+  submitted_at TEXT DEFAULT (datetime('now')),
   verified_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -666,7 +669,285 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   metadata TEXT DEFAULT '{}',
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- 22. UPLOADS (MEDIA & DOCUMENTS)
+CREATE TABLE IF NOT EXISTS uploads (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  filename TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  url TEXT NOT NULL,
+  thumbnail_url TEXT,
+  entity_type TEXT,
+  entity_id TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 23. RAW WEBHOOK EVENTS (RETRY & DEAD-LETTER QUEUE)
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  signature TEXT,
+  status TEXT DEFAULT 'RECEIVED',
+  attempts INTEGER DEFAULT 0,
+  last_error TEXT,
+  processed_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 24. ASYNC EXPORT JOBS
+CREATE TABLE IF NOT EXISTS export_jobs (
+  id TEXT PRIMARY KEY,
+  requested_by TEXT REFERENCES users(id),
+  export_type TEXT NOT NULL,
+  format TEXT NOT NULL DEFAULT 'csv',
+  filters TEXT DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'PROCESSING',
+  download_url TEXT,
+  row_count INTEGER DEFAULT 0,
+  error TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+-- 25. SUPPLIER IN-APP NOTIFICATIONS
+CREATE TABLE IF NOT EXISTS supplier_notifications (
+  id TEXT PRIMARY KEY,
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  action_url TEXT,
+  is_read INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 26. PRODUCT MEDIA GALLERY
+CREATE TABLE IF NOT EXISTS product_media (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  media_type TEXT NOT NULL DEFAULT 'IMAGE',
+  url TEXT NOT NULL,
+  thumbnail_url TEXT,
+  alt_text TEXT,
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 27. PRODUCT INVENTORY & CAPACITY CALENDAR
+CREATE TABLE IF NOT EXISTS product_availability (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  date TEXT NOT NULL,
+  capacity INTEGER DEFAULT 10,
+  booked_count INTEGER DEFAULT 0,
+  price_override_inr INTEGER,
+  time_slots TEXT DEFAULT '[]',
+  status TEXT DEFAULT 'AVAILABLE',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 28. PRODUCT TIME SLOTS
+CREATE TABLE IF NOT EXISTS product_time_slots (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  slot_label TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT,
+  max_capacity INTEGER DEFAULT 10,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 29. DYNAMIC PRICING RULES
+CREATE TABLE IF NOT EXISTS pricing_rules (
+  id TEXT PRIMARY KEY,
+  product_id TEXT REFERENCES products(id),
+  supplier_id TEXT REFERENCES suppliers(id),
+  rule_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  start_date TEXT,
+  end_date TEXT,
+  day_of_week INTEGER,
+  min_group_size INTEGER,
+  adjustment_type TEXT NOT NULL DEFAULT 'PERCENT',
+  adjustment_value REAL NOT NULL,
+  priority INTEGER DEFAULT 0,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 30. PRODUCT ADD-ONS & EXTRAS
+CREATE TABLE IF NOT EXISTS product_addons (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  addon_name TEXT NOT NULL,
+  description TEXT,
+  price_inr INTEGER NOT NULL,
+  pricing_type TEXT DEFAULT 'PER_PERSON',
+  max_quantity INTEGER DEFAULT 10,
+  is_active INTEGER DEFAULT 1,
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 31. PRODUCT FAQS & PRE-TRIP INFO
+CREATE TABLE IF NOT EXISTS product_faqs (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  category TEXT DEFAULT 'GENERAL',
+  sort_order INTEGER DEFAULT 0,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 32. EXTENDED USER PROFILES
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id TEXT PRIMARY KEY,
+  user_id TEXT UNIQUE NOT NULL REFERENCES users(id),
+  display_name TEXT,
+  phone TEXT,
+  avatar_url TEXT,
+  travel_preferences TEXT DEFAULT '{}',
+  saved_addresses TEXT DEFAULT '[]',
+  emergency_contact_name TEXT,
+  emergency_contact_phone TEXT,
+  id_verified INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 33. WISHLISTS & SAVED EXPERIENCES
+CREATE TABLE IF NOT EXISTS wishlists (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  product_id TEXT NOT NULL REFERENCES products(id),
+  added_at TEXT DEFAULT (datetime('now')),
+  price_at_save INTEGER
+);
+
+-- 34. BOOKING MODIFICATIONS
+CREATE TABLE IF NOT EXISTS booking_modifications (
+  id TEXT PRIMARY KEY,
+  booking_id TEXT NOT NULL REFERENCES bookings(id),
+  requested_by TEXT NOT NULL REFERENCES users(id),
+  modification_type TEXT NOT NULL,
+  original_value TEXT NOT NULL,
+  requested_value TEXT NOT NULL,
+  price_difference_inr INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'PENDING',
+  supplier_notes TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  resolved_at TEXT
+);
+
+-- 35. SEARCH HISTORY
+CREATE TABLE IF NOT EXISTS search_history (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id),
+  search_query TEXT NOT NULL,
+  category TEXT,
+  destination TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 36. REVIEW PHOTOS
+CREATE TABLE IF NOT EXISTS review_photos (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL REFERENCES reviews(id),
+  photo_url TEXT NOT NULL,
+  caption TEXT,
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 37. REVIEW HELPFULNESS VOTES
+CREATE TABLE IF NOT EXISTS review_helpfulness (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL REFERENCES reviews(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  is_helpful INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 38. SUPPLIER CASHFREE SECUREID KYB VERIFICATIONS AUDIT
+CREATE TABLE IF NOT EXISTS supplier_kyb_verifications (
+  id TEXT PRIMARY KEY,
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  verification_type TEXT NOT NULL,
+  reference_id TEXT,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  input_data TEXT DEFAULT '{}',
+  response_data TEXT DEFAULT '{}',
+  score REAL,
+  verified_at TEXT,
+  actor_id TEXT,
+  actor_role TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 39. PROMO CODES
+CREATE TABLE IF NOT EXISTS promo_codes (
+  id TEXT PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,
+  description TEXT,
+  discount_type TEXT NOT NULL DEFAULT 'PERCENTAGE',
+  discount_value REAL NOT NULL,
+  min_order_inr REAL DEFAULT 0.0,
+  max_discount_inr REAL,
+  usage_limit INTEGER DEFAULT 1000,
+  times_used INTEGER DEFAULT 0,
+  is_active INTEGER DEFAULT 1,
+  expires_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 40. USER REFERRALS
+CREATE TABLE IF NOT EXISTS user_referrals (
+  id TEXT PRIMARY KEY,
+  referrer_user_id TEXT NOT NULL REFERENCES users(id),
+  referred_user_id TEXT REFERENCES users(id),
+  referral_code TEXT NOT NULL,
+  reward_inr REAL DEFAULT 250.0,
+  status TEXT DEFAULT 'PENDING',
+  booking_id TEXT REFERENCES bookings(id),
+  created_at TEXT DEFAULT (datetime('now')),
+  rewarded_at TEXT
+);
+
+-- 41. TRAVELER ITINERARIES
+CREATE TABLE IF NOT EXISTS traveler_itineraries (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  destination TEXT,
+  start_date TEXT,
+  days_count INTEGER DEFAULT 3,
+  items TEXT DEFAULT '[]',
+  is_public INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 `);
+
+// Seed default promo vouchers if not existing
+try {
+  db.prepare(`
+    INSERT OR IGNORE INTO promo_codes (id, code, description, discount_type, discount_value, min_order_inr, max_discount_inr, usage_limit, is_active)
+    VALUES
+      ('promo_welcome10', 'WELCOME10', '10% discount on experiences across India', 'PERCENTAGE', 10.0, 1000.0, 500.0, 10000, 1),
+      ('promo_india500', 'INDIA500', 'Flat ₹500 discount on bookings above ₹2,500', 'FIXED', 500.0, 2500.0, 500.0, 5000, 1),
+      ('promo_summer20', 'SUMMER20', '20% summer getaway discount up to ₹1,000', 'PERCENTAGE', 20.0, 2000.0, 1000.0, 2000, 1),
+      ('promo_idea10', 'IDEA10', '10% instant checkout discount', 'PERCENTAGE', 10.0, 500.0, 500.0, 10000, 1)
+  `).run();
+} catch {}
+
 
 // Add operational codes to databases created before the code fields existed.
 for (const statement of [
@@ -689,11 +970,17 @@ db.exec(`
 // Safe migrations if table existed previously with older columns
 const safeAlter = (table, colDef) => {
   try {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
-  } catch (e) {}
+    db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${colDef}`);
+  } catch (e) {
+    try {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
+    } catch {}
+  }
 };
 
 safeAlter("users", "role TEXT DEFAULT 'TRAVELER'");
+safeAlter("users", "referral_code TEXT");
+safeAlter("wishlists", "collection_name TEXT DEFAULT 'Favorites'");
 safeAlter("suppliers", "commission_override_rate REAL");
 safeAlter("destinations", "category TEXT DEFAULT 'TOURISM'");
 safeAlter("destinations", "is_active INTEGER DEFAULT 1");
@@ -707,6 +994,9 @@ safeAlter("products", "is_published INTEGER DEFAULT 1");
 safeAlter("products", "group_type TEXT DEFAULT 'PRIVATE'");
 safeAlter("products", "created_at TEXT");
 safeAlter("products", "cancellation_policy TEXT DEFAULT 'FLEXIBLE_24H'");
+safeAlter("products", "submitted_at TEXT");
+safeAlter("products", "reviewed_at TEXT");
+safeAlter("products", "reviewer_notes TEXT");
 safeAlter("bookings", "product_id TEXT");
 safeAlter("bookings", "supplier_id TEXT");
 safeAlter("bookings", "product_type TEXT DEFAULT 'DAY_TOUR'");
@@ -809,8 +1099,25 @@ safeAlter("payouts", "reconciliation_note TEXT");
 safeAlter("payouts", "idempotency_key TEXT");
 safeAlter("notification_deliveries", "booking_id TEXT");
 safeAlter("notification_deliveries", "booking_ref TEXT");
+safeAlter("kyb_documents", "submitted_at TEXT");
+safeAlter("kyb_documents", "reviewed_by TEXT");
+safeAlter("kyb_documents", "review_note TEXT");
+safeAlter("suppliers", "website_url TEXT");
+safeAlter("suppliers", "business_type TEXT");
+safeAlter("suppliers", "years_in_operation INTEGER");
+safeAlter("suppliers", "gstin_verified INTEGER DEFAULT 0");
+safeAlter("suppliers", "gstin_verified_name TEXT");
+safeAlter("suppliers", "gstin_verified_status TEXT");
+safeAlter("suppliers", "pan_verified INTEGER DEFAULT 0");
+safeAlter("suppliers", "pan_verified_name TEXT");
+safeAlter("suppliers", "pan_type TEXT");
+safeAlter("suppliers", "bank_verified INTEGER DEFAULT 0");
+safeAlter("suppliers", "bank_verified_name TEXT");
+safeAlter("suppliers", "bank_match_score REAL");
+safeAlter("suppliers", "kyb_last_verified_at TEXT");
 
 try {
+  db.exec("CREATE INDEX IF NOT EXISTS idx_kyb_verifications_supplier ON supplier_kyb_verifications(supplier_id, verification_type, created_at DESC)");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_client_request_id ON bookings(client_request_id) WHERE client_request_id IS NOT NULL");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_ref ON bookings(ref)");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_assignments_booking ON driver_assignments(booking_id)");
@@ -844,6 +1151,25 @@ try {
   db.exec("CREATE INDEX IF NOT EXISTS idx_package_itineraries_product ON package_itineraries(product_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_destinations_active_name ON destinations(is_active, name)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_quality_scores_entity ON quality_scores(entity_type, entity_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_supplier_notifications_unread ON supplier_notifications(supplier_id, is_read, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_product_media_product ON product_media(product_id, sort_order)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_product_availability_lookup ON product_availability(product_id, date)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_product_time_slots_product ON product_time_slots(product_id, is_active)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_pricing_rules_product ON pricing_rules(product_id, is_active)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_pricing_rules_supplier ON pricing_rules(supplier_id, is_active)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_product_addons_product ON product_addons(product_id, is_active, sort_order)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_product_faqs_product ON product_faqs(product_id, is_active, sort_order)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_user_profiles_user ON user_profiles(user_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_wishlists_user ON wishlists(user_id, added_at DESC)");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_wishlists_user_product ON wishlists(user_id, product_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_booking_modifications_booking ON booking_modifications(booking_id, status)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_booking_modifications_user ON booking_modifications(requested_by, status)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_search_history_user ON search_history(user_id, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_review_photos_review ON review_photos(review_id, sort_order)");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_review_helpfulness_user ON review_helpfulness(review_id, user_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_uploads_entity ON uploads(entity_type, entity_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_export_jobs_user ON export_jobs(requested_by, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_webhook_events_status ON webhook_events(status, created_at DESC)");
 } catch (e) {}
 
 // Backfill timestamps required by the admin moderation and payout queues for

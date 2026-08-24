@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, Menu, Search, Ticket, UserRound, X } from "lucide-react";
+import { ArrowRight, Heart, Menu, MessageSquare, Search, Ticket, User, UserRound, X } from "lucide-react";
 import { useAuth } from "../lib/auth.jsx";
 import IdeaHolidayLogo from "./IdeaHolidayLogo.jsx";
+import ThemeToggle from "./ThemeToggle.jsx";
+import CurrencySelector from "./CurrencySelector.jsx";
 
 const NAV_ITEMS = [
   { label: "Experiences", path: "/search?type=DAY_TOUR" },
@@ -46,7 +48,7 @@ export default function Navbar() {
   }, []);
 
   return (
-    <header className={`sticky top-0 z-50 bg-white transition-shadow ${scrolled ? "shadow-md" : "border-b border-slate-200"}`}>
+    <header className={`sticky top-0 z-50 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md transition-shadow ${scrolled ? "shadow-md" : "border-b border-stone-200 dark:border-stone-800"}`}>
       {/* ── Main nav row ── */}
       <div className="mx-auto flex h-[68px] max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
 
@@ -63,7 +65,7 @@ export default function Navbar() {
               to={path}
               className={({ isActive }) =>
                 `rounded-full px-4 py-2 text-sm font-semibold transition ${
-                  isActive ? "bg-amber-500 text-stone-950 font-bold shadow-sm shadow-amber-500/20" : "text-stone-600 hover:bg-stone-100 hover:text-stone-900"
+                  isActive ? "bg-amber-500 text-stone-950 font-bold shadow-sm shadow-amber-500/20" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900"
                 }`
               }
             >
@@ -74,38 +76,64 @@ export default function Navbar() {
 
         {/* Right actions */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Currency Selector */}
+          <CurrencySelector />
+
+          {/* Theme Toggle */}
+          <ThemeToggle />
+
           {/* Search icon on mobile */}
           <Link
             to="/search"
             aria-label="Search experiences"
-            className="grid h-9 w-9 place-items-center rounded-full text-stone-600 hover:bg-stone-100 lg:hidden"
+            className="grid h-9 w-9 place-items-center rounded-full text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 lg:hidden"
           >
             <Search className="h-5 w-5" />
           </Link>
 
+          {/* Wishlist Link */}
+          <Link
+            to="/wishlist"
+            aria-label="Saved Wishlist"
+            title="Wishlist"
+            className="hidden items-center gap-1.5 rounded-full border border-stone-200 dark:border-stone-700 px-3 py-2 text-sm font-bold text-stone-700 dark:text-stone-200 hover:border-rose-400 hover:text-rose-500 sm:inline-flex"
+          >
+            <Heart className="h-4 w-4 text-rose-500" />
+            <span className="hidden xl:inline">Saved</span>
+          </Link>
+
           <Link
             to="/supplier/signup"
-            className="hidden text-sm font-semibold text-stone-600 hover:text-amber-600 xl:block"
+            className="hidden text-sm font-semibold text-stone-600 dark:text-stone-300 hover:text-amber-600 xl:block"
           >
             Become a partner
           </Link>
 
           <Link
-            to="/bookings"
+            to="/my-bookings"
             aria-label="My trips"
-            className="hidden items-center gap-2 rounded-full border border-stone-200 px-3 py-2 text-sm font-bold text-stone-700 hover:border-amber-500 hover:text-amber-700 sm:inline-flex"
+            className="hidden items-center gap-2 rounded-full border border-stone-200 dark:border-stone-700 px-3 py-2 text-sm font-bold text-stone-700 dark:text-stone-200 hover:border-amber-500 hover:text-amber-700 sm:inline-flex"
           >
             <Ticket className="h-4 w-4 text-amber-500" />
             {user ? "My trips" : "Trips"}
           </Link>
 
           {user ? (
-            <button
-              onClick={() => { logout(); navigate("/"); }}
-              className="inline-flex items-center gap-2 rounded-full border border-stone-300 px-4 py-2 text-sm font-bold transition hover:border-amber-500 hover:text-amber-700"
-            >
-              <UserRound className="h-4 w-4" /> Sign out
-            </button>
+            <div className="flex items-center gap-1.5">
+              <Link
+                to="/profile"
+                className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 px-3 py-2 text-xs font-bold text-stone-800 dark:text-stone-100 hover:border-amber-500"
+              >
+                <User className="h-3.5 w-3.5 text-amber-500" />
+                <span className="max-w-[100px] truncate">{user.name?.split(" ")[0] || "Profile"}</span>
+              </Link>
+              <button
+                onClick={() => { logout(); navigate("/"); }}
+                className="hidden sm:inline-flex items-center gap-1 rounded-full border border-stone-200 dark:border-stone-700 px-3 py-2 text-xs font-bold text-stone-500 hover:text-red-600 hover:border-red-300"
+              >
+                Sign out
+              </button>
+            </div>
           ) : (
             <Link
               to="/login"
@@ -120,7 +148,7 @@ export default function Navbar() {
             aria-expanded={menuOpen}
             aria-controls="mobile-navigation"
             aria-label={menuOpen ? "Close menu" : "Open menu"}
-            className="rounded-full p-2.5 hover:bg-stone-100 lg:hidden"
+            className="rounded-full p-2.5 hover:bg-stone-100 dark:hover:bg-stone-800 lg:hidden text-stone-700 dark:text-stone-300"
           >
             {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>

@@ -14,12 +14,13 @@ import {
   Copy,
   Check
 } from "lucide-react";
-import { authHeaders } from "../../lib/api.js";
+import api, { authHeaders } from "../../lib/api.js";
 
 export default function WhatsAppNotificationView() {
   const [logs, setLogs] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [runningScanner, setRunningScanner] = useState(false);
   const [dispatchForm, setDispatchForm] = useState({
     bookingRef: "IH-9A82B1",
     customerName: "Amit Kumar",
@@ -37,7 +38,7 @@ export default function WhatsAppNotificationView() {
   const [message, setMessage] = useState(null);
   const [copied, setCopied] = useState(false);
   const [providers, setProviders] = useState(null);
-  const [resendEvent, setResendEvent] = useState("DOCUMENTS");
+  const [resendEvent, setResendEvent] = useState("PRE_TRIP_REMINDER");
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -55,6 +56,26 @@ export default function WhatsAppNotificationView() {
       console.error("Fetch WhatsApp logs error:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRunScanner = async () => {
+    setRunningScanner(true);
+    try {
+      const res = await api.triggerAutomatedReminders();
+      if (res.success) {
+        setMessage({
+          type: "success",
+          text: `⚡ Automated Scanner Completed: Dispatched ${res.preTripRemindersSent} pre-trip reminder(s) and ${res.postTripReviewInvitesSent} post-trip review invite(s).`,
+        });
+        fetchLogs();
+      } else {
+        setMessage({ type: "error", text: res.error || "Automated reminders scanner failed" });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: err.message || "Failed to run automated reminders scanner" });
+    } finally {
+      setRunningScanner(false);
     }
   };
 
@@ -161,6 +182,32 @@ Your trip ref *${dispatchForm.bookingRef}* is confirmed! Here are your chauffeur
         </div>
       )}
 
+      {/* AUTOMATED REMINDERS & REVIEW INVITES BANNER */}
+      <div className="rounded-3xl border border-stone-200 bg-gradient-to-r from-amber-50/80 via-white to-emerald-50/80 p-5 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-amber-600" />
+              <h3 className="font-serif font-bold text-stone-900 text-sm sm:text-base">
+                Automated 24h Pre-Trip Reminders & Post-Trip Review Scanner
+              </h3>
+            </div>
+            <p className="text-xs text-stone-600 mt-1 max-w-xl">
+              Dispatches automated WhatsApp & Email reminders to travelers departing in 24–36 hours with driver/pickup info, and triggers review invitations for completed trips.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={runningScanner}
+            onClick={handleRunScanner}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-stone-900 hover:bg-stone-800 px-5 py-3 text-xs font-bold text-white disabled:opacity-50 shadow-sm shrink-0 transition-all cursor-pointer"
+          >
+            <RefreshCw className={`h-4 w-4 ${runningScanner ? "animate-spin text-amber-400" : ""}`} />
+            {runningScanner ? "Scanning & Dispatching..." : "⚡ Run Reminder Scanner Now"}
+          </button>
+        </div>
+      </div>
+
       <div className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 md:flex-row md:items-end">
           <div className="flex-1">
@@ -170,12 +217,14 @@ Your trip ref *${dispatchForm.bookingRef}* is confirmed! Here are your chauffeur
           <div className="flex-1">
             <label className="mb-1 block text-[10px] font-bold uppercase text-stone-500">Approved guest update</label>
             <select value={resendEvent} onChange={(e) => setResendEvent(e.target.value)} className="w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-3 text-xs text-stone-900 focus:bg-white focus:border-amber-500 outline-none">
+              <option value="PRE_TRIP_REMINDER">⏰ 24-Hour Pre-Trip Reminder (Driver & Pickup)</option>
+              <option value="POST_TRIP_REVIEW_INVITE">⭐ Post-Trip Review Request & Rating</option>
               <option value="DOCUMENTS">Voucher and invoice</option>
               <option value="BOOKING_CONFIRMED">Booking confirmation</option>
               <option value="DRIVER_ASSIGNED">Driver details</option>
             </select>
           </div>
-          <button type="button" disabled={sending} onClick={resendGuestUpdate} className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 px-5 py-3 text-xs font-black text-stone-950 disabled:opacity-50 shadow-sm">
+          <button type="button" disabled={sending} onClick={resendGuestUpdate} className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 px-5 py-3 text-xs font-black text-stone-950 disabled:opacity-50 shadow-sm cursor-pointer">
             <Send className="h-4 w-4" /> Send enabled channels
           </button>
         </div>

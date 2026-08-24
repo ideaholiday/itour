@@ -253,6 +253,112 @@ export function reconcileSettlementBatch(database, { batchId, note }) {
   return database.prepare("SELECT * FROM payout_batches WHERE id = ?").get(batch.id);
 }
 
+export function autoCreateAllSettlementBatches(database, actorId) {
+  const readySuppliers = database.prepare(`
+    SELECT DISTINCT p.supplier_id, s.company_name, s.kyb_status, s.payout_bank_details
+    FROM payouts p
+    JOIN suppliers s ON s.id = p.supplier_id
+    WHERE p.payout_status = 'SCHEDULED' AND p.settlement_batch_id IS NULL
+  `).all();
+
+  const createdBatches = [];
+  for (const sup of readySuppliers) {
+    if (String(sup.kyb_status).toUpperCase() === "APPROVED" && validBankDetails(sup.payout_bank_details)) {
+      try {
+        const batch = createSettlementBatch(database, {
+          supplierId: sup.supplier_id,
+          actorId,
+          notes: `Automated settlement run on ${new Date().toISOString().slice(0, 10)}`,
+        });
+        createdBatches.push(batch);
+      } catch (err) {
+        console.warn(`Skipping auto-batch for supplier ${sup.supplier_id}:`, err.message);
+      }
+    }
+  }
+  return createdBatches;
+}
+
+export function getSupplierPayoutLedger(database, supplierId) {
+  const supplier = database.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
+  if (!supplier) throw financeError("Supplier not found", 404);
+
+  const transactions = database.prepare(`
+    SELECT 
+      p.id as payout_id,
+      p.booking_id,
+      b.ref as booking_ref,
+      b.traveler_name,
+      b.activity_date,
+      b.product_type,
+      b.status as booking_status,
+      pr.title as product_title,
+      p.gross_amount,
+      p.commission_amount,
+      p.net_payout,
+      p.payout_status,
+      p.transfer_id,
+      p.processed_at,
+      p.reconciled_at,
+      pb.batch_ref,
+      pb.status as batch_status,
+      pb.provider
+    FROM payouts p
+    JOIN bookings b ON b.id = p.booking_id
+    LEFT JOIN products pr ON pr.id = b.product_id
+    LEFT JOIN payout_batches pb ON pb.id = p.settlement_batch_id
+    WHERE p.supplier_id = ?
+    ORDER BY p.created_at DESC
+  `).all(supplierId).map(t => {
+    const gross = money(t.gross_amount);
+    const comm = money(t.commission_amount);
+    const net = money(t.net_payout);
+    const rate = gross > 0 ? Math.round((comm / gross) * 100) : 18;
+    return {
+      ...t,
+      gross_amount: gross,
+      commission_amount: comm,
+      net_payout: net,
+      commission_rate_percent: rate,
+    };
+  });
+
+  const lifetime = transactions.reduce((acc, t) => {
+    if (t.payout_status !== "CANCELLED") {
+      acc.totalGmv += t.gross_amount;
+      acc.totalCommission += t.commission_amount;
+      acc.totalEarned += t.net_payout;
+      if (t.payout_status === "PROCESSED" || t.payout_status === "RECONCILED") {
+        acc.totalSettled += t.net_payout;
+      } else if (t.payout_status === "SCHEDULED" || t.payout_status === "BATCHED") {
+        acc.pendingScheduled += t.net_payout;
+      }
+    }
+    return acc;
+  }, { totalGmv: 0, totalCommission: 0, totalEarned: 0, totalSettled: 0, pendingScheduled: 0 });
+
+  return {
+    supplier: {
+      id: supplier.id,
+      companyName: supplier.company_name,
+      commissionRate: supplier.commission_rate || 18,
+      kybStatus: supplier.kyb_status,
+      bankDetails: (() => {
+        try { return JSON.parse(supplier.payout_bank_details || "{}"); } catch { return {}; }
+      })(),
+    },
+    summary: {
+      totalGmv: money(lifetime.totalGmv),
+      totalCommission: money(lifetime.totalCommission),
+      totalEarned: money(lifetime.totalEarned),
+      totalSettled: money(lifetime.totalSettled),
+      pendingScheduled: money(lifetime.pendingScheduled),
+      transactionCount: transactions.length,
+    },
+    transactions,
+  };
+}
+
 export function getReconciliationReport(database) {
   const rows = database.prepare(`
     SELECT b.id, b.ref, b.payment_status, b.amount_inr, COALESCE(b.refunded_amount, 0) AS refunded_amount,

@@ -93,9 +93,9 @@ export function createVerifiedReview(database, { booking, actor, input }) {
   const comment = String(input.comment || "").trim().slice(0, 2000);
   if (comment.length < 10) throw reviewError("Write at least 10 characters about the experience");
   const title = String(input.title || "").trim().slice(0, 120);
-  const experienceRating = rating(input.experienceRating, "Experience");
-  const supplierRating = rating(input.supplierRating, "Supplier");
-  const driverRating = rating(input.driverRating, "Driver", !booking.driver_assignment_id);
+  const experienceRating = rating(input.experienceRating ?? input.experience_rating, "Experience");
+  const supplierRating = rating(input.supplierRating ?? input.supplier_rating, "Supplier");
+  const driverRating = rating(input.driverRating ?? input.driver_rating, "Driver", !booking.driver_assignment_id);
   const tags = [...new Set((Array.isArray(input.tags) ? input.tags : []).map((tag) => String(tag).toUpperCase()).filter((tag) => ALLOWED_TAGS.has(tag)))].slice(0, 6);
   const assessment = moderationAssessment(comment, title);
   const id = `rev_${nanoid(12)}`;
@@ -107,7 +107,19 @@ export function createVerifiedReview(database, { booking, actor, input }) {
     .run(id, booking.id, booking.user_id || actor.id, booking.product_id, booking.supplier_id,
       booking.driver_assignment_id || null, booking.supplier_driver_id || null,
       experienceRating, supplierRating, driverRating, title || null, comment, JSON.stringify(tags),
-      input.wouldRecommend === false ? 0 : 1, assessment.status, assessment.reason);
+      (input.wouldRecommend === false || input.would_recommend === false) ? 0 : 1, assessment.status, assessment.reason);
+
+  if (Array.isArray(input.photos) && input.photos.length > 0) {
+    const insertPhoto = database.prepare("INSERT INTO review_photos (id, review_id, photo_url, caption, sort_order, created_at) VALUES (?, ?, ?, ?, ?, datetime('now'))");
+    input.photos.slice(0, 10).forEach((item, index) => {
+      const url = typeof item === "string" ? item : (item?.photo_url || item?.url);
+      const caption = typeof item === "object" ? (item?.caption || "") : "";
+      if (url && typeof url === "string" && url.trim().length > 0) {
+        insertPhoto.run(`revp_${nanoid(10)}`, id, url.trim(), caption, index);
+      }
+    });
+  }
+
   if (Math.min(experienceRating, supplierRating, driverRating || 5) <= 2) {
     database.prepare("INSERT INTO staff_tasks (id, task_type, booking_id, product_id, assigned_staff_name, priority, status, notes) VALUES (?, 'QUALITY_REVIEW', ?, ?, 'Quality Team', 'HIGH', 'OPEN', ?)")
       .run(`task_${nanoid(12)}`, booking.id, booking.product_id, `Low verified rating on booking ${booking.ref}. Review ${id} requires follow-up.`);
@@ -117,13 +129,29 @@ export function createVerifiedReview(database, { booking, actor, input }) {
 }
 
 export function reviewDetails(database, id) {
-  const row = database.prepare(`SELECT r.*, b.ref AS booking_ref, b.traveler_name, p.title AS product_title,
+  const row = database.prepare(`SELECT r.*, b.ref AS booking_ref, b.traveler_name, b.activity_date, p.title AS product_title,
     s.company_name AS supplier_name, da.driver_name, da.vehicle_number
     FROM reviews r JOIN bookings b ON b.id = r.booking_id JOIN products p ON p.id = r.product_id
     JOIN suppliers s ON s.id = r.supplier_id LEFT JOIN driver_assignments da ON da.id = r.driver_assignment_id
     WHERE r.id = ?`).get(id);
   if (!row) throw reviewError("Review not found", 404);
-  return { ...row, tags: JSON.parse(row.tags || "[]") };
+
+  const photos = database.prepare("SELECT id, photo_url, caption, sort_order FROM review_photos WHERE review_id = ? ORDER BY sort_order ASC").all(id);
+  const helpfulness = database.prepare(`
+    SELECT 
+      SUM(CASE WHEN is_helpful = 1 THEN 1 ELSE 0 END) AS helpful_count,
+      SUM(CASE WHEN is_helpful = 0 THEN 1 ELSE 0 END) AS unhelpful_count
+    FROM review_helpfulness WHERE review_id = ?
+  `).get(id) || { helpful_count: 0, unhelpful_count: 0 };
+
+  return {
+    ...row,
+    tags: JSON.parse(row.tags || "[]"),
+    photos: photos.map((p) => p.photo_url),
+    photo_details: photos,
+    helpful_count: Number(helpfulness.helpful_count || 0),
+    unhelpful_count: Number(helpfulness.unhelpful_count || 0)
+  };
 }
 
 export function moderateReview(database, reviewId, { action, reason, actorId }) {

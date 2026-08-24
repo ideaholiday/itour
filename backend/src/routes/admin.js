@@ -4,11 +4,27 @@ import { withoutPickupOtpSecrets } from "../services/bookingService.js";
 import { authenticate, optionalAuthMiddleware, requireRoles } from "../middleware/auth.js";
 import logger from "../config/logger.js";
 import { normalizeCoverageReview } from "../lib/coverageReview.js";
-import { notifyProductPublished, notifyRefundProcessed, notifySettlementProcessed, notifySupplierVerification, queueNotification } from "../services/notificationService.js";
+import {
+  notifyProductPublished,
+  notifyRefundProcessed,
+  notifySettlementProcessed,
+  notifySupplierVerification,
+  notifyUpcomingTripReminder,
+  notifyPostTripReviewRequest,
+  runAutomatedTripReminders,
+  queueNotification,
+} from "../services/notificationService.js";
 import { processRazorpayRefund } from "../services/razorpayService.js";
-import { processCashfreeRefund } from "../services/cashfreeService.js";
+import { processCashfreeRefund, initiateCashfreeTransfer } from "../services/cashfreeService.js";
+import {
+  runComprehensiveSupplierKyb,
+  verifyGstin,
+  verifyPan,
+  verifyBankAccount,
+} from "../services/cashfreeSecureIdService.js";
 import { saveSupplierVerification } from "../services/supplierVerificationService.js";
 import {
+  autoCreateAllSettlementBatches,
   calculateRefundQuote,
   createRefundRecord,
   createSettlementBatch,
@@ -183,6 +199,12 @@ router.get("/suppliers", optionalAuthMiddleware, requireAdminAccess, (req, res) 
     const suppliersWithDocs = suppliersList.map((sup) => {
       const kybDocs = db.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ?").all(sup.id);
       const bankDetails = parseBankDetails(sup.payout_bank_details);
+      const secureIdVerifications = db.prepare(`
+        SELECT * FROM supplier_kyb_verifications
+        WHERE supplier_id = ?
+        ORDER BY created_at DESC
+        LIMIT 10
+      `).all(sup.id);
       
       // Separate attachments for Commercial Transport License, GSTIN, PAN
       const commercialLicense = kybDocs.find(
@@ -196,6 +218,7 @@ router.get("/suppliers", optionalAuthMiddleware, requireAdminAccess, (req, res) 
         is_verified: Boolean(sup.is_verified || sup.kyb_status === "APPROVED"),
         bankDetails,
         kybDocs,
+        secureIdVerifications,
         total_products: sup.total_products || 0,
         published_products: sup.published_products || 0,
         attachments: {
@@ -225,6 +248,39 @@ router.get("/suppliers", optionalAuthMiddleware, requireAdminAccess, (req, res) 
   } catch (err) {
     logger.error("Admin supplier lookup failed", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to fetch supplier list" });
+  }
+});
+
+// POST /api/admin/suppliers/:id/kyb/auto-verify - One-click Cashfree SecureID KYB Verification Audit
+router.post("/suppliers/:id/kyb/auto-verify", optionalAuthMiddleware, requireAdminAccess, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+
+    const auditReport = await runComprehensiveSupplierKyb(db, {
+      supplierId: id,
+      actorId: req.user?.id || "admin",
+      actorRole: req.user?.role || "ADMIN",
+    });
+
+    const verifications = db.prepare(`
+      SELECT * FROM supplier_kyb_verifications
+      WHERE supplier_id = ?
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all(id);
+
+    res.json({
+      success: true,
+      report: auditReport,
+      verifications,
+      supplier: auditReport.updatedSupplier,
+      message: "Cashfree SecureID KYB audit completed successfully.",
+    });
+  } catch (err) {
+    logger.error("Admin KYB auto-verification failed", { requestId: req.requestId, error: err.message });
+    res.status(500).json({ error: err.message || "Failed to execute Cashfree SecureID KYB check" });
   }
 });
 
@@ -461,6 +517,68 @@ router.post("/finance/settlements", optionalAuthMiddleware, requireAdminAccess, 
   }
 });
 
+router.post("/finance/settlements/auto-batch", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
+  try {
+    const batches = autoCreateAllSettlementBatches(db, req.user?.id || "admin");
+    res.status(201).json({
+      success: true,
+      batches,
+      count: batches.length,
+      message: batches.length > 0
+        ? `Successfully generated ${batches.length} settlement batch${batches.length === 1 ? "" : "es"}.`
+        : "No eligible scheduled payouts found for settlement generation.",
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || "Failed to auto-generate settlement batches" });
+  }
+});
+
+router.post("/finance/settlements/:id/process-cashfree", optionalAuthMiddleware, requireAdminAccess, async (req, res) => {
+  try {
+    const batch = db.prepare("SELECT pb.*, s.company_name, s.payout_bank_details, s.email, s.phone FROM payout_batches pb JOIN suppliers s ON s.id = pb.supplier_id WHERE pb.id = ? OR pb.batch_ref = ?").get(req.params.id, req.params.id);
+    if (!batch) return res.status(404).json({ error: "Settlement batch not found" });
+    if (batch.status === "PROCESSED" || batch.status === "RECONCILED") {
+      return res.json({ success: true, batch, idempotent: true, message: `${batch.batch_ref} was already processed.` });
+    }
+
+    const bankDetails = parseBankDetails(batch.payout_bank_details);
+    if (!bankDetails.account_number && !bankDetails.upi_id) {
+      return res.status(400).json({ error: "Supplier has not configured a valid payout bank account or UPI ID" });
+    }
+
+    const transfer = await initiateCashfreeTransfer({
+      transferId: `tr_${batch.batch_ref.replace(/[^a-zA-Z0-9_-]/g, "_")}`,
+      amount: batch.net_amount,
+      beneficiaryDetails: {
+        ...bankDetails,
+        name: bankDetails.account_holder || batch.company_name,
+        email: batch.email,
+        phone: batch.phone,
+      },
+      remarks: `Settlement ${batch.batch_ref} for ${batch.company_name}`,
+    });
+
+    const result = processSettlementBatch(db, {
+      batchId: batch.id,
+      provider: "CASHFREE",
+      providerReference: transfer.utr || transfer.transferId || transfer.referenceId,
+      actorId: req.user?.id || "admin",
+    });
+
+    if (!result.idempotent) queueNotification(notifySettlementProcessed(db, result.batch.id), "Settlement notification");
+
+    res.json({
+      success: true,
+      batch: result.batch,
+      transfer,
+      message: `${result.batch.batch_ref} dispatched via Cashfree Direct Transfer with UTR ${result.batch.provider_batch_id}.`,
+    });
+  } catch (err) {
+    logger.error("Cashfree settlement processing failed", { error: err.message, batchId: req.params.id });
+    res.status(err.status || 500).json({ error: err.message || "Cashfree automated settlement failed" });
+  }
+});
+
 router.post("/finance/settlements/:id/process", optionalAuthMiddleware, requireAdminAccess, validateBody(adminSchemas.settlement), (req, res) => {
   try {
     const result = processSettlementBatch(db, { batchId: req.params.id, provider: req.body?.provider, providerReference: req.body?.providerReference, actorId: req.user.id });
@@ -691,6 +809,75 @@ router.get("/email-logs", optionalAuthMiddleware, requireAdminAccess, (req, res)
     res.json({ success: true, emailLogs: logs });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch email logs" });
+  }
+});
+
+// POST /api/admin/reminders/trigger-run - Run automated trip reminders and review requests scanner
+router.post("/reminders/trigger-run", optionalAuthMiddleware, requireAdminAccess, async (req, res) => {
+  try {
+    const result = await runAutomatedTripReminders(db);
+    res.json({
+      success: true,
+      ...result,
+      message: `Dispatched ${result.preTripRemindersSent} pre-trip reminder(s) and ${result.postTripReviewInvitesSent} review request(s).`,
+    });
+  } catch (err) {
+    logger.error("Automated reminders trigger failed", { error: err });
+    res.status(500).json({ error: err.message || "Failed to execute automated reminders runner" });
+  }
+});
+
+// POST /api/admin/reminders/booking/:id/pre-trip - On-demand pre-trip reminder
+router.post("/reminders/booking/:id/pre-trip", optionalAuthMiddleware, requireAdminAccess, async (req, res) => {
+  try {
+    const result = await notifyUpcomingTripReminder(db, req.params.id);
+    res.json({
+      success: true,
+      ...result,
+      message: `24-hour pre-trip reminder successfully sent for booking ${result.bookingRef}.`,
+    });
+  } catch (err) {
+    logger.error("Pre-trip reminder on-demand dispatch failed", { error: err, bookingId: req.params.id });
+    res.status(500).json({ error: err.message || "Failed to dispatch pre-trip reminder" });
+  }
+});
+
+// POST /api/admin/reminders/booking/:id/post-trip-review - On-demand post-trip review invite
+router.post("/reminders/booking/:id/post-trip-review", optionalAuthMiddleware, requireAdminAccess, async (req, res) => {
+  try {
+    const result = await notifyPostTripReviewRequest(db, req.params.id);
+    res.json({
+      success: true,
+      ...result,
+      message: `Post-trip review invite successfully sent for booking ${result.bookingRef}.`,
+    });
+  } catch (err) {
+    logger.error("Post-trip review invite dispatch failed", { error: err, bookingId: req.params.id });
+    res.status(500).json({ error: err.message || "Failed to dispatch post-trip review invite" });
+  }
+});
+
+// GET /api/admin/reminders/status/:bookingId - Inspect reminder dispatch logs for a booking
+router.get("/reminders/status/:bookingId", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
+  try {
+    const logs = db.prepare(`
+      SELECT * FROM notification_deliveries 
+      WHERE event_key LIKE ? || ':%' OR metadata LIKE '%"' || ? || '"%'
+      ORDER BY created_at DESC
+    `).all(req.params.bookingId, req.params.bookingId);
+
+    const hasPreTrip = logs.some((l) => l.event_type === "PRE_TRIP_REMINDER" && l.status === "SENT");
+    const hasReviewInvite = logs.some((l) => l.event_type === "POST_TRIP_REVIEW_INVITE" && l.status === "SENT");
+
+    res.json({
+      success: true,
+      bookingId: req.params.bookingId,
+      hasPreTripReminder: hasPreTrip,
+      hasReviewInvite,
+      logs,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch reminder status" });
   }
 });
 

@@ -18,6 +18,7 @@ dotenv.config({
 });
 
 import db, { databaseInfo } from "./db.js";
+import { runPendingMigrations } from "./services/migrationRunner.js";
 import { supabase } from "./supabaseClient.js";
 import { processExpiredSupplierAssignments } from "./services/assignmentSlaService.js";
 import { syncGoaSupplierAndProducts } from "./scripts/seedGoaSupplierProducts.js";
@@ -25,6 +26,16 @@ import { configureSecurity } from "./middleware/security.js";
 import { apiNotFound, errorHandler, requestContext, requestLogger, stableErrorResponses } from "./middleware/observability.js";
 import { auditMutations } from "./services/auditService.js";
 import { requestBoundary } from "./middleware/validation.js";
+
+// Run pending migrations on startup
+try {
+  const migResult = runPendingMigrations(db);
+  if (migResult?.applied?.length > 0) {
+    logger.info("Executed database migrations", { batch: migResult.batch, count: migResult.applied.length });
+  }
+} catch (err) {
+  logger.warn("Database migration check completed with notice", { error: err.message });
+}
 
 // Ensure supplier and Goa products are synchronized across environments
 try {
@@ -50,6 +61,14 @@ import analyticsRouter from "./routes/analytics.js";
 import seoRouter from "./routes/seo.js";
 import securityTxtRouter from "./routes/securityTxt.js";
 import metricsRouter from "./routes/metrics.js";
+import travelerRouter from "./routes/traveler.js";
+import uploadsRouter from "./routes/uploads.js";
+import searchRouter from "./routes/search.js";
+import exportsRouter from "./routes/exports.js";
+import eventsRouter from "./routes/events.js";
+import currencyRouter from "./routes/currency.js";
+import promoRouter from "./routes/promo.js";
+import { swaggerSpec } from "./config/swagger.js";
 
 const app = express();
 app.use(requestContext);
@@ -62,28 +81,76 @@ app.use(express.json({
   }
 }));
 app.use("/api", requestBoundary);
+app.use("/api/v1", requestBoundary);
 app.use(requestLogger);
 app.use(auditMutations(db));
 app.use("/api", metricsRouter);
+app.use("/api/v1", metricsRouter);
 
-// API Routes
-app.use("/api", activitiesRouter);
-app.use("/api/auth", authRouter);
-app.use("/api/bookings", bookingsRouter);
-app.use("/api/transfers", transfersRouter);
-app.use("/api/suppliers", suppliersRouter);
-app.use("/api/admin", adminRouter);
-app.use("/api/analytics", analyticsRouter);
-app.use("/api/ops", opsRouter);
-app.use("/api/checkout", checkoutRouter);
-app.use("/api/support", supportRouter);
-app.use("/api/reviews", reviewsRouter);
-app.use("/api/webhooks", notificationWebhooksRouter);
-app.use("/api", placesRouter);
+// Serve uploads directory
+const uploadsDir = path.join(__dirname, "..", "uploads");
+app.use("/uploads", express.static(uploadsDir));
+app.use("/api/uploads/files", express.static(uploadsDir));
+
+// OpenAPI / Swagger documentation
+app.get(["/api/docs", "/api/v1/docs"], (req, res) => {
+  if (req.headers.accept?.includes("application/json")) {
+    return res.json(swaggerSpec);
+  }
+  const swaggerHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Idea Holiday API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body style="margin:0;background:#FAF9F6;">
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      spec: ${JSON.stringify(swaggerSpec)},
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis],
+      layout: "BaseLayout"
+    });
+  </script>
+</body>
+</html>`;
+  res.setHeader("Content-Type", "text/html");
+  return res.send(swaggerHtml);
+});
+
+// Register routes helper for dual mounting (/api and /api/v1)
+const mountApiRoutes = (prefix) => {
+  app.use(prefix, activitiesRouter);
+  app.use(`${prefix}/auth`, authRouter);
+  app.use(`${prefix}/bookings`, bookingsRouter);
+  app.use(`${prefix}/transfers`, transfersRouter);
+  app.use(`${prefix}/suppliers`, suppliersRouter);
+  app.use(`${prefix}/admin`, adminRouter);
+  app.use(`${prefix}/analytics`, analyticsRouter);
+  app.use(`${prefix}/ops`, opsRouter);
+  app.use(`${prefix}/checkout`, checkoutRouter);
+  app.use(`${prefix}/support`, supportRouter);
+  app.use(`${prefix}/reviews`, reviewsRouter);
+  app.use(`${prefix}/webhooks`, notificationWebhooksRouter);
+  app.use(prefix, placesRouter);
+  app.use(prefix, travelerRouter);
+  app.use(prefix, uploadsRouter);
+  app.use(prefix, searchRouter);
+  app.use(prefix, exportsRouter);
+  app.use(prefix, eventsRouter);
+  app.use(`${prefix}/currency`, currencyRouter);
+  app.use(`${prefix}/promo`, promoRouter);
+};
+
+mountApiRoutes("/api");
+mountApiRoutes("/api/v1");
+
 app.use("/", securityTxtRouter);
 app.use("/", seoRouter);
 
-app.get("/api/health", (req, res) =>
+app.get(["/api/health", "/api/v1/health"], (req, res) =>
   res.json({
     ok: true,
     service: "idea-holiday-api",

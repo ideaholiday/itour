@@ -1,8 +1,9 @@
 import React from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { Bell, CalendarCheck, ChevronDown, ExternalLink, FileCheck, LayoutDashboard, LogOut, Map, PlusCircle, Store, Users } from "lucide-react";
+import { BarChart3, Bell, CalendarCheck, ChevronDown, ExternalLink, FileCheck, LayoutDashboard, LogOut, Map, PlusCircle, Store, Users } from "lucide-react";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { useAuth } from "../../lib/auth.jsx";
+import SupplierNotificationBell from "./SupplierNotificationBell.jsx";
 
 export default function SupplierHeaderNav({ supplierData, activeTab }) {
   const location = useLocation();
@@ -12,17 +13,19 @@ export default function SupplierHeaderNav({ supplierData, activeTab }) {
   const supplier = supplierData?.supplier || {};
   const requestedPanel = searchParams.get("panel");
   const pendingCount = supplierData?.bookings?.filter((booking) => booking.status === "pending_confirmation")?.length || 0;
+  const isKybPending = supplier.kyb_status && supplier.kyb_status !== "APPROVED";
 
   const navLinks = [
     ["DASHBOARD", "Overview", "/supplier/dashboard", LayoutDashboard],
     ["BOOKINGS", "Bookings", "/supplier/bookings", CalendarCheck, pendingCount || null],
     ["BUILDER", "Listings", "/supplier/dashboard?panel=listings", PlusCircle, supplierData?.products?.length || null],
     ["FLEET", "Fleet", "/supplier/dashboard?panel=fleet", Users, supplierData?.drivers?.length || null],
-    ["KYB", "Compliance", "/supplier/dashboard?panel=compliance", FileCheck]
+    ["ANALYTICS", "Analytics", "/supplier/dashboard?panel=analytics", BarChart3],
+    ["KYB", "Compliance", "/supplier/dashboard?panel=compliance", FileCheck, isKybPending ? (supplier.kyb_status === "REJECTED" ? "Rejected" : "Action") : null]
   ];
 
   const isCurrent = (id, path) => {
-    if (id === "FLEET" || id === "KYB" || id === "BUILDER") return requestedPanel === (id === "BUILDER" ? "listings" : id.toLowerCase());
+    if (id === "FLEET" || id === "KYB" || id === "BUILDER" || id === "ANALYTICS") return requestedPanel === (id === "BUILDER" ? "listings" : id.toLowerCase());
     if (id === "DASHBOARD") return location.pathname === "/supplier" || (location.pathname === "/supplier/dashboard" && !requestedPanel);
     return location.pathname === path;
   };
@@ -49,6 +52,7 @@ export default function SupplierHeaderNav({ supplierData, activeTab }) {
           </div>
           <div className="flex items-center gap-2">
             <Link to="/" className="hidden items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-stone-600 hover:bg-stone-100 hover:text-stone-900 md:flex">View marketplace <ExternalLink className="h-3.5 w-3.5" /></Link>
+            {supplier.id && <SupplierNotificationBell supplierId={supplier.id} />}
             <button onClick={() => navigate("/supplier/bookings")} className="relative rounded-xl border border-stone-200 bg-stone-50 p-2.5 text-stone-600 hover:text-stone-900" aria-label="Open booking notifications"><Bell className="h-4 w-4" />{pendingCount > 0 && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-rose-500 px-1 text-[9px] font-black text-white">{pendingCount}</span>}</button>
             <div className="group relative"><button className="flex items-center gap-2 rounded-xl border border-stone-200 bg-stone-50 px-2.5 py-2 text-left" aria-label="Open partner account menu"><span className="grid h-7 w-7 place-items-center rounded-lg bg-amber-500 text-xs font-black text-stone-950">{(user?.name || supplier.contact_name || "P")[0]}</span><span className="hidden max-w-28 truncate text-xs font-bold text-stone-800 lg:block">{user?.name || supplier.contact_name || "Partner"}</span><ChevronDown className="h-3.5 w-3.5 text-stone-400" /></button><div className="invisible absolute right-0 top-full mt-2 w-48 rounded-xl border border-stone-200 bg-white p-2 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"><button onClick={() => { logout(); navigate("/login"); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50"><LogOut className="h-4 w-4" />Sign out</button></div></div>
           </div>

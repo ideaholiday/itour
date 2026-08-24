@@ -71,7 +71,16 @@ export const checkoutSchemas = {
 
 export const supplierSchemas = {
   registration: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100) }),
-  kyb: object({ docType: text(2, 80), docNumber: text(2, 160), docUrl: optionalText(2_000), pan: optionalText(32), gstin: optionalText(32) }),
+  kyb: object({
+    docType: optionalText(80),
+    doc_type: optionalText(80),
+    docNumber: optionalText(160),
+    doc_number: optionalText(160),
+    docUrl: optionalText(2_000),
+    doc_url: optionalText(2_000),
+    pan: optionalText(32),
+    gstin: optionalText(32),
+  }),
   geofence: object({ zoneName: text(2, 160), city: text(2, 100), centerLat: z.coerce.number().min(-90).max(90), centerLng: z.coerce.number().min(-180).max(180), radiusKm: z.coerce.number().positive().max(500).optional(), polygonCoordinates: z.union([z.string().max(50_000), z.array(z.tuple([z.coerce.number(), z.coerce.number()])).max(1_000)]).optional() }),
   product: object({ title: text(2, 240), productType: text(2, 80), city: text(2, 100), state: text(2, 100), priceInr: amount, shortDesc: optionalText(1_000), fullDesc: optionalText(10_000), durationHours: z.coerce.number().positive().max(720).optional() }),
   publication: object({ isPublished: booleanValue.optional(), status: optionalText(40) }),
@@ -82,11 +91,62 @@ export const supplierSchemas = {
   blockDates: object({ dates: z.array(date).min(1).max(366).optional(), startDate: date.optional(), endDate: date.optional(), reason: optionalText(500), capacity: count.optional() }),
   price: object({ priceInr: amount.optional(), price_inr: amount.optional(), variantName: optionalText(160) }),
   cancellation: object({ reason: text(3, 1_000) }),
+  profileUpdate: object({
+    companyName: optionalText(180),
+    contactName: optionalText(120),
+    phone: phone.optional(),
+    city: optionalText(100),
+    state: optionalText(100),
+    gstin: optionalText(32),
+    panNumber: optionalText(32),
+    pan_number: optionalText(32),
+    websiteUrl: optionalText(500),
+    website_url: optionalText(500),
+    businessType: optionalText(100),
+    business_type: optionalText(100),
+    yearsInOperation: z.union([z.number().int().min(0).max(150), z.string().regex(/^\d+$/)]).optional().nullable(),
+    years_in_operation: z.union([z.number().int().min(0).max(150), z.string().regex(/^\d+$/)]).optional().nullable(),
+  }),
+  payoutDetails: object({
+    accountHolder: optionalText(150),
+    account_holder: optionalText(150),
+    accountHolderName: optionalText(150),
+    account_holder_name: optionalText(150),
+    bankName: optionalText(120),
+    bank_name: optionalText(120),
+    accountNumber: optionalText(40),
+    account_number: optionalText(40),
+    ifscCode: optionalText(20),
+    ifsc_code: optionalText(20),
+    ifsc: optionalText(20),
+    accountType: z.enum(["SAVINGS", "CURRENT", "savings", "current"]).optional(),
+    account_type: z.enum(["SAVINGS", "CURRENT", "savings", "current"]).optional(),
+    upiId: optionalText(100),
+    upi_id: optionalText(100),
+  }),
+  verifyGstin: object({
+    gstin: text(10, 20),
+    businessName: optionalText(180),
+    business_name: optionalText(180),
+  }),
+  verifyPan: object({
+    pan: text(10, 10),
+    name: optionalText(180),
+  }),
+  verifyBankAccount: object({
+    accountNumber: text(5, 40),
+    account_number: optionalText(40),
+    ifsc: text(5, 20),
+    ifscCode: optionalText(20),
+    name: optionalText(180),
+    phone: phone.optional(),
+  }),
 };
 
 export const adminSchemas = {
   review: object({ action: text(2, 40), reason: optionalText(1_000) }),
   verification: object({ action: optionalText(40), decision: optionalText(40), reason: optionalText(1_000), commissionRate: z.coerce.number().min(0).max(100).optional() }),
+  autoVerify: object({ supplierId: id.optional() }),
   commission: object({ commissionRate: z.coerce.number().min(0).max(100).optional(), commission_rate: z.coerce.number().min(0).max(100).optional(), category: optionalText(100) }),
   categoryCommission: object({ categoryCode: text(2, 100), defaultCommissionRate: z.coerce.number().min(0).max(100) }),
   publication: object({ isPublished: booleanValue.optional(), status: optionalText(40), notifySupplier: booleanValue.optional() }),
@@ -109,7 +169,26 @@ export const supportSchemas = {
 };
 
 export const reviewSchemas = {
-  create: object({ bookingId: id.optional(), bookingRef: id.optional(), experienceRating: rating.optional(), experience_rating: rating.optional(), supplierRating: rating.optional(), supplier_rating: rating.optional(), driverRating: rating.optional(), driver_rating: rating.optional(), title: optionalText(160), comment: text(5, 5_000), tags: z.array(text(1, 80)).max(20).optional(), wouldRecommend: booleanValue.optional(), would_recommend: booleanValue.optional() }),
+  create: object({
+    bookingId: id.optional(),
+    bookingRef: id.optional(),
+    experienceRating: rating.optional(),
+    experience_rating: rating.optional(),
+    supplierRating: rating.optional(),
+    supplier_rating: rating.optional(),
+    driverRating: rating.optional(),
+    driver_rating: rating.optional(),
+    title: optionalText(160),
+    comment: text(5, 5_000),
+    tags: z.array(text(1, 80)).max(20).optional(),
+    photos: z.array(z.union([
+      z.string().max(2000),
+      z.object({ url: z.string().max(2000), caption: optionalText(500) }),
+      z.object({ photo_url: z.string().max(2000), caption: optionalText(500) })
+    ])).max(10).optional(),
+    wouldRecommend: booleanValue.optional(),
+    would_recommend: booleanValue.optional()
+  }),
   response: object({ response: text(2, 2_000) }),
   moderate: object({ action: text(2, 40), reason: optionalText(1_000) }),
 };

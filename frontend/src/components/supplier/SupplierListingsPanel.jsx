@@ -19,10 +19,13 @@ import {
   Zap,
   Edit3,
   Copy,
-  Check
+  Check,
+  Layers,
+  Files
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
+import ProductBulkActions from "./ProductBulkActions.jsx";
 
 const money = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const transferLabels = {
@@ -43,6 +46,8 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
   const [updatingId, setUpdatingId] = useState("");
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [cloningId, setCloningId] = useState("");
 
   // Quick Price Edit Modal State
   const [editingProduct, setEditingProduct] = useState(null);
@@ -56,6 +61,50 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
     navigator.clipboard?.writeText(id);
     setCopiedId(id);
     setTimeout(() => setCopiedId(""), 2000);
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === visibleProducts.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(visibleProducts.map((p) => p.id));
+    }
+  };
+
+  const handleBulkAction = async (action, params = {}) => {
+    if (!supplierId || selectedIds.length === 0) return;
+    try {
+      await api.post(`/suppliers/${supplierId}/products/bulk-action`, {
+        action,
+        productIds: selectedIds,
+        params,
+      });
+      setSuccessMsg(`Bulk action "${action}" completed successfully on ${selectedIds.length} listings.`);
+      setSelectedIds([]);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setError(err.message || "Failed to execute bulk action");
+    }
+  };
+
+  const handleClone = async (product) => {
+    if (!supplierId || !product?.id) return;
+    setCloningId(product.id);
+    try {
+      const res = await api.post(`/suppliers/${supplierId}/products/${product.id}/clone`);
+      setSuccessMsg(`Successfully cloned "${product.title}". New copy created as Draft.`);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setError(err.message || "Failed to duplicate product");
+    } finally {
+      setCloningId("");
+    }
   };
 
   const counts = useMemo(() => ({
@@ -245,21 +294,60 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
         </div>
       )}
 
+      {/* Bulk Actions Floating Banner */}
+      <ProductBulkActions
+        selectedCount={selectedIds.length}
+        onPublishAll={() => handleBulkAction("PUBLISH")}
+        onPauseAll={() => handleBulkAction("PAUSE")}
+        onArchiveAll={() => handleBulkAction("ARCHIVE")}
+        onAdjustPrice={(delta) => handleBulkAction("ADJUST_PRICE", { deltaPrice: delta })}
+      />
+
+      {/* Select All Bar */}
+      {visibleProducts.length > 0 && (
+        <div className="flex items-center justify-between px-2 pt-2 text-xs text-stone-500">
+          <label className="inline-flex items-center gap-2 cursor-pointer font-semibold">
+            <input
+              type="checkbox"
+              checked={selectedIds.length === visibleProducts.length && visibleProducts.length > 0}
+              onChange={toggleSelectAll}
+              className="rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+            />
+            <span>Select All ({visibleProducts.length} listings)</span>
+          </label>
+        </div>
+      )}
+
       {/* Product List */}
-      <div className="mt-4 space-y-3">
+      <div className="mt-2 space-y-3">
         {visibleProducts.map((product) => {
           const live = isLive(product);
           const isTransfer = product.product_type === "TRANSFER";
           const shared = !isTransfer && product.group_type === "SHARED";
           const hasDiscount = product.strike_price_inr && Number(product.strike_price_inr) > Number(product.price_inr);
+          const isSelected = selectedIds.includes(product.id);
 
           return (
             <article
               key={product.id}
-              className={`grid gap-4 rounded-2xl border p-4 transition sm:grid-cols-[72px_1fr_auto] sm:items-center ${
-                live ? "border-stone-200 bg-[#FAF9F6] hover:border-amber-300" : "border-stone-200/80 bg-stone-50/60 opacity-80"
+              className={`grid gap-4 rounded-2xl border p-4 transition sm:grid-cols-[auto_72px_1fr_auto] sm:items-center ${
+                isSelected
+                  ? "border-amber-500 bg-amber-50/40 dark:bg-amber-950/20"
+                  : live
+                  ? "border-stone-200 bg-[#FAF9F6] hover:border-amber-300"
+                  : "border-stone-200/80 bg-stone-50/60 opacity-80"
               }`}
             >
+              {/* Checkbox */}
+              <div className="flex items-center justify-center">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => toggleSelect(product.id)}
+                  className="rounded border-stone-300 text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                />
+              </div>
+
               <div className="relative h-18 w-18 overflow-hidden rounded-xl bg-stone-100 border border-stone-200 shrink-0">
                 <img
                   src={product.hero_image || "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=400&q=80"}
@@ -279,44 +367,36 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
                   <button
                     type="button"
                     onClick={() => handleCopyId(product.id)}
-                    className="inline-flex items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-stone-700 border border-stone-300 hover:bg-amber-100 hover:text-amber-900 transition"
-                    title="Click to copy Product ID"
+                    className="inline-flex items-center gap-1 font-mono text-[10px] bg-stone-100 px-1.5 py-0.5 rounded border border-stone-300 text-stone-700 hover:bg-amber-100 hover:text-amber-900 transition"
+                    title="Copy Product ID"
                   >
-                    {copiedId === product.id ? <Check className="h-2.5 w-2.5 text-emerald-600" /> : <Copy className="h-2.5 w-2.5 text-stone-400" />}
-                    ID: {product.id}
+                    {copiedId === product.id ? <Check className="w-2.5 h-2.5 text-emerald-600" /> : <Copy className="w-2.5 h-2.5 text-stone-400" />}
+                    <span>ID: {product.id}</span>
                   </button>
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${
-                      live ? "bg-emerald-100 text-emerald-900 border border-emerald-300" : "bg-stone-200 text-stone-700"
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                      live
+                        ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                        : product.status === "PENDING_REVIEW"
+                        ? "bg-amber-100 text-amber-900 border border-amber-300"
+                        : product.status === "PAUSED"
+                        ? "bg-stone-200 text-stone-700 border border-stone-300"
+                        : "bg-stone-200 text-stone-600 border border-stone-300"
                     }`}
                   >
-                    {live ? "LIVE" : "DRAFT"}
-                  </span>
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${
-                      shared ? "bg-stone-100 text-stone-800 border border-stone-300" : "bg-amber-100 text-amber-900 border border-amber-300"
-                    }`}
-                  >
-                    {shared ? <Users className="h-3 w-3" /> : <Car className="h-3 w-3" />}
-                    {isTransfer
-                      ? transferLabels[product.route_type] || "PRIVATE TRANSFER"
-                      : shared
-                      ? "SHARED · PER SEAT"
-                      : "PRIVATE TOUR"}
+                    {product.status || (live ? "PUBLISHED" : "DRAFT")}
                   </span>
                 </div>
 
-                <div className="mt-2 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[11px] text-stone-500">
-                  <span className="font-medium text-stone-700">{product.city || "India"}</span>
-                  {product.supplier_id && (
-                    <button
-                      type="button"
-                      onClick={() => handleCopyId(product.supplier_id)}
-                      className="font-mono text-[10px] text-stone-500 hover:text-amber-800"
-                      title="Click to copy Supplier ID"
-                    >
-                      Supplier: <span className="underline">{product.supplier_id}</span>
-                    </button>
+                <p className="mt-1 line-clamp-1 text-xs text-stone-500">
+                  {product.short_desc || product.subtitle || "No description provided."}
+                </p>
+
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500">
+                  {product.destination && (
+                    <span className="inline-flex items-center gap-1 text-stone-600">
+                      <Compass className="h-3 w-3" /> {product.destination}
+                    </span>
                   )}
                   {isTransfer && product.origin_name && (
                     <span className="font-mono text-stone-600">
@@ -344,6 +424,17 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
 
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleClone(product)}
+                  disabled={cloningId === product.id}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-[11px] font-bold text-stone-700 hover:bg-stone-100 shadow-sm transition disabled:opacity-50"
+                  title="Clone / Duplicate Listing"
+                >
+                  <Files className="h-3.5 w-3.5 text-stone-600" />
+                  {cloningId === product.id ? "Cloning..." : "Clone"}
+                </button>
+
                 <button
                   type="button"
                   onClick={() => handleOpenPriceModal(product)}

@@ -6,6 +6,9 @@ import { analytics } from "../lib/analytics.js";
 import SeoHead from "../components/SeoHead.jsx";
 import StarRating from "../components/StarRating.jsx";
 import DatePicker from "../components/ui/DatePicker.jsx";
+import ReviewGallery from "../components/traveler/ReviewGallery.jsx";
+import ReviewModal from "../components/ReviewModal.jsx";
+import { useCurrency } from "../lib/currency.jsx";
 
 const VEHICLES = [
   { code: "SEDAN", name: "Sedan (Dzire / Etios)", pax: 4, bags: 3, icon: "🚗" },
@@ -56,6 +59,7 @@ function TravelerCounter({ label, helper, value, min, onChange }) {
 }
 
 export default function ActivityDetail() {
+  const { formatPrice, currency } = useCurrency();
   const { id } = useParams();
   const navigate = useNavigate();
   const [activity, setActivity] = useState(null);
@@ -70,7 +74,27 @@ export default function ActivityDetail() {
   const [quoteError, setQuoteError] = useState("");
   const [availabilityOptions, setAvailabilityOptions] = useState([]);
   const [availabilityChecked, setAvailabilityChecked] = useState(false);
-  const [reviewData, setReviewData] = useState({ reviews: [], quality: null });
+  const [reviewData, setReviewData] = useState({ reviews: [], quality: null, distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }, totalReviews: 0, averageRating: 0, pagination: null });
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewSort, setReviewSort] = useState("newest");
+  const [reviewRating, setReviewRating] = useState("ALL");
+  const [eligibleBooking, setEligibleBooking] = useState(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+
+  const fetchReviews = (page = 1, append = false) => {
+    setReviewLoading(true);
+    const params = { page, limit: 10, sort: reviewSort };
+    if (reviewRating !== "ALL") params.rating = reviewRating;
+    api.getProductReviews(id, params)
+      .then((data) => {
+        setReviewData((prev) => ({
+          ...data,
+          reviews: append ? [...prev.reviews, ...(data.reviews || [])] : (data.reviews || [])
+        }));
+      })
+      .catch(() => setReviewData((prev) => (append ? prev : { reviews: [], quality: null, distribution: {}, totalReviews: 0 })))
+      .finally(() => setReviewLoading(false));
+  };
 
   useEffect(() => {
     let active = true;
@@ -80,9 +104,21 @@ export default function ActivityDetail() {
       analytics.trackViewItem(data);
       if ((data?.productType || data?.product_type) === "TRANSFER" && data?.pricingVariants?.length) setSelectedVariant(data.pricingVariants[0]);
     }).catch((error) => setQuoteError(error.message || "This experience is unavailable."));
-    api.getProductReviews(id).then(setReviewData).catch(() => setReviewData({ reviews: [], quality: null }));
     window.scrollTo(0, 0);
     return () => { active = false; };
+  }, [id]);
+
+  useEffect(() => {
+    fetchReviews(1, false);
+  }, [id, reviewSort, reviewRating]);
+
+  useEffect(() => {
+    api.getEligibleReviews()
+      .then((res) => {
+        const eligible = res?.bookings?.find((b) => b.product_id === id);
+        setEligibleBooking(eligible || null);
+      })
+      .catch(() => setEligibleBooking(null));
   }, [id]);
 
   const productType = activity?.productType || activity?.product_type || "DAY_TOUR";
@@ -431,48 +467,39 @@ export default function ActivityDetail() {
 
             {/* ── Reviews ── */}
             <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Verified completed bookings</span>
-                  <h2 className="mt-1 font-display text-2xl font-bold text-stone-900">Traveler reviews</h2>
-                </div>
-                {reviewData.quality && (
-                  <div className="text-right">
-                    <strong className="text-3xl text-amber-800 font-mono">{Number(reviewData.quality.average_rating || 0).toFixed(1)}</strong>
-                    <span className="ml-1 text-xs text-stone-500">/ 5 · {reviewData.quality.review_count} reviews</span>
-                    <p className="text-[10px] font-bold text-emerald-800">Quality {reviewData.quality.score_100}/100 · {reviewData.quality.tier}</p>
-                  </div>
-                )}
-              </div>
-              <div className="mt-5 space-y-4">
-                {reviewData.reviews.map((review) => (
-                  <article key={review.id} className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex gap-1">{[1,2,3,4,5].map((score) => <Star key={score} className={`h-4 w-4 ${score <= review.experience_rating ? "fill-amber-400 text-amber-400" : "text-stone-300"}`} />)}</div>
-                        <h3 className="mt-2 text-sm font-bold text-stone-900">{review.title || "Verified traveler feedback"}</h3>
-                      </div>
-                      <span className="text-[10px] text-stone-400">{review.traveler_name}</span>
-                    </div>
-                    <p className="mt-2 text-sm leading-relaxed text-stone-600">{review.comment}</p>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {review.tags.map((tag) => <span key={tag} className="rounded-full bg-stone-200 px-2 py-1 text-[9px] text-stone-600">{tag.replaceAll("_", " ")}</span>)}
-                    </div>
-                    {review.supplier_response && (
-                      <div className="mt-3 rounded-xl border-l-2 border-emerald-600 bg-emerald-50 p-3">
-                        <span className="text-[9px] font-bold uppercase text-emerald-900">Supplier response</span>
-                        <p className="mt-1 text-xs text-stone-600">{review.supplier_response}</p>
-                      </div>
-                    )}
-                  </article>
-                ))}
-                {!reviewData.reviews.length && (
-                  <div className="rounded-2xl border border-dashed border-stone-200 p-7 text-center text-xs text-stone-400">
-                    No verified traveler reviews yet.
-                  </div>
-                )}
-              </div>
+              <ReviewGallery
+                reviews={reviewData.reviews || []}
+                avgRating={Number(reviewData.averageRating || reviewData.quality?.average_rating || activity.rating || 0)}
+                totalReviews={Number(reviewData.totalReviews || reviewData.quality?.review_count || activity.review_count || 0)}
+                distribution={reviewData.distribution || { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }}
+                quality={reviewData.quality}
+                onWriteReview={eligibleBooking ? () => setShowReviewModal(true) : null}
+                canWriteReview={Boolean(eligibleBooking)}
+                selectedRating={reviewRating}
+                onRatingChange={(newRating) => setReviewRating(newRating)}
+                sortBy={reviewSort}
+                onSortChange={(newSort) => setReviewSort(newSort)}
+                loading={reviewLoading}
+                pagination={reviewData.pagination}
+                onLoadMore={() => {
+                  if (reviewData.pagination?.hasNext) {
+                    fetchReviews(reviewData.pagination.page + 1, true);
+                  }
+                }}
+              />
             </section>
+
+            {showReviewModal && eligibleBooking && (
+              <ReviewModal
+                booking={eligibleBooking}
+                onClose={() => setShowReviewModal(false)}
+                onSuccess={() => {
+                  setShowReviewModal(false);
+                  fetchReviews(1, false);
+                  setEligibleBooking(null);
+                }}
+              />
+            )}
           </main>
 
           {/* ── Booking sidebar ── */}
@@ -481,9 +508,14 @@ export default function ActivityDetail() {
               <div>
                 <span className="text-xs font-semibold text-stone-500">{serverQuote ? "Your total" : "From"}</span>
                 <div className="mt-1 flex items-baseline gap-2">
-                  <strong className="font-display text-3xl text-stone-900">{money(serverQuote?.breakdown?.totalAmount ?? activity.priceInr ?? activity.price_inr)}</strong>
+                  <strong className="font-display text-3xl text-stone-900">{formatPrice(serverQuote?.breakdown?.totalAmount ?? activity.priceInr ?? activity.price_inr)}</strong>
                   {!serverQuote && <span className="text-xs text-stone-400">per person</span>}
                 </div>
+                {currency !== "INR" && (
+                  <span className="block text-[10px] text-stone-400 font-mono mt-0.5">
+                    (₹{Number(serverQuote?.breakdown?.totalAmount ?? activity.priceInr ?? activity.price_inr ?? 0).toLocaleString("en-IN")})
+                  </span>
+                )}
               </div>
 
               <div className="space-y-3 border-t border-stone-200 pt-5">
@@ -532,7 +564,7 @@ export default function ActivityDetail() {
                             </span>
                           </span>
                           <span className="text-right">
-                            <strong className="block text-lg text-stone-900 font-mono">{money(option.quote.breakdown.totalAmount)}</strong>
+                            <strong className="block text-lg text-stone-900 font-mono">{formatPrice(option.quote.breakdown.totalAmount)}</strong>
                             <span className="text-[10px] text-stone-400">total</span>
                           </span>
                         </span>

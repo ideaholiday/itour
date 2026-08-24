@@ -59,10 +59,17 @@ function cachedFetch(url, options = {}, ttlMs = 30000) {
 export const api = {
   getDestinations: () => cachedFetch(`${BASE}/destinations`, {}, 300000), // 5 min cache
   getCities: () => cachedFetch(`${BASE}/cities`, {}, 300000),
+  search: (params = {}) => {
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))).toString();
+    return fetch(`${BASE}/search?${qs}`, { headers: authHeaders() }).then(handle);
+  },
+  getSuggestions: (q = "") => {
+    return cachedFetch(`${BASE}/search/suggestions?q=${encodeURIComponent(q)}`, {}, 60000);
+  },
   getActivities: (params = {}) => {
-    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v))).toString();
-    const url = `${BASE}/activities?${qs}`;
-    return cachedFetch(url, {}, 30000); // 30 sec cache
+    const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))).toString();
+    const url = `${BASE}/search?${qs}`;
+    return fetch(url, { headers: authHeaders() }).then(handle);
   },
   getActivity: (id) => cachedFetch(`${BASE}/activities/${id}`, {}, 60000),
   signup: (payload) => fetch(`${BASE}/auth/signup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
@@ -98,9 +105,15 @@ export const api = {
   getEligibleReviews: () => fetch(`${BASE}/reviews/eligible`, { headers: authHeaders() }).then(handle),
   getMyReviews: () => fetch(`${BASE}/reviews/mine`, { headers: authHeaders() }).then(handle),
   createReview: (payload) => fetch(`${BASE}/reviews`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
-  getProductReviews: (id) => fetch(`${BASE}/reviews/product/${encodeURIComponent(id)}`).then(handle),
+  getProductReviews: (id, params = {}) => {
+    const query = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")).toString();
+    return fetch(`${BASE}/reviews/product/${encodeURIComponent(id)}${query ? `?${query}` : ""}`).then(handle);
+  },
   getSupplierReviews: (id) => fetch(`${BASE}/reviews/supplier/${encodeURIComponent(id)}`, { headers: authHeaders() }).then(handle),
   respondToReview: (id, response) => fetch(`${BASE}/reviews/${encodeURIComponent(id)}/response`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ response }) }).then(handle),
+  voteReviewHelpfulness: (id, isHelpful = true) => fetch(`${BASE}/reviews/${encodeURIComponent(id)}/helpfulness`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ isHelpful }) }).then(handle),
+  uploadReviewPhoto: (id, payload) => fetch(`${BASE}/reviews/${encodeURIComponent(id)}/photos`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  uploadFile: (payload) => fetch(`${BASE}/uploads`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   updateSupplierProductPrice: (supplierId, productId, payload) =>
     fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/products/${encodeURIComponent(productId)}/price`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   cancelSupplierBooking: (supplierId, bookingId, payload) =>
@@ -109,6 +122,57 @@ export const api = {
     fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/bookings/${encodeURIComponent(bookingId)}/notifications/resend`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ eventType }) }).then(handle),
   calculateRefund: (payload) =>
     fetch(`${BASE}/checkout/calculate-refund`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
-  cancelTravelerBooking: (payload) =>
-    fetch(`${BASE}/checkout/cancel-booking`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getSupplierPayoutLedger: (supplierId) =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/payout-ledger`, { headers: authHeaders() }).then(handle),
+  autoBatchSettlements: () =>
+    fetch(`${BASE}/admin/finance/settlements/auto-batch`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }).then(handle),
+  processCashfreeSettlement: (batchId) =>
+    fetch(`${BASE}/admin/finance/settlements/${encodeURIComponent(batchId)}/process-cashfree`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }).then(handle),
+  triggerAutomatedReminders: () =>
+    fetch(`${BASE}/admin/reminders/trigger-run`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }).then(handle),
+  sendPreTripReminder: (bookingId) =>
+    fetch(`${BASE}/admin/reminders/booking/${encodeURIComponent(bookingId)}/pre-trip`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }).then(handle),
+  sendPostTripReviewInvite: (bookingId) =>
+    fetch(`${BASE}/admin/reminders/booking/${encodeURIComponent(bookingId)}/post-trip-review`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }).then(handle),
+  getReminderStatus: (bookingId) =>
+    fetch(`${BASE}/admin/reminders/status/${encodeURIComponent(bookingId)}`, { headers: authHeaders() }).then(handle),
+  getLiveTracking: () =>
+    fetch("/api/ops/live-tracking", { headers: authHeaders() }).then(handle),
+  updateDriverLocation: (payload) =>
+    fetch("/api/ops/driver-location", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  verifyPickupOtp: (payload) =>
+    fetch("/api/ops/verify-otp-start", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  updateTripStatus: (payload) =>
+    fetch("/api/ops/update-trip-status", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  validatePromoCode: (payload) =>
+    fetch("/api/promo/validate", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getActivePromoVouchers: () =>
+    fetch("/api/promo/active").then(handle),
+  getUserReferralStats: () =>
+    fetch("/api/promo/user/referral", { headers: authHeaders() }).then(handle),
+  getWishlists: () =>
+    fetch("/api/wishlists", { headers: authHeaders() }).then(handle),
+  addToWishlist: (productId, collectionName = "Favorites") =>
+    fetch(`/api/wishlists/${encodeURIComponent(productId)}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ collectionName }) }).then(handle),
+  removeFromWishlist: (productId) =>
+    fetch(`/api/wishlists/${encodeURIComponent(productId)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
+  getUserItineraries: () =>
+    fetch("/api/itineraries", { headers: authHeaders() }).then(handle),
+  createItinerary: (payload) =>
+    fetch("/api/itineraries", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  updateItinerary: (id, payload) =>
+    fetch(`/api/itineraries/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getPublicItinerary: (id) =>
+    fetch(`/api/itineraries/${encodeURIComponent(id)}`, { headers: authHeaders() }).then(handle),
+  deleteItinerary: (id) =>
+    fetch(`/api/itineraries/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
+  get: (path) => fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { headers: authHeaders() }).then(handle),
+  post: (path, payload) =>
+    fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: payload ? JSON.stringify(payload) : undefined }).then(handle),
+  patch: (path, payload) =>
+    fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: payload ? JSON.stringify(payload) : undefined }).then(handle),
+  delete: (path) =>
+    fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "DELETE", headers: authHeaders() }).then(handle),
 };
+
+export default api;

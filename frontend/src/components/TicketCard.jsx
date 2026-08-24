@@ -1,12 +1,14 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { Clock, Heart, MapPin, Star } from "lucide-react";
+import { useCurrency } from "../lib/currency.jsx";
 
 /**
  * ExperienceCard — Viator-style tall photo-first card used across the marketplace.
  * Replaces the old horizontal boarding-pass ticket card.
  */
 export default function TicketCard({ activity }) {
+  const { formatPrice, currency } = useCurrency();
   const {
     id, title, images, heroImage, hero_image,
     price_inr, strike_price_inr,
@@ -42,76 +44,85 @@ export default function TicketCard({ activity }) {
     }
   }
 
-  const modeLabel = isTransfer
-    ? "🚗 Transfer"
-    : isShared
-    ? "👥 Shared"
-    : "🚗 Private";
-
   return (
-    <Link to={`/activity/${id}`} className="group block h-full">
-      <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-xl">
-
-        {/* ── Image ── */}
-        <div className="relative h-52 flex-shrink-0 overflow-hidden">
+    <Link
+      to={`/activity/${id}`}
+      className="group block h-full text-stone-900"
+      aria-label={`${title}, starting from ${formatPrice(price_inr || 0)}`}
+    >
+      <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white transition duration-200 hover:-translate-y-1 hover:border-stone-300 hover:shadow-lg">
+        {/* Photo container */}
+        <div className="relative aspect-4/3 w-full overflow-hidden bg-stone-100">
           <img
             src={img}
-            alt={title}
+            alt=""
             loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            decoding="async"
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
           />
 
-          {/* Top-left badges */}
-          <div className="absolute left-3 top-3 flex flex-col gap-1.5">
+          {/* Badges top-left */}
+          <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1">
             {bestseller && (
-              <span className="rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-stone-950 shadow-sm">
+              <span className="rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-stone-950 shadow-xs">
                 Bestseller
               </span>
             )}
-            <span className="rounded-full bg-stone-900/80 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur-sm">
-              {modeLabel}
-            </span>
+            {isTransfer ? (
+              <span className="rounded-md bg-stone-900/80 backdrop-blur-xs px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                Private transfer
+              </span>
+            ) : isShared ? (
+              <span className="rounded-md bg-amber-900/85 backdrop-blur-xs px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-100">
+                Shared tour
+              </span>
+            ) : null}
           </div>
 
-          {/* Wishlist */}
+          {/* Wishlist heart */}
           <button
-            aria-label="Save"
-            onClick={(e) => e.preventDefault()}
-            className="absolute right-3 top-3 rounded-full bg-white/90 p-2 shadow transition hover:scale-110 active:scale-95"
+            type="button"
+            aria-label="Save to wishlist"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            className="absolute top-2.5 right-2.5 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-stone-700 shadow-xs backdrop-blur-xs transition hover:scale-110 hover:bg-white hover:text-rose-500"
           >
-            <Heart className="h-4 w-4 text-stone-400 hover:text-rose-500" />
+            <Heart className="h-4 w-4" />
           </button>
+        </div>
 
-          {/* Bottom chips on image */}
-          <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 px-3 pb-2.5">
-            <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
-              <MapPin className="h-3 w-3" />{loc}
+        {/* Card body */}
+        <div className="flex flex-1 flex-col p-4">
+          {/* Destination + duration row */}
+          <div className="flex items-center justify-between text-[11px] font-semibold text-stone-500">
+            <span className="flex items-center gap-1 truncate">
+              <MapPin className="h-3 w-3 shrink-0 text-amber-700" />
+              <span className="truncate">{loc}</span>
             </span>
             {durationLabel && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
-                <Clock className="h-3 w-3" />{durationLabel}
+              <span className="flex items-center gap-1 shrink-0 text-stone-400">
+                <Clock className="h-3 w-3" />
+                {durationLabel}
               </span>
             )}
           </div>
-        </div>
 
-        {/* ── Body ── */}
-        <div className="flex flex-1 flex-col p-4">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">
-            {category || (isTransfer ? "Airport Transfer" : "Sightseeing")}
-          </p>
-
-          <h3 className="mt-1.5 line-clamp-2 min-h-[2.6rem] text-[15px] font-bold leading-snug text-stone-900 transition-colors group-hover:text-amber-800">
+          {/* Title */}
+          <h3 className="mt-1.5 font-display text-sm font-bold leading-snug text-stone-900 line-clamp-2 group-hover:text-amber-800">
             {title}
           </h3>
 
           {/* Rating */}
-          <div className="mt-2">
+          <div className="mt-2 flex items-center gap-1.5 text-xs">
             {review_count > 0 ? (
               <div className="flex items-center gap-1">
-                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                <span className="text-xs font-bold text-stone-800">{Number(rating || 0).toFixed(1)}</span>
-                <span className="text-xs text-stone-400">({Number(review_count).toLocaleString("en-IN")})</span>
+                <div className="flex items-center text-amber-500">
+                  <Star className="h-3.5 w-3.5 fill-current" />
+                </div>
+                <span className="font-bold text-stone-900">{Number(rating || 5).toFixed(1)}</span>
+                <span className="text-stone-400">({review_count.toLocaleString()})</span>
               </div>
             ) : (
               <span className="text-[10px] font-semibold text-stone-400">New · no reviews yet</span>
@@ -130,16 +141,21 @@ export default function TicketCard({ activity }) {
               <div className="flex items-baseline gap-1.5">
                 {strike_price_inr && (
                   <span className="text-xs text-stone-400 line-through">
-                    ₹{Number(strike_price_inr).toLocaleString("en-IN")}
+                    {formatPrice(strike_price_inr)}
                   </span>
                 )}
                 <span className="font-display text-xl font-bold text-stone-900">
-                  ₹{Number(price_inr || 0).toLocaleString("en-IN")}
+                  {formatPrice(price_inr || 0)}
                 </span>
                 <span className="text-[10px] text-stone-400">
                   {isShared ? "/ seat" : "/ vehicle"}
                 </span>
               </div>
+              {currency !== "INR" && (
+                <span className="block text-[9px] text-stone-400 font-mono">
+                  (₹{Number(price_inr || 0).toLocaleString("en-IN")})
+                </span>
+              )}
             </div>
             <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-800 border border-emerald-200">
               Free cancel

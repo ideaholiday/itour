@@ -136,6 +136,30 @@ export default function FinanceOverviewView() {
     } catch (err) {
       alert("Failed to process payout");
     }
+  }
+
+  const autoBatchAllSettlements = async () => {
+    setSettlementLoading("auto-batch");
+    try {
+      const response = await fetch("/api/admin/finance/settlements/auto-batch", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not auto-generate settlement batches");
+      setMessage({ type: "success", text: data.message });
+      await fetchFinanceData();
+    } catch (error) { setMessage({ type: "error", text: error.message }); }
+    finally { setSettlementLoading(""); }
+  };
+
+  const processCashfreeSettlement = async (batchId) => {
+    setSettlementLoading(`cashfree:${batchId}`);
+    try {
+      const response = await fetch(`/api/admin/finance/settlements/${batchId}/process-cashfree`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Cashfree automated payout failed");
+      setMessage({ type: "success", text: data.message });
+      await fetchFinanceData();
+    } catch (error) { setMessage({ type: "error", text: error.message }); }
+    finally { setSettlementLoading(""); }
   };
 
   const createSettlement = async (supplierId) => {
@@ -188,15 +212,9 @@ export default function FinanceOverviewView() {
 
   return (
     <div className="space-y-6">
-      {/* View Title Header */}
-      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      {/* HEADER & CONTROLS */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="bg-amber-100 text-amber-900 text-[10px] font-mono px-2.5 py-0.5 rounded-full border border-amber-300 font-bold">
-              MODULE 3
-            </span>
-            <span className="text-stone-500 text-xs font-mono">/admin/finance</span>
-          </div>
           <h1 className="text-2xl font-serif font-bold text-stone-900 flex items-center gap-3">
             <DollarSign className="w-7 h-7 text-emerald-600" />
             Global Bookings & Financial Overview

@@ -16,9 +16,15 @@ import {
   SlidersHorizontal,
   CheckCircle2,
   XCircle,
-  Plus
+  Plus,
+  Map as MapIcon,
+  LayoutGrid,
+  KeyRound
 } from "lucide-react";
 import EmergencyReallocationModal from "../../components/ops/EmergencyReallocationModal.jsx";
+import LiveTripMapView from "../../components/ops/LiveTripMapView.jsx";
+import TripStatusActionModal from "../../components/ops/TripStatusActionModal.jsx";
+import { api } from "../../lib/api.js";
 
 export default function LiveTripBoardView() {
   const [boardData, setBoardData] = useState({
@@ -30,6 +36,9 @@ export default function LiveTripBoardView() {
   });
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState("kanban");
+  const [trackingTrips, setTrackingTrips] = useState([]);
+  const [statusModalTrip, setStatusModalTrip] = useState(null);
   const [reallocateBooking, setReallocateBooking] = useState(null);
   const [fallbackModalBooking, setFallbackModalBooking] = useState(null);
   const [message, setMessage] = useState(null);
@@ -43,11 +52,16 @@ export default function LiveTripBoardView() {
 
   const fetchLiveBoard = async () => {
     try {
-      const res = await fetch("/api/ops/live-trips", { headers: authHeaders() });
-      const data = await res.json();
-      if (data.success) {
-        setBoardData(data.liveBoard);
-        setMetrics(data.metrics);
+      const [boardRes, trackingRes] = await Promise.all([
+        fetch("/api/ops/live-trips", { headers: authHeaders() }).then((r) => r.json()),
+        api.getLiveTracking().catch(() => ({ success: false, trips: [] })),
+      ]);
+      if (boardRes.success) {
+        setBoardData(boardRes.liveBoard);
+        setMetrics(boardRes.metrics);
+      }
+      if (trackingRes.success) {
+        setTrackingTrips(trackingRes.trips || []);
       }
     } catch (err) {
       console.error("Fetch Live Board Error:", err);
@@ -158,163 +172,222 @@ export default function LiveTripBoardView() {
   return (
     <div className="space-y-6">
       {/* View Title Header */}
-      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="bg-amber-100 text-amber-900 text-[10px] font-mono px-2.5 py-0.5 rounded-full border border-amber-300 font-bold">
-              LIVE MONITORING
+            <span className="bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 text-[10px] font-mono px-2.5 py-0.5 rounded-full border border-amber-300 dark:border-amber-700 font-bold">
+              LIVE OPERATIONS FLEET
             </span>
             <span className="text-stone-500 text-xs font-mono">/ops/live</span>
           </div>
-          <h1 className="text-2xl font-serif font-bold text-stone-900 flex items-center gap-3">
+          <h1 className="text-2xl font-serif font-bold text-stone-900 dark:text-stone-100 flex items-center gap-3">
             <Activity className="w-7 h-7 text-amber-600 animate-pulse" />
-            Live 24-Hour Trip Fulfillment Monitoring Board
+            Live 24-Hour Trip Fulfillment & Dispatch Center
           </h1>
-          <p className="text-xs text-stone-600 mt-1 max-w-2xl">
-            Realtime Kanban dispatch board tracking ground fulfillment stages across India. SLA breach alerts highlight imminent unassigned trips in red for immediate fallback override.
+          <p className="text-xs text-stone-600 dark:text-stone-400 mt-1 max-w-2xl">
+            Real-time fleet tracking, traveler OTP check-in, and Kanban dispatch board tracking ground fulfillment stages across India.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-300 px-4 py-2 rounded-2xl text-xs font-mono text-emerald-900 font-bold">
-          <Radio className="w-4 h-4 text-emerald-600 animate-ping" />
-          <span>REALTIME FEED ACTIVE</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {/* View Mode Switcher */}
+          <div className="flex items-center bg-stone-100 dark:bg-stone-800 p-1 rounded-2xl border border-stone-200 dark:border-stone-700">
+            <button
+              type="button"
+              onClick={() => setViewMode("kanban")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold font-mono transition ${
+                viewMode === "kanban"
+                  ? "bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 shadow-xs border border-stone-200 dark:border-stone-700"
+                  : "text-stone-500 hover:text-stone-900 dark:hover:text-stone-200"
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Kanban Board</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("map")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold font-mono transition ${
+                viewMode === "map"
+                  ? "bg-amber-500 text-stone-950 shadow-xs font-black"
+                  : "text-stone-500 hover:text-stone-900 dark:hover:text-stone-200"
+              }`}
+            >
+              <MapIcon className="w-3.5 h-3.5" />
+              <span>Live Map ({trackingTrips.length})</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 px-3.5 py-1.5 rounded-2xl text-xs font-mono text-emerald-900 dark:text-emerald-300 font-bold">
+            <Radio className="w-3.5 h-3.5 text-emerald-600 animate-ping" />
+            <span>LIVE GPS ACTIVE</span>
+          </div>
         </div>
       </div>
 
       {message && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-mono flex items-center justify-between shadow-sm">
+        <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-300 text-xs font-mono flex items-center justify-between shadow-sm">
           <span>{message.text}</span>
-          <button onClick={() => setMessage(null)} className="underline hover:text-stone-900">Dismiss</button>
+          <button onClick={() => setMessage(null)} className="underline hover:text-stone-900 dark:hover:text-stone-100">Dismiss</button>
         </div>
       )}
 
-      {/* 5-COLUMN KANBAN BOARD */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        {columns.map((col) => (
-          <div
-            key={col.id}
-            className={`bg-white border ${col.color} rounded-3xl p-4 flex flex-col h-[78vh] shadow-sm`}
-          >
-            {/* Column Header */}
-            <div className={`p-3 rounded-2xl border ${col.headerColor} flex items-center justify-between mb-4 font-mono text-xs font-bold`}>
-              <span>{col.title}</span>
-              <span className="px-2 py-0.5 rounded-full bg-white text-stone-900 text-[10px] shadow-sm border border-stone-200">
-                {col.count}
-              </span>
-            </div>
+      {/* VIEW: LIVE DISPATCH MAP */}
+      {viewMode === "map" && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <LiveTripMapView
+            trips={trackingTrips}
+            onOpenStatusModal={(trip) => setStatusModalTrip(trip)}
+            onOpenReallocateModal={(trip) => setReallocateBooking(trip)}
+            onRefresh={fetchLiveBoard}
+            loading={loading}
+          />
+        </div>
+      )}
 
-            {/* Column Cards Container */}
-            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-              {loading ? (
-                <div className="text-center py-8 text-xs font-mono text-stone-400">Loading trips...</div>
-              ) : col.items.length === 0 ? (
-                <div className="text-center py-12 text-xs font-mono text-stone-400 border border-dashed border-stone-300 rounded-2xl p-4">
-                  No trips in this stage
-                </div>
-              ) : (
-                col.items.map((trip) => (
-                  <div
-                    key={trip.id}
-                    className={`bg-[#FAF9F6] border rounded-2xl p-4 space-y-3 shadow-sm transition-all ${
-                      trip.slaAlert
-                        ? "border-rose-400 bg-rose-50/50 shadow-rose-200 animate-pulse"
-                        : "border-stone-200 hover:border-amber-400 hover:bg-white"
-                    }`}
-                  >
-                    {/* SLA ALERT BADGE */}
-                    {trip.slaAlert && (
-                      <div className="bg-rose-100 border border-rose-300 text-rose-900 text-[10px] font-mono font-bold px-2.5 py-1 rounded-xl flex items-center gap-1.5">
-                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                        <span>SLA BREACH: Trip in {trip.minutesToPickup}m - No Driver!</span>
-                      </div>
-                    )}
+      {/* VIEW: 5-COLUMN KANBAN BOARD */}
+      {viewMode === "kanban" && (
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {columns.map((col) => (
+            <div
+              key={col.id}
+              className={`bg-white border ${col.color} rounded-3xl p-4 flex flex-col h-[78vh] shadow-sm`}
+            >
+              {/* Column Header */}
+              <div className={`p-3 rounded-2xl border ${col.headerColor} flex items-center justify-between mb-4 font-mono text-xs font-bold`}>
+                <span>{col.title}</span>
+                <span className="px-2 py-0.5 rounded-full bg-white text-stone-900 text-[10px] shadow-sm border border-stone-200">
+                  {col.count}
+                </span>
+              </div>
 
-                    {/* Header Ref & Time */}
-                    <div className="flex items-center justify-between font-mono text-xs">
-                      <span className="text-amber-800 font-bold">{trip.ref || trip.id}</span>
-                      <span className="text-stone-500 text-[10px]">{trip.pickup_time || "09:00 AM"}</span>
-                    </div>
-
-                    {/* Product & Traveler */}
-                    <div className="space-y-1">
-                      <div className="font-bold text-xs text-stone-900 font-sans line-clamp-1">{trip.product_title || trip.product_type}</div>
-                      <div className="text-[10px] text-stone-500 font-mono">
-                        👤 {trip.traveler_name} &bull; {trip.traveler_phone}
-                      </div>
-                    </div>
-
-                    {/* Location & Navigation */}
-                    <div className="bg-white border border-stone-200 p-2.5 rounded-xl text-[10px] font-mono text-stone-700 space-y-1.5">
-                      <div className="flex items-center gap-1.5 truncate">
-                        <MapPin className="w-3 h-3 text-amber-600 shrink-0" />
-                        <span className="truncate font-semibold text-stone-900">{trip.pickup_location || "Airport Pickup"}</span>
-                      </div>
-                      {trip.drop_location && (
-                        <div className="flex items-center gap-1.5 truncate text-emerald-800 font-semibold border-t border-stone-100 pt-1">
-                          <span className="text-[11px]">🏨</span>
-                          <span className="truncate">Drop: {trip.drop_location}</span>
-                        </div>
-                      )}
-                      {trip.flight_number && (
-                        <div className="text-[9px] text-stone-500 font-bold">
-                          ✈️ Flight/Train: <span className="text-stone-800">{trip.flight_number}</span>
-                        </div>
-                      )}
-                      <a
-                        href={trip.mapsLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-amber-800 hover:underline flex items-center gap-1 mt-1 text-[9px] font-bold"
-                      >
-                        <span>Open Google Maps Navigation</span> &rarr;
-                      </a>
-                    </div>
-
-                    {/* Driver Status Info */}
-                    <div className="text-[10px] font-mono">
-                      {trip.hasDriver ? (
-                        <div className="text-emerald-700 font-bold flex items-center gap-1">
-                          <Car className="w-3 h-3 text-emerald-600" /> {trip.driver_name} ({trip.vehicle_number || "Cab"})
-                        </div>
-                      ) : (
-                        <div className="text-rose-700 font-bold flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3 text-rose-600" /> Supplier Driver Missing
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Action Toolbar on Card */}
-                    <div className="pt-2 border-t border-stone-200 space-y-1.5">
-                      {!trip.hasDriver && (
-                        <button
-                          onClick={() => setFallbackModalBooking(trip)}
-                          className="w-full bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300 font-bold py-1.5 px-3 rounded-xl text-[10px] font-mono transition-all flex items-center justify-center gap-1"
-                        >
-                          <Car className="w-3 h-3 text-rose-600" /> Dispatch Backup Driver
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => setReallocateBooking(trip)}
-                        className="w-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold py-1.5 px-3 rounded-xl text-[10px] font-mono transition-all flex items-center justify-center gap-1"
-                      >
-                        <Zap className="w-3 h-3 text-amber-700" /> Trigger 15km Emergency Ping
-                      </button>
-
-                      <button
-                        onClick={() => handleSendWhatsApp(trip)}
-                        className="w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300 font-bold py-1.5 px-3 rounded-xl text-[10px] font-mono transition-all flex items-center justify-center gap-1"
-                      >
-                        <MessageSquare className="w-3 h-3 text-emerald-700" /> Send WhatsApp Voucher
-                      </button>
-                    </div>
+              {/* Column Cards Container */}
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                {loading ? (
+                  <div className="text-center py-8 text-xs font-mono text-stone-400">Loading trips...</div>
+                ) : col.items.length === 0 ? (
+                  <div className="text-center py-12 text-xs font-mono text-stone-400 border border-dashed border-stone-300 rounded-2xl p-4">
+                    No trips in this stage
                   </div>
-                ))
-              )}
+                ) : (
+                  col.items.map((trip) => (
+                    <div
+                      key={trip.id}
+                      className={`bg-[#FAF9F6] border rounded-2xl p-4 space-y-3 shadow-sm transition-all ${
+                        trip.slaAlert
+                          ? "border-rose-400 bg-rose-50/50 shadow-rose-200 animate-pulse"
+                          : "border-stone-200 hover:border-stone-300"
+                      }`}
+                    >
+                      {/* Card Header: Product Title & SLA Badge */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-[10px] font-mono font-bold text-amber-800 uppercase block">
+                            {trip.ref}
+                          </span>
+                          <h4 className="text-xs font-bold text-stone-900 line-clamp-1">
+                            {trip.product_title || "Experience Tour"}
+                          </h4>
+                        </div>
+                        {trip.slaAlert && (
+                          <span className="bg-rose-600 text-white text-[9px] font-mono px-2 py-0.5 rounded-full font-bold uppercase animate-bounce">
+                            SLA ALERT
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Pickup & Timing Info */}
+                      <div className="space-y-1 text-[11px] font-mono text-stone-600">
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3 h-3 text-stone-400" />
+                          <span>{trip.pickup_time || "09:00 AM"} ({trip.activity_date})</span>
+                        </div>
+                        <div className="flex items-start gap-1.5">
+                          <MapPin className="w-3 h-3 text-stone-400 shrink-0 mt-0.5" />
+                          <span className="truncate" title={trip.pickup_location}>
+                            {trip.pickup_location}
+                          </span>
+                        </div>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(trip.pickup_location || "Agra")}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-amber-800 hover:underline flex items-center gap-1 mt-1 text-[9px] font-bold"
+                        >
+                          <span>Open Google Maps Navigation</span> &rarr;
+                        </a>
+                      </div>
+
+                      {/* Driver Status Info */}
+                      <div className="text-[10px] font-mono">
+                        {trip.hasDriver ? (
+                          <div className="text-emerald-700 font-bold flex items-center gap-1">
+                            <Car className="w-3 h-3 text-emerald-600" /> {trip.driver_name} ({trip.vehicle_number || "Cab"})
+                          </div>
+                        ) : (
+                          <div className="text-rose-700 font-bold flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-rose-600" /> Supplier Driver Missing
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action Toolbar on Card */}
+                      <div className="pt-2 border-t border-stone-200 space-y-1.5">
+                        {/* Quick Status / OTP Action */}
+                        <button
+                          type="button"
+                          onClick={() => setStatusModalTrip(trip)}
+                          className="w-full bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold py-1.5 px-3 rounded-xl text-[10px] font-mono transition-all flex items-center justify-center gap-1 shadow-xs"
+                        >
+                          <KeyRound className="w-3 h-3" /> Update Status / Verify OTP
+                        </button>
+
+                        {!trip.hasDriver && (
+                          <button
+                            type="button"
+                            onClick={() => setFallbackModalBooking(trip)}
+                            className="w-full bg-rose-100 hover:bg-rose-200 text-rose-900 border border-rose-300 font-bold py-1.5 px-3 rounded-xl text-[10px] font-mono transition-all flex items-center justify-center gap-1"
+                          >
+                            <Car className="w-3 h-3 text-rose-600" /> Dispatch Backup Driver
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setReallocateBooking(trip)}
+                          className="w-full bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold py-1.5 px-3 rounded-xl text-[10px] font-mono transition-all flex items-center justify-center gap-1"
+                        >
+                          <Zap className="w-3 h-3 text-amber-700" /> Trigger 15km Emergency Ping
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSendWhatsApp(trip)}
+                          className="w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border border-emerald-300 font-bold py-1.5 px-3 rounded-xl text-[10px] font-mono transition-all flex items-center justify-center gap-1"
+                        >
+                          <MessageSquare className="w-3 h-3 text-emerald-700" /> Send WhatsApp Voucher
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* TRIP STATUS & OTP MODAL */}
+      {statusModalTrip && (
+        <TripStatusActionModal
+          trip={statusModalTrip}
+          onClose={() => setStatusModalTrip(null)}
+          onStatusUpdated={() => {
+            fetchLiveBoard();
+            setMessage({ type: "success", text: "Trip status updated successfully" });
+          }}
+        />
+      )}
 
       {/* EMERGENCY RE-ALLOCATION MODAL */}
       {reallocateBooking && (

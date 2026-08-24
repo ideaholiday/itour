@@ -9,4 +9,21 @@ export default defineConfig({
       "/api": "http://localhost:4000",
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/react/") || id.includes("node_modules/react-dom/")) {
+            return "vendor-react";
+          }
+          if (id.includes("node_modules/react-router-dom") || id.includes("node_modules/react-router")) {
+            return "vendor-router";
+          }
+          if (id.includes("node_modules/lucide-react")) {
+            return "vendor-icons";
+          }
+        },
+      },
+    },
+  },
 });

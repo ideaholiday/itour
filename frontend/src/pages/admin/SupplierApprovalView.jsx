@@ -39,6 +39,7 @@ export default function SupplierApprovalView() {
   const [suspendReason, setSuspendReason] = useState("");
   const [previewDoc, setPreviewDoc] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [autoVerifying, setAutoVerifying] = useState(false);
   const [message, setMessage] = useState(null);
   const [copiedId, setCopiedId] = useState("");
 
@@ -110,6 +111,35 @@ export default function SupplierApprovalView() {
       setMessage({ type: "error", text: err.message || "Network error occurred during verification" });
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleRunAutoVerify = async () => {
+    if (!selectedSupplier) return;
+    setAutoVerifying(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/admin/suppliers/${selectedSupplier.id}/kyb/auto-verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "Cashfree SecureID check failed");
+
+      setMessage({ type: "success", text: "Cashfree SecureID KYB Verification audit completed." });
+      if (data.supplier) {
+        setSelectedSupplier((prev) => ({
+          ...prev,
+          ...data.supplier,
+          secureIdVerifications: data.verifications || prev?.secureIdVerifications || [],
+        }));
+      }
+      await fetchSuppliers();
+    } catch (err) {
+      console.error("Cashfree KYB Error:", err);
+      setMessage({ type: "error", text: err.message || "Failed to execute Cashfree SecureID check" });
+    } finally {
+      setAutoVerifying(false);
     }
   };
 
@@ -396,6 +426,80 @@ export default function SupplierApprovalView() {
                   <div>
                     <span className="text-stone-500 block">Operational Base</span>
                     <span className="text-stone-900 font-bold">{selectedSupplier.city}, {selectedSupplier.state}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cashfree SecureID KYB Verification Suite Section */}
+              <div className="bg-gradient-to-br from-amber-500/10 via-amber-50 to-emerald-500/10 border border-amber-300 rounded-2xl p-5 space-y-4 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-amber-700" />
+                    <div>
+                      <h3 className="text-xs font-mono font-bold text-stone-900 uppercase tracking-wider">
+                        Cashfree SecureID KYB Engine
+                      </h3>
+                      <span className="text-[10px] text-stone-500">Real-Time GSTIN, PAN & Bank Account Verification</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={autoVerifying}
+                    onClick={handleRunAutoVerify}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs transition shadow-xs disabled:opacity-50"
+                  >
+                    {autoVerifying ? (
+                      <>
+                        <Clock className="w-3.5 h-3.5 animate-spin" />
+                        <span>Auditing…</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Run SecureID Audit</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2.5 text-xs font-mono">
+                  {/* GSTIN Badge */}
+                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                    <span className="text-[10px] text-stone-500 block">GSTIN STATUS</span>
+                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.gstin_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                      {selectedSupplier.gstin_verified === 1 ? `Active (${selectedSupplier.gstin_verified_status || "Valid"})` : "Unverified"}
+                    </span>
+                    {selectedSupplier.gstin_verified_name && (
+                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.gstin_verified_name}>
+                        {selectedSupplier.gstin_verified_name}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* PAN Badge */}
+                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                    <span className="text-[10px] text-stone-500 block">PAN STATUS</span>
+                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.pan_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                      {selectedSupplier.pan_verified === 1 ? `Valid (${selectedSupplier.pan_type || "Company"})` : "Unverified"}
+                    </span>
+                    {selectedSupplier.pan_verified_name && (
+                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.pan_verified_name}>
+                        {selectedSupplier.pan_verified_name}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Bank Penny Drop Badge */}
+                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                    <span className="text-[10px] text-stone-500 block">BANK PENNY-DROP</span>
+                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.bank_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                      {selectedSupplier.bank_verified === 1 ? `Match: ${selectedSupplier.bank_match_score || 100}%` : "Unverified"}
+                    </span>
+                    {selectedSupplier.bank_verified_name && (
+                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.bank_verified_name}>
+                        {selectedSupplier.bank_verified_name}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

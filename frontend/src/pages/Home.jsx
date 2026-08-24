@@ -4,6 +4,7 @@ import { ArrowRight, BadgeCheck, CalendarClock, Check, Clock, Headphones, Heart,
 import SearchBar from "../components/SearchBar.jsx";
 import SeoHead from "../components/SeoHead.jsx";
 import { api } from "../lib/api.js";
+import { useCurrency } from "../lib/currency.jsx";
 
 const HERO_IMAGES = [
   { src: "https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=1800&q=90", label: "Taj Mahal, Agra" },
@@ -63,6 +64,7 @@ function HeroSlide({ src, label, active }) {
 }
 
 function ExperienceCard({ activity }) {
+  const { formatPrice, currency } = useCurrency();
   const { id, title, images, hero_image, heroImage, price_inr, rating, review_count, duration_hours, destination_name, city, bestseller } = activity;
   const img = images?.[0] || heroImage || hero_image || "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=600&q=80";
   const loc = destination_name || city || "India";
@@ -102,8 +104,13 @@ function ExperienceCard({ activity }) {
             <span className="text-xs text-slate-400">({(review_count || 0).toLocaleString("en-IN")})</span>
           </div>
           <div className="mt-3 flex items-end justify-between border-t border-slate-100 pt-3">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold">From</span>
-            <strong className="font-display text-xl text-stone-900">₹{(price_inr || 0).toLocaleString("en-IN")}</strong>
+            <div>
+              <span className="text-[10px] text-slate-400 uppercase font-semibold block">From</span>
+              {currency !== "INR" && (
+                <span className="text-[9px] text-slate-400 font-mono">₹{(price_inr || 0).toLocaleString("en-IN")}</span>
+              )}
+            </div>
+            <strong className="font-display text-xl text-stone-900">{formatPrice(price_inr || 0)}</strong>
           </div>
         </div>
       </div>

@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, CalendarDays, Check, Clock3, CreditCard, Info,
-  LockKeyhole, MapPin, Navigation, ShieldCheck, Sparkles, TestTube2,
+  LockKeyhole, MapPin, Navigation, ShieldCheck, Sparkles, Tag, TestTube2,
   UserRound, Users
 } from "lucide-react";
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
+import { useCurrency } from "../lib/currency.jsx";
 import PickupPointPicker from "../components/PickupPointPicker.jsx";
 
 const PICKUP_TYPES = [
@@ -65,6 +66,7 @@ function locationFromParams(params, name) {
 }
 
 export default function Checkout() {
+  const { formatPrice, currency } = useCurrency();
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -90,6 +92,11 @@ export default function Checkout() {
   const [quoteLoading, setQuoteLoading] = useState(true);
   const [quoteError, setQuoteError] = useState("");
   const [clientRequestId] = useState(() => globalThis.crypto?.randomUUID?.() || `booking-${Date.now()}-${Math.random()}`);
+
+  const [promoInput, setPromoInput] = useState(params.get("promo") || params.get("ref") || "");
+  const [appliedPromo, setAppliedPromo] = useState(null);
+  const [promoLoading, setPromoLoading] = useState(false);
+  const [promoError, setPromoError] = useState("");
 
   const date = params.get("date") || new Date().toISOString().split("T")[0];
   const adults = Number(params.get("adults") || params.get("pax") || 1);
@@ -167,6 +174,45 @@ export default function Checkout() {
   );
   const travelerReady = Boolean(travelerName.trim() && travelerPhone.trim() && travelerEmail.trim());
   const dropReady = !isTransfer || Boolean(dropLocation.trim().length >= 3);
+
+  const discountAmount = appliedPromo ? Number(appliedPromo.discountAmount || 0) : 0;
+  const payableTotal = Math.max(0, totalAmount - discountAmount);
+
+  const handleApplyPromo = async (overrideCode) => {
+    const codeToValidate = String(overrideCode || promoInput).trim().toUpperCase();
+    if (!codeToValidate) return;
+    if (!totalAmount) {
+      setPromoError("Please wait for the price calculation to load");
+      return;
+    }
+    setPromoLoading(true);
+    setPromoError("");
+    try {
+      const res = await api.validatePromoCode({
+        code: codeToValidate,
+        amountInr: totalAmount,
+      });
+      if (res?.promo?.valid) {
+        setAppliedPromo(res.promo);
+        setPromoInput(res.promo.code);
+      } else {
+        setPromoError("Invalid promo code");
+      }
+    } catch (err) {
+      setAppliedPromo(null);
+      setPromoError(err.message || "Invalid promo or referral code");
+    } finally {
+      setPromoLoading(false);
+    }
+  };
+
+  // Auto-validate promo code if passed in URL
+  useEffect(() => {
+    const initialCode = params.get("promo") || params.get("ref");
+    if (initialCode && totalAmount > 0 && !appliedPromo) {
+      handleApplyPromo(initialCode);
+    }
+  }, [totalAmount]);
 
   useEffect(() => {
     if (!activity) return;
@@ -520,36 +566,24 @@ export default function Checkout() {
                       </div>
                     </>
                   )}
-
-                  {/* Notes / Special Instructions */}
-                  <label className="block text-xs font-bold text-stone-700">
-                    Chauffeur notes / specific instructions <span className="font-normal text-stone-500">(optional)</span>
-                    <input
-                      value={pickupInstructions}
-                      onChange={(e) => setPickupInstructions(e.target.value)}
-                      placeholder="e.g. Name on placard, child seat needed, extra large luggage..."
-                      className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-3 text-xs text-stone-900 outline-none focus:border-amber-500 focus:bg-white"
-                    />
-                  </label>
                 </div>
               )}
 
-              {/* Day Tour Hotel Pickup Form */}
-              {!isTransfer && joiningMethod === "PICKUP" && (
-                <div className="mt-4 space-y-4">
+              {(isTransfer || isPackage || joiningMethod === "PICKUP") && (
+                <div className="mt-5 space-y-4">
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {PICKUP_TYPES.map((option) => (
                       <button
                         key={option.id}
                         type="button"
                         onClick={() => setPickupType(option.id)}
-                        className={`rounded-xl border p-3 text-left transition ${
+                        className={`rounded-2xl border p-3 text-center transition-all ${
                           pickupType === option.id
                             ? "border-amber-500 bg-amber-50 text-stone-950 font-bold"
                             : "border-stone-200 bg-white text-stone-600 hover:border-stone-300"
                         }`}
                       >
-                        <span className="text-lg">{option.icon}</span>
+                        <span className="text-xl">{option.icon}</span>
                         <span className="mt-1 block text-[10px] font-bold">{option.label}</span>
                       </button>
                     ))}
@@ -582,20 +616,6 @@ export default function Checkout() {
                       />
                     </label>
                   </div>
-                </div>
-              )}
-
-              {joiningMethod === "MEET" && (
-                <div className="mt-4 rounded-xl border border-emerald-300 bg-emerald-50 p-4">
-                  <strong className="text-sm text-emerald-900">Meet at {meetingPoint}</strong>
-                  <p className="mt-1 text-xs text-stone-600">
-                    Arrive by {pickupTime}. The final meeting instructions and operator contact will appear on your digital voucher.
-                  </p>
-                </div>
-              )}
-              {joiningMethod === "LATER" && (
-                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">
-                  You can book now and share your hotel or arrival flight details with the operator anytime before the tour begins.
                 </div>
               )}
             </section>
@@ -650,14 +670,95 @@ export default function Checkout() {
                 : quoteLoading
                 ? "Checking price and availability…"
                 : paymentMethod === "CASHFREE"
-                ? `Pay ₹${totalAmount.toLocaleString("en-IN")} via Cashfree →`
+                ? `Pay ₹${payableTotal.toLocaleString("en-IN")}${currency !== "INR" ? ` (~${formatPrice(payableTotal)})` : ""} via Cashfree →`
                 : "Confirm demo booking · ₹0 charged →"}
             </button>
+            {currency !== "INR" && (
+              <p className="text-center text-[10px] text-stone-500 font-mono">
+                ℹ️ Displayed estimate: {formatPrice(payableTotal)}. Final transaction will be settled in INR (₹{payableTotal.toLocaleString("en-IN")}) in compliance with RBI regulations.
+              </p>
+            )}
             <p className="text-center text-[11px] text-stone-500">By confirming, you agree to the experience’s cancellation terms and Idea Holiday booking terms.</p>
           </form>
 
           <aside className="space-y-5 lg:sticky lg:top-24 lg:h-fit">
-            <div className="overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-md"><img src={activity.heroImage || activity.hero_image || activity.images?.[0]} alt="" className="h-48 w-full object-cover" /><div className="p-5"><span className="text-[9px] font-black uppercase tracking-wider text-amber-700">{isPackage ? "Multi-day package" : isShared ? "Shared · per seat" : "Private experience"}</span><h2 className="mt-2 font-serif text-lg font-bold leading-snug text-stone-900">{activity.title}</h2><div className="mt-5 space-y-3 border-t border-stone-200 pt-4 text-xs"><div className="flex items-center gap-3"><CalendarDays className="h-4 w-4 text-amber-600" /><div><span className="block text-stone-500">{isPackage ? "Start date" : "Date"}</span><strong className="text-stone-900">{new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</strong></div></div><div className="flex items-center gap-3"><Users className="h-4 w-4 text-amber-700" /><div><span className="block text-stone-500">Travelers</span><strong className="text-stone-900">{adults} adult{adults !== 1 ? "s" : ""}{children ? ` · ${children} child${children !== 1 ? "ren" : ""}` : ""}</strong></div></div><div className="flex items-center gap-3"><Clock3 className="h-4 w-4 text-amber-700" /><div><span className="block text-stone-500">{isTransfer || joiningMethod === "PICKUP" ? "Pickup" : joiningMethod === "MEET" ? "Meeting point" : "Arrival details"}</span><strong className={pickupReady ? "text-emerald-700" : "text-amber-800 font-bold"}>{pickupReady ? `${pickupTime} · ${pickupLocation}` : "Add joining details"}</strong></div></div></div><div className="mt-5 space-y-2 border-t border-dashed border-stone-200 pt-4 text-xs text-stone-600"><div className="flex justify-between"><span>Selected option</span><span className="max-w-[180px] text-right text-stone-900 font-semibold">{variant}</span></div><div className="flex justify-between"><span>Server-verified fare</span><span className="text-stone-900 font-semibold">₹{rawBaseFare.toLocaleString("en-IN")}</span></div>{fastagTolls > 0 && <div className="flex justify-between"><span>Tolls / route taxes</span><span className="text-stone-900 font-semibold">₹{fastagTolls.toLocaleString("en-IN")}</span></div>}<div className="flex justify-between"><span>GST</span><span className="text-stone-900 font-semibold">₹{gstTax.toLocaleString("en-IN")}</span></div><div className="flex items-end justify-between border-t border-stone-200 pt-3"><strong className="text-sm text-stone-900">Total</strong><strong className="font-serif text-3xl text-emerald-700">{quoteLoading ? "…" : `₹${totalAmount.toLocaleString("en-IN")}`}</strong></div></div></div></div>
+            <div className="overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-md">
+              <img src={activity.heroImage || activity.hero_image || activity.images?.[0]} alt="" className="h-48 w-full object-cover" />
+              <div className="p-5">
+                <span className="text-[9px] font-black uppercase tracking-wider text-amber-700">{isPackage ? "Multi-day package" : isShared ? "Shared · per seat" : "Private experience"}</span>
+                <h2 className="mt-2 font-serif text-lg font-bold leading-snug text-stone-900">{activity.title}</h2>
+                <div className="mt-5 space-y-3 border-t border-stone-200 pt-4 text-xs">
+                  <div className="flex items-center gap-3"><CalendarDays className="h-4 w-4 text-amber-600" /><div><span className="block text-stone-500">{isPackage ? "Start date" : "Date"}</span><strong className="text-stone-900">{new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</strong></div></div>
+                  <div className="flex items-center gap-3"><Users className="h-4 w-4 text-amber-700" /><div><span className="block text-stone-500">Travelers</span><strong className="text-stone-900">{adults} adult{adults !== 1 ? "s" : ""}{children ? ` · ${children} child${children !== 1 ? "ren" : ""}` : ""}</strong></div></div>
+                  <div className="flex items-center gap-3"><Clock3 className="h-4 w-4 text-amber-700" /><div><span className="block text-stone-500">{isTransfer || joiningMethod === "PICKUP" ? "Pickup" : joiningMethod === "MEET" ? "Meeting point" : "Arrival details"}</span><strong className={pickupReady ? "text-emerald-700" : "text-amber-800 font-bold"}>{pickupReady ? `${pickupTime} · ${pickupLocation}` : "Add joining details"}</strong></div></div>
+                </div>
+
+                {/* Pricing Breakdown */}
+                <div className="mt-5 space-y-2 border-t border-dashed border-stone-200 pt-4 text-xs text-stone-600">
+                  <div className="flex justify-between"><span>Selected option</span><span className="max-w-[180px] text-right text-stone-900 font-semibold">{variant}</span></div>
+                  <div className="flex justify-between"><span>Server-verified fare</span><span className="text-stone-900 font-semibold">{formatPrice(rawBaseFare)}</span></div>
+                  {fastagTolls > 0 && <div className="flex justify-between"><span>Tolls / route taxes</span><span className="text-stone-900 font-semibold">{formatPrice(fastagTolls)}</span></div>}
+                  <div className="flex justify-between"><span>GST</span><span className="text-stone-900 font-semibold">{formatPrice(gstTax)}</span></div>
+
+                  {/* Promo Code Discount */}
+                  {discountAmount > 0 && (
+                    <div className="flex justify-between items-center text-emerald-700 font-bold bg-emerald-50 p-2 rounded-xl border border-emerald-200">
+                      <span className="flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5" /> Promo ({appliedPromo.code})
+                      </span>
+                      <span>−{formatPrice(discountAmount)}</span>
+                    </div>
+                  )}
+
+                  {/* Promo Code Input Box */}
+                  <div className="pt-2 border-t border-stone-100 space-y-2">
+                    {appliedPromo ? (
+                      <div className="flex items-center justify-between text-[11px] font-mono text-emerald-800">
+                        <span>{appliedPromo.description}</span>
+                        <button
+                          type="button"
+                          onClick={() => { setAppliedPromo(null); setPromoError(""); }}
+                          className="text-rose-600 font-bold hover:underline"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={promoInput}
+                          onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); setPromoError(""); }}
+                          placeholder="Promo / Referral code"
+                          className="flex-1 rounded-xl border border-stone-300 bg-[#FAF9F6] px-3 py-1.5 text-xs font-mono font-bold uppercase text-stone-900 outline-none focus:border-amber-500 focus:bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleApplyPromo()}
+                          disabled={promoLoading || !promoInput.trim() || !totalAmount}
+                          className="px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-bold font-mono transition disabled:opacity-50"
+                        >
+                          {promoLoading ? "..." : "Apply"}
+                        </button>
+                      </div>
+                    )}
+                    {promoError && (
+                      <p className="text-[10px] font-mono text-rose-600">{promoError}</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-end justify-between border-t border-stone-200 pt-3">
+                    <div>
+                      <strong className="text-sm text-stone-900 block">Total</strong>
+                      {currency !== "INR" && (
+                        <span className="text-[10px] text-stone-400 font-mono">Billed: ₹{payableTotal.toLocaleString("en-IN")}</span>
+                      )}
+                    </div>
+                    <strong className="font-serif text-3xl text-emerald-700">{quoteLoading ? "…" : formatPrice(payableTotal)}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
             <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-4"><div className="flex items-center gap-2 text-sm font-bold text-emerald-900"><ShieldCheck className="h-5 w-5 text-emerald-700" />Book with breathing room</div><p className="mt-2 text-xs leading-relaxed text-stone-600">Secure checkout, clear cancellation terms and human support if plans change.</p></div>
           </aside>
         </div>

@@ -23,6 +23,8 @@ playwright-report/
 test-results/
 .monitoring.env
 observability/secrets/
+backend/uploads/*
+!backend/uploads/.gitkeep
 
 apps/api/vendor/
 apps/api/storage/*.key

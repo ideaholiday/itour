@@ -1,6 +1,10 @@
 import { nanoid } from "nanoid";
 import { vehicleModelSupportsCategory } from "../lib/vehicleInventory.js";
 import { normalizeWhatsAppPhone } from "./whatsappService.js";
+import { hashPickupOtp } from "./bookingService.js";
+import { processReferralRewardOnCompletion } from "./promoService.js";
+
+const driverGpsCache = new Map();
 
 export const DISPATCH_STATUS_TRANSITIONS = Object.freeze({
   ASSIGNED: ["EN_ROUTE"],
@@ -217,6 +221,9 @@ export function updateDispatchStatus(database, { supplierId, bookingId, nextStat
     if (normalizedNext === "COMPLETED") {
       database.prepare("UPDATE bookings SET status = 'completed' WHERE id = ?").run(bookingId);
       database.prepare("UPDATE payouts SET payout_status = 'SCHEDULED' WHERE booking_id = ? AND payout_status = 'PAYMENT_HELD'").run(bookingId);
+      try {
+        processReferralRewardOnCompletion(database, bookingId);
+      } catch {}
     }
     event(database, assignment, { eventType: "STATUS_CHANGED", previousStatus: current, newStatus: normalizedNext, actorId, note });
   })();
@@ -225,4 +232,121 @@ export function updateDispatchStatus(database, { supplierId, bookingId, nextStat
 
 export function getDispatchTimeline(database, bookingId) {
   return database.prepare("SELECT * FROM driver_assignment_events WHERE booking_id = ? ORDER BY created_at, rowid").all(bookingId);
+}
+
+export function verifyPickupOtp(database, bookingId, enteredOtp) {
+  const normalizedOtp = String(enteredOtp || "").trim();
+  if (!/^\d{4,6}$/.test(normalizedOtp)) {
+    throw dispatchError("Enter a valid 4-digit numeric pickup OTP", 400);
+  }
+  const booking = database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
+  if (!booking) throw dispatchError("Booking not found", 404);
+
+  const expectedHash = hashPickupOtp(booking.id, normalizedOtp);
+  const isValid = (booking.otp_hash && booking.otp_hash === expectedHash) ||
+                  (booking.otp_code && String(booking.otp_code) === normalizedOtp);
+
+  if (!isValid) {
+    throw dispatchError("Invalid pickup OTP. Please verify with traveler.", 400);
+  }
+  return { valid: true, bookingId: booking.id };
+}
+
+export function updateDriverCoordinates(database, assignmentId, coords = {}) {
+  const assignment = database.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignmentId);
+  if (!assignment) throw dispatchError("Driver assignment not found", 404);
+
+  const lat = Number(coords.lat);
+  const lng = Number(coords.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw dispatchError("Valid numeric lat and lng coordinates required", 400);
+  }
+
+  const telemetry = {
+    lat,
+    lng,
+    speed_kmh: Number(coords.speed_kmh || coords.speed || 0),
+    heading: Number(coords.heading || 0),
+    battery_pct: coords.battery_pct != null ? Number(coords.battery_pct) : 95,
+    updated_at: new Date().toISOString(),
+  };
+
+  driverGpsCache.set(assignment.id, telemetry);
+  return { assignmentId: assignment.id, telemetry };
+}
+
+export function getDriverCoordinates(assignmentId) {
+  return driverGpsCache.get(assignmentId) || null;
+}
+
+export function getLiveDispatchTelemetry(database) {
+  const rawRows = database.prepare(`
+    SELECT b.id as booking_id, b.ref as booking_reference, b.status as booking_status, b.activity_date, b.pickup_time,
+           b.pickup_location, b.pickup_lat, b.pickup_lng, b.drop_location, b.drop_lat, b.drop_lng,
+           b.traveler_name as guest_name, b.traveler_phone as guest_phone, b.adults, b.children,
+           p.id as product_id, p.title as product_title, p.hero_image, p.category, p.city as product_city,
+           s.id as supplier_id, s.company_name as supplier_name, s.phone as supplier_phone,
+           da.id as assignment_id, da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number,
+           da.assignment_status, da.assigned_at, da.en_route_at, da.arrived_at, da.trip_started_at, da.last_status_at
+    FROM bookings b
+    LEFT JOIN products p ON p.id = b.product_id
+    LEFT JOIN suppliers s ON s.id = b.supplier_id
+    LEFT JOIN driver_assignments da ON da.booking_id = b.id
+    WHERE b.status IN ('driver_assigned', 'in_progress', 'confirmed')
+       OR da.assignment_status IN ('ASSIGNED', 'EN_ROUTE', 'ARRIVED', 'TRIP_STARTED')
+    ORDER BY b.activity_date ASC, b.pickup_time ASC
+  `).all();
+
+  return rawRows.map((row) => {
+    let telemetry = driverGpsCache.get(row.assignment_id);
+
+    // If no simulated/active GPS yet, generate sensible telemetry around pickup or city center
+    const pickupLat = row.pickup_lat || 27.1751;
+    const pickupLng = row.pickup_lng || 78.0421;
+    const dropLat = row.drop_lat || pickupLat + 0.05;
+    const dropLng = row.drop_lng || pickupLng + 0.05;
+
+    if (!telemetry) {
+      const status = (row.assignment_status || "ASSIGNED").toUpperCase();
+      let lat = pickupLat;
+      let lng = pickupLng;
+      let speed = 0;
+      let heading = 45;
+
+      if (status === "EN_ROUTE") {
+        lat = pickupLat - 0.015;
+        lng = pickupLng - 0.012;
+        speed = 38;
+        heading = 32;
+      } else if (status === "ARRIVED") {
+        lat = pickupLat;
+        lng = pickupLng;
+        speed = 0;
+        heading = 0;
+      } else if (status === "TRIP_STARTED") {
+        lat = pickupLat + (dropLat - pickupLat) * 0.4;
+        lng = pickupLng + (dropLng - pickupLng) * 0.4;
+        speed = 46;
+        heading = 78;
+      }
+
+      telemetry = {
+        lat,
+        lng,
+        speed_kmh: speed,
+        heading,
+        battery_pct: 92,
+        updated_at: new Date().toISOString(),
+      };
+    }
+
+    return {
+      ...row,
+      pickup_lat: pickupLat,
+      pickup_lng: pickupLng,
+      drop_lat: dropLat,
+      drop_lng: dropLng,
+      driver_telemetry: telemetry,
+    };
+  });
 }

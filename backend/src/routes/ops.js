@@ -5,6 +5,13 @@ import { emailProviderConfiguration, sendEmail } from "../services/emailService.
 import { withoutPickupOtpSecrets } from "../services/bookingService.js";
 import { processExpiredSupplierAssignments } from "../services/assignmentSlaService.js";
 import { sendGuestBookingNotification } from "../services/notificationService.js";
+import {
+  getLiveDispatchTelemetry,
+  updateDriverCoordinates,
+  verifyPickupOtp,
+  updateDispatchStatus,
+  getDispatchTimeline
+} from "../services/driverDispatchService.js";
 import { authenticate, optionalAuthMiddleware, requireRoles, requireSchedulerOrRoles } from "../middleware/auth.js";
 import logger from "../config/logger.js";
 import { validateBody } from "../middleware/validation.js";
@@ -376,6 +383,95 @@ router.post("/tasks/:id/update", validateBody(opsSchemas.task), (req, res) => {
     res.json({ success: true, message: `Task status set to ${status || "RESOLVED"}` });
   } catch (err) {
     res.status(500).json({ error: "Failed to update staff task" });
+  }
+});
+
+// GET /api/ops/live-tracking - Live fleet tracking, driver telemetry, and active routes
+router.get("/live-tracking", (req, res) => {
+  try {
+    const trips = getLiveDispatchTelemetry(db);
+    res.json({ success: true, trips, count: trips.length });
+  } catch (err) {
+    logger.error("Failed to fetch live dispatch telemetry:", err);
+    res.status(500).json({ error: "Failed to fetch live dispatch telemetry" });
+  }
+});
+
+// POST /api/ops/driver-location - Record / update live driver GPS coordinates
+router.post("/driver-location", (req, res) => {
+  try {
+    const { assignmentId, lat, lng, speed_kmh, heading, battery_pct } = req.body;
+    if (!assignmentId) return res.status(400).json({ error: "assignmentId is required" });
+    const result = updateDriverCoordinates(db, assignmentId, { lat, lng, speed_kmh, heading, battery_pct });
+    res.json({ success: true, telemetry: result.telemetry });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "Failed to update driver coordinates" });
+  }
+});
+
+// POST /api/ops/verify-otp-start - Verify traveler OTP and start trip
+router.post("/verify-otp-start", (req, res) => {
+  try {
+    const { bookingId, otp, note } = req.body;
+    if (!bookingId || !otp) return res.status(400).json({ error: "bookingId and otp are required" });
+
+    verifyPickupOtp(db, bookingId, otp);
+
+    const booking = db.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    const result = updateDispatchStatus(db, {
+      supplierId: booking.supplier_id,
+      bookingId: booking.id,
+      nextStatus: "TRIP_STARTED",
+      actorId: req.user?.id || "OPS_AGENT",
+      note: note || "Pickup OTP verified by traveler on ground check-in",
+      allowTripStart: true,
+    });
+
+    res.json({
+      success: true,
+      message: "Traveler OTP verified successfully! Trip has started.",
+      assignment: result.assignment,
+    });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "Failed to verify pickup OTP" });
+  }
+});
+
+// POST /api/ops/update-trip-status - Advance trip status with lifecycle checks
+router.post("/update-trip-status", (req, res) => {
+  try {
+    const { bookingId, nextStatus, note, otp } = req.body;
+    if (!bookingId || !nextStatus) return res.status(400).json({ error: "bookingId and nextStatus are required" });
+
+    const booking = db.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+
+    let allowTripStart = false;
+    if (String(nextStatus).toUpperCase() === "TRIP_STARTED") {
+      if (!otp) return res.status(400).json({ error: "Pickup OTP is required to start trip" });
+      verifyPickupOtp(db, bookingId, otp);
+      allowTripStart = true;
+    }
+
+    const result = updateDispatchStatus(db, {
+      supplierId: booking.supplier_id,
+      bookingId: booking.id,
+      nextStatus,
+      actorId: req.user?.id || "OPS_AGENT",
+      note,
+      allowTripStart,
+    });
+
+    res.json({
+      success: true,
+      message: `Trip status updated to ${nextStatus}`,
+      assignment: result.assignment,
+      idempotent: result.idempotent,
+    });
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || "Failed to update trip status" });
   }
 });
 

@@ -160,6 +160,8 @@ export const authenticate = authentication.authenticate;
 export const optionalAuthenticate = authentication.optionalAuthenticate;
 export const authMiddleware = authenticate;
 export const optionalAuthMiddleware = optionalAuthenticate;
+export const authenticateBearer = authenticate;
+export const optionalBearer = optionalAuthenticate;
 
 export function requireRoles(...roles) {
   const allowed = new Set(roles.flat().map(normalizeRole));
