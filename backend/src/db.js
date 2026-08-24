@@ -961,7 +961,26 @@ CREATE TABLE IF NOT EXISTS newsletter_subscribers (
   unsubscribed_at TEXT,
   ip_address TEXT
 );
+
+-- 44. WALLET TRANSACTIONS & LOYALTY LEDGER
+CREATE TABLE IF NOT EXISTS wallet_transactions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  type TEXT NOT NULL,
+  amount_inr REAL NOT NULL,
+  balance_after_inr REAL NOT NULL,
+  reference_id TEXT,
+  description TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 `);
+
+try {
+  db.prepare("ALTER TABLE users ADD COLUMN wallet_balance_inr REAL DEFAULT 0.0").run();
+} catch {}
+try {
+  db.prepare("ALTER TABLE users ADD COLUMN referral_code TEXT").run();
+} catch {}
 
 // Seed default promo vouchers if not existing
 try {

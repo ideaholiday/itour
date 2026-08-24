@@ -192,6 +192,14 @@ export const api = {
     fetch("/api/newsletter/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
   getNewsletterStats: () =>
     fetch("/api/newsletter/stats", { headers: authHeaders() }).then(handle),
+  getLoyaltyProfile: () =>
+    fetch("/api/loyalty/profile", { headers: authHeaders() }).then(handle),
+  applyWalletCredits: (payload) =>
+    fetch("/api/loyalty/wallet/apply", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getPublicReferralInfo: (code) =>
+    fetch(`/api/loyalty/public-ref/${encodeURIComponent(code)}`).then(handle),
+  getLoyaltyLeaderboard: () =>
+    fetch("/api/loyalty/leaderboard", { headers: authHeaders() }).then(handle),
   get: (path) => fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { headers: authHeaders() }).then(handle),
   post: (path, payload) =>
     fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: payload ? JSON.stringify(payload) : undefined }).then(handle),

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft, CalendarDays, Check, Clock3, CreditCard, Info,
   LockKeyhole, MapPin, Navigation, ShieldCheck, Sparkles, Tag, TestTube2,
-  UserRound, Users
+  UserRound, Users, Wallet
 } from "lucide-react";
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
@@ -98,7 +98,20 @@ export default function Checkout() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
 
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [useWalletCredits, setUseWalletCredits] = useState(false);
+
   const [addonCalculation, setAddonCalculation] = useState({ addons: [], totalAddonsInr: 0 });
+
+  useEffect(() => {
+    if (user) {
+      api.getLoyaltyProfile()
+        .then((res) => {
+          if (res?.walletBalanceInr) setWalletBalance(Number(res.walletBalanceInr));
+        })
+        .catch(() => {});
+    }
+  }, [user]);
 
   const date = params.get("date") || new Date().toISOString().split("T")[0];
   const adults = Number(params.get("adults") || params.get("pax") || 1);
@@ -197,7 +210,10 @@ export default function Checkout() {
   const dropReady = !isTransfer || Boolean(dropLocation.trim().length >= 3);
 
   const discountAmount = appliedPromo ? Number(appliedPromo.discountAmount || 0) : 0;
-  const payableTotal = Math.max(0, totalAmount - discountAmount);
+  const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount);
+  const maxAllowedWalletCredit = Math.min(walletBalance, remainingBeforeWallet * 0.5, 2000);
+  const walletDiscountAmount = useWalletCredits ? Math.round(maxAllowedWalletCredit) : 0;
+  const payableTotal = Math.max(0, remainingBeforeWallet - walletDiscountAmount);
 
   const handleApplyPromo = async (overrideCode) => {
     const codeToValidate = String(overrideCode || promoInput).trim().toUpperCase();
@@ -747,7 +763,7 @@ export default function Checkout() {
                     </div>
                   )}
 
-                  {/* Promo Code Input Box */}
+                    {/* Promo Code Input Box */}
                   <div className="pt-2 border-t border-stone-100 space-y-2">
                     {appliedPromo ? (
                       <div className="flex items-center justify-between text-[11px] font-mono text-emerald-800">
@@ -783,6 +799,44 @@ export default function Checkout() {
                       <p className="text-[10px] font-mono text-rose-600">{promoError}</p>
                     )}
                   </div>
+
+                  {/* Wallet Credits Redemption */}
+                  {walletBalance > 0 && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={useWalletCredits}
+                            onChange={(e) => setUseWalletCredits(e.target.checked)}
+                            className="rounded border-stone-300 text-amber-800 focus:ring-amber-600 h-4 w-4"
+                          />
+                          <span className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                            <Wallet className="h-3.5 w-3.5 text-amber-800" />
+                            Apply Wallet Credits
+                          </span>
+                        </label>
+                        <span className="text-xs font-mono font-bold text-amber-900">
+                          ₹{walletBalance.toLocaleString("en-IN")} available
+                        </span>
+                      </div>
+                      {useWalletCredits && (
+                        <div className="flex justify-between items-center text-[11px] text-amber-900 font-semibold pt-1 border-t border-amber-200/60">
+                          <span>Discount Applied:</span>
+                          <span className="text-emerald-700 font-bold font-mono">−{formatPrice(walletDiscountAmount)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {walletDiscountAmount > 0 && (
+                    <div className="flex justify-between items-center text-emerald-700 font-bold bg-emerald-50 p-2 rounded-xl border border-emerald-200 text-xs">
+                      <span className="flex items-center gap-1.5">
+                        <Wallet className="w-3.5 h-3.5" /> Idea Holiday Wallet Credit
+                      </span>
+                      <span>−{formatPrice(walletDiscountAmount)}</span>
+                    </div>
+                  )}
 
                   <div className="flex items-end justify-between border-t border-stone-200 pt-3">
                     <div>

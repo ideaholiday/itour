@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { label: "Experiences", path: "/search?type=DAY_TOUR" },
   { label: "Transfers", path: "/transfers" },
   { label: "Multi-day Tours", path: "/search?type=MULTI_DAY_PACKAGE" },
+  { label: "Travel & Earn ✨", path: "/travel-and-earn" },
   { label: "How it works", path: "/how-it-works" },
 ];
 

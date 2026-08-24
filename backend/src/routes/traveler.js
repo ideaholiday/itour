@@ -9,6 +9,12 @@ import { ItineraryService } from "../services/itineraryService.js";
 import { BookingModificationService } from "../services/bookingModificationService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { subscribeNewsletter, unsubscribeNewsletter, getSubscriberStats } from "../services/newsletterService.js";
+import {
+  getTravelerLoyaltyProfile,
+  applyWalletCreditsToCheckout,
+  getPublicReferralInfo,
+  getLoyaltyLeaderboard,
+} from "../services/loyaltyService.js";
 
 const router = express.Router();
 
@@ -549,6 +555,48 @@ router.get("/newsletter/stats", authenticate, (req, res) => {
   }
   const stats = getSubscriberStats({ database: db });
   return res.json(stats);
+});
+
+// --- LOYALTY & REWARDS ("TRAVEL & EARN") ---
+router.get("/loyalty/profile", authenticate, (req, res) => {
+  try {
+    const profile = getTravelerLoyaltyProfile(db, req.user.id);
+    return res.json(profile);
+  } catch (err) {
+    logger.error("Failed to fetch loyalty profile", { error: err.message, userId: req.user?.id });
+    return res.status(400).json({ error: err.message || "FAILED_TO_LOAD_LOYALTY_PROFILE" });
+  }
+});
+
+router.post("/loyalty/wallet/apply", authenticate, (req, res) => {
+  try {
+    const { bookingAmountInr, requestedCreditInr } = req.body || {};
+    const calculation = applyWalletCreditsToCheckout(db, req.user.id, {
+      bookingAmountInr,
+      requestedCreditInr,
+    });
+    return res.json(calculation);
+  } catch (err) {
+    logger.error("Failed to apply wallet credits", { error: err.message, userId: req.user?.id });
+    return res.status(400).json({ error: err.message || "FAILED_TO_APPLY_WALLET_CREDITS" });
+  }
+});
+
+router.get("/loyalty/public-ref/:code", (req, res) => {
+  try {
+    const info = getPublicReferralInfo(db, req.params.code);
+    return res.json(info);
+  } catch (err) {
+    return res.status(400).json({ error: err.message || "INVALID_REFERRAL_CODE" });
+  }
+});
+
+router.get("/loyalty/leaderboard", authenticate, (req, res) => {
+  if (req.user.role !== "ADMIN" && req.user.role !== "OPS") {
+    return res.status(403).json({ error: "UNAUTHORIZED" });
+  }
+  const leaderboard = getLoyaltyLeaderboard(db);
+  return res.json(leaderboard);
 });
 
 export default router;

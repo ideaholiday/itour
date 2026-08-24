@@ -37,6 +37,7 @@ const UserProfile = React.lazy(() => import("./pages/UserProfile.jsx"));
 const WishlistPage = React.lazy(() => import("./pages/WishlistPage.jsx"));
 const TravelerMessages = React.lazy(() => import("./pages/TravelerMessages.jsx"));
 const TripSummary = React.lazy(() => import("./pages/TripSummary.jsx"));
+const TravelAndEarn = React.lazy(() => import("./pages/TravelAndEarn.jsx"));
 const NotFound404 = React.lazy(() => import("./pages/NotFound404.jsx"));
 
 function AppContent() {
@@ -89,6 +90,8 @@ function AppContent() {
             <Route path="/reviews" element={<MyReviews />} />
             <Route path="/trip-summary/:id" element={<TripSummary />} />
             <Route path="/trip/:id" element={<TripSummary />} />
+            <Route path="/travel-and-earn" element={<TravelAndEarn />} />
+            <Route path="/referrals" element={<TravelAndEarn />} />
             <Route path="/login" element={<Login />} />
             <Route path="/how-it-works" element={<HowItWorks />} />
             <Route path="/terms" element={<TermsPage />} />

@@ -464,8 +464,17 @@ export function UserProfile() {
                 Invite Friends to Idea Holiday
               </h3>
               <p className="text-xs text-stone-900/80 font-medium leading-relaxed">
-                Share your unique invite link with fellow travelers. Your friends get an instant ₹250 discount on their first booking, and you earn ₹250 wallet credit when their trip completes!
+                Share your unique invite link with fellow travelers. Your friends get an instant ₹250 discount on their first booking, and you earn up to ₹500 wallet credit when their trip completes!
               </p>
+              <div className="pt-2">
+                <Link
+                  to="/travel-and-earn"
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-stone-950 hover:bg-stone-900 text-white text-xs font-bold px-4 py-2 shadow-md transition"
+                >
+                  <span>Open Travel & Earn Rewards Hub</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
             </div>
             <Gift className="absolute -right-4 -bottom-4 w-36 h-36 text-amber-400/40 pointer-events-none" />
           </div>
