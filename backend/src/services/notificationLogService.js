@@ -39,22 +39,40 @@ export function beginNotificationDelivery({
 }
 
 export function finishNotificationDelivery(id, { status, providerMessageId, errorMessage }, database = db) {
-  database.prepare(`
-    UPDATE notification_deliveries
-    SET status = ?, provider_message_id = ?, error_message = ?,
-        sent_at = CASE WHEN ? IN ('SENT', 'DELIVERED') THEN datetime('now') ELSE sent_at END,
-        updated_at = datetime('now')
-    WHERE id = ?
-  `).run(status, providerMessageId || null, errorMessage || null, status, id);
+  const isDelivered = status === "SENT" || status === "DELIVERED";
+  if (isDelivered) {
+    database.prepare(`
+      UPDATE notification_deliveries
+      SET status = ?, provider_message_id = ?, error_message = ?,
+          sent_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(status, providerMessageId || null, errorMessage || null, id);
+  } else {
+    database.prepare(`
+      UPDATE notification_deliveries
+      SET status = ?, provider_message_id = ?, error_message = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(status, providerMessageId || null, errorMessage || null, id);
+  }
   return database.prepare("SELECT * FROM notification_deliveries WHERE id = ?").get(id);
 }
 
 export function updateProviderDeliveryStatus(providerMessageId, status, errorMessage = null, database = db) {
-  database.prepare(`
-    UPDATE notification_deliveries SET status = ?, error_message = COALESCE(?, error_message), updated_at = datetime('now'),
-      sent_at = CASE WHEN ? IN ('SENT', 'DELIVERED', 'READ') THEN COALESCE(sent_at, datetime('now')) ELSE sent_at END
-    WHERE provider_message_id = ?
-  `).run(status, errorMessage, status, providerMessageId);
+  const isDelivered = status === "SENT" || status === "DELIVERED" || status === "READ";
+  if (isDelivered) {
+    database.prepare(`
+      UPDATE notification_deliveries SET status = ?, error_message = COALESCE(?, error_message), updated_at = datetime('now'),
+        sent_at = COALESCE(sent_at, datetime('now'))
+      WHERE provider_message_id = ?
+    `).run(status, errorMessage, providerMessageId);
+  } else {
+    database.prepare(`
+      UPDATE notification_deliveries SET status = ?, error_message = COALESCE(?, error_message), updated_at = datetime('now')
+      WHERE provider_message_id = ?
+    `).run(status, errorMessage, providerMessageId);
+  }
   database.prepare(`
     UPDATE whatsapp_logs SET gateway_status = ?, error_message = COALESCE(?, error_message) WHERE provider_message_id = ?
   `).run(status, errorMessage, providerMessageId);
