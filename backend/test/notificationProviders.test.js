@@ -94,3 +94,54 @@ test("duplicate successful event keys are idempotent", async () => {
   database.close();
   restoreEnv("EMAIL_NOTIFICATIONS_ENABLED", previous);
 });
+
+test("Brevo (Sendinblue) email provider dispatches through API and logs messageId", async () => {
+  const previous = {
+    enabled: process.env.EMAIL_NOTIFICATIONS_ENABLED,
+    provider: process.env.EMAIL_PROVIDER,
+    key: process.env.BREVO_API_KEY,
+  };
+  process.env.EMAIL_NOTIFICATIONS_ENABLED = "true";
+  process.env.EMAIL_PROVIDER = "BREVO";
+  process.env.BREVO_API_KEY = "xkeysib-mock-test-key";
+
+  const database = notificationDatabase();
+  let capturedRequest;
+  const fetchImpl = async (url, options) => {
+    capturedRequest = { url, options, body: JSON.parse(options.body) };
+    return {
+      ok: true,
+      status: 201,
+      json: async () => ({ messageId: "<20260824-brevo-test-msg-id@smtp-relay.brevo.com>" }),
+    };
+  };
+
+  const result = await sendEmail({
+    to: "guest@example.com",
+    recipientName: "Rohan Gupta",
+    recipientRole: "TRAVELER",
+    eventType: "BOOKING_CONFIRMED",
+    eventKey: "brevo:test:1",
+    subject: "Your Booking is Confirmed!",
+    text: "Thank you for booking Taj Mahal Day Tour with Idea Holiday.",
+  }, { database, fetchImpl });
+
+  assert.equal(result.success, true);
+  assert.equal(result.status, "SENT");
+  assert.equal(result.providerMessageId, "<20260824-brevo-test-msg-id@smtp-relay.brevo.com>");
+  assert.equal(capturedRequest.url, "https://api.brevo.com/v3/smtp/email");
+  assert.equal(capturedRequest.options.headers["api-key"], "xkeysib-mock-test-key");
+  assert.equal(capturedRequest.body.to[0].email, "guest@example.com");
+  assert.equal(capturedRequest.body.sender.name, "Idea Holiday");
+
+  const logRow = database.prepare("SELECT * FROM email_logs WHERE recipient_email = ?").get("guest@example.com");
+  assert.ok(logRow);
+  assert.equal(logRow.provider, "BREVO");
+  assert.equal(logRow.status, "SENT");
+
+  database.close();
+  restoreEnv("EMAIL_NOTIFICATIONS_ENABLED", previous.enabled);
+  restoreEnv("EMAIL_PROVIDER", previous.provider);
+  restoreEnv("BREVO_API_KEY", previous.key);
+});
+
