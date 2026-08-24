@@ -68,6 +68,7 @@ import exportsRouter from "./routes/exports.js";
 import eventsRouter from "./routes/events.js";
 import currencyRouter from "./routes/currency.js";
 import promoRouter from "./routes/promo.js";
+import addonsRouter from "./routes/addons.js";
 import { swaggerSpec } from "./config/swagger.js";
 
 const app = express();
@@ -142,6 +143,7 @@ const mountApiRoutes = (prefix) => {
   app.use(prefix, eventsRouter);
   app.use(`${prefix}/currency`, currencyRouter);
   app.use(`${prefix}/promo`, promoRouter);
+  app.use(prefix, addonsRouter);
 };
 
 mountApiRoutes("/api");

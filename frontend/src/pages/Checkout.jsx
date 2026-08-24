@@ -98,12 +98,31 @@ export default function Checkout() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
 
+  const [addonCalculation, setAddonCalculation] = useState({ addons: [], totalAddonsInr: 0 });
+
   const date = params.get("date") || new Date().toISOString().split("T")[0];
   const adults = Number(params.get("adults") || params.get("pax") || 1);
   const children = Number(params.get("children") || 0);
   const luggage = Number(params.get("luggage") || 0);
   const vehicle = params.get("vehicle") || "SEDAN";
   const variant = params.get("variant") || "Standard Booking";
+  const addonsParam = params.get("addons") || "";
+
+  const selectedAddonIds = useMemo(() => {
+    return addonsParam ? addonsParam.split(",").filter(Boolean) : [];
+  }, [addonsParam]);
+
+  useEffect(() => {
+    if (selectedAddonIds.length > 0) {
+      api.calculateAddons({ selectedAddonIds, travelersCount: adults + children })
+        .then((res) => {
+          if (res?.success) setAddonCalculation(res);
+        })
+        .catch(() => {});
+    } else {
+      setAddonCalculation({ addons: [], totalAddonsInr: 0 });
+    }
+  }, [selectedAddonIds, adults, children]);
 
   useEffect(() => {
     let active = true;
@@ -161,7 +180,9 @@ export default function Checkout() {
   const rawBaseFare = Number(quote?.breakdown?.baseAmount || 0);
   const fastagTolls = Number(quote?.breakdown?.fastagTolls || 0) + Number(quote?.breakdown?.stateTax || 0);
   const gstTax = Number(quote?.breakdown?.gstAmount || 0);
-  const totalAmount = Number(quote?.breakdown?.totalAmount || 0);
+  const baseTotalAmount = Number(quote?.breakdown?.totalAmount || 0);
+  const addonsTotalAmount = Number(addonCalculation?.totalAddonsInr || 0);
+  const totalAmount = baseTotalAmount + addonsTotalAmount;
   const pickupLocation = isTransfer || joiningMethod === "PICKUP"
     ? pickupPoint.address
     : joiningMethod === "MEET"
@@ -287,8 +308,9 @@ export default function Checkout() {
         drop_lng: dropPoint.lng,
         flight_number: flightNumber.trim() || null,
         origin_state: params.get("originState"),
-        dest_state: params.get("destState"),
         special_requests: specialRequests.trim(),
+        promo_code: appliedPromo?.code || null,
+        selected_addons: addonCalculation.addons,
         adults, children, luggage_bags: luggage,
         vehicle_category: vehicle,
         variant_name: variant,
@@ -699,6 +721,21 @@ export default function Checkout() {
                   <div className="flex justify-between"><span>Server-verified fare</span><span className="text-stone-900 font-semibold">{formatPrice(rawBaseFare)}</span></div>
                   {fastagTolls > 0 && <div className="flex justify-between"><span>Tolls / route taxes</span><span className="text-stone-900 font-semibold">{formatPrice(fastagTolls)}</span></div>}
                   <div className="flex justify-between"><span>GST</span><span className="text-stone-900 font-semibold">{formatPrice(gstTax)}</span></div>
+
+                  {/* Selected Add-On Extras */}
+                  {addonCalculation.addons.length > 0 && (
+                    <div className="space-y-1.5 py-2 border-t border-dashed border-stone-200">
+                      <span className="block font-bold text-stone-800 text-[11px]">Selected Add-Ons:</span>
+                      {addonCalculation.addons.map((addon) => (
+                        <div key={addon.id} className="flex justify-between items-center text-[11px] text-stone-600">
+                          <span className="flex items-center gap-1">
+                            <span>{addon.icon}</span> {addon.title} {addon.quantity > 1 ? `(×${addon.quantity})` : ""}
+                          </span>
+                          <span className="font-mono font-semibold text-stone-900">+{formatPrice(addon.subtotalInr)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Promo Code Discount */}
                   {discountAmount > 0 && (

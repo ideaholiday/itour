@@ -154,11 +154,11 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
           id, ref, client_request_id, user_id, product_id, supplier_id, product_code, supplier_code, product_type, variant_name,
           activity_date, pickup_time, pickup_type, pickup_location, pickup_instructions, drop_location, drop_instructions,
           pickup_lat, pickup_lng, drop_lat, drop_lng, flight_number, flight_arrival_time, terminal_gate,
-          special_requests, promo_code, adults, children, luggage_bags, vehicle_category,
+          special_requests, promo_code, selected_addons, adults, children, luggage_bags, vehicle_category,
           traveler_name, traveler_phone, traveler_email, amount_inr, tolls_and_tax_amount,
           commission_amount, commission_rate_snapshot, supplier_payout_amount, payment_method, payment_status, status,
           supplier_assignment_status, supplier_assignment_method, supplier_assignment_score, supplier_assignment_reason, assigned_supplier_product_id, supplier_assigned_at, otp_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'pending_payment', 'RESERVED_PENDING_PAYMENT', 'RULE_ENGINE_V1', ?, ?, ?, datetime('now'), NULL)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'pending_payment', 'RESERVED_PENDING_PAYMENT', 'RULE_ENGINE_V1', ?, ?, ?, datetime('now'), NULL)`
       ).run(
         bookingId, ref, clientRequestId, userId, quote.product.id, selectedSupplier.supplierId,
         quote.product.product_code || quote.product.id, quote.product.supplier_code || selectedSupplier.supplierId,
@@ -170,7 +170,9 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         nullableNumber(req.body.drop_lat),
         nullableNumber(req.body.drop_lng),
         req.body.flight_number || null, req.body.flight_arrival_time || null, req.body.terminal_gate || null,
-        req.body.special_requests || null, req.body.promo_code || null, quote.adults, quote.children, quote.luggage,
+        req.body.special_requests || null, req.body.promo_code || null,
+        req.body.selected_addons ? (typeof req.body.selected_addons === "string" ? req.body.selected_addons : JSON.stringify(req.body.selected_addons)) : "[]",
+        quote.adults, quote.children, quote.luggage,
         quote.vehicleCategory, req.body.traveler_name.trim(), req.body.traveler_phone.trim(), req.body.traveler_email.trim().toLowerCase(),
         quote.totalAmount, quote.tolls + quote.stateTax + quote.gstAmount, assignmentCommissionAmount, selectedSupplier.commissionRate,
         assignmentSupplierPayout, String(req.body.payment_method || "DEMO").toUpperCase(),

@@ -934,6 +934,20 @@ CREATE TABLE IF NOT EXISTS traveler_itineraries (
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
+
+-- 42. PRODUCT ADD-ON EXTRAS
+CREATE TABLE IF NOT EXISTS product_addons (
+  id TEXT PRIMARY KEY,
+  product_id TEXT REFERENCES products(id),
+  category TEXT DEFAULT 'GENERAL',
+  title TEXT NOT NULL,
+  description TEXT,
+  price_inr REAL NOT NULL,
+  per_person INTEGER DEFAULT 0,
+  icon TEXT,
+  is_active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 `);
 
 // Seed default promo vouchers if not existing
@@ -945,6 +959,19 @@ try {
       ('promo_india500', 'INDIA500', 'Flat ₹500 discount on bookings above ₹2,500', 'FIXED', 500.0, 2500.0, 500.0, 5000, 1),
       ('promo_summer20', 'SUMMER20', '20% summer getaway discount up to ₹1,000', 'PERCENTAGE', 20.0, 2000.0, 1000.0, 2000, 1),
       ('promo_idea10', 'IDEA10', '10% instant checkout discount', 'PERCENTAGE', 10.0, 500.0, 500.0, 10000, 1)
+  `).run();
+} catch {}
+
+// Seed standard marketplace add-on extras
+try {
+  db.prepare(`
+    INSERT OR IGNORE INTO product_addons (id, product_id, category, title, description, price_inr, per_person, icon, is_active)
+    VALUES
+      ('addon_monument_vip', NULL, 'TICKETS', 'Monument Fast-Track VIP Entry Ticket', 'Skip standard ticket queues with priority skip-the-line entrance pass', 500.0, 1, '🎫', 1),
+      ('addon_pro_dslr_photo', NULL, 'PHOTOGRAPHY', 'Pro DSLR Photographer Package', 'Professional travel photographer delivering 25 edited high-resolution photos & reels', 1800.0, 0, '📸', 1),
+      ('addon_foreign_guide', NULL, 'GUIDE', 'Certified Foreign Language Guide', 'Government-certified tour guide fluent in French, German, Spanish, or Japanese', 2500.0, 0, '🎧', 1),
+      ('addon_child_seat', NULL, 'COMFORT', 'Infant / Child Safety Booster Car Seat', 'Sanitized ISOFIX child safety seat installed in private vehicle for trip duration', 300.0, 0, '💺', 1),
+      ('addon_lounge_access', NULL, 'LOUNGE', 'Executive Airport Lounge Access Pass', 'Complimentary buffet meals, high-speed Wi-Fi, and premium lounge shower facilities', 1200.0, 1, '☕', 1)
   `).run();
 } catch {}
 
@@ -1016,6 +1043,7 @@ safeAlter("bookings", "flight_arrival_time TEXT");
 safeAlter("bookings", "terminal_gate TEXT");
 safeAlter("bookings", "special_requests TEXT");
 safeAlter("bookings", "promo_code TEXT");
+safeAlter("bookings", "selected_addons TEXT DEFAULT '[]'");
 safeAlter("bookings", "luggage_bags INTEGER DEFAULT 0");
 safeAlter("bookings", "vehicle_category TEXT");
 safeAlter("bookings", "traveler_email TEXT");

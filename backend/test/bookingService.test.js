@@ -42,7 +42,7 @@ test("booking creation SQL statement has equal column and value expressions", ()
   const columns = insertMatch[1].split(",").map((value) => value.trim()).filter(Boolean);
   const values = insertMatch[2].split(",").map((value) => value.trim()).filter(Boolean);
 
-  assert.equal(columns.length, 48, "Production booking insert must include all 48 target columns");
-  assert.equal(values.length, 48, "Production booking insert must provide all 48 value expressions");
+  assert.equal(columns.length, 49, "Production booking insert must include all 49 target columns");
+  assert.equal(values.length, 49, "Production booking insert must provide all 49 value expressions");
   assert.equal(columns.length, values.length, "Target columns count must equal value expressions count");
 });

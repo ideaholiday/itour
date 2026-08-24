@@ -80,6 +80,31 @@ export default function ActivityDetail() {
   const [reviewRating, setReviewRating] = useState("ALL");
   const [eligibleBooking, setEligibleBooking] = useState(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [availableAddons, setAvailableAddons] = useState([]);
+  const [selectedAddonIds, setSelectedAddonIds] = useState([]);
+
+  useEffect(() => {
+    api.getProductAddons(id)
+      .then((res) => {
+        if (res?.addons) setAvailableAddons(res.addons);
+      })
+      .catch(() => {});
+  }, [id]);
+
+  const toggleAddon = (addonId) => {
+    setSelectedAddonIds((prev) =>
+      prev.includes(addonId) ? prev.filter((i) => i !== addonId) : [...prev, addonId]
+    );
+  };
+
+  const headcount = (adults || 1) + (children || 0);
+  const addonsTotalInr = useMemo(() => {
+    return selectedAddonIds.reduce((sum, addonId) => {
+      const addon = availableAddons.find((a) => a.id === addonId);
+      if (!addon) return sum;
+      return sum + (addon.perPerson ? addon.priceInr * headcount : addon.priceInr);
+    }, 0);
+  }, [selectedAddonIds, availableAddons, headcount]);
 
   const fetchReviews = (page = 1, append = false) => {
     setReviewLoading(true);
@@ -190,7 +215,17 @@ export default function ActivityDetail() {
   };
 
   const goToCheckout = () => {
-    const params = new URLSearchParams({ date, adults: String(adults), children: String(children), vehicle: isSharedTour ? "SHARED_SEAT" : selectedVehicle, variant: selectedVariantName || (isTransfer ? "Private chauffeur transfer" : "Standard option"), time: startTime });
+    const params = new URLSearchParams({
+      date,
+      adults: String(adults),
+      children: String(children),
+      vehicle: isSharedTour ? "SHARED_SEAT" : selectedVehicle,
+      variant: selectedVariantName || (isTransfer ? "Private chauffeur transfer" : "Standard option"),
+      time: startTime,
+    });
+    if (selectedAddonIds.length > 0) {
+      params.set("addons", selectedAddonIds.join(","));
+    }
     navigate(`/checkout/${id}?${params.toString()}`);
   };
 
@@ -508,12 +543,19 @@ export default function ActivityDetail() {
               <div>
                 <span className="text-xs font-semibold text-stone-500">{serverQuote ? "Your total" : "From"}</span>
                 <div className="mt-1 flex items-baseline gap-2">
-                  <strong className="font-display text-3xl text-stone-900">{formatPrice(serverQuote?.breakdown?.totalAmount ?? activity.priceInr ?? activity.price_inr)}</strong>
+                  <strong className="font-display text-3xl text-stone-900">
+                    {formatPrice((serverQuote?.breakdown?.totalAmount ?? activity.priceInr ?? activity.price_inr) + addonsTotalInr)}
+                  </strong>
                   {!serverQuote && <span className="text-xs text-stone-400">per person</span>}
                 </div>
+                {addonsTotalInr > 0 && (
+                  <span className="block text-[11px] text-amber-700 dark:text-amber-400 font-bold font-mono mt-0.5">
+                    Includes {formatPrice(addonsTotalInr)} in selected add-ons
+                  </span>
+                )}
                 {currency !== "INR" && (
                   <span className="block text-[10px] text-stone-400 font-mono mt-0.5">
-                    (₹{Number(serverQuote?.breakdown?.totalAmount ?? activity.priceInr ?? activity.price_inr ?? 0).toLocaleString("en-IN")})
+                    (₹{Number((serverQuote?.breakdown?.totalAmount ?? activity.priceInr ?? activity.price_inr ?? 0) + addonsTotalInr).toLocaleString("en-IN")})
                   </span>
                 )}
               </div>
@@ -575,6 +617,62 @@ export default function ActivityDetail() {
                     );
                   })}
                   <button type="button" onClick={checkAvailability} className="text-xs font-bold text-stone-500 hover:text-amber-800 transition">Change or refresh availability</button>
+                </div>
+              )}
+
+              {/* ── Optional Add-On Extras Customizer ── */}
+              {(isTransfer || selectedVariant) && availableAddons.length > 0 && (
+                <div className="space-y-3 border-t border-stone-200 pt-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" /> Enhance Your Trip (Add-Ons)
+                    </span>
+                    <span className="text-[10px] text-stone-400 font-mono">Optional</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {availableAddons.map((addon) => {
+                      const isSelected = selectedAddonIds.includes(addon.id);
+                      const addonCalculatedPrice = addon.perPerson ? addon.priceInr * headcount : addon.priceInr;
+
+                      return (
+                        <div
+                          key={addon.id}
+                          onClick={() => toggleAddon(addon.id)}
+                          className={`p-3 rounded-2xl border cursor-pointer transition flex items-start gap-3 ${
+                            isSelected
+                              ? "border-amber-500 bg-amber-50/70 shadow-xs"
+                              : "border-stone-200 bg-[#FAF9F6] hover:border-stone-300"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}} // Handled by parent div
+                            className="mt-1 h-4 w-4 rounded border-stone-300 text-amber-600 focus:ring-amber-500"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-xs font-bold text-stone-900 flex items-center gap-1">
+                                <span>{addon.icon}</span> {addon.title}
+                              </span>
+                              <span className="text-xs font-mono font-bold text-amber-800 shrink-0">
+                                +{formatPrice(addonCalculatedPrice)}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-stone-500 line-clamp-1 mt-0.5">
+                              {addon.description}
+                            </p>
+                            {addon.perPerson && (
+                              <span className="text-[10px] text-stone-400 font-mono">
+                                ({formatPrice(addon.priceInr)} &times; {headcount} travelers)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

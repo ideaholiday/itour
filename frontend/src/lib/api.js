@@ -166,6 +166,12 @@ export const api = {
     fetch(`/api/itineraries/${encodeURIComponent(id)}`, { headers: authHeaders() }).then(handle),
   deleteItinerary: (id) =>
     fetch(`/api/itineraries/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
+  getProductAddons: (productId) =>
+    fetch(`/api/addons${productId ? `?productId=${encodeURIComponent(productId)}` : ""}`).then(handle),
+  calculateAddons: (payload) =>
+    fetch("/api/addons/calculate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
+  createProductAddon: (payload) =>
+    fetch("/api/addons", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   get: (path) => fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { headers: authHeaders() }).then(handle),
   post: (path, payload) =>
     fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: payload ? JSON.stringify(payload) : undefined }).then(handle),

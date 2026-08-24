@@ -55,10 +55,14 @@ describe("Traveler Promo Codes & Referral Engine", () => {
 
   after(() => {
     // Cleanup
-    db.prepare("DELETE FROM user_referrals WHERE referrer_user_id IN (?, ?) OR referred_user_id IN (?, ?) OR booking_id = ?").run(user1Id, user2Id, user1Id, user2Id, bookingId);
-    db.prepare("DELETE FROM bookings WHERE id = ?").run(bookingId);
-    db.prepare("DELETE FROM promo_codes WHERE code IN ('TESTPCT50', 'TESTFIX200', 'TESTEXPIRED', 'TESTINACTIVE')").run();
-    db.prepare("DELETE FROM users WHERE id IN (?, ?)").run(user1Id, user2Id);
+    try {
+      db.prepare("DELETE FROM user_referrals WHERE referrer_user_id IN (?, ?) OR referred_user_id IN (?, ?) OR booking_id = ?").run(user1Id, user2Id, user1Id, user2Id, bookingId);
+      db.prepare("DELETE FROM payouts WHERE booking_id = ?").run(bookingId);
+      db.prepare("DELETE FROM reviews WHERE booking_id = ?").run(bookingId);
+      db.prepare("DELETE FROM bookings WHERE id = ?").run(bookingId);
+      db.prepare("DELETE FROM promo_codes WHERE code IN ('TESTPCT50', 'TESTFIX200', 'TESTEXPIRED', 'TESTINACTIVE')").run();
+      db.prepare("DELETE FROM users WHERE id IN (?, ?)").run(user1Id, user2Id);
+    } catch {}
   });
 
   it("calculates percentage discount accurately with maximum discount cap", () => {
