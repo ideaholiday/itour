@@ -8,6 +8,7 @@ import StarRating from "../components/StarRating.jsx";
 import DatePicker from "../components/ui/DatePicker.jsx";
 import ReviewGallery from "../components/traveler/ReviewGallery.jsx";
 import ReviewModal from "../components/ReviewModal.jsx";
+import PriceCalendarWidget from "../components/traveler/PriceCalendarWidget.jsx";
 import { useCurrency } from "../lib/currency.jsx";
 
 const VEHICLES = [
@@ -499,6 +500,31 @@ export default function ActivityDetail() {
                 </div>
               </section>
             )}
+
+            {/* ── Dynamic Price Calendar & Seasonality ── */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-display text-lg font-bold text-stone-900">
+                    Seasonal & Demand Price Calendar
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    Compare daily departure rates to find saver deals and avoid peak surcharges.
+                  </p>
+                </div>
+              </div>
+              <PriceCalendarWidget
+                productId={id}
+                basePrice={activity.priceInr || activity.price_inr || 1499}
+                selectedDate={date}
+                onSelectDate={(selectedDateStr) => {
+                  setDate(selectedDateStr);
+                  setAvailabilityChecked(false);
+                  setAvailabilityOptions([]);
+                  setServerQuote(null);
+                }}
+              />
+            </section>
 
             {/* ── Reviews ── */}
             <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">

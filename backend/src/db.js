@@ -975,6 +975,17 @@ try {
   `).run();
 } catch {}
 
+// Seed default dynamic pricing rules
+try {
+  db.prepare(`
+    INSERT OR IGNORE INTO pricing_rules (id, product_id, supplier_id, rule_type, title, start_date, end_date, day_of_week, min_group_size, adjustment_type, adjustment_value, priority, is_active)
+    VALUES
+      ('rule_weekend_surge_sat', NULL, NULL, 'WEEKEND_SURGE', 'Saturday Peak Demand Surcharge (+10%)', NULL, NULL, 6, NULL, 'PERCENT', 10.0, 1, 1),
+      ('rule_weekend_surge_sun', NULL, NULL, 'WEEKEND_SURGE', 'Sunday Peak Demand Surcharge (+10%)', NULL, NULL, 0, NULL, 'PERCENT', 10.0, 1, 1),
+      ('rule_group_discount', NULL, NULL, 'GROUP_DISCOUNT', 'Group Booking Discount (5+ Travelers, -10%)', NULL, NULL, NULL, 5, 'PERCENT', -10.0, 2, 1)
+  `).run();
+} catch {}
+
 
 // Add operational codes to databases created before the code fields existed.
 for (const statement of [

@@ -180,6 +180,14 @@ export const api = {
     fetch(`/api/bookings/${encodeURIComponent(bookingId)}/cancellation-preview`, { headers: authHeaders() }).then(handle),
   selfCancelBooking: (bookingId, payload) =>
     fetch(`/api/bookings/${encodeURIComponent(bookingId)}/self-cancel`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getSupplierPricingRules: (supplierId) =>
+    fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/pricing-rules`, { headers: authHeaders() }).then(handle),
+  createSupplierPricingRule: (supplierId, payload) =>
+    fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/pricing-rules`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  deleteSupplierPricingRule: (supplierId, ruleId) =>
+    fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/pricing-rules/${encodeURIComponent(ruleId)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
+  getProductPriceCalendar: (productId, month) =>
+    fetch(`/api/products/${encodeURIComponent(productId)}/price-calendar${month ? `?month=${encodeURIComponent(month)}` : ""}`).then(handle),
   get: (path) => fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { headers: authHeaders() }).then(handle),
   post: (path, payload) =>
     fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: payload ? JSON.stringify(payload) : undefined }).then(handle),

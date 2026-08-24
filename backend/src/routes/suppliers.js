@@ -34,6 +34,7 @@ import {
 import { nanoid } from "nanoid";
 import { validateBody } from "../middleware/validation.js";
 import { bookingSchemas, supplierSchemas } from "../validators/apiSchemas.js";
+import { PricingRuleService } from "../services/pricingRuleService.js";
 
 const router = express.Router();
 router.use(authenticate);
@@ -1533,6 +1534,37 @@ router.get("/:id/analytics/overview", optionalAuthMiddleware, requireSupplierAcc
       otpSuccessRate: 99.1,
     },
   });
+});
+
+// --- SUPPLIER DYNAMIC PRICING RULES ---
+router.get("/:id/pricing-rules", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  try {
+    const rules = PricingRuleService.getSupplierPricingRules(db, req.params.id);
+    return res.json({ rules });
+  } catch (err) {
+    logger.error("Failed to fetch supplier pricing rules", { error: err.message, supplierId: req.params.id });
+    return res.status(500).json({ error: "FAILED_TO_FETCH_PRICING_RULES" });
+  }
+});
+
+router.post("/:id/pricing-rules", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  try {
+    const created = PricingRuleService.createPricingRule(db, req.body, req.params.id);
+    return res.status(201).json({ rule: created });
+  } catch (err) {
+    logger.error("Failed to create pricing rule", { error: err.message, supplierId: req.params.id });
+    return res.status(400).json({ error: err.message || "FAILED_TO_CREATE_PRICING_RULE" });
+  }
+});
+
+router.delete("/:id/pricing-rules/:ruleId", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  try {
+    const success = PricingRuleService.deletePricingRule(db, req.params.ruleId, req.params.id);
+    return res.json({ success });
+  } catch (err) {
+    logger.error("Failed to delete pricing rule", { error: err.message, ruleId: req.params.ruleId });
+    return res.status(400).json({ error: err.message || "FAILED_TO_DELETE_PRICING_RULE" });
+  }
 });
 
 export default router;

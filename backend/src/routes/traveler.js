@@ -7,6 +7,7 @@ import logger from "../config/logger.js";
 import { sseService } from "../services/sseService.js";
 import { ItineraryService } from "../services/itineraryService.js";
 import { BookingModificationService } from "../services/bookingModificationService.js";
+import { PricingRuleService } from "../services/pricingRuleService.js";
 
 const router = express.Router();
 
@@ -432,6 +433,18 @@ router.post("/bookings/:id/self-cancel", authenticate, (req, res) => {
     logger.error("Failed to execute self-service cancellation", { error: err.message, bookingId: req.params.id });
     const status = err.message === "UNAUTHORIZED" ? 403 : err.message === "BOOKING_NOT_FOUND" ? 404 : 400;
     return res.status(status).json({ error: err.message || "FAILED_TO_CANCEL" });
+  }
+});
+
+// --- PRODUCT PRICE CALENDAR (DYNAMIC SURGE & SAVER DAYS) ---
+router.get("/products/:id/price-calendar", (req, res) => {
+  try {
+    const { month } = req.query;
+    const calendar = PricingRuleService.getMonthPriceCalendar(db, req.params.id, month);
+    return res.json(calendar);
+  } catch (err) {
+    logger.error("Failed to generate price calendar", { error: err.message, productId: req.params.id });
+    return res.status(500).json({ error: "FAILED_TO_GENERATE_PRICE_CALENDAR" });
   }
 });
 
