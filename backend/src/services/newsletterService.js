@@ -184,7 +184,7 @@ export async function subscribeNewsletter({
           </a>
         </div>
         <p style="font-size:13px;color:#78716c;margin-top:28px;border-top:1px solid #f5f5f4;padding-top:16px;">
-          Have questions or need help planning your trip? Reply directly to this email or reach us at <a href="mailto:info@ideaholiday.com" style="color:#B45309;">info@ideaholiday.com</a>.
+          Have questions or need help planning your trip? Reply directly to this email or reach us at <a href="mailto:info@ideaholiday.in" style="color:#B45309;">info@ideaholiday.in</a>.
         </p>
       </div>
       <div style="background:#F5F3ED;padding:16px 24px;text-align:center;font-size:12px;color:#78716c;border-top:1px solid #e7e5e4;">

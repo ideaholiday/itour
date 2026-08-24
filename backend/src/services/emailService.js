@@ -11,7 +11,7 @@ export function emailProviderConfiguration() {
   const brevoApiKey = process.env.BREVO_API_KEY || "";
   const provider = (process.env.EMAIL_PROVIDER || (brevoApiKey ? "BREVO" : "AMAZON_SES")).toUpperCase();
   const region = process.env.SES_REGION || process.env.AWS_REGION || "ap-south-1";
-  const fromEmail = process.env.BREVO_SENDER_EMAIL || process.env.SES_FROM_EMAIL || process.env.EMAIL_FROM || "info@ideaholiday.com";
+  const fromEmail = process.env.BREVO_SENDER_EMAIL || process.env.SES_FROM_EMAIL || process.env.EMAIL_FROM || "info@ideaholiday.in";
   const senderName = process.env.BREVO_SENDER_NAME || process.env.EMAIL_SENDER_NAME || "Idea Holiday";
 
   const isConfigured = provider === "BREVO"
@@ -64,7 +64,7 @@ export function plainTextToHtml(text) {
     </div>
     <div class="footer">
       <p>© ${new Date().getFullYear()} Idea Holiday Private Limited. All rights reserved.</p>
-      <p>For 24/7 travel concierge assistance, reach out at info@ideaholiday.com or +91 9219999214</p>
+      <p>For 24/7 travel concierge assistance, reach out at info@ideaholiday.in or +91 9219999214</p>
     </div>
   </div>
 </body>

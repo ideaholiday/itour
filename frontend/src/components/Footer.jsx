@@ -95,7 +95,7 @@ export default function Footer() {
           </div>
 
           <div className="mt-6 space-y-2 text-sm text-stone-600 border-t border-stone-200/80 pt-5">
-            <a href="mailto:info@ideaholiday.com" className="flex items-center gap-2 hover:text-amber-700"><Mail className="h-4 w-4 text-amber-600" /> info@ideaholiday.com</a>
+            <a href="mailto:info@ideaholiday.in" className="flex items-center gap-2 hover:text-amber-700"><Mail className="h-4 w-4 text-amber-600" /> info@ideaholiday.in</a>
             <a href="tel:+911800433200" className="flex items-center gap-2 hover:text-amber-700"><Phone className="h-4 w-4 text-amber-600" /> +91 1800-IDEA</a>
             <span className="flex items-center gap-2"><MapPin className="h-4 w-4 text-amber-600" /> India</span>
           </div>
