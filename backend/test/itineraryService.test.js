@@ -1,7 +1,7 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert";
 import Database from "better-sqlite3";
-import { ItineraryService } from "../src/services/itineraryService.js";
+import { ItineraryService, CURATED_CIRCUIT_TEMPLATES } from "../src/services/itineraryService.js";
 
 describe("ItineraryService", () => {
   let db;
@@ -53,6 +53,15 @@ describe("ItineraryService", () => {
     `);
   });
 
+  it("returns curated circuit templates with complete day plans", () => {
+    const templates = ItineraryService.getCuratedTemplates();
+    assert.strictEqual(templates.length, 4);
+    assert.ok(templates.some((t) => t.id === "template_golden_triangle"));
+    assert.ok(templates.some((t) => t.id === "template_kerala_backwaters"));
+    assert.ok(templates.some((t) => t.id === "template_goa_coastal"));
+    assert.ok(templates.some((t) => t.id === "template_varanasi_spiritual"));
+  });
+
   it("creates a new multi-day trip itinerary with items and computes total budget and duration", () => {
     const payload = {
       title: "Agra Heritage 2-Day Getaway",
@@ -80,6 +89,47 @@ describe("ItineraryService", () => {
     // Total duration = 6.0 + 3.0 + 4.5 = 13.5
     assert.strictEqual(created.totalDurationHours, 13.5);
     assert.strictEqual(created.items[0].product.title, "Sunrise Taj Mahal Tour");
+  });
+
+  it("clones a curated template into a traveler editable itinerary", () => {
+    const cloned = ItineraryService.cloneItinerary(db, "usr_1", "template_golden_triangle");
+    assert.ok(cloned.id.startsWith("itin_"));
+    assert.strictEqual(cloned.title, "My Golden Triangle Heritage Circuit");
+    assert.strictEqual(cloned.daysCount, 4);
+    assert.ok(cloned.items.length >= 6);
+  });
+
+  it("clones an existing user itinerary", () => {
+    const source = ItineraryService.createItinerary(db, "usr_1", {
+      title: "Family Trip to Goa",
+      destination: "Goa",
+      daysCount: 3,
+      items: [{ dayNumber: 1, timeSlot: "MORNING", title: "Beach Walk" }],
+    });
+
+    const cloned = ItineraryService.cloneItinerary(db, "usr_2", source.id);
+    assert.strictEqual(cloned.title, "Family Trip to Goa (Copy)");
+    assert.strictEqual(cloned.destination, "Goa");
+    assert.strictEqual(cloned.userId, "usr_2");
+  });
+
+  it("exports itinerary to clean markdown with day-by-day structure", () => {
+    const source = ItineraryService.createItinerary(db, "usr_1", {
+      title: "Quick Weekend Circuit",
+      destination: "Agra",
+      daysCount: 2,
+      items: [
+        { dayNumber: 1, timeSlot: "MORNING", title: "Sunrise Taj Mahal View", notes: "Entry at 6 AM" },
+        { dayNumber: 2, timeSlot: "EVENING", title: "Local Bazaar Shopping", notes: "Buy petha" },
+      ],
+    });
+
+    const exportText = ItineraryService.exportItineraryMarkdown(db, source.id, "usr_1");
+    assert.ok(exportText.includes("Quick Weekend Circuit"));
+    assert.ok(exportText.includes("Day 1:"));
+    assert.ok(exportText.includes("Sunrise Taj Mahal View"));
+    assert.ok(exportText.includes("Entry at 6 AM"));
+    assert.ok(exportText.includes("Day 2:"));
   });
 
   it("updates an existing itinerary", () => {

@@ -171,6 +171,16 @@ router.delete("/wishlists/:productId", authenticate, (req, res) => {
 });
 
 // --- TRAVELER ITINERARIES / TRIP PLANNER ---
+router.get("/itineraries/templates", (_req, res) => {
+  try {
+    const templates = ItineraryService.getCuratedTemplates();
+    return res.json({ success: true, templates });
+  } catch (err) {
+    logger.error("Failed to fetch curated itinerary templates", { error: err.message });
+    return res.status(500).json({ error: "FAILED_TO_FETCH_TEMPLATES" });
+  }
+});
+
 router.get("/itineraries", authenticate, (req, res) => {
   try {
     const itineraries = ItineraryService.getUserItineraries(db, req.user.id);
@@ -188,6 +198,28 @@ router.post("/itineraries", authenticate, (req, res) => {
   } catch (err) {
     logger.error("Failed to create itinerary", { error: err.message });
     return res.status(400).json({ error: err.message || "FAILED_TO_CREATE_ITINERARY" });
+  }
+});
+
+router.post("/itineraries/:id/clone", authenticate, (req, res) => {
+  try {
+    const itinerary = ItineraryService.cloneItinerary(db, req.user.id, req.params.id);
+    return res.status(201).json({ success: true, itinerary });
+  } catch (err) {
+    logger.error("Failed to clone itinerary", { error: err.message });
+    return res.status(400).json({ error: err.message || "FAILED_TO_CLONE_ITINERARY" });
+  }
+});
+
+router.get("/itineraries/:id/export", optionalAuthenticate, (req, res) => {
+  try {
+    const markdown = ItineraryService.exportItineraryMarkdown(db, req.params.id, req.user?.id || null);
+    return res.json({ success: true, markdown });
+  } catch (err) {
+    if (err.message === "ITINERARY_NOT_FOUND") return res.status(404).json({ error: "ITINERARY_NOT_FOUND" });
+    if (err.message === "FORBIDDEN") return res.status(403).json({ error: "FORBIDDEN" });
+    logger.error("Failed to export itinerary", { error: err.message });
+    return res.status(500).json({ error: "FAILED_TO_EXPORT_ITINERARY" });
   }
 });
 

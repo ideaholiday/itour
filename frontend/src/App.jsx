@@ -38,6 +38,7 @@ const WishlistPage = React.lazy(() => import("./pages/WishlistPage.jsx"));
 const TravelerMessages = React.lazy(() => import("./pages/TravelerMessages.jsx"));
 const TripSummary = React.lazy(() => import("./pages/TripSummary.jsx"));
 const TravelAndEarn = React.lazy(() => import("./pages/TravelAndEarn.jsx"));
+const CircuitPlanner = React.lazy(() => import("./pages/CircuitPlanner.jsx"));
 const NotFound404 = React.lazy(() => import("./pages/NotFound404.jsx"));
 
 function AppContent() {
@@ -92,6 +93,8 @@ function AppContent() {
             <Route path="/trip/:id" element={<TripSummary />} />
             <Route path="/travel-and-earn" element={<TravelAndEarn />} />
             <Route path="/referrals" element={<TravelAndEarn />} />
+            <Route path="/circuit-planner" element={<CircuitPlanner />} />
+            <Route path="/plan-trip" element={<CircuitPlanner />} />
             <Route path="/login" element={<Login />} />
             <Route path="/how-it-works" element={<HowItWorks />} />
             <Route path="/terms" element={<TermsPage />} />

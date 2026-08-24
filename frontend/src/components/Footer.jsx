@@ -5,7 +5,7 @@ import IdeaHolidayLogo from "./IdeaHolidayLogo.jsx";
 import { api } from "../lib/api.js";
 
 const footerGroups = [
-  { title: "Discover", links: [["Things to do", "/search"], ["Airport transfers", "/transfers"], ["Travel & Earn ✨", "/travel-and-earn"], ["How it works", "/how-it-works"], ["List your experience", "/supplier/signup"]] },
+  { title: "Discover", links: [["Things to do", "/search"], ["Airport transfers", "/transfers"], ["Plan Circuit 🗺️", "/circuit-planner"], ["Travel & Earn ✨", "/travel-and-earn"], ["How it works", "/how-it-works"], ["List your experience", "/supplier/signup"]] },
   { title: "Company", links: [["About us", "/about-us"], ["Contact us", "/contact-us"], ["My bookings", "/bookings"], ["Rewards & Referrals", "/travel-and-earn"], ["Help & support", "/contact-us"]] },
   { title: "Legal", links: [["Terms & Conditions", "/terms"], ["Cancellation & Refund", "/cancellation"], ["How Idea Holiday works", "/how-it-works"]] },
 ];

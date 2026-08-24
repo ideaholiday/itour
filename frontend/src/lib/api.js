@@ -158,12 +158,18 @@ export const api = {
     fetch(`/api/wishlists/${encodeURIComponent(productId)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
   getUserItineraries: () =>
     fetch("/api/itineraries", { headers: authHeaders() }).then(handle),
+  getItineraryTemplates: () =>
+    fetch("/api/itineraries/templates").then(handle),
   createItinerary: (payload) =>
     fetch("/api/itineraries", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   updateItinerary: (id, payload) =>
     fetch(`/api/itineraries/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  cloneItinerary: (id) =>
+    fetch(`/api/itineraries/${encodeURIComponent(id)}/clone`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() } }).then(handle),
   getPublicItinerary: (id) =>
     fetch(`/api/itineraries/${encodeURIComponent(id)}`, { headers: authHeaders() }).then(handle),
+  exportItinerary: (id) =>
+    fetch(`/api/itineraries/${encodeURIComponent(id)}/export`, { headers: authHeaders() }).then(handle),
   deleteItinerary: (id) =>
     fetch(`/api/itineraries/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
   getProductAddons: (productId) =>

@@ -705,9 +705,18 @@ export default function ActivityDetail() {
               {quoteError && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs leading-relaxed text-rose-700">{quoteError}</div>}
 
               {(isTransfer || selectedVariant) && (
-                <button type="button" disabled={!canContinue} onClick={goToCheckout} className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-4 text-sm font-bold text-stone-950 transition shadow-sm disabled:cursor-not-allowed disabled:opacity-40">
-                  Continue to booking <ArrowRight className="h-4 w-4" />
-                </button>
+                <div className="space-y-2">
+                  <button type="button" disabled={!canContinue} onClick={goToCheckout} className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-4 text-sm font-bold text-stone-950 transition shadow-sm disabled:cursor-not-allowed disabled:opacity-40">
+                    Continue to booking <ArrowRight className="h-4 w-4" />
+                  </button>
+                  <Link
+                    to={`/circuit-planner?addActivityId=${id}&destination=${encodeURIComponent(activity.destination || activity.city || "")}`}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-stone-300 bg-stone-50 hover:bg-stone-100 px-4 py-2.5 text-xs font-bold text-stone-700 transition"
+                  >
+                    <MapPin className="h-3.5 w-3.5 text-amber-700" />
+                    <span>Add to Multi-Day Circuit Planner</span>
+                  </Link>
+                </div>
               )}
 
               <div className="space-y-2 border-t border-stone-200 pt-4 text-[11px] leading-relaxed text-stone-500">
