@@ -6,6 +6,7 @@ import crypto from "crypto";
 import logger from "../config/logger.js";
 import { sseService } from "../services/sseService.js";
 import { ItineraryService } from "../services/itineraryService.js";
+import { BookingModificationService } from "../services/bookingModificationService.js";
 
 const router = express.Router();
 
@@ -381,6 +382,57 @@ router.get("/traveler/messages", authenticate, (req, res) => {
     supportThreads,
     bookingAlerts,
   });
+});
+
+// --- BOOKING RESCHEDULE & SELF-SERVICE CANCELLATION ---
+router.get("/bookings/:id/reschedule-eligibility", authenticate, (req, res) => {
+  try {
+    const result = BookingModificationService.checkRescheduleEligibility(db, req.params.id, req.user);
+    if (!result.eligible && result.error === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ error: "BOOKING_NOT_FOUND" });
+    }
+    if (!result.eligible && result.error === "UNAUTHORIZED") {
+      return res.status(403).json({ error: "UNAUTHORIZED" });
+    }
+    return res.json(result);
+  } catch (err) {
+    logger.error("Failed to check reschedule eligibility", { error: err.message, bookingId: req.params.id });
+    return res.status(500).json({ error: "FAILED_TO_CHECK_ELIGIBILITY" });
+  }
+});
+
+router.post("/bookings/:id/reschedule", authenticate, (req, res) => {
+  try {
+    const { newDate, newTime, reason } = req.body || {};
+    const result = BookingModificationService.requestReschedule(db, req.params.id, { newDate, newTime, reason }, req.user);
+    return res.json(result);
+  } catch (err) {
+    logger.error("Failed to reschedule booking", { error: err.message, bookingId: req.params.id });
+    return res.status(400).json({ error: err.message || "FAILED_TO_RESCHEDULE" });
+  }
+});
+
+router.get("/bookings/:id/cancellation-preview", authenticate, (req, res) => {
+  try {
+    const preview = BookingModificationService.calculateCancellationRefundPreview(db, req.params.id, req.user);
+    return res.json(preview);
+  } catch (err) {
+    logger.error("Failed to preview cancellation refund", { error: err.message, bookingId: req.params.id });
+    const status = err.message === "UNAUTHORIZED" ? 403 : err.message === "BOOKING_NOT_FOUND" ? 404 : 400;
+    return res.status(status).json({ error: err.message || "FAILED_TO_CALCULATE_REFUND" });
+  }
+});
+
+router.post("/bookings/:id/self-cancel", authenticate, (req, res) => {
+  try {
+    const { reason } = req.body || {};
+    const result = BookingModificationService.executeSelfServiceCancellation(db, req.params.id, { reason }, req.user);
+    return res.json(result);
+  } catch (err) {
+    logger.error("Failed to execute self-service cancellation", { error: err.message, bookingId: req.params.id });
+    const status = err.message === "UNAUTHORIZED" ? 403 : err.message === "BOOKING_NOT_FOUND" ? 404 : 400;
+    return res.status(status).json({ error: err.message || "FAILED_TO_CANCEL" });
+  }
 });
 
 export default router;

@@ -172,6 +172,14 @@ export const api = {
     fetch("/api/addons/calculate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
   createProductAddon: (payload) =>
     fetch("/api/addons", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getRescheduleEligibility: (bookingId) =>
+    fetch(`/api/bookings/${encodeURIComponent(bookingId)}/reschedule-eligibility`, { headers: authHeaders() }).then(handle),
+  rescheduleBooking: (bookingId, payload) =>
+    fetch(`/api/bookings/${encodeURIComponent(bookingId)}/reschedule`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getCancellationPreview: (bookingId) =>
+    fetch(`/api/bookings/${encodeURIComponent(bookingId)}/cancellation-preview`, { headers: authHeaders() }).then(handle),
+  selfCancelBooking: (bookingId, payload) =>
+    fetch(`/api/bookings/${encodeURIComponent(bookingId)}/self-cancel`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   get: (path) => fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { headers: authHeaders() }).then(handle),
   post: (path, payload) =>
     fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: payload ? JSON.stringify(payload) : undefined }).then(handle),

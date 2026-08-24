@@ -32,6 +32,7 @@ import CancellationRefundModal from "../components/checkout/CancellationRefundMo
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 import ReviewModal from "../components/ReviewModal.jsx";
+import BookingModificationModal from "../components/traveler/BookingModificationModal.jsx";
 
 const today = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00");
 const bookingDate = (booking) => new Date(`${booking.activity_date || booking.travel_date}T00:00:00`);
@@ -70,6 +71,8 @@ export default function MyBookings() {
   const [supportReply, setSupportReply] = useState("");
   const [supportSending, setSupportSending] = useState(false);
   const [reviewBooking, setReviewBooking] = useState(null);
+  const [modifyingBooking, setModifyingBooking] = useState(null);
+  const [modifyingTab, setModifyingTab] = useState("RESCHEDULE");
   const [message, setMessage] = useState("");
   const [notifications, setNotifications] = useState([]);
   const [preferences, setPreferences] = useState({ emailEnabled: true, whatsappEnabled: true });
@@ -740,6 +743,29 @@ export default function MyBookings() {
                             </span>
                           )}
 
+                          {isUpcoming(booking) && confirmed && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  setModifyingTab("RESCHEDULE");
+                                  setModifyingBooking(booking);
+                                }}
+                                className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50/80 px-3.5 py-2 text-xs font-bold text-amber-900 hover:bg-amber-100 transition shadow-2xs"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5 text-amber-700" /> Reschedule Date
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setModifyingTab("CANCEL");
+                                  setModifyingBooking(booking);
+                                }}
+                                className="inline-flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-xs font-bold text-rose-800 hover:bg-rose-100 transition"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" /> Cancel & Refund
+                              </button>
+                            </>
+                          )}
+
                           <button
                             onClick={() => {
                               setSupportInitialType("COMPLAINT");
@@ -749,18 +775,6 @@ export default function MyBookings() {
                           >
                             <Headphones className="h-3.5 w-3.5 text-amber-600" /> Concierge Help
                           </button>
-
-                          {isUpcoming(booking) && confirmed && (
-                            <button
-                              onClick={() => {
-                                setSupportInitialType("CANCELLATION");
-                                setCancelModalBooking(booking);
-                              }}
-                              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-xs font-bold text-rose-800 hover:bg-rose-100"
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" /> Request Cancellation
-                            </button>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -791,6 +805,15 @@ export default function MyBookings() {
           </div>
         )}
 
+        {modifyingBooking && (
+          <BookingModificationModal
+            isOpen={Boolean(modifyingBooking)}
+            onClose={() => setModifyingBooking(null)}
+            booking={modifyingBooking}
+            initialTab={modifyingTab}
+            onModificationSuccess={fetchBookings}
+          />
+        )}
         {cancelModalBooking && (
           <CancellationRefundModal
             booking={cancelModalBooking}
