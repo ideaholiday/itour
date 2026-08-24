@@ -1,15 +1,24 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Home, Search, Heart, User, Calendar } from "lucide-react";
+import { Home, Search, Heart, User, Calendar, Store, LayoutDashboard, ShieldCheck } from "lucide-react";
 
 export function MobileBottomNav({ user }) {
   const location = useLocation();
   const currentPath = location.pathname;
+  const userRole = String(user?.role || user?.user_metadata?.role || "").toUpperCase();
+
+  const roleItem = userRole === "SUPPLIER"
+    ? { label: "Portal", to: "/supplier", icon: Store }
+    : userRole === "ADMIN"
+    ? { label: "Admin", to: "/admin", icon: LayoutDashboard }
+    : userRole === "OPS" || userRole === "STAFF" || userRole === "DRIVER"
+    ? { label: "Ops", to: "/ops", icon: ShieldCheck }
+    : { label: "Saved", to: "/wishlist", icon: Heart };
 
   const navItems = [
     { label: "Home", to: "/", icon: Home },
     { label: "Search", to: "/search", icon: Search },
-    { label: "Saved", to: "/wishlist", icon: Heart },
+    roleItem,
     { label: "My Trips", to: "/my-bookings", icon: Calendar },
     { label: user ? "Profile" : "Login", to: user ? "/profile" : "/login", icon: User },
   ];

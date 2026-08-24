@@ -24,11 +24,13 @@ import {
   Copy,
   Check,
   Share2,
-  Tag,
   Users,
+  ArrowRight,
+  Store,
+  LayoutDashboard,
 } from "lucide-react";
-import { useAuth } from "../lib/auth";
-import api from "../lib/api";
+import { useAuth } from "../lib/auth.jsx";
+import api from "../lib/api.js";
 import Card, { CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import Input from "../components/ui/Input";
 import Button from "../components/ui/Button";
@@ -37,6 +39,7 @@ import Tabs from "../components/ui/Tabs";
 
 export function UserProfile() {
   const { user, login } = useAuth();
+  const userRole = String(user?.role || user?.user_metadata?.role || "").toUpperCase();
   const [profile, setProfile] = useState({
     name: user?.name || "",
     email: user?.email || "",
@@ -618,9 +621,32 @@ export function UserProfile() {
             </div>
             <p className="text-xs font-mono text-stone-500">{profile.email}</p>
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800/80 px-2.5 py-0.5 rounded-full">
-                  <Shield className="w-3 h-3 text-amber-600" /> Idea Holiday Verified Member
-                </span>
+                {userRole === "SUPPLIER" ? (
+                  <Link
+                    to="/supplier"
+                    className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-stone-950 bg-amber-500 hover:bg-amber-400 border border-amber-600 px-3 py-0.5 rounded-full shadow-xs transition"
+                  >
+                    <Store className="w-3.5 h-3.5 text-stone-950" /> Supplier Portal
+                  </Link>
+                ) : userRole === "ADMIN" ? (
+                  <Link
+                    to="/admin"
+                    className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-white bg-purple-600 hover:bg-purple-500 border border-purple-700 px-3 py-0.5 rounded-full shadow-xs transition"
+                  >
+                    <LayoutDashboard className="w-3.5 h-3.5 text-white" /> Admin Console
+                  </Link>
+                ) : userRole === "OPS" || userRole === "STAFF" || userRole === "DRIVER" ? (
+                  <Link
+                    to="/ops"
+                    className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-white bg-blue-600 hover:bg-blue-500 border border-blue-700 px-3 py-0.5 rounded-full shadow-xs transition"
+                  >
+                    <Shield className="w-3.5 h-3.5 text-white" /> Ops & Dispatch
+                  </Link>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 border border-amber-200/80 dark:border-amber-800/80 px-2.5 py-0.5 rounded-full">
+                    <Shield className="w-3 h-3 text-amber-600" /> Idea Holiday Verified Member
+                  </span>
+                )}
                 <Link
                   to="/my-reviews"
                   className="inline-flex items-center gap-1 text-[11px] font-bold text-stone-700 dark:text-stone-300 hover:text-amber-600 bg-stone-100 dark:bg-stone-800 px-2.5 py-0.5 rounded-full border border-stone-200 dark:border-stone-700 transition"

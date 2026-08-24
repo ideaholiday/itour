@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, Heart, Menu, MessageSquare, Search, Ticket, User, UserRound, X } from "lucide-react";
+import { ArrowRight, Heart, LayoutDashboard, Menu, MessageSquare, Search, ShieldCheck, Store, Ticket, User, UserRound, X } from "lucide-react";
 import { useAuth } from "../lib/auth.jsx";
 import IdeaHolidayLogo from "./IdeaHolidayLogo.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
@@ -34,6 +34,7 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const isHome = location.pathname === "/";
+  const userRole = String(user?.role || user?.user_metadata?.role || "").toUpperCase();
 
   useEffect(() => setMenuOpen(false), [location.pathname, location.search]);
   useEffect(() => {
@@ -103,12 +104,39 @@ export default function Navbar() {
             <span className="hidden xl:inline">Saved</span>
           </Link>
 
-          <Link
-            to="/supplier/signup"
-            className="hidden text-sm font-semibold text-stone-600 dark:text-stone-300 hover:text-amber-600 xl:block"
-          >
-            Become a partner
-          </Link>
+          {/* Role Dashboard Quick Action for Supplier/Admin/Ops */}
+          {userRole === "SUPPLIER" ? (
+            <Link
+              to="/supplier"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-amber-500 hover:bg-amber-400 text-stone-950 font-extrabold px-3.5 py-2 text-xs shadow-xs transition"
+            >
+              <Store className="h-4 w-4" />
+              <span>Supplier Portal</span>
+            </Link>
+          ) : userRole === "ADMIN" ? (
+            <Link
+              to="/admin"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-purple-600 hover:bg-purple-500 text-white font-extrabold px-3.5 py-2 text-xs shadow-xs transition"
+            >
+              <LayoutDashboard className="h-4 w-4" />
+              <span>Admin Console</span>
+            </Link>
+          ) : userRole === "OPS" || userRole === "STAFF" || userRole === "DRIVER" ? (
+            <Link
+              to="/ops"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-extrabold px-3.5 py-2 text-xs shadow-xs transition"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>Ops Panel</span>
+            </Link>
+          ) : (
+            <Link
+              to="/supplier/signup"
+              className="hidden text-sm font-semibold text-stone-600 dark:text-stone-300 hover:text-amber-600 xl:block"
+            >
+              Become a partner
+            </Link>
+          )}
 
           <Link
             to="/my-bookings"
@@ -189,12 +217,36 @@ export default function Navbar() {
           className="absolute inset-x-0 top-full z-50 h-[calc(100vh-68px)] overflow-y-auto border-t border-stone-200 bg-white px-5 py-6 shadow-2xl lg:hidden"
         >
           <nav className="mx-auto flex max-w-lg flex-col" aria-label="Mobile navigation">
+            {/* Quick Role Portal for Mobile */}
+            {userRole === "SUPPLIER" ? (
+              <Link to="/supplier" className="mb-4 rounded-2xl bg-amber-500 p-4 text-stone-950 font-bold shadow-md flex items-center justify-between">
+                <span className="flex items-center gap-2.5 text-base font-extrabold">
+                  <Store className="h-5 w-5" /> Open Supplier Portal
+                </span>
+                <ArrowRight className="h-5 w-5" />
+              </Link>
+            ) : userRole === "ADMIN" ? (
+              <Link to="/admin" className="mb-4 rounded-2xl bg-purple-600 p-4 text-white font-bold shadow-md flex items-center justify-between">
+                <span className="flex items-center gap-2.5 text-base font-extrabold">
+                  <LayoutDashboard className="h-5 w-5" /> Open Admin Console
+                </span>
+                <ArrowRight className="h-5 w-5" />
+              </Link>
+            ) : userRole === "OPS" || userRole === "STAFF" || userRole === "DRIVER" ? (
+              <Link to="/ops" className="mb-4 rounded-2xl bg-blue-600 p-4 text-white font-bold shadow-md flex items-center justify-between">
+                <span className="flex items-center gap-2.5 text-base font-extrabold">
+                  <ShieldCheck className="h-5 w-5" /> Open Operations Hub
+                </span>
+                <ArrowRight className="h-5 w-5" />
+              </Link>
+            ) : null}
+
             {NAV_ITEMS.map(({ label, path }, i) => (
               <NavLink
                 key={path}
                 to={path}
                 className={({ isActive }) =>
-                  `flex items-center justify-between border-b border-stone-100 py-5 text-xl font-bold ${
+                  `flex items-center justify-between border-b border-stone-100 py-4 text-lg font-bold ${
                     isActive ? "text-amber-600" : "text-stone-800"
                   }`
                 }
@@ -221,12 +273,14 @@ export default function Navbar() {
               ))}
             </div>
 
-            <Link to="/supplier/signup" className="rounded-2xl bg-amber-500 p-5 text-stone-950 font-bold shadow-md">
-              <span className="text-xs font-extrabold uppercase tracking-[.16em] text-stone-800">For local operators</span>
-              <span className="mt-2 flex items-center justify-between text-lg font-extrabold">
-                Grow with Idea Holiday <ArrowRight className="h-5 w-5" />
-              </span>
-            </Link>
+            {(!userRole || userRole === "TRAVELER") && (
+              <Link to="/supplier/signup" className="rounded-2xl bg-amber-500 p-5 text-stone-950 font-bold shadow-md">
+                <span className="text-xs font-extrabold uppercase tracking-[.16em] text-stone-800">For local operators</span>
+                <span className="mt-2 flex items-center justify-between text-lg font-extrabold">
+                  Grow with Idea Holiday <ArrowRight className="h-5 w-5" />
+                </span>
+              </Link>
+            )}
           </nav>
         </div>
       )}

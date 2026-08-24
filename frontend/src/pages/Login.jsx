@@ -15,8 +15,21 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { user, login } = useAuth();
 
+  const getRedirectTarget = (authenticatedUser) => {
+    if (from && from !== "/" && from !== "/login") {
+      return from;
+    }
+    const role = String(authenticatedUser?.role || authenticatedUser?.user_metadata?.role || "").toUpperCase();
+    if (role === "SUPPLIER") return "/supplier";
+    if (role === "ADMIN") return "/admin";
+    if (role === "OPS" || role === "STAFF" || role === "DRIVER") return "/ops";
+    return "/";
+  };
+
   useEffect(() => {
-    if (user) navigate(from, { replace: true });
+    if (user) {
+      navigate(getRedirectTarget(user), { replace: true });
+    }
   }, [user, from, navigate]);
 
   useEffect(() => {
@@ -42,7 +55,7 @@ export default function Login() {
       const fn = mode === "login" ? api.login : api.signup;
       const result = await fn({ ...form, email: form.email.trim(), name: form.name.trim() });
       login(result.token, result.user);
-      navigate(from, { replace: true });
+      navigate(getRedirectTarget(result.user), { replace: true });
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");
     } finally {
