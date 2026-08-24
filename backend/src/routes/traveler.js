@@ -8,6 +8,7 @@ import { sseService } from "../services/sseService.js";
 import { ItineraryService } from "../services/itineraryService.js";
 import { BookingModificationService } from "../services/bookingModificationService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
+import { subscribeNewsletter, unsubscribeNewsletter, getSubscriberStats } from "../services/newsletterService.js";
 
 const router = express.Router();
 
@@ -446,6 +447,108 @@ router.get("/products/:id/price-calendar", (req, res) => {
     logger.error("Failed to generate price calendar", { error: err.message, productId: req.params.id });
     return res.status(500).json({ error: "FAILED_TO_GENERATE_PRICE_CALENDAR" });
   }
+});
+
+// --- NEWSLETTER SUBSCRIPTION & UPDATES ---
+router.post("/newsletter/subscribe", async (req, res) => {
+  try {
+    const { email, name, source } = req.body || {};
+    const ipAddress = req.ip || req.headers["x-forwarded-for"] || null;
+    const result = await subscribeNewsletter({
+      email,
+      name,
+      source,
+      ipAddress,
+    }, { database: db });
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || "FAILED_TO_SUBSCRIBE" });
+    }
+
+    return res.json(result);
+  } catch (err) {
+    logger.error("Newsletter subscription route error", { error: err.message });
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+});
+
+router.get("/newsletter/unsubscribe", async (req, res) => {
+  try {
+    const { email, token } = req.query || {};
+    const result = await unsubscribeNewsletter({ email, token }, { database: db });
+
+    if (!result.success) {
+      if (req.accepts("html")) {
+        return res.status(400).send(`
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Unsubscribe Error - Idea Holiday</title>
+            <style>
+              body { font-family: system-ui, -apple-system, sans-serif; background: #FAF9F6; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+              .card { background: white; border: 1px solid #E7E5E4; border-radius: 12px; max-width: 480px; width: 100%; padding: 32px; text-align: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+              h1 { color: #DC2626; font-size: 22px; margin-top: 0; }
+              p { color: #57534E; font-size: 15px; line-height: 1.5; }
+              a { display: inline-block; margin-top: 20px; background: #B45309; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-weight: 500; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h1>Unsubscribe Request Failed</h1>
+              <p>${result.error || "The unsubscribe link is invalid or expired."}</p>
+              <a href="/">Return to Idea Holiday</a>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+      return res.status(400).json({ error: result.error });
+    }
+
+    if (req.accepts("html")) {
+      return res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Unsubscribed - Idea Holiday</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; background: #FAF9F6; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+            .card { background: white; border: 1px solid #E7E5E4; border-radius: 12px; max-width: 480px; width: 100%; padding: 32px; text-align: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+            .icon { font-size: 40px; margin-bottom: 12px; }
+            h1 { color: #1C1917; font-size: 22px; margin-top: 0; }
+            p { color: #57534E; font-size: 15px; line-height: 1.5; }
+            a { display: inline-block; margin-top: 20px; background: #B45309; color: white; text-decoration: none; padding: 10px 20px; border-radius: 6px; font-weight: 500; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon">✉️</div>
+            <h1>Unsubscribed Successfully</h1>
+            <p>You will no longer receive marketing updates from Idea Holiday. You can resubscribe anytime on our website.</p>
+            <a href="/">Return to Idea Holiday</a>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    return res.json(result);
+  } catch (err) {
+    logger.error("Newsletter unsubscribe route error", { error: err.message });
+    return res.status(500).json({ error: "INTERNAL_SERVER_ERROR" });
+  }
+});
+
+router.get("/newsletter/stats", authenticate, (req, res) => {
+  if (req.user.role !== "ADMIN" && req.user.role !== "OPS") {
+    return res.status(403).json({ error: "UNAUTHORIZED" });
+  }
+  const stats = getSubscriberStats({ database: db });
+  return res.json(stats);
 });
 
 export default router;

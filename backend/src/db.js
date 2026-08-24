@@ -948,6 +948,19 @@ CREATE TABLE IF NOT EXISTS product_addons (
   is_active INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+-- 43. NEWSLETTER SUBSCRIBERS
+CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT,
+  source TEXT DEFAULT 'FOOTER',
+  status TEXT DEFAULT 'ACTIVE',
+  brevo_contact_id TEXT,
+  subscribed_at TEXT DEFAULT (datetime('now')),
+  unsubscribed_at TEXT,
+  ip_address TEXT
+);
 `);
 
 // Seed default promo vouchers if not existing

@@ -188,6 +188,10 @@ export const api = {
     fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/pricing-rules/${encodeURIComponent(ruleId)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
   getProductPriceCalendar: (productId, month) =>
     fetch(`/api/products/${encodeURIComponent(productId)}/price-calendar${month ? `?month=${encodeURIComponent(month)}` : ""}`).then(handle),
+  subscribeNewsletter: (payload) =>
+    fetch("/api/newsletter/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
+  getNewsletterStats: () =>
+    fetch("/api/newsletter/stats", { headers: authHeaders() }).then(handle),
   get: (path) => fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { headers: authHeaders() }).then(handle),
   post: (path, payload) =>
     fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: payload ? JSON.stringify(payload) : undefined }).then(handle),

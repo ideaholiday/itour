@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, BadgeCheck, CalendarClock, Check, Clock, Headphones, Heart, IndianRupee, MapPin, ShieldCheck, Sparkles, Star, Users } from "lucide-react";
+import { ArrowRight, BadgeCheck, CalendarClock, Check, CheckCircle2, Clock, Headphones, Heart, IndianRupee, Loader2, Mail, MapPin, Send, ShieldCheck, Sparkles, Star, Users } from "lucide-react";
 import SearchBar from "../components/SearchBar.jsx";
 import SeoHead from "../components/SeoHead.jsx";
 import { api } from "../lib/api.js";
@@ -123,7 +123,40 @@ export default function Home() {
   const [destinations, setDestinations] = useState([]);
   const [bestsellers, setBestsellers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [nlEmail, setNlEmail] = useState("");
+  const [nlName, setNlName] = useState("");
+  const [nlStatus, setNlStatus] = useState("idle");
+  const [nlMessage, setNlMessage] = useState("");
   const scrollRef = useRef(null);
+
+  const handleNewsletterSubmit = async (e) => {
+    e.preventDefault();
+    if (!nlEmail || !nlEmail.includes("@")) return;
+
+    setNlStatus("loading");
+    setNlMessage("");
+
+    try {
+      const res = await api.subscribeNewsletter({
+        email: nlEmail.trim(),
+        name: nlName.trim() || undefined,
+        source: "HOME_CTA",
+      });
+
+      if (res && res.success) {
+        setNlStatus("success");
+        setNlMessage(res.message || "Thank you for subscribing! Check your inbox.");
+        setNlEmail("");
+        setNlName("");
+      } else {
+        setNlStatus("error");
+        setNlMessage(res?.error || "Failed to subscribe. Please try again.");
+      }
+    } catch (err) {
+      setNlStatus("error");
+      setNlMessage(err.message || "Something went wrong. Please try again.");
+    }
+  };
 
   // Cycle hero images
   useEffect(() => {
@@ -415,6 +448,85 @@ export default function Home() {
           >
             Learn more <ArrowRight className="h-4 w-4" />
           </Link>
+        </div>
+      </section>
+
+      {/* ─── NEWSLETTER SUBSCRIPTION SECTION ──────────────────────── */}
+      <section className="mx-auto max-w-7xl px-5 py-12 sm:px-8">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-amber-900 via-stone-900 to-stone-950 p-8 sm:p-12 shadow-xl border border-amber-800/30">
+          <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-amber-600/10 blur-3xl pointer-events-none" />
+          <div className="absolute -left-20 -bottom-20 h-64 w-64 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />
+
+          <div className="relative grid gap-8 lg:grid-cols-12 lg:items-center">
+            <div className="lg:col-span-7 space-y-3">
+              <div className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-400">
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>Insider Travel Club</span>
+              </div>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold text-white tracking-tight">
+                Stay Inspired. Get Secret Deals & Itineraries.
+              </h2>
+              <p className="text-sm text-stone-300 max-w-xl leading-relaxed">
+                Join 10,000+ travelers receiving weekly curated adventures, seasonal discounts, and handpicked local guide recommendations across India.
+              </p>
+            </div>
+
+            <div className="lg:col-span-5">
+              {nlStatus === "success" ? (
+                <div className="rounded-2xl bg-emerald-950/60 border border-emerald-500/40 p-6 text-center animate-in fade-in">
+                  <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto mb-3" />
+                  <h3 className="text-lg font-bold text-white mb-1">You're On The List! 🎉</h3>
+                  <p className="text-xs text-emerald-200">{nlMessage}</p>
+                </div>
+              ) : (
+                <form onSubmit={handleNewsletterSubmit} className="space-y-3">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      placeholder="Your name (optional)"
+                      value={nlName}
+                      onChange={(e) => setNlName(e.target.value)}
+                      className="w-full sm:w-1/3 rounded-xl border border-stone-700 bg-stone-900/90 px-4 py-3 text-sm text-white placeholder-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                    <input
+                      type="email"
+                      required
+                      placeholder="Enter your email address"
+                      value={nlEmail}
+                      onChange={(e) => {
+                        setNlEmail(e.target.value);
+                        if (nlStatus === "error") setNlStatus("idle");
+                      }}
+                      className="w-full sm:w-2/3 rounded-xl border border-stone-700 bg-stone-900/90 px-4 py-3 text-sm text-white placeholder-stone-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={nlStatus === "loading"}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 px-6 py-3 text-sm font-bold text-stone-950 shadow-lg shadow-amber-500/20 transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {nlStatus === "loading" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <>
+                        <span>Subscribe for Free</span>
+                        <Send className="h-4 w-4" />
+                      </>
+                    )}
+                  </button>
+
+                  {nlStatus === "error" && (
+                    <p className="text-xs text-rose-400 font-medium">{nlMessage}</p>
+                  )}
+
+                  <p className="text-[11px] text-stone-400 text-center">
+                    No spam ever. Unsubscribe with a single click anytime.
+                  </p>
+                </form>
+              )}
+            </div>
+          </div>
         </div>
       </section>
 
