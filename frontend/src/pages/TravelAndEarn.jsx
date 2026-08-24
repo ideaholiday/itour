@@ -12,6 +12,7 @@ import {
   Lock,
   MessageCircle,
   QrCode,
+  Send,
   Share2,
   Sparkles,
   TrendingUp,
