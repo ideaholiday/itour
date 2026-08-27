@@ -141,7 +141,9 @@ export function getBookingQuestions(db, optionId) {
     FROM booking_question_definitions q JOIN product_option_questions pq ON pq.question_id = q.id
     WHERE pq.option_id = ? ORDER BY pq.sort_order, q.code`).all(optionId).map((q) => ({
     code: q.code, label: q.label, answerType: q.answer_type, scope: q.scope,
-    required: q.required_override == null ? Boolean(q.required) : Boolean(q.required_override),
+    required: q.required_override == null
+      ? (q.required === 1 || q.required === true || q.required === "1" || q.required === "t" || q.required === "true")
+      : (q.required_override === 1 || q.required_override === true || q.required_override === "1" || q.required_override === "t" || q.required_override === "true"),
     unit: q.unit || null, helpText: q.help_text || null, allowedAnswers: json(q.allowed_answers, []), condition: json(q.condition_json, {}),
   }));
 }
