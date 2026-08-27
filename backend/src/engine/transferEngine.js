@@ -185,7 +185,7 @@ export function matchSupplierGeoFences(db, pickupLat, pickupLng, dropLat, dropLn
         `SELECT g.*, s.company_name, s.rating as supplier_rating, s.commission_rate
          FROM geo_fences g
          JOIN suppliers s ON g.supplier_id = s.id
-         WHERE g.is_active = TRUE AND COALESCE(g.approval_status, 'APPROVED') = 'APPROVED'`
+         WHERE COALESCE(g.is_active, 1) = 1 AND COALESCE(g.approval_status, 'APPROVED') = 'APPROVED'`
       )
       .all();
 

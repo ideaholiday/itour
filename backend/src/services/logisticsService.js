@@ -51,20 +51,20 @@ export function optionView(row, locations = []) {
 
 export function getProductOptions(db, productId) {
   if (!tableReady(db, "product_options")) return [];
-  const rows = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND is_active = TRUE ORDER BY name").all(productId);
-  return rows.map((row) => optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND is_active = TRUE ORDER BY sort_order, display_label").all(row.id)));
+  const rows = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY name").all(productId);
+  return rows.map((row) => optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY sort_order, display_label").all(row.id)));
 }
 
 export function getOption(db, productId, optionId) {
   if (!optionId || !tableReady(db, "product_options")) return null;
-  const row = db.prepare("SELECT * FROM product_options WHERE id = ? AND product_id = ? AND is_active = TRUE").get(optionId, productId);
-  return row ? optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND is_active = TRUE ORDER BY sort_order, display_label").all(row.id)) : null;
+  const row = db.prepare("SELECT * FROM product_options WHERE id = ? AND product_id = ? AND COALESCE(is_active, 1) = 1").get(optionId, productId);
+  return row ? optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY sort_order, display_label").all(row.id)) : null;
 }
 
 export function ensureDefaultProductOption(db, product) {
   if (!tableReady(db, "product_options") || !product?.id) return null;
-  const existing = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND is_active = TRUE ORDER BY created_at LIMIT 1").get(product.id);
-  if (existing) return optionView(existing, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND is_active = TRUE ORDER BY sort_order").all(existing.id));
+  const existing = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY created_at LIMIT 1").get(product.id);
+  if (existing) return optionView(existing, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY sort_order").all(existing.id));
   const route = product.product_type === "TRANSFER" ? db.prepare("SELECT * FROM transfer_routes WHERE product_id = ? LIMIT 1").get(product.id) : null;
   const dayTour = product.product_type === "DAY_TOUR" ? db.prepare("SELECT * FROM day_tours WHERE product_id = ? LIMIT 1").get(product.id) : null;
   const routeType = String(route?.route_type || "").toUpperCase();
@@ -176,7 +176,7 @@ export function validateOptionLogistics(db, productId, input = {}) {
   const refs = new Set((option.locations || []).map((location) => String(location.ref || "")).filter(Boolean));
   const pickupRef = String(input.pickup_location_ref || "");
   if (pickupRef && !["MEET_AT_DEPARTURE_POINT", "CONTACT_SUPPLIER_LATER"].includes(pickupRef) && !refs.has(pickupRef)) {
-    const canonical = (() => { try { return db.prepare("SELECT id FROM canonical_locations WHERE id = ? AND is_active = TRUE").get(pickupRef); } catch { return null; } })();
+    const canonical = (() => { try { return db.prepare("SELECT id FROM canonical_locations WHERE id = ? AND COALESCE(is_active, 1) = 1").get(pickupRef); } catch { return null; } })();
     if (!canonical && !option.allowCustomTravelerPickup && !(Number.isFinite(Number(input.pickup_lat)) && Number.isFinite(Number(input.pickup_lng)))) { const e = new Error("Select a valid pickup location for this option"); e.status = 400; e.code = "INVALID_LOCATION_REFERENCE"; throw e; }
   }
   return option;
@@ -230,13 +230,12 @@ export function persistBookingLogistics(db, bookingId, snapshot, answers = {}, a
   } catch {}
 }
 
-export function createBookingHold(db, { productId, optionId, activityDate, adults, children, amount, quote, logistics, bookingId = null, clientRequestId = null }) {
-  if (!tableReady(db, "booking_holds")) return { id: null, status: "UNSUPPORTED", expires_at: null };
-  const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60_000).toISOString();
-  const id = `hold_${nanoid(14)}`;
+export function createBookingHold(db, { productId, optionId = null, bookingId = null, activityDate, adults, children = 0, amount, quote = {}, logistics = {}, clientRequestId = null }) {
+  if (!tableReady(db, "booking_holds") || !productId || !activityDate || !adults || !amount) return null;
+  const id = `hld_${nanoid(12)}`;
+  const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000).toISOString();
   if (clientRequestId) {
-    const existing = db.prepare("SELECT * FROM booking_holds WHERE client_request_id = ?").get(clientRequestId);
-    if (existing && existing.status === "ACTIVE" && new Date(existing.expires_at).getTime() > Date.now()) return existing;
+    const existing = db.prepare("SELECT * FROM booking_holds WHERE client_request_id = ? AND status = 'ACTIVE' AND datetime(expires_at) > datetime('now')").get(clientRequestId);
     if (existing) {
       db.prepare("UPDATE booking_holds SET product_id=?, product_option_id=?, activity_date=?, adults=?, children=?, amount_inr=?, quote_snapshot=?, logistics_snapshot=?, status='ACTIVE', expires_at=?, consumed_at=NULL WHERE id=?").run(productId, optionId, activityDate, adults, children, amount, JSON.stringify(quote || {}), JSON.stringify(logistics || {}), expiresAt, existing.id);
       return db.prepare("SELECT * FROM booking_holds WHERE id = ?").get(existing.id);
@@ -249,7 +248,8 @@ export function createBookingHold(db, { productId, optionId, activityDate, adult
 
 export function expireBookingHolds(db) {
   if (!tableReady(db, "booking_holds")) return 0;
-  return db.prepare("UPDATE booking_holds SET status = 'EXPIRED' WHERE status = 'ACTIVE' AND expires_at <= CURRENT_TIMESTAMP").run().changes;
+  const now = new Date().toISOString();
+  return db.prepare("UPDATE booking_holds SET status = 'EXPIRED' WHERE status = 'ACTIVE' AND expires_at <= ?").run(now).changes;
 }
 
 export function consumeBookingHold(db, holdId, bookingId) {

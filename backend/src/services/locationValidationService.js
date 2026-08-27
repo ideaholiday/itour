@@ -48,7 +48,7 @@ function publicLocation(row) {
 function nearestLocation(db, point, { types = [], state = null, city = null } = {}) {
   let rows;
   try {
-    rows = db.prepare("SELECT * FROM canonical_locations WHERE COALESCE(is_active, TRUE) = TRUE").all();
+    rows = db.prepare("SELECT * FROM canonical_locations WHERE COALESCE(is_active, 1) = 1").all();
   } catch {
     // Migration 014 may not have been applied yet on an upgraded deployment.
     // Callers can still use the product's legacy route anchors safely.
@@ -105,7 +105,7 @@ function explicitRules(db, productId) {
       c.lng AS fixed_lng, c.radius_km AS fixed_radius_km
     FROM product_location_rules r
     LEFT JOIN canonical_locations c ON c.id = r.fixed_location_id
-    WHERE r.product_id = ? AND COALESCE(r.is_active, TRUE) = TRUE
+    WHERE r.product_id = ? AND COALESCE(r.is_active, 1) = 1
     `).all(productId);
   } catch {
     // Keep activity detail and quote flows available until migration 014 is
@@ -250,7 +250,7 @@ export function validatePickupPoint(db, productId, side, userLat, userLng, userA
   let needsOpsReview = false;
   if (mode === "FIXED_LOCATION") {
     let fixed = rule.fixed_location_id
-      ? db.prepare("SELECT * FROM canonical_locations WHERE id = ? AND COALESCE(is_active, TRUE) = TRUE").get(rule.fixed_location_id)
+      ? db.prepare("SELECT * FROM canonical_locations WHERE id = ? AND COALESCE(is_active, 1) = 1").get(rule.fixed_location_id)
       : null;
     if (!fixed) fixed = { lat: rule.fixed_lat ?? rule.center_lat, lng: rule.fixed_lng ?? rule.center_lng, radius_km: rule.fixed_radius_km ?? rule.radius_km ?? 3, name: rule.fixed_name };
     if (!coordinates(fixed.lat, fixed.lng)) return validationFailure(rule, normalizedSide, { reason: "RULE_MISCONFIGURED" });
@@ -464,7 +464,7 @@ export function getPickupSuggestions(db, productId, side, searchQuery = "") {
   const allowedTypes = parseJson(rule.allowed_location_types).map((type) => String(type).toUpperCase());
   let rows;
   try {
-    rows = db.prepare("SELECT * FROM canonical_locations WHERE COALESCE(is_active, TRUE) = TRUE").all();
+    rows = db.prepare("SELECT * FROM canonical_locations WHERE COALESCE(is_active, 1) = 1").all();
   } catch {
     // Before migration 014 is applied, expose the route's own anchor as a
     // safe, product-scoped suggestion rather than failing the endpoint.
