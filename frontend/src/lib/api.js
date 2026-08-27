@@ -22,6 +22,7 @@ async function handle(res) {
     const err = new Error(data.error || "Something went wrong");
     err.code = data.code || null;
     err.status = res.status;
+    err.details = data.detail || data.details || null;
     throw err;
   }
   return data;
@@ -72,11 +73,16 @@ export const api = {
     return fetch(url, { headers: authHeaders() }).then(handle);
   },
   getActivity: (id) => cachedFetch(`${BASE}/activities/${id}`, {}, 60000),
+  getActivityOptions: (id) => fetch(`${BASE}/activities/${encodeURIComponent(id)}/options`).then(handle),
+  getPickupSuggestions: (id, side, q = "") => fetch(`${BASE}/activities/${encodeURIComponent(id)}/pickup-suggestions?side=${encodeURIComponent(side)}&q=${encodeURIComponent(q)}`).then(handle),
+  validateProductPickup: (id, payload) => fetch(`${BASE}/activities/${encodeURIComponent(id)}/validate-pickup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
   signup: (payload) => fetch(`${BASE}/auth/signup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
   supplierSignup: (payload) => fetch(`${BASE}/auth/supplier-signup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
   login: (payload) => fetch(`${BASE}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
   createBooking: (payload) =>
     fetch(`${BASE}/bookings`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  createBookingHold: (payload) =>
+    fetch(`${BASE}/bookings/hold`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   getBookingQuote: (payload) =>
     fetch(`${BASE}/bookings/quote`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   completeDemoPayment: (payload) =>
@@ -92,6 +98,11 @@ export const api = {
   getNotificationPreferences: () => fetch(`${BASE}/bookings/notification-preferences`, { headers: authHeaders() }).then(handle),
   updateNotificationPreferences: (payload) => fetch(`${BASE}/bookings/notification-preferences`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   getBooking: (ref) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}`, { headers: authHeaders() }).then(handle),
+  getBookingStatus: (ref) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/status`, { headers: authHeaders() }).then(handle),
+  getBookingLogistics: (ref) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/logistics`, { headers: authHeaders() }).then(handle),
+  checkBookingAmendment: (ref, payload) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/amendment/check`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  quoteBookingAmendment: (ref, payload) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/amendment/quote`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  applyBookingAmendment: (ref, payload) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/amendment/apply`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   getBookingDocuments: (ref) => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/documents`, { headers: authHeaders() }).then(handle),
   resendGuestNotification: (ref, eventType = "DOCUMENTS") => fetch(`${BASE}/bookings/${encodeURIComponent(ref)}/notifications/resend`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ eventType }) }).then(handle),
   getSupportCases: (params = {}) => {
@@ -172,6 +183,42 @@ export const api = {
     fetch(`/api/itineraries/${encodeURIComponent(id)}/export`, { headers: authHeaders() }).then(handle),
   deleteItinerary: (id) =>
     fetch(`/api/itineraries/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
+  createCircuitQuote: (id, payload = {}) =>
+    fetch(`/api/itineraries/${encodeURIComponent(id)}/quote`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getCircuitQuote: (quoteId) =>
+    fetch(`/api/itineraries/quotes/${encodeURIComponent(quoteId)}`, { headers: authHeaders() }).then(handle),
+  createCircuitOrder: (payload, idempotencyKey) =>
+    fetch("/api/circuit-orders", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+        ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+      },
+      body: JSON.stringify(payload),
+    }).then(handle),
+  getCircuitOrder: (orderId) =>
+    fetch(`/api/circuit-orders/${encodeURIComponent(orderId)}`, { headers: authHeaders() }).then(handle),
+  createCircuitPaymentOrder: (orderId, payload) =>
+    fetch(`/api/circuit-orders/${encodeURIComponent(orderId)}/payment-order`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  verifyCircuitPayment: (orderId, payload) =>
+    fetch(`/api/circuit-orders/${encodeURIComponent(orderId)}/verify-payment`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  completeCircuitDemoPayment: (orderId) =>
+    fetch(`/api/circuit-orders/${encodeURIComponent(orderId)}/demo-payment`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: "{}" }).then(handle),
+  getCircuitManagement: (orderId) =>
+    fetch(`/api/circuit-orders/${encodeURIComponent(orderId)}/management`, { headers: authHeaders() }).then(handle),
+  previewCircuitCancellation: (orderId) =>
+    fetch(`/api/circuit-orders/${encodeURIComponent(orderId)}/cancellation-preview`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: "{}" }).then(handle),
+  previewCircuitReschedule: (orderId, newStartDate) =>
+    fetch(`/api/circuit-orders/${encodeURIComponent(orderId)}/reschedule-preview`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ newStartDate }) }).then(handle),
+  createCircuitManagementRequest: (orderId, payload) =>
+    fetch(`/api/circuit-orders/${encodeURIComponent(orderId)}/management-requests`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getCircuitManagementRequests: (params = {}) => {
+    const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value)).toString();
+    return fetch(`/api/circuit-orders/management/requests${query ? `?${query}` : ""}`, { headers: authHeaders() }).then(handle);
+  },
+  reviewCircuitManagementRequest: (requestId, payload) =>
+    fetch(`/api/circuit-orders/management/requests/${encodeURIComponent(requestId)}/review`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   getProductAddons: (productId) =>
     fetch(`/api/addons${productId ? `?productId=${encodeURIComponent(productId)}` : ""}`).then(handle),
   calculateAddons: (payload) =>

@@ -15,7 +15,8 @@ import {
   Shield,
   Layers,
   MessageSquare,
-  Headphones
+  Headphones,
+  Route
 } from "lucide-react";
 
 export default function OpsLayout({ children }) {
@@ -46,6 +47,13 @@ export default function OpsLayout({ children }) {
   }, [location.pathname]);
 
   const navItems = [
+    {
+      path: "/ops/circuits",
+      label: "Circuit Changes & Refunds",
+      icon: Route,
+      badge: null,
+      badgeColor: ""
+    },
     {
       path: "/ops/support",
       label: "Support & Disputes",

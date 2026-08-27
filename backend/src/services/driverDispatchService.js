@@ -226,6 +226,11 @@ export function updateDispatchStatus(database, { supplierId, bookingId, nextStat
       } catch {}
     }
     event(database, assignment, { eventType: "STATUS_CHANGED", previousStatus: current, newStatus: normalizedNext, actorId, note });
+    try {
+      const logisticsEvent = { EN_ROUTE: "DRIVER_EN_ROUTE", ARRIVED: "DRIVER_ARRIVED", TRIP_STARTED: "GUEST_PICKED_UP", COMPLETED: "DROPPED_OFF" }[normalizedNext];
+      if (logisticsEvent) database.prepare("INSERT INTO booking_logistics_events (id, booking_id, event_type, status, payload, actor_id) VALUES (?, ?, ?, ?, ?, ?)").run(`ble_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, bookingId, logisticsEvent, normalizedNext, JSON.stringify({ note: note || null }), actorId || null);
+      if (logisticsEvent) database.prepare("UPDATE booking_logistics SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE booking_id = ?").run(logisticsEvent, bookingId);
+    } catch {}
   })();
   return { assignment: database.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignment.id), idempotent: false };
 }

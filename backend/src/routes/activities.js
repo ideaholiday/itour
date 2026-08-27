@@ -1,6 +1,10 @@
 import { Router } from "express";
 import db from "../db.js";
 import logger from "../config/logger.js";
+import { getPickupSuggestions, getProductLocationContext, validatePickupPoint } from "../services/locationValidationService.js";
+import { validateBody } from "../middleware/validation.js";
+import { locationSchemas } from "../validators/apiSchemas.js";
+import { ensureDefaultProductOption, getBookingQuestions, getProductOptions } from "../services/logisticsService.js";
 
 const router = Router();
 
@@ -56,6 +60,15 @@ function parseProductRows(rows = []) {
     } catch (e) {}
   }
 
+  const dayTourMap = new Map();
+  if (productIds.length > 0) {
+    try {
+      const placeholders = productIds.map(() => "?").join(",");
+      const allDayTours = db.prepare(`SELECT * FROM day_tours WHERE product_id IN (${placeholders})`).all(...productIds);
+      for (const tour of allDayTours) dayTourMap.set(tour.product_id, tour);
+    } catch {}
+  }
+
   // 3. Batch Package Itineraries
   const packageMap = new Map();
   if (productIds.length > 0) {
@@ -92,9 +105,40 @@ function parseProductRows(rows = []) {
     } catch (e) {}
   }
 
+  // 6–10. Plan 14 supporting tables (ticket tiers, vehicle options, SIC hubs, hotel tiers, itinerary items)
+  const ticketTiersMap = new Map();
+  const vehicleOptionsMap = new Map();
+  const sicHubsMap = new Map();
+  const hotelTiersMap = new Map();
+  const itineraryItemsMap = new Map();
+  if (productIds.length > 0) {
+    const ph = productIds.map(() => "?").join(",");
+    try {
+      db.prepare(`SELECT * FROM product_ticket_tiers WHERE product_id IN (${ph}) AND COALESCE(is_active,1)=1 ORDER BY sort_order`).all(...productIds)
+        .forEach((r) => { if (!ticketTiersMap.has(r.product_id)) ticketTiersMap.set(r.product_id, []); ticketTiersMap.get(r.product_id).push(r); });
+    } catch {}
+    try {
+      db.prepare(`SELECT * FROM product_vehicle_options WHERE product_id IN (${ph}) AND COALESCE(is_active,1)=1 ORDER BY sort_order`).all(...productIds)
+        .forEach((r) => { if (!vehicleOptionsMap.has(r.product_id)) vehicleOptionsMap.set(r.product_id, []); vehicleOptionsMap.get(r.product_id).push(r); });
+    } catch {}
+    try {
+      db.prepare(`SELECT * FROM product_sic_hubs WHERE product_id IN (${ph}) AND COALESCE(is_active,1)=1 ORDER BY sort_order`).all(...productIds)
+        .forEach((r) => { if (!sicHubsMap.has(r.product_id)) sicHubsMap.set(r.product_id, []); sicHubsMap.get(r.product_id).push(r); });
+    } catch {}
+    try {
+      db.prepare(`SELECT * FROM product_hotel_tiers WHERE product_id IN (${ph}) AND COALESCE(is_active,1)=1 ORDER BY sort_order`).all(...productIds)
+        .forEach((r) => { if (!hotelTiersMap.has(r.product_id)) hotelTiersMap.set(r.product_id, []); hotelTiersMap.get(r.product_id).push(r); });
+    } catch {}
+    try {
+      db.prepare(`SELECT * FROM product_itinerary_items WHERE product_id IN (${ph}) ORDER BY sort_order`).all(...productIds)
+        .forEach((r) => { if (!itineraryItemsMap.has(r.product_id)) itineraryItemsMap.set(r.product_id, []); itineraryItemsMap.get(r.product_id).push(r); });
+    } catch {}
+  }
+
   return rows.map((row) => {
     const pricing = pricingMap.get(row.id) || [];
     const transferRoute = transferRouteMap.get(row.id) || null;
+    const dayTour = dayTourMap.get(row.id) || null;
     const packageItinerary = packageMap.get(row.id) || null;
     const supplier = supplierMap.get(row.supplier_id) || null;
     const verifiedQuality = qualityMap.get(row.id) || null;
@@ -146,13 +190,42 @@ function parseProductRows(rows = []) {
       supplierRating: supplier ? supplier.rating : 4.8,
       pricingVariants: pricing,
       transferRoute,
+      transferMeta: transferRoute ? {
+        ...transferRoute,
+        routeType: transferRoute.route_type,
+        serviceDirection: String(transferRoute.route_type).toUpperCase() === "AIRPORT_DROP" ? "DEPARTURE" : "ARRIVAL",
+        originName: transferRoute.origin_name,
+        originLat: Number(transferRoute.origin_lat),
+        originLng: Number(transferRoute.origin_lng),
+        destName: transferRoute.dest_name,
+        destLat: Number(transferRoute.dest_lat),
+        destLng: Number(transferRoute.dest_lng),
+        zoneName: String(transferRoute.route_type).toUpperCase() === "AIRPORT_DROP" ? transferRoute.origin_name : transferRoute.dest_name,
+        freeWaitingMins: Number(transferRoute.free_waiting_mins || 0),
+      } : null,
+      dayTour: dayTour ? {
+        ...dayTour,
+        availableTimeSlots: safeJsonParse(dayTour.available_time_slots, []),
+        placesCovered: safeJsonParse(dayTour.places_covered, []),
+        vehicleRules: safeJsonParse(dayTour.vehicle_rules, []),
+      } : null,
       packageItinerary: packageItinerary
         ? {
             ...packageItinerary,
             dayWiseDetails: safeJsonParse(packageItinerary.day_wise_details, []),
             hotelCategories: safeJsonParse(packageItinerary.hotel_categories, [])
           }
-        : null
+        : null,
+      // Plan 14 fields
+      productSubType: row.product_sub_type || null,
+      durationDays: row.duration_days || null,
+      highlights: safeJsonParse(row.highlights, []),
+      essentialInfo: safeJsonParse(row.essential_info, []),
+      ticketTiers: ticketTiersMap.get(row.id) || [],
+      vehicleOptions: vehicleOptionsMap.get(row.id) || [],
+      sicHubs: sicHubsMap.get(row.id) || [],
+      hotelTiers: hotelTiersMap.get(row.id) || [],
+      itineraryItems: itineraryItemsMap.get(row.id) || [],
     };
   });
 }
@@ -255,22 +328,21 @@ router.get("/activities", (req, res) => {
       }
     }
 
-    // Normalize product type filter (supports 'TRANSFER', 'transfers', 'DAY_TOUR', 'day-tours', 'packages', etc.)
-    const requestedType = (productType || type || "").trim().toLowerCase();
-    let normalizedProductType = "";
-    if (requestedType === "transfer" || requestedType === "transfers") {
-      normalizedProductType = "TRANSFER";
-    } else if (requestedType === "day_tour" || requestedType === "day-tour" || requestedType === "day-tours" || requestedType === "day_tours" || requestedType === "sightseeing") {
-      normalizedProductType = "DAY_TOUR";
-    } else if (requestedType === "multi_day_package" || requestedType === "multi-day-package" || requestedType === "multi-day-packages" || requestedType === "package" || requestedType === "packages") {
-      normalizedProductType = "MULTI_DAY_PACKAGE";
+    // Normalize product type filter
+    const requestedType = (productType || type || "").trim().toUpperCase();
+    if (requestedType === "PACKAGE" || requestedType === "PACKAGES" || requestedType === "MULTI_DAY_PACKAGE") {
+      sql += " AND p.product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE')";
+    } else if (requestedType === "TOUR" || requestedType === "TOURS" || requestedType === "DAY_TOUR") {
+      sql += " AND p.product_type IN ('TOUR', 'DAY_TOUR')";
+    } else if (requestedType === "TRANSFER" || requestedType === "TRANSFERS") {
+      sql += " AND p.product_type = 'TRANSFER'";
+    } else if (requestedType === "ATTRACTION" || requestedType === "ATTRACTIONS") {
+      sql += " AND p.product_type = 'ATTRACTION'";
+    } else if (requestedType === "EXPERIENCE" || requestedType === "EXPERIENCES") {
+      sql += " AND p.product_type = 'EXPERIENCE'";
     } else if (requestedType) {
-      normalizedProductType = requestedType.toUpperCase();
-    }
-
-    if (normalizedProductType) {
       sql += " AND p.product_type = ?";
-      params.push(normalizedProductType);
+      params.push(requestedType);
     }
 
     if (category) {
@@ -321,12 +393,76 @@ router.get("/activities", (req, res) => {
   }
 });
 
+function sendSuggestions(req, res) {
+  try {
+    const product = db.prepare("SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1").get(req.params.id);
+    if (!product) return res.status(404).json({ error: "Product not found", code: "PRODUCT_NOT_FOUND", requestId: req.requestId });
+    const side = String(req.query.side || req.body?.side || "PICKUP").toUpperCase();
+    const query = String(req.query.q || req.body?.q || "").slice(0, 100);
+    const suggestions = getPickupSuggestions(db, req.params.id, side, query);
+    res.json({ success: true, suggestions });
+  } catch (error) {
+    logger.error("Product pickup suggestions failed", { requestId: req.requestId, error });
+    res.status(500).json({ error: "Could not load pickup suggestions", requestId: req.requestId });
+  }
+}
+
+router.get("/activities/:id/pickup-suggestions", sendSuggestions);
+router.post("/activities/:id/pickup-suggestions", validateBody(locationSchemas.suggestions), sendSuggestions);
+
+router.post("/activities/:id/validate-pickup", validateBody(locationSchemas.validatePoint), (req, res) => {
+  const result = validatePickupPoint(db, req.params.id, req.body?.side || "PICKUP", req.body?.lat, req.body?.lng, req.body?.address);
+  if (!result.valid) return res.status(400).json({ ...result, requestId: req.requestId });
+  return res.json({ success: true, ...result });
+});
+
+router.get("/activities/:id/options", (req, res) => {
+  try {
+    const product = db.prepare("SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1").get(req.params.id);
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    const options = getProductOptions(db, product.id);
+    return res.json({ success: true, options: options.length ? options : [ensureDefaultProductOption(db, product)].filter(Boolean) });
+  } catch (error) { return res.status(500).json({ error: "Failed to load product options" }); }
+});
+
+router.get("/activities/:id/options/:optionId", (req, res) => {
+  try {
+    const option = getOption(db, req.params.id, req.params.optionId);
+    if (!option) return res.status(404).json({ error: "Product option not found" });
+    return res.json({ success: true, option, bookingQuestions: getBookingQuestions(db, option.id) });
+  } catch { return res.status(500).json({ error: "Failed to load product option" }); }
+});
+
 // GET /api/activities/:id
 router.get("/activities/:id", (req, res) => {
   try {
     const row = db.prepare("SELECT p.* FROM products p WHERE p.id = ? AND p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1").get(req.params.id);
     if (!row) return res.status(404).json({ error: "Product not found" });
     const product = parseProductRow(row);
+    const context = getProductLocationContext(db, row.id);
+    product.locationRules = context?.rules?.map((rule) => ({
+      side: rule.rule_side,
+      mode: rule.rule_mode,
+      allowedCity: rule.allowed_city,
+      allowedState: rule.allowed_state,
+      allowedLocationTypes: safeJsonParse(rule.allowed_location_types, []),
+      radiusKm: Number(rule.radius_km || rule.fixed_radius_km || 0) || null,
+      fixedLocation: rule.fixed_name ? {
+        id: rule.fixed_location_id,
+        name: rule.fixed_name,
+        shortName: rule.fixed_short_name,
+        iataCode: rule.fixed_iata_code,
+        type: rule.fixed_location_type,
+        lat: Number(rule.fixed_lat),
+        lng: Number(rule.fixed_lng),
+      } : null,
+      errorMessage: rule.error_message,
+      suggestion: rule.suggestion,
+    })) || [];
+    const defaultOption = ensureDefaultProductOption(db, row);
+    product.options = getProductOptions(db, row.id);
+    if (!product.options.length && defaultOption) product.options = [defaultOption];
+    product.bookingQuestions = product.options.flatMap((option) => getBookingQuestions(db, option.id));
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
     res.json(product);
   } catch (err) {

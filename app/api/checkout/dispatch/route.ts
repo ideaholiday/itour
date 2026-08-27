@@ -11,6 +11,7 @@ const locationSchema = z.object({
 
 const payloadSchema = z.object({
   productId: z.string().min(1),
+  optionId: z.string().min(1).optional(),
   supplierId: z.string().min(1),
   productType: z.enum(['TRANSFER', 'DAY_TOUR', 'MULTI_DAY_PACKAGE']),
   activityDate: z.string().min(8),
@@ -23,7 +24,8 @@ const payloadSchema = z.object({
   drop: locationSchema,
   flight: z.object({
     number: z.string().min(2),
-    scheduledArrival: z.string().min(4),
+    scheduledArrival: z.string().min(4).optional(),
+    scheduledDeparture: z.string().min(4).optional(),
     terminalGate: z.string().max(100),
   }).nullable(),
   fare: z.object({
@@ -35,7 +37,7 @@ const payloadSchema = z.object({
     promoCode: z.string().nullable(),
   }),
 }).superRefine((value, context) => {
-  if (value.productType === 'TRANSFER' && !value.flight) {
+  if (value.productType === 'TRANSFER' && (!value.flight || (!value.flight.scheduledArrival && !value.flight.scheduledDeparture))) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['flight'], message: 'Flight details are required for airport transfers.' });
   }
 });
@@ -51,6 +53,7 @@ export async function POST(request: NextRequest) {
   }
 
   const data = parsed.data;
+  const airportDeparture = Boolean(data.flight?.scheduledDeparture && !data.flight?.scheduledArrival);
   const backendUrl = (process.env.IDEA_HOLIDAY_API_URL || process.env.WANDERINDIA_API_URL || 'http://localhost:4000').replace(/\/$/, '');
 
   try {
@@ -59,11 +62,15 @@ export async function POST(request: NextRequest) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({
         product_id: data.productId,
+        product_option_id: data.optionId,
         activity_date: data.activityDate,
         traveler_name: data.traveler.name,
         traveler_phone: data.traveler.phone,
         traveler_email: data.traveler.email,
         pickup_location: data.pickup.address,
+        pickup_type: data.productType === 'TRANSFER' ? (airportDeparture ? 'HOTEL' : 'AIRPORT') : 'HOTEL',
+        pickup_location_ref: undefined,
+        drop_type: data.productType === 'TRANSFER' ? (airportDeparture ? 'AIRPORT' : 'HOTEL') : 'LOCATION',
         pickup_instructions: data.pickup.instructions,
         pickup_lat: data.pickup.lat,
         pickup_lng: data.pickup.lng,
@@ -71,9 +78,10 @@ export async function POST(request: NextRequest) {
         drop_instructions: data.drop.instructions,
         drop_lat: data.drop.lat,
         drop_lng: data.drop.lng,
-        pickup_time: data.flight?.scheduledArrival,
+        pickup_time: data.flight?.scheduledArrival || data.flight?.scheduledDeparture,
         flight_number: data.flight?.number,
         flight_arrival_time: data.flight?.scheduledArrival,
+        flight_departure_time: data.flight?.scheduledDeparture,
         terminal_gate: data.flight?.terminalGate,
         amount_inr: data.fare.total,
         tolls_and_tax_amount: data.fare.gst + data.fare.fastagAndAllowance,

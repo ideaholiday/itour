@@ -4,7 +4,8 @@ import { sendWhatsAppMessage, sendWhatsAppVoucher, whatsAppProviderConfiguration
 import { emailProviderConfiguration, sendEmail } from "../services/emailService.js";
 import { withoutPickupOtpSecrets } from "../services/bookingService.js";
 import { processExpiredSupplierAssignments } from "../services/assignmentSlaService.js";
-import { sendGuestBookingNotification } from "../services/notificationService.js";
+import { processExpiredCircuitReconfirmations } from "../services/circuitOrchestrationService.js";
+import { notifyCircuitReschedule, queueNotification, sendGuestBookingNotification } from "../services/notificationService.js";
 import {
   getLiveDispatchTelemetry,
   updateDriverCoordinates,
@@ -138,7 +139,14 @@ router.get("/live-trips", (req, res) => {
 // POST /api/ops/process-assignment-timeouts - Scheduler/admin safety net for expired supplier responses
 router.post("/process-assignment-timeouts", optionalAuthMiddleware, requireSchedulerOrRoles("ADMIN", "STAFF"), validateBody(opsSchemas.scheduler), (req, res) => {
   try {
-    return res.json({ success: true, ...processExpiredSupplierAssignments(db, { limit: req.body?.limit || 50 }) });
+    const limit = req.body?.limit || 50;
+    const circuitReconfirmations = processExpiredCircuitReconfirmations(db, { limit });
+    for (const orderId of circuitReconfirmations.orderIds) queueNotification(notifyCircuitReschedule(db, orderId, "REVIEW_REQUIRED"), "Circuit reconfirmation SLA notification");
+    return res.json({
+      success: true,
+      assignments: processExpiredSupplierAssignments(db, { limit }),
+      circuitReconfirmations,
+    });
   } catch (err) {
     return res.status(500).json({ error: "Assignment timeouts could not be processed" });
   }
@@ -202,7 +210,7 @@ router.post("/emergency-reallocate", validateBody(opsSchemas.reallocate), (req, 
 
     const pingedSuppliers = activeSuppliers.map((s) => {
       // Find supplier geo fence or center lat/lng
-      const fence = db.prepare("SELECT center_lat, center_lng FROM geo_fences WHERE supplier_id = ? AND is_active = 1 AND COALESCE(approval_status, 'APPROVED') = 'APPROVED' LIMIT 1").get(s.id);
+      const fence = db.prepare("SELECT center_lat, center_lng FROM geo_fences WHERE supplier_id = ? AND is_active = TRUE AND COALESCE(approval_status, 'APPROVED') = 'APPROVED' LIMIT 1").get(s.id);
       const sLat = fence ? fence.center_lat : 26.8467;
       const sLng = fence ? fence.center_lng : 80.9462;
 
@@ -372,6 +380,19 @@ router.get("/tasks", (req, res) => {
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch staff tasks" });
   }
+});
+
+// GET /api/ops/logistics-queue - operational worklist for unresolved pickup/drop logistics
+router.get("/logistics-queue", (req, res) => {
+  try {
+    const rows = db.prepare(`SELECT bl.*, b.ref AS booking_ref, b.activity_date, b.status AS booking_status,
+      b.traveler_name, b.traveler_phone, p.title AS product_title, s.company_name AS supplier_name
+      FROM booking_logistics bl JOIN bookings b ON b.id = bl.booking_id
+      LEFT JOIN products p ON p.id = b.product_id LEFT JOIN suppliers s ON s.id = b.supplier_id
+      WHERE bl.pending_supplier = TRUE OR bl.needs_ops_review = TRUE OR bl.status IN ('UNABLE_TO_LOCATE','PICKUP_CHANGE_REQUESTED')
+      ORDER BY bl.updated_at ASC`).all();
+    return res.json({ success: true, count: rows.length, queue: rows });
+  } catch (error) { return res.status(500).json({ error: "Failed to load logistics operations queue" }); }
 });
 
 // POST /api/ops/tasks/:id/update - Update staff task status

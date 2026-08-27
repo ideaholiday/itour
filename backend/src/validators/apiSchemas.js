@@ -31,11 +31,20 @@ export const authSchemas = {
 
 const bookingQuoteFields = {
   product_id: id.optional(), activity_id: id.optional(), activity_date: date,
+  product_option_id: id.optional(), pickup_mode: z.enum(["AIR", "RAIL", "SEA", "OTHER", "air", "rail", "sea", "other"]).optional(),
+  hold_id: id.optional(),
+  transfer_arrival_mode: z.enum(["AIR", "RAIL", "SEA", "OTHER", "air", "rail", "sea", "other"]).optional(),
+  transfer_departure_mode: z.enum(["AIR", "RAIL", "SEA", "OTHER", "air", "rail", "sea", "other"]).optional(),
+  pickup_location_ref: optionalText(240), drop_location_ref: optionalText(240), pickup_address: optionalText(500), drop_address: optionalText(500),
+  pickup_city: optionalText(100), pickup_state: optionalText(100), drop_type: optionalText(40), custom_pickup: booleanValue.optional(),
+  meeting_point_ref: optionalText(240), meeting_point_label: optionalText(500), booking_question_answers: z.record(z.any()).optional(),
   adults: count.optional(), passengers: count.optional(), children: count.optional(), luggage: count.optional(), luggage_bags: count.optional(),
   pickup_time: time.optional(), pickup_location: optionalText(500), drop_location: optionalText(500),
   pickup_lat: optionalCoordinate(-90, 90), pickup_lng: optionalCoordinate(-180, 180),
   drop_lat: optionalCoordinate(-90, 90), drop_lng: optionalCoordinate(-180, 180),
   vehicle_category: optionalText(80), variant_name: optionalText(160),
+  flight_number: optionalText(40), flight_arrival_time: time.optional().nullable(), flight_departure_time: time.optional().nullable(), terminal_gate: optionalText(80),
+  package_hotels: z.array(object({ day: z.coerce.number().int().min(1).max(60), name: optionalText(240), city: optionalText(100), lat: optionalCoordinate(-90, 90), lng: optionalCoordinate(-180, 180) })).max(60).optional(),
 };
 
 const requireBookingProduct = (value, ctx) => {
@@ -49,7 +58,7 @@ export const bookingCreateSchema = object({
   traveler_name: text(2, 120), traveler_email: email, traveler_phone: phone,
   pickup_location: text(2, 500), pickup_instructions: optionalText(1_000), drop_instructions: optionalText(1_000),
   special_requests: optionalText(2_000), promo_code: optionalText(80), client_request_id: optionalText(160),
-  flight_number: optionalText(40), terminal_gate: optionalText(80), payment_method: optionalText(40),
+  payment_method: optionalText(40),
 }).superRefine(requireBookingProduct);
 
 export const bookingSchemas = {
@@ -57,6 +66,89 @@ export const bookingSchemas = {
   otp: object({ otp: z.string().regex(/^\d{6}$/) }),
   status: object({ status: text(2, 60), reason: optionalText(1_000) }),
   resend: object({ channel: z.enum(["EMAIL", "WHATSAPP", "ALL", "email", "whatsapp", "all"]).optional() }),
+  amendment: object({ idempotencyKey: text(8, 160), amendmentType: z.enum(["PICKUP", "DROP", "LOGISTICS", "DATE", "TIME"]), proposed: z.record(z.any()), reason: optionalText(1_000) }),
+};
+
+const itineraryItemSchema = object({
+  id: optionalText(160),
+  dayNumber: z.coerce.number().int().min(1).max(30),
+  timeSlot: optionalText(80),
+  title: text(1, 240),
+  location: optionalText(500),
+  notes: optionalText(2_000),
+  productId: optionalText(160),
+  durationHours: z.coerce.number().positive().max(72).optional(),
+  type: z.enum(["TOUR", "TRANSFER", "EXPERIENCE", "STAY", "MEAL", "CUSTOM"]).optional(),
+  vehicleCategory: optionalText(80),
+  variantName: optionalText(160),
+});
+
+const itineraryFields = {
+  title: text(1, 160),
+  destination: optionalText(160),
+  startDate: date.optional(),
+  travelDate: date.optional(),
+  endDate: date.optional(),
+  daysCount: z.coerce.number().int().min(1).max(30).optional(),
+  adultsCount: z.coerce.number().int().min(1).max(30).optional(),
+  childrenCount: z.coerce.number().int().min(0).max(30).optional(),
+  items: z.array(itineraryItemSchema).max(120).optional(),
+  isPublic: booleanValue.optional(),
+};
+
+export const itinerarySchemas = {
+  create: object(itineraryFields),
+  update: object({
+    ...itineraryFields,
+    title: itineraryFields.title.optional(),
+  }),
+  quote: object({
+    startDate: date.optional(),
+    adultsCount: z.coerce.number().int().min(1).max(30).optional(),
+    childrenCount: z.coerce.number().int().min(0).max(30).optional(),
+    luggage: z.coerce.number().int().min(0).max(60).optional(),
+  }),
+};
+
+export const circuitOrderSchemas = {
+  create: object({
+    quoteId: id,
+    idempotencyKey: optionalText(160),
+    travelerName: optionalText(120),
+    travelerEmail: email.optional(),
+    travelerPhone: phone.optional(),
+  }),
+  paymentOrder: object({
+    provider: z.enum(["CASHFREE", "RAZORPAY", "cashfree", "razorpay"]),
+    returnUrl: optionalText(2_000),
+  }),
+  verifyPayment: object({
+    provider: z.enum(["CASHFREE", "RAZORPAY", "cashfree", "razorpay"]),
+    paymentOrderId: id,
+    paymentId: id.optional(),
+    signature: optionalText(512),
+  }).superRefine((value, ctx) => {
+    if (value.provider.toUpperCase() === "RAZORPAY" && (!value.paymentId || !value.signature)) {
+      ctx.addIssue({ code: "custom", path: ["signature"], message: "Razorpay payment ID and signature are required" });
+    }
+  }),
+  demoPayment: object({}),
+  cancellationPreview: object({}),
+  reschedulePreview: object({ newStartDate: date }),
+  managementRequest: object({
+    type: z.enum(["CANCELLATION", "RESCHEDULE", "cancellation", "reschedule"]),
+    reason: text(5, 1_000),
+    newStartDate: date.optional(),
+    idempotencyKey: text(8, 160),
+  }).superRefine((value, ctx) => {
+    if (value.type.toUpperCase() === "RESCHEDULE" && !value.newStartDate) {
+      ctx.addIssue({ code: "custom", path: ["newStartDate"], message: "New circuit start date is required" });
+    }
+  }),
+  managementReview: object({
+    action: z.enum(["APPROVE", "REJECT", "approve", "reject"]),
+    resolution: text(5, 2_000),
+  }),
 };
 
 export const checkoutSchemas = {
@@ -68,6 +160,20 @@ export const checkoutSchemas = {
   cancel: object({ bookingId: id.optional(), bookingRef: id.optional(), reason: text(3, 1_000) }),
   refund: object({ bookingId: id.optional(), bookingRef: id.optional(), reason: optionalText(1_000), refundPercentage: z.coerce.number().min(0).max(100).optional() }),
 };
+
+const locationRuleSchema = object({
+  side: z.enum(["PICKUP", "DROP", "pickup", "drop"]).optional(),
+  ruleSide: z.enum(["PICKUP", "DROP", "pickup", "drop"]).optional(),
+  mode: z.enum(["FIXED_LOCATION", "ZONE_POLYGON", "RADIUS_FROM_CENTER", "CITY_ANYWHERE"]).optional(),
+  ruleMode: z.enum(["FIXED_LOCATION", "ZONE_POLYGON", "RADIUS_FROM_CENTER", "CITY_ANYWHERE"]).optional(),
+  fixedLocationId: optionalText(160),
+  allowedLocationTypes: z.array(z.enum(["AIRPORT", "RAILWAY_STATION", "BUS_STAND", "HOTEL_ZONE", "CITY_CENTER", "LANDMARK", "CRUISE_PORT", "PICKUP_ZONE"])).max(8).optional(),
+  centerLat: optionalCoordinate(-90, 90), centerLng: optionalCoordinate(-180, 180),
+  radiusKm: z.coerce.number().positive().max(500).optional(),
+  allowedState: optionalText(100), allowedCity: optionalText(100),
+  polygonCoordinates: z.array(z.tuple([z.coerce.number(), z.coerce.number()])).max(1_000).optional(),
+  errorMessage: optionalText(1_000), suggestion: optionalText(1_000),
+});
 
 export const supplierSchemas = {
   registration: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100) }),
@@ -82,9 +188,34 @@ export const supplierSchemas = {
     gstin: optionalText(32),
   }),
   geofence: object({ zoneName: text(2, 160), city: text(2, 100), centerLat: z.coerce.number().min(-90).max(90), centerLng: z.coerce.number().min(-180).max(180), radiusKm: z.coerce.number().positive().max(500).optional(), polygonCoordinates: z.union([z.string().max(50_000), z.array(z.tuple([z.coerce.number(), z.coerce.number()])).max(1_000)]).optional() }),
-  product: object({ title: text(2, 240), productType: text(2, 80), city: text(2, 100), state: text(2, 100), priceInr: amount, shortDesc: optionalText(1_000), fullDesc: optionalText(10_000), durationHours: z.coerce.number().positive().max(720).optional() }),
+  product: object({
+    title: text(2, 240), productType: z.enum(["TRANSFER", "DAY_TOUR", "MULTI_DAY_PACKAGE"]),
+    city: text(2, 100), state: text(2, 100), priceInr: amount,
+    shortDesc: optionalText(1_500), fullDesc: optionalText(10_000),
+    durationHours: z.coerce.number().positive().max(720).optional(),
+    locationRules: z.array(locationRuleSchema).max(2).optional(),
+    options: z.array(object({
+      code: text(1, 80), name: text(1, 160), description: optionalText(1_000),
+      pickupOptionType: z.enum(["PICKUP_EVERYONE", "PICKUP_AND_MEET_AT_START_POINT", "MEET_EVERYONE_AT_START_POINT"]).optional(),
+      confirmationType: z.enum(["INSTANT", "MANUAL", "INSTANT_THEN_MANUAL"]).optional(),
+      supportedArrivalModes: z.array(z.enum(["AIR", "RAIL", "SEA", "OTHER"])).max(4).optional(),
+      supportedDepartureModes: z.array(z.enum(["AIR", "RAIL", "SEA", "OTHER"])).max(4).optional(),
+      availableStartTimes: z.array(time).max(48).optional(), allowCustomTravelerPickup: booleanValue.optional(),
+      pickupWindowMinutes: z.coerce.number().int().min(0).max(720).optional(), waitingTimeMinutes: z.coerce.number().int().min(0).max(720).optional(),
+      meetingPointRef: optionalText(240), endPoint: optionalText(500), locations: z.array(object({ ref: optionalText(240), pickupType: optionalText(40), mode: optionalText(20), displayLabel: text(1, 500), address: optionalText(500), city: optionalText(100), state: optionalText(100), lat: optionalCoordinate(-90, 90), lng: optionalCoordinate(-180, 180), isMeetingPoint: booleanValue.optional() })).max(100).optional(),
+    })).max(20).optional(),
+    dayTourMeta: object({
+      distanceKmLimit: z.coerce.number().positive().max(500).optional(),
+      availableTimeSlots: z.array(time).min(1).max(24).optional(),
+      vehicleRules: z.array(object({ pax_max: z.coerce.number().int().positive().max(100), category: optionalText(80) })).max(20).optional(),
+      maxGroupSize: z.coerce.number().int().positive().max(100).optional(),
+      advanceBookingCutoffHours: z.coerce.number().min(0).max(168).optional(),
+      operatingStartTime: time.optional(), operatingEndTime: time.optional(),
+      allowedLocationTypes: z.array(z.enum(["HOTEL_ZONE", "LANDMARK", "CITY_CENTER", "PICKUP_ZONE"])).max(4).optional(),
+    }).optional(),
+  }),
   publication: object({ isPublished: booleanValue.optional(), status: optionalText(40) }),
-  assignment: object({ bookingId: id.optional(), driverId: id.optional(), action: optionalText(80), reason: optionalText(1_000) }),
+  assignment: object({ bookingId: id.optional(), driverId: id.optional(), action: optionalText(80), reason: optionalText(1_000), note: optionalText(1_000) }),
   driver: object({ driverName: text(2, 120), driverPhone: phone, vehicleNumber: text(3, 40), vehicleModel: optionalText(120), vehicleCategory: optionalText(80), licenseNumber: optionalText(80) }),
   dispatch: object({ bookingId: id, pickup: object({ address: text(2, 500), instructions: optionalText(1_000), lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180) }), drop: object({ address: text(2, 500), instructions: optionalText(1_000), lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180) }), flight: z.object({ number: optionalText(40), scheduledArrival: optionalText(80), terminalGate: optionalText(80) }).passthrough().optional().nullable() }),
   status: object({ status: text(2, 80), reason: optionalText(1_000) }),
@@ -204,10 +335,15 @@ export const opsSchemas = {
 };
 
 export const transferSchema = object({
+  productId: id.optional(), product_id: id.optional(),
   pickup: optionalText(500), drop: optionalText(500), pickup_location: optionalText(500), drop_location: optionalText(500),
+  pickupAddress: optionalText(500), dropAddress: optionalText(500),
   pickupLat: optionalCoordinate(-90, 90), pickupLng: optionalCoordinate(-180, 180),
   dropLat: optionalCoordinate(-90, 90), dropLng: optionalCoordinate(-180, 180),
-  passengers: count.optional(), luggage: count.optional(), vehicleCategory: optionalText(80), routeType: optionalText(80), date: date.optional(), pickupTime: time.optional(),
+  originLat: optionalCoordinate(-90, 90), originLng: optionalCoordinate(-180, 180),
+  destLat: optionalCoordinate(-90, 90), destLng: optionalCoordinate(-180, 180),
+  passengers: count.optional(), luggage: count.optional(), vehicleCategory: optionalText(80), selectedVehicle: optionalText(80), routeType: optionalText(80), date: date.optional(), pickupTime: time.optional(),
+  flight_number: optionalText(40), flight_arrival_time: time.optional().nullable(), flight_departure_time: time.optional().nullable(), terminal_gate: optionalText(80),
 });
 
 export const metricsSchemas = {
@@ -219,4 +355,9 @@ export const metricsSchemas = {
     route: z.string().trim().startsWith("/").max(160),
     navigationType: z.string().trim().max(40).optional(),
   }).strict(),
+};
+
+export const locationSchemas = {
+  suggestions: object({ side: z.enum(["PICKUP", "DROP", "pickup", "drop"]).optional(), q: optionalText(100) }),
+  validatePoint: object({ side: z.enum(["PICKUP", "DROP", "pickup", "drop"]).optional(), lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180), address: optionalText(500) }),
 };

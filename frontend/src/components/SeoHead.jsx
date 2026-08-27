@@ -11,6 +11,7 @@ export default function SeoHead({
   image = "https://ideaholiday.in/idea-holiday-social.png",
   type = "website",
   jsonLd = null,
+  noindex = false,
 }) {
   useEffect(() => {
     // 1. Update Document Title
@@ -41,6 +42,7 @@ export default function SeoHead({
     // 3. Set Standard Meta
     setMetaTag("name", "description", description);
     setMetaTag("name", "keywords", keywords);
+    setMetaTag("name", "robots", noindex ? "noindex, nofollow" : "index, follow");
     setLinkTag("canonical", canonical);
 
     // 4. Set Open Graph Meta
@@ -68,7 +70,7 @@ export default function SeoHead({
     } else if (scriptTag) {
       scriptTag.remove();
     }
-  }, [title, description, keywords, canonical, image, type, jsonLd]);
+  }, [title, description, keywords, canonical, image, type, jsonLd, noindex]);
 
   return null;
 }

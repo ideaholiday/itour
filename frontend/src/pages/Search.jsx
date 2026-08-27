@@ -27,15 +27,17 @@ import SearchMapView from "../components/traveler/SearchMapView.jsx";
 import { SearchSuggestions } from "../components/traveler/SearchSuggestions.jsx";
 
 const TYPE_OPTIONS = [
-  { id: "", label: "All Experiences" },
-  { id: "DAY_TOUR", label: "🏛️ Day Sightseeing" },
-  { id: "TRANSFER", label: "🚗 Airport & City Cabs" },
-  { id: "MULTI_DAY_PACKAGE", label: "🌴 Multi-Day Packages" },
+  { id: "", label: "All Products" },
+  { id: "PACKAGE", label: "🎒 Packages" },
+  { id: "TOUR", label: "🗺️ Tours" },
+  { id: "TRANSFER", label: "🚗 Transfers" },
+  { id: "ATTRACTION", label: "🎡 Attractions" },
+  { id: "EXPERIENCE", label: "🤿 Experiences" },
 ];
 
 const GROUP_OPTIONS = [
   { id: "", label: "All Modes" },
-  { id: "SHARED", label: "👥 Shared / Group" },
+  { id: "SHARED", label: "👥 Shared (SIC)" },
   { id: "PRIVATE", label: "🚗 Private" },
 ];
 
@@ -44,7 +46,7 @@ const DURATION_OPTIONS = [
   { id: "short", label: "Under 4 hours", bucket: "short" },
   { id: "half_day", label: "4 to 8 hours (Half Day)", bucket: "half_day" },
   { id: "full_day", label: "Full Day (8–24h)", bucket: "full_day" },
-  { id: "multi_day", label: "Multi-Day Packages", bucket: "multi_day" },
+  { id: "multi_day", label: "Multi-Day (Packages)", bucket: "multi_day" },
 ];
 
 const VEHICLE_OPTIONS = [
@@ -73,14 +75,13 @@ const SORT_OPTIONS = [
 
 const POPULAR_DESTINATIONS = [
   { id: "goa", name: "Goa" },
+  { id: "bangkok", name: "Bangkok" },
+  { id: "pattaya", name: "Pattaya" },
   { id: "delhi", name: "Delhi NCR" },
   { id: "jaipur", name: "Jaipur" },
   { id: "agra", name: "Agra" },
-  { id: "varanasi", name: "Varanasi" },
-  { id: "udaipur", name: "Udaipur" },
   { id: "mumbai", name: "Mumbai" },
-  { id: "kochi", name: "Kochi" },
-  { id: "lucknow", name: "Lucknow" },
+  { id: "udaipur", name: "Udaipur" },
 ];
 
 function FilterSection({ title, children, defaultOpen = true }) {
@@ -131,11 +132,13 @@ export default function Search() {
   const freeCancellation = params.get("freeCancellation") === "1" || params.get("freeCancellation") === "true";
   const bestseller = params.get("bestseller") === "1" || params.get("bestseller") === "true";
 
-  const rawType = params.get("type") || "";
+  const rawType = (params.get("type") || params.get("productType") || "").toUpperCase();
   let type = rawType;
-  if (/^transfer/i.test(rawType)) type = "TRANSFER";
-  else if (/^day/i.test(rawType)) type = "DAY_TOUR";
-  else if (/^multi/i.test(rawType)) type = "MULTI_DAY_PACKAGE";
+  if (/^TRANSFER/i.test(rawType)) type = "TRANSFER";
+  else if (/^DAY|^TOUR/i.test(rawType)) type = "TOUR";
+  else if (/^MULTI|^PACK|^PKG/i.test(rawType)) type = "PACKAGE";
+  else if (/^ATTR/i.test(rawType)) type = "ATTRACTION";
+  else if (/^EXP/i.test(rawType)) type = "EXPERIENCE";
 
   useEffect(() => {
     setLocalQ(q);

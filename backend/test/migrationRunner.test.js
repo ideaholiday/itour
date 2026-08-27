@@ -54,6 +54,7 @@ DROP INDEX IF EXISTS idx_test_items_title;`
     assert.equal(postStatus.appliedCount, 2);
     assert.equal(postStatus.pendingCount, 0);
     assert.equal(postStatus.currentBatch, 1);
+    assert.ok(postStatus.migrations.every((migration) => migration.checksumMatches));
 
     // Rollback batch
     const rollbackResult = rollbackLastBatch(db, tempDir);
@@ -65,6 +66,68 @@ DROP INDEX IF EXISTS idx_test_items_title;`
     assert.equal(rollbackStatus.appliedCount, 0);
     assert.equal(rollbackStatus.pendingCount, 2);
     assert.equal(rollbackStatus.currentBatch, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("migration runner translates conditional column additions for SQLite", () => {
+  const db = new Database(":memory:");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "idea-holiday-migrations-"));
+
+  try {
+    db.exec("CREATE TABLE travelers (id TEXT PRIMARY KEY, name TEXT)");
+    fs.writeFileSync(
+      path.join(tempDir, "001_add_columns.sql"),
+      `ALTER TABLE travelers ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE travelers ADD COLUMN IF NOT EXISTS adults INTEGER DEFAULT 2;`,
+    );
+
+    const result = runPendingMigrations(db, tempDir);
+    assert.equal(result.applied.length, 1);
+    const columns = db.prepare("PRAGMA table_info('travelers')").all().map((column) => column.name);
+    assert.deepEqual(columns, ["id", "name", "adults"]);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("migration runner rolls back the complete pending batch after a failure", () => {
+  const db = new Database(":memory:");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "idea-holiday-migrations-"));
+
+  try {
+    fs.writeFileSync(path.join(tempDir, "001_create.sql"), "CREATE TABLE atomic_items (id TEXT PRIMARY KEY);");
+    fs.writeFileSync(path.join(tempDir, "002_fail.sql"), "INSERT INTO table_that_does_not_exist VALUES ('x');");
+
+    assert.throws(() => runPendingMigrations(db, tempDir));
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'atomic_items'").get(), undefined);
+    assert.equal(getMigrationStatus(db, tempDir).appliedCount, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("migration runner blocks edited migrations and ledger-only rollbacks", () => {
+  const db = new Database(":memory:");
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "idea-holiday-migrations-"));
+  const migrationPath = path.join(tempDir, "001_create.sql");
+
+  try {
+    fs.writeFileSync(migrationPath, "CREATE TABLE checksum_items (id TEXT PRIMARY KEY);");
+    runPendingMigrations(db, tempDir);
+
+    assert.throws(
+      () => rollbackLastBatch(db, tempDir),
+      (error) => error.code === "MIGRATION_DOWN_MISSING",
+    );
+    assert.equal(getMigrationStatus(db, tempDir).appliedCount, 1);
+
+    fs.writeFileSync(migrationPath, "CREATE TABLE checksum_items (id TEXT PRIMARY KEY, title TEXT);");
+    assert.throws(
+      () => runPendingMigrations(db, tempDir),
+      (error) => error.code === "MIGRATION_CHECKSUM_MISMATCH",
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

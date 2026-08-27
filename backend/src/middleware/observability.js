@@ -42,9 +42,21 @@ export function stableErrorResponses(req, res, next) {
     const safeError = status >= 500
       ? "An unexpected error occurred"
       : String(body?.error || "Request failed").slice(0, 300);
+    const safeDetailKeys = new Set([
+      "allowed_area", "allowed_state", "provided_distance_km", "radius_km",
+      "suggestion", "fixed_location", "detected_state", "detected_city",
+      "required_location_types", "nearest_matching_distance_km",
+      "available_time_slots", "required_hotels", "expected_city", "day",
+    ]);
+    const detail = body?.detail && typeof body.detail === "object"
+      ? Object.fromEntries(Object.entries(body.detail)
+          .filter(([key]) => safeDetailKeys.has(key))
+          .map(([key, value]) => [key, typeof value === "string" ? value.slice(0, 500) : value]))
+      : null;
     return sendJson({
       error: safeError,
       code: body?.code || defaultErrorCode(status),
+      ...(detail && Object.keys(detail).length ? { detail } : {}),
       requestId: req.requestId,
     });
   };

@@ -111,8 +111,11 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
     ALL: products.length,
     LIVE: products.filter(isLive).length,
     DRAFT: products.filter((product) => !isLive(product)).length,
-    TRANSFER: products.filter((p) => p.product_type === "TRANSFER").length,
-    TOUR: products.filter((p) => p.product_type !== "TRANSFER").length,
+    PACKAGE: products.filter((p) => ["PACKAGE", "MULTI_DAY_PACKAGE"].includes((p.product_type || "").toUpperCase())).length,
+    TOUR: products.filter((p) => ["TOUR", "DAY_TOUR"].includes((p.product_type || "").toUpperCase())).length,
+    TRANSFER: products.filter((p) => (p.product_type || "").toUpperCase() === "TRANSFER").length,
+    ATTRACTION: products.filter((p) => (p.product_type || "").toUpperCase() === "ATTRACTION").length,
+    EXPERIENCE: products.filter((p) => (p.product_type || "").toUpperCase() === "EXPERIENCE").length,
   }), [products]);
 
   const visibleProducts = useMemo(() => {
@@ -122,8 +125,14 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
       if (statusFilter === "DRAFT" && isLive(product)) return false;
 
       // Type filter
-      if (typeFilter === "TRANSFER" && product.product_type !== "TRANSFER") return false;
-      if (typeFilter === "TOUR" && product.product_type === "TRANSFER") return false;
+      if (typeFilter !== "ALL") {
+        const pType = (product.product_type || "").toUpperCase();
+        if (typeFilter === "PACKAGE" && !["PACKAGE", "MULTI_DAY_PACKAGE"].includes(pType)) return false;
+        if (typeFilter === "TOUR" && !["TOUR", "DAY_TOUR"].includes(pType)) return false;
+        if (typeFilter === "TRANSFER" && pType !== "TRANSFER") return false;
+        if (typeFilter === "ATTRACTION" && pType !== "ATTRACTION") return false;
+        if (typeFilter === "EXPERIENCE" && pType !== "EXPERIENCE") return false;
+      }
 
       // Search Query
       if (searchQuery.trim()) {
@@ -203,16 +212,16 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            to="/supplier/transfers/create"
+            to="/supplier/products/create"
             className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 bg-stone-50 hover:bg-stone-100 px-3.5 py-2.5 text-xs font-bold text-stone-800 shadow-sm"
           >
-            <Car className="h-4 w-4 text-amber-600" /> + Add Transfer
+            <Compass className="h-4 w-4 text-amber-600" /> Browse 5 Categories
           </Link>
           <Link
-            to="/supplier/tours/create"
+            to="/supplier/products/new"
             className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-2.5 text-xs font-extrabold text-stone-950 shadow-sm"
           >
-            <Plus className="h-4 w-4" /> + Add Day Tour / Activity
+            <Plus className="h-4 w-4" /> + New Product Wizard
           </Link>
         </div>
       </div>
@@ -241,11 +250,14 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
           </div>
 
           {/* Type filter */}
-          <div className="flex rounded-xl bg-[#FAF9F6] border border-stone-200 p-1">
+          <div className="flex flex-wrap rounded-xl bg-[#FAF9F6] border border-stone-200 p-1 gap-1">
             {[
               ["ALL", "All types"],
-              ["TRANSFER", `Transfers (${counts.TRANSFER})`],
+              ["PACKAGE", `Packages (${counts.PACKAGE})`],
               ["TOUR", `Tours (${counts.TOUR})`],
+              ["TRANSFER", `Transfers (${counts.TRANSFER})`],
+              ["ATTRACTION", `Attractions (${counts.ATTRACTION})`],
+              ["EXPERIENCE", `Experiences (${counts.EXPERIENCE})`],
             ].map(([val, label]) => (
               <button
                 key={val}
@@ -362,7 +374,7 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
               </div>
 
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <strong className="truncate text-sm font-bold text-stone-900">{product.title}</strong>
                   <button
                     type="button"
@@ -373,6 +385,28 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
                     {copiedId === product.id ? <Check className="w-2.5 h-2.5 text-emerald-600" /> : <Copy className="w-2.5 h-2.5 text-stone-400" />}
                     <span>ID: {product.id}</span>
                   </button>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wider border ${
+                      product.product_type === "PACKAGE"
+                        ? "bg-amber-100 text-amber-900 border-amber-300"
+                        : product.product_type === "TOUR"
+                        ? "bg-blue-100 text-blue-900 border-blue-300"
+                        : product.product_type === "TRANSFER"
+                        ? "bg-indigo-100 text-indigo-900 border-indigo-300"
+                        : product.product_type === "ATTRACTION"
+                        ? "bg-rose-100 text-rose-900 border-rose-300"
+                        : product.product_type === "EXPERIENCE"
+                        ? "bg-emerald-100 text-emerald-900 border-emerald-300"
+                        : "bg-stone-100 text-stone-800 border-stone-300"
+                    }`}
+                  >
+                    {product.product_type || "PRODUCT"}
+                  </span>
+                  {product.product_sub_type && (
+                    <span className="rounded-full bg-stone-100 border border-stone-200 px-2 py-0.5 text-[9px] font-semibold text-stone-700">
+                      {product.product_sub_type.replace(/_/g, " ")}
+                    </span>
+                  )}
                   <span
                     className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wider ${
                       live

@@ -153,7 +153,7 @@ function validateCapacity(vehicleCategory, passengers, luggage) {
 export function calculateBookingQuote(db, input, { enforceListingSupplierAvailability = true } = {}) {
   const productId = input.product_id || input.activity_id;
   const product = db.prepare(
-    `SELECT p.*, s.kyb_status, s.commission_rate, s.supplier_code
+    `SELECT p.*, s.kyb_status, s.commission_rate, s.supplier_code, s.company_name AS supplier_name
      FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id
      WHERE p.id = ?`
   ).get(productId);
@@ -194,16 +194,17 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
       throw error;
     }
   }
-  // Vehicle capacity is a transport constraint, not a package-room constraint.
-  // Multi-day products can price larger parties per person even when their
-  // day-one transfer vehicle is assigned later by the operator.
-  if (product.product_type !== "MULTI_DAY_PACKAGE") validateCapacity(vehicleCategory, passengers, luggage);
+  // Vehicle capacity is a transport constraint, not a package-room or ticket constraint.
+  const isNonVehicleProduct = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(product.product_type) ||
+    ["TICKET_ONLY", "SIC", "TICKET_SIC"].includes(product.product_sub_type);
+  if (!isNonVehicleProduct) validateCapacity(vehicleCategory, passengers, luggage);
   const commissionRate = resolveCommissionRate(db, product.supplier_id, product.product_type);
   let baseAmount;
   let tolls = 0;
   let stateTax = 0;
   let gstAmount = 0;
   let totalAmount;
+  let nightAllowance = 0;
   let pricingModel = "FIXED";
   let variantName = String(input.variant_name || "Standard Booking");
 
@@ -221,20 +222,74 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
       vehicleCategory,
       commissionRatePercent: commissionRate
     });
-    baseAmount = transferQuote.costBreakdown.baseFare;
+    const route = db.prepare("SELECT route_type, night_allowance_inr FROM transfer_routes WHERE product_id = ? LIMIT 1").get(product.id);
+    const flightTime = String(route?.route_type || "").toUpperCase() === "AIRPORT_DROP"
+      ? input.flight_departure_time : input.flight_arrival_time;
+    const flightHour = Number(String(flightTime || "").match(/^(\d{1,2})/)?.[1]);
+    if (Number.isFinite(flightHour) && (flightHour >= 22 || flightHour < 6)) {
+      nightAllowance = roundMoney(route?.night_allowance_inr || 0);
+    }
+    baseAmount = transferQuote.costBreakdown.baseFare + nightAllowance;
     tolls = transferQuote.costBreakdown.fastagTolls;
     stateTax = transferQuote.costBreakdown.stateBorderTax;
-    gstAmount = transferQuote.costBreakdown.gstTax;
-    totalAmount = transferQuote.costBreakdown.totalAmount;
+    gstAmount = roundMoney((baseAmount + tolls + stateTax) * 0.05);
+    totalAmount = baseAmount + tolls + stateTax + gstAmount;
     variantName = transferQuote.vehicleDisplayName;
   } else {
+    // Check for Plan 14 supporting tables first
+    let matchingVehicleOption = null;
+    let matchingHotelTier = null;
+    let ticketTiers = [];
+
+    try {
+      if (vehicleCategory) {
+        matchingVehicleOption = db.prepare("SELECT * FROM product_vehicle_options WHERE product_id = ? AND UPPER(vehicle_type) = ? AND COALESCE(is_active,1) = 1 LIMIT 1").get(product.id, vehicleCategory);
+      }
+      if (input.hotel_tier_id || input.hotelTierId) {
+        matchingHotelTier = db.prepare("SELECT * FROM product_hotel_tiers WHERE id = ? AND product_id = ? LIMIT 1").get(input.hotel_tier_id || input.hotelTierId, product.id);
+      }
+      ticketTiers = db.prepare("SELECT * FROM product_ticket_tiers WHERE product_id = ? AND COALESCE(is_active,1) = 1 ORDER BY sort_order").all(product.id);
+    } catch {}
+
     const variant = findPricingVariant(db, product.id, variantName, vehicleCategory);
-    const unitPrice = roundMoney(variant?.base_price ?? product.price_inr);
-    pricingModel = variant?.pricing_model || (product.group_type === "SHARED" || product.product_type === "MULTI_DAY_PACKAGE" ? "PER_PERSON" : "FIXED");
-    variantName = variant?.variant_name || variantName;
-    baseAmount = pricingModel === "PER_PERSON"
-      ? unitPrice * adults + Math.round(unitPrice * 0.5) * children
-      : unitPrice;
+    
+    // Determine pricing model
+    const isPerPerson = product.group_type === "SHARED" ||
+      ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(product.product_type) ||
+      ["SIC", "TICKET_SIC", "TICKET_ONLY"].includes(product.product_sub_type) ||
+      ticketTiers.length > 0;
+    
+    pricingModel = variant?.pricing_model || (isPerPerson ? "PER_PERSON" : "FIXED");
+    variantName = variant?.variant_name || matchingVehicleOption?.label || variantName;
+
+    if (matchingVehicleOption) {
+      baseAmount = matchingVehicleOption.price_inr;
+      pricingModel = "PER_VEHICLE";
+    } else if (ticketTiers.length > 0 && input.ticket_selections && typeof input.ticket_selections === "object") {
+      // Dynamic ticket counts: { "tt_id1": 2, "tt_id2": 1 }
+      let tierSum = 0;
+      for (const tier of ticketTiers) {
+        const count = Number(input.ticket_selections[tier.id] || input.ticket_selections[tier.tier_name] || 0);
+        if (count > 0 && !tier.is_free) {
+          tierSum += tier.price_inr * count;
+        }
+      }
+      baseAmount = tierSum > 0 ? tierSum : product.price_inr;
+    } else {
+      const unitPrice = roundMoney(variant?.base_price ?? product.price_inr);
+      baseAmount = pricingModel === "PER_PERSON"
+        ? unitPrice * adults + Math.round(unitPrice * 0.5) * children
+        : unitPrice;
+    }
+
+    // Add hotel tier surcharge if selected (per person per night)
+    if (matchingHotelTier && matchingHotelTier.price_per_person_per_night_inr > 0) {
+      const nights = Math.max(1, (Number(product.duration_days) || 1) - 1);
+      const hotelExtra = matchingHotelTier.price_per_person_per_night_inr * adults * nights +
+        Math.round(matchingHotelTier.price_per_person_per_night_inr * 0.5) * children * nights;
+      baseAmount += hotelExtra;
+    }
+
     tolls = roundMoney(variant?.estimated_fastag_tolls);
     stateTax = roundMoney(variant?.estimated_state_tax);
     const taxRate = Number(variant?.tax_percentage ?? 5);
@@ -256,6 +311,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     tolls,
     stateTax,
     gstAmount,
+    nightAllowance,
     totalAmount,
     commissionRate,
     commissionAmount,
@@ -282,6 +338,7 @@ export function publicQuote(quote) {
       fastagTolls: quote.tolls,
       stateTax: quote.stateTax,
       gstAmount: quote.gstAmount,
+      nightAllowance: quote.nightAllowance || 0,
       totalAmount: quote.totalAmount
     }
   };

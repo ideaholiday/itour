@@ -4,6 +4,7 @@ import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
 import { INDIA_CITIES } from "./data/indiaCities.js";
+import { backfillProductLocationRules, seedCanonicalLocations } from "./data/canonicalLocations.js";
 import { ADMIN_LOGIN, hashPassword } from "./lib/passwords.js";
 import logger from "./config/logger.js";
 import { observeMetricsDatabase } from "./config/metrics.js";
@@ -132,7 +133,7 @@ CREATE TABLE IF NOT EXISTS geo_fences (
   center_lng REAL NOT NULL,
   radius_km REAL DEFAULT 30.0,
   polygon_coordinates TEXT DEFAULT '[]',
-  is_active INTEGER DEFAULT 1,
+  is_active BOOLEAN DEFAULT TRUE,
   approval_status TEXT DEFAULT 'APPROVED',
   review_note TEXT,
   reviewed_at TEXT,
@@ -172,6 +173,44 @@ CREATE TABLE IF NOT EXISTS products (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- 5A. CANONICAL LOCATION REGISTRY & PRODUCT RULES
+CREATE TABLE IF NOT EXISTS canonical_locations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  short_name TEXT,
+  iata_code TEXT,
+  location_type TEXT NOT NULL,
+  city TEXT NOT NULL,
+  state TEXT NOT NULL,
+  country TEXT DEFAULT 'India',
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  radius_km REAL DEFAULT 5.0,
+  aliases TEXT DEFAULT '[]',
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS product_location_rules (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  rule_side TEXT NOT NULL,
+  rule_mode TEXT NOT NULL,
+  fixed_location_id TEXT REFERENCES canonical_locations(id),
+  allowed_location_types TEXT DEFAULT '[]',
+  center_lat REAL,
+  center_lng REAL,
+  radius_km REAL,
+  allowed_state TEXT,
+  allowed_city TEXT,
+  polygon_coordinates TEXT DEFAULT '[]',
+  error_message TEXT,
+  suggestion TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(product_id, rule_side)
+);
+
 -- 6. TRANSFER ROUTES METADATA
 CREATE TABLE IF NOT EXISTS transfer_routes (
   id TEXT PRIMARY KEY,
@@ -180,9 +219,15 @@ CREATE TABLE IF NOT EXISTS transfer_routes (
   origin_name TEXT NOT NULL,
   origin_lat REAL NOT NULL,
   origin_lng REAL NOT NULL,
+  origin_radius_km REAL DEFAULT 25.0,
+  origin_iata TEXT,
+  origin_location_id TEXT REFERENCES canonical_locations(id),
   dest_name TEXT NOT NULL,
   dest_lat REAL NOT NULL,
   dest_lng REAL NOT NULL,
+  dest_radius_km REAL DEFAULT 25.0,
+  dest_iata TEXT,
+  dest_location_id TEXT REFERENCES canonical_locations(id),
   distance_km REAL DEFAULT 30.0,
   duration_mins INTEGER DEFAULT 45,
   vehicle_category TEXT NOT NULL,
@@ -190,7 +235,26 @@ CREATE TABLE IF NOT EXISTS transfer_routes (
   max_luggage INTEGER NOT NULL,
   free_waiting_mins INTEGER DEFAULT 60,
   toll_included INTEGER DEFAULT 1,
-  state_tax_included INTEGER DEFAULT 1
+  state_tax_included INTEGER DEFAULT 1,
+  interstate_permit_tax INTEGER DEFAULT 0,
+  night_allowance_inr REAL DEFAULT 300.0
+);
+
+-- 6A. DAY TOUR OPERATIONAL METADATA
+CREATE TABLE IF NOT EXISTS day_tours (
+  id TEXT PRIMARY KEY,
+  product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  duration_hours REAL NOT NULL,
+  distance_km_limit REAL DEFAULT 80,
+  available_time_slots TEXT DEFAULT '["09:00"]',
+  group_type TEXT DEFAULT 'PRIVATE',
+  places_covered TEXT DEFAULT '[]',
+  vehicle_rules TEXT DEFAULT '[]',
+  pickup_service_type TEXT DEFAULT 'HOTEL_PICKUP_ANYWHERE',
+  advance_booking_cutoff_hours REAL DEFAULT 4,
+  operating_start_time TEXT DEFAULT '06:00',
+  operating_end_time TEXT DEFAULT '22:00',
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
 -- 7. PACKAGE ITINERARIES
@@ -255,7 +319,10 @@ CREATE TABLE IF NOT EXISTS bookings (
   drop_lng REAL,
   flight_number TEXT,
   flight_arrival_time TEXT,
+  flight_departure_time TEXT,
   terminal_gate TEXT,
+  location_validation_snapshot TEXT DEFAULT '{}',
+  location_ops_review INTEGER DEFAULT 0,
   special_requests TEXT,
   promo_code TEXT,
   adults INTEGER NOT NULL DEFAULT 1,
@@ -651,6 +718,7 @@ CREATE TABLE IF NOT EXISTS payment_events (
   event_type TEXT NOT NULL,
   payment_id TEXT,
   booking_id TEXT REFERENCES bookings(id),
+  circuit_order_id TEXT,
   received_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -928,11 +996,179 @@ CREATE TABLE IF NOT EXISTS traveler_itineraries (
   title TEXT NOT NULL,
   destination TEXT,
   start_date TEXT,
+  travel_date TEXT,
+  end_date TEXT,
   days_count INTEGER DEFAULT 3,
+  adults_count INTEGER DEFAULT 2,
+  children_count INTEGER DEFAULT 0,
   items TEXT DEFAULT '[]',
   is_public INTEGER DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS circuit_quotes (
+  id TEXT PRIMARY KEY,
+  itinerary_id TEXT NOT NULL REFERENCES traveler_itineraries(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'INR',
+  adults_count INTEGER NOT NULL DEFAULT 1,
+  children_count INTEGER NOT NULL DEFAULT 0,
+  start_date TEXT NOT NULL,
+  end_date TEXT,
+  base_amount REAL NOT NULL DEFAULT 0,
+  taxes_amount REAL NOT NULL DEFAULT 0,
+  total_amount REAL NOT NULL DEFAULT 0,
+  line_items TEXT NOT NULL DEFAULT '[]',
+  issues TEXT NOT NULL DEFAULT '[]',
+  expires_at TEXT NOT NULL,
+  consumed_at TEXT,
+  circuit_order_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS circuit_orders (
+  id TEXT PRIMARY KEY,
+  order_ref TEXT NOT NULL UNIQUE,
+  quote_id TEXT NOT NULL UNIQUE REFERENCES circuit_quotes(id),
+  itinerary_id TEXT NOT NULL REFERENCES traveler_itineraries(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  idempotency_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING_PAYMENT',
+  currency TEXT NOT NULL DEFAULT 'INR',
+  adults_count INTEGER NOT NULL DEFAULT 1,
+  children_count INTEGER NOT NULL DEFAULT 0,
+  traveler_name TEXT NOT NULL,
+  traveler_email TEXT NOT NULL,
+  traveler_phone TEXT NOT NULL,
+  base_amount REAL NOT NULL DEFAULT 0,
+  taxes_amount REAL NOT NULL DEFAULT 0,
+  total_amount REAL NOT NULL DEFAULT 0,
+  payment_reference TEXT,
+  payment_provider TEXT,
+  payment_order_id TEXT,
+  payment_session_id TEXT,
+  payment_id TEXT,
+  payment_signature TEXT,
+  payment_status TEXT DEFAULT 'PENDING',
+  payment_order_status TEXT DEFAULT 'NOT_STARTED',
+  payment_verified_at TEXT,
+  payment_failed_at TEXT,
+  payment_failure_code TEXT,
+  management_status TEXT DEFAULT 'NONE',
+  refunded_amount REAL DEFAULT 0,
+  cancellation_fee_amount REAL DEFAULT 0,
+  cancelled_at TEXT,
+  refunded_at TEXT,
+  rescheduled_at TEXT,
+  reconfirmation_status TEXT DEFAULT 'NOT_REQUIRED',
+  reconfirmation_deadline TEXT,
+  reconfirmed_at TEXT,
+  refund_reconciliation_status TEXT DEFAULT 'NOT_REQUIRED',
+  refund_reconciled_at TEXT,
+  hold_expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(user_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS circuit_order_items (
+  id TEXT PRIMARY KEY,
+  circuit_order_id TEXT NOT NULL REFERENCES circuit_orders(id) ON DELETE CASCADE,
+  quote_line_item_id TEXT NOT NULL,
+  booking_id TEXT NOT NULL UNIQUE REFERENCES bookings(id),
+  sequence_number INTEGER NOT NULL,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  activity_date TEXT NOT NULL,
+  pickup_time TEXT NOT NULL,
+  vehicle_category TEXT,
+  variant_name TEXT,
+  status TEXT NOT NULL DEFAULT 'HELD_PENDING_PAYMENT',
+  reconfirmation_status TEXT DEFAULT 'NOT_REQUIRED',
+  reconfirmation_deadline TEXT,
+  reconfirmed_at TEXT,
+  base_amount REAL NOT NULL DEFAULT 0,
+  taxes_amount REAL NOT NULL DEFAULT 0,
+  total_amount REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(circuit_order_id, quote_line_item_id)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_holds (
+  id TEXT PRIMARY KEY,
+  circuit_order_id TEXT NOT NULL REFERENCES circuit_orders(id) ON DELETE CASCADE,
+  circuit_order_item_id TEXT NOT NULL REFERENCES circuit_order_items(id) ON DELETE CASCADE,
+  booking_id TEXT NOT NULL UNIQUE REFERENCES bookings(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  product_id TEXT NOT NULL REFERENCES products(id),
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  activity_date TEXT NOT NULL,
+  pickup_time TEXT NOT NULL,
+  vehicle_category TEXT,
+  units INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  expires_at TEXT NOT NULL,
+  released_at TEXT,
+  consumed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS circuit_payment_events (
+  id TEXT PRIMARY KEY,
+  circuit_order_id TEXT NOT NULL REFERENCES circuit_orders(id) ON DELETE CASCADE,
+  event_key TEXT NOT NULL UNIQUE,
+  provider TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  provider_order_id TEXT,
+  provider_payment_id TEXT,
+  status TEXT NOT NULL,
+  amount REAL,
+  failure_code TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS circuit_management_requests (
+  id TEXT PRIMARY KEY,
+  request_ref TEXT NOT NULL UNIQUE,
+  circuit_order_id TEXT NOT NULL REFERENCES circuit_orders(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  request_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  reason TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  requested_changes TEXT NOT NULL DEFAULT '{}',
+  policy_snapshot TEXT NOT NULL DEFAULT '{}',
+  refund_amount REAL NOT NULL DEFAULT 0,
+  cancellation_fee_amount REAL NOT NULL DEFAULT 0,
+  gateway_refund_id TEXT,
+  gateway_status TEXT,
+  failure_code TEXT,
+  resolution TEXT,
+  reviewed_by TEXT,
+  reviewed_at TEXT,
+  orchestration_status TEXT DEFAULT 'NOT_STARTED',
+  refund_expected_status TEXT,
+  refund_reconciled_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(circuit_order_id, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS circuit_orchestration_events (
+  id TEXT PRIMARY KEY,
+  circuit_order_id TEXT NOT NULL REFERENCES circuit_orders(id) ON DELETE CASCADE,
+  management_request_id TEXT REFERENCES circuit_management_requests(id) ON DELETE SET NULL,
+  event_key TEXT NOT NULL UNIQUE,
+  event_type TEXT NOT NULL,
+  booking_id TEXT,
+  supplier_id TEXT,
+  status TEXT NOT NULL,
+  provider TEXT,
+  provider_reference TEXT,
+  details TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 42. PRODUCT ADD-ON EXTRAS
@@ -1050,6 +1286,14 @@ const safeAlter = (table, colDef) => {
 
 safeAlter("users", "role TEXT DEFAULT 'TRAVELER'");
 safeAlter("users", "referral_code TEXT");
+safeAlter("traveler_itineraries", "travel_date TEXT");
+safeAlter("traveler_itineraries", "end_date TEXT");
+safeAlter("traveler_itineraries", "adults_count INTEGER DEFAULT 2");
+safeAlter("traveler_itineraries", "children_count INTEGER DEFAULT 0");
+safeAlter("circuit_quotes", "consumed_at TEXT");
+safeAlter("circuit_quotes", "circuit_order_id TEXT");
+safeAlter("bookings", "circuit_order_id TEXT");
+safeAlter("bookings", "circuit_order_item_id TEXT");
 safeAlter("wishlists", "collection_name TEXT DEFAULT 'Favorites'");
 safeAlter("suppliers", "commission_override_rate REAL");
 safeAlter("destinations", "category TEXT DEFAULT 'TOURISM'");
@@ -1067,6 +1311,15 @@ safeAlter("products", "cancellation_policy TEXT DEFAULT 'FLEXIBLE_24H'");
 safeAlter("products", "submitted_at TEXT");
 safeAlter("products", "reviewed_at TEXT");
 safeAlter("products", "reviewer_notes TEXT");
+safeAlter("products", "default_confirmation_type TEXT DEFAULT 'INSTANT_THEN_MANUAL'");
+safeAlter("transfer_routes", "origin_radius_km REAL DEFAULT 25.0");
+safeAlter("transfer_routes", "dest_radius_km REAL DEFAULT 25.0");
+safeAlter("transfer_routes", "origin_iata TEXT");
+safeAlter("transfer_routes", "dest_iata TEXT");
+safeAlter("transfer_routes", "origin_location_id TEXT");
+safeAlter("transfer_routes", "dest_location_id TEXT");
+safeAlter("transfer_routes", "interstate_permit_tax INTEGER DEFAULT 0");
+safeAlter("transfer_routes", "night_allowance_inr REAL DEFAULT 300.0");
 safeAlter("bookings", "product_id TEXT");
 safeAlter("bookings", "supplier_id TEXT");
 safeAlter("bookings", "product_type TEXT DEFAULT 'DAY_TOUR'");
@@ -1083,7 +1336,14 @@ safeAlter("bookings", "drop_lat REAL");
 safeAlter("bookings", "drop_lng REAL");
 safeAlter("bookings", "flight_number TEXT");
 safeAlter("bookings", "flight_arrival_time TEXT");
+safeAlter("bookings", "flight_departure_time TEXT");
 safeAlter("bookings", "terminal_gate TEXT");
+safeAlter("bookings", "location_validation_snapshot TEXT DEFAULT '{}'");
+safeAlter("bookings", "location_ops_review INTEGER DEFAULT 0");
+safeAlter("bookings", "product_option_id TEXT");
+safeAlter("bookings", "confirmation_type TEXT DEFAULT 'INSTANT_THEN_MANUAL'");
+safeAlter("bookings", "confirmation_status TEXT DEFAULT 'PENDING_PAYMENT'");
+safeAlter("bookings", "logistics_snapshot TEXT DEFAULT '{}'");
 safeAlter("bookings", "special_requests TEXT");
 safeAlter("bookings", "promo_code TEXT");
 safeAlter("bookings", "selected_addons TEXT DEFAULT '[]'");
@@ -1124,6 +1384,35 @@ safeAlter("bookings", "razorpay_signature TEXT");
 safeAlter("bookings", "cashfree_order_id TEXT");
 safeAlter("bookings", "cashfree_payment_id TEXT");
 safeAlter("bookings", "payment_session_id TEXT");
+safeAlter("payment_events", "circuit_order_id TEXT");
+safeAlter("circuit_orders", "payment_provider TEXT");
+safeAlter("circuit_orders", "payment_order_id TEXT");
+safeAlter("circuit_orders", "payment_session_id TEXT");
+safeAlter("circuit_orders", "payment_id TEXT");
+safeAlter("circuit_orders", "payment_signature TEXT");
+safeAlter("circuit_orders", "payment_status TEXT DEFAULT 'PENDING'");
+safeAlter("circuit_orders", "payment_order_status TEXT DEFAULT 'NOT_STARTED'");
+safeAlter("circuit_orders", "payment_verified_at TEXT");
+safeAlter("circuit_orders", "payment_failed_at TEXT");
+safeAlter("circuit_orders", "payment_failure_code TEXT");
+safeAlter("circuit_orders", "management_status TEXT DEFAULT 'NONE'");
+safeAlter("circuit_orders", "refunded_amount REAL DEFAULT 0");
+safeAlter("circuit_orders", "cancellation_fee_amount REAL DEFAULT 0");
+safeAlter("circuit_orders", "cancelled_at TEXT");
+safeAlter("circuit_orders", "refunded_at TEXT");
+safeAlter("circuit_orders", "rescheduled_at TEXT");
+safeAlter("circuit_orders", "reconfirmation_status TEXT DEFAULT 'NOT_REQUIRED'");
+safeAlter("circuit_orders", "reconfirmation_deadline TEXT");
+safeAlter("circuit_orders", "reconfirmed_at TEXT");
+safeAlter("circuit_orders", "refund_reconciliation_status TEXT DEFAULT 'NOT_REQUIRED'");
+safeAlter("circuit_orders", "refund_reconciled_at TEXT");
+safeAlter("circuit_order_items", "reconfirmation_status TEXT DEFAULT 'NOT_REQUIRED'");
+safeAlter("circuit_order_items", "reconfirmation_deadline TEXT");
+safeAlter("circuit_order_items", "reconfirmed_at TEXT");
+safeAlter("circuit_management_requests", "orchestration_status TEXT DEFAULT 'NOT_STARTED'");
+safeAlter("circuit_management_requests", "refund_expected_status TEXT");
+safeAlter("circuit_management_requests", "refund_reconciled_at TEXT");
+safeAlter("staff_tasks", "circuit_order_id TEXT");
 safeAlter("payouts", "transfer_id TEXT");
 safeAlter("payouts", "created_at TEXT");
 safeAlter("supplier_assignment_attempts", "assignment_round INTEGER DEFAULT 1");
@@ -1224,6 +1513,10 @@ try {
   db.exec("CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_product_pricing_product ON product_pricing(product_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_transfer_routes_product ON transfer_routes(product_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_canonical_locations_lookup ON canonical_locations(location_type, city, state, is_active)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_canonical_locations_iata ON canonical_locations(iata_code)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_product_location_rules_product ON product_location_rules(product_id, rule_side, is_active)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_day_tours_product ON day_tours(product_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_package_itineraries_product ON package_itineraries(product_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_destinations_active_name ON destinations(is_active, name)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_quality_scores_entity ON quality_scores(entity_type, entity_id)");
@@ -1237,6 +1530,19 @@ try {
   db.exec("CREATE INDEX IF NOT EXISTS idx_product_faqs_product ON product_faqs(product_id, is_active, sort_order)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_user_profiles_user ON user_profiles(user_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_wishlists_user ON wishlists(user_id, added_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_circuit_quotes_itinerary ON circuit_quotes(itinerary_id, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_circuit_quotes_user ON circuit_quotes(user_id, created_at DESC)");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_circuit_orders_user_idempotency ON circuit_orders(user_id, idempotency_key)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_circuit_orders_user_status ON circuit_orders(user_id, status, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_circuit_order_items_order ON circuit_order_items(circuit_order_id, sequence_number)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_inventory_holds_availability ON inventory_holds(product_id, supplier_id, activity_date, status, expires_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_inventory_holds_order ON inventory_holds(circuit_order_id, status)");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_circuit_orders_payment_order ON circuit_orders(payment_order_id) WHERE payment_order_id IS NOT NULL");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_circuit_orders_payment_status ON circuit_orders(payment_status, status, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_circuit_payment_events_order ON circuit_payment_events(circuit_order_id, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_circuit_management_order ON circuit_management_requests(circuit_order_id, created_at DESC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_circuit_management_queue ON circuit_management_requests(status, request_type, created_at ASC)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_staff_tasks_circuit ON staff_tasks(circuit_order_id, status, created_at DESC)");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_wishlists_user_product ON wishlists(user_id, product_id)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_booking_modifications_booking ON booking_modifications(booking_id, status)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_booking_modifications_user ON booking_modifications(requested_by, status)");
@@ -1253,7 +1559,7 @@ try {
 try {
   db.prepare("UPDATE products SET created_at = datetime('now') WHERE created_at IS NULL").run();
   db.prepare("UPDATE payouts SET created_at = COALESCE(processed_at, datetime('now')) WHERE created_at IS NULL").run();
-  db.prepare("UPDATE geo_fences SET approval_status = COALESCE(approval_status, CASE WHEN is_active = 1 THEN 'APPROVED' ELSE 'SUSPENDED' END), submitted_at = COALESCE(submitted_at, datetime('now'))").run();
+  db.prepare("UPDATE geo_fences SET approval_status = COALESCE(approval_status, CASE WHEN is_active = TRUE THEN 'APPROVED' ELSE 'SUSPENDED' END), submitted_at = COALESCE(submitted_at, datetime('now'))").run();
   db.prepare("UPDATE bookings SET supplier_assignment_status = 'LEGACY_ASSIGNED', supplier_assignment_method = 'LEGACY', supplier_assigned_at = COALESCE(supplier_assigned_at, created_at) WHERE supplier_id IS NOT NULL AND (supplier_assignment_status IS NULL OR supplier_assignment_status = 'UNASSIGNED')").run();
   db.prepare("UPDATE bookings SET commission_rate_snapshot = CASE WHEN amount_inr > 0 AND commission_amount IS NOT NULL THEN ROUND(commission_amount * 100.0 / amount_inr, 4) ELSE (SELECT commission_rate FROM suppliers WHERE suppliers.id = bookings.supplier_id) END WHERE commission_rate_snapshot IS NULL").run();
   db.prepare("UPDATE blocked_dates SET scope_type = CASE WHEN product_id IS NOT NULL THEN 'PRODUCT' ELSE 'ALL' END WHERE scope_type IS NULL OR scope_type = '' OR (scope_type = 'ALL' AND product_id IS NOT NULL)").run();
@@ -1304,6 +1610,15 @@ try {
   logger.warn("India city catalog refresh failed", { error: e });
 }
 
+try {
+  if (databaseInfo.engine === "postgres") {
+    seedCanonicalLocations(db);
+    backfillProductLocationRules(db);
+  }
+} catch (error) {
+  logger.warn("Canonical location registry refresh failed", { error });
+}
+
 // Migrate only the original seeded marketplace accounts to the Idea Holiday domain.
 try {
   db.prepare("UPDATE users SET email = 'traveler@ideaholiday.in' WHERE id = 'user_traveler' AND email = 'traveler@wanderindia.com'").run();
@@ -1325,6 +1640,16 @@ try {
   }
 } catch (e) {}
 
+}
+
+// PostgreSQL schemas are migration-owned, while SQLite is bootstrapped above.
+// Once the registry table exists, keep the stable anchor catalog synchronized
+// on either engine without making startup depend on an external geocoder.
+try {
+  seedCanonicalLocations(db);
+  backfillProductLocationRules(db);
+} catch (error) {
+  logger.warn("Canonical location registry is not ready; run pending migrations", { error });
 }
 
 // Keep the production admin credential in sync across both database engines.

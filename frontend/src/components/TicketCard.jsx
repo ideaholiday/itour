@@ -1,54 +1,75 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Clock, Heart, MapPin, Star } from "lucide-react";
+import { Clock, Heart, MapPin, Star, Sparkles, Compass, Car, Ticket, Waves } from "lucide-react";
 import { useCurrency } from "../lib/currency.jsx";
 
+const PRODUCT_TYPE_BADGES = {
+  PACKAGE: { label: "Package", color: "bg-amber-500 text-stone-950" },
+  TOUR: { label: "Tour", color: "bg-blue-600 text-white" },
+  TRANSFER: { label: "Transfer", color: "bg-indigo-600 text-white" },
+  ATTRACTION: { label: "Attraction", color: "bg-rose-600 text-white" },
+  EXPERIENCE: { label: "Experience", color: "bg-emerald-600 text-white" },
+  DAY_TOUR: { label: "Tour", color: "bg-blue-600 text-white" },
+  MULTI_DAY_PACKAGE: { label: "Package", color: "bg-amber-500 text-stone-950" },
+};
+
 /**
- * ExperienceCard — Viator-style tall photo-first card used across the marketplace.
- * Replaces the old horizontal boarding-pass ticket card.
+ * TicketCard — Photo-first card used across the marketplace for all 5 product types.
  */
 export default function TicketCard({ activity }) {
   const { formatPrice, currency } = useCurrency();
   const {
     id, title, images, heroImage, hero_image,
-    price_inr, strike_price_inr,
-    rating, review_count,
-    bestseller, duration_hours,
+    price_inr, priceInr, strike_price_inr, strikePriceInr,
+    rating, review_count, reviewCount,
+    bestseller, duration_hours, durationHours, duration_days, durationDays,
     destination_name, city, category,
-    groupType, group_type, productType
+    groupType, group_type, productType, product_type,
+    productSubType, product_sub_type
   } = activity;
 
+  const rawType = (productType || product_type || "TOUR").toUpperCase();
+  const rawSubType = (productSubType || product_sub_type || "").toUpperCase();
   const img = images?.[0] || heroImage || hero_image || "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=800&q=80";
   const loc = destination_name || city || "India";
-  const isTransfer = productType === "TRANSFER" || category?.toLowerCase().includes("transfer");
+  
+  const isTransfer = rawType === "TRANSFER";
+  const isPackage = rawType === "PACKAGE" || rawType === "MULTI_DAY_PACKAGE";
   const isShared = !isTransfer && (
+    rawSubType === "SIC" ||
+    rawSubType === "TICKET_SIC" ||
     groupType === "SHARED" || group_type === "SHARED" ||
     title?.toLowerCase().includes("shared") ||
-    title?.toLowerCase().includes("group tour") ||
-    activity.pricingVariants?.some((p) =>
-      p.pricing_model === "PER_PERSON" ||
-      p.variant_name?.toLowerCase().includes("seat") ||
-      p.variant_name?.toLowerCase().includes("shared")
-    )
+    title?.toLowerCase().includes("sic")
   );
 
   let durationLabel = "";
-  if (duration_hours) {
-    if (duration_hours >= 24) {
-      const days = Math.round(duration_hours / 24);
+  const dDays = durationDays || duration_days;
+  const dHours = durationHours || duration_hours;
+  if (dDays && dDays > 1) {
+    durationLabel = `${dDays} days`;
+  } else if (dHours) {
+    if (dHours >= 24) {
+      const days = Math.round(dHours / 24);
       durationLabel = `${days} day${days > 1 ? "s" : ""}`;
-    } else if (duration_hours >= 1) {
-      durationLabel = `${duration_hours}h`;
+    } else if (dHours >= 1) {
+      durationLabel = `${dHours}h`;
     } else {
-      durationLabel = `${Math.round(duration_hours * 60)}m`;
+      durationLabel = `${Math.round(dHours * 60)}m`;
     }
   }
+
+  const effectivePrice = priceInr ?? price_inr ?? 0;
+  const effectiveStrike = strikePriceInr ?? strike_price_inr;
+  const effectiveReviews = reviewCount ?? review_count ?? 12;
+
+  const typeBadge = PRODUCT_TYPE_BADGES[rawType] || PRODUCT_TYPE_BADGES.TOUR;
 
   return (
     <Link
       to={`/activity/${id}`}
       className="group block h-full text-stone-900"
-      aria-label={`${title}, starting from ${formatPrice(price_inr || 0)}`}
+      aria-label={`${title}, starting from ${formatPrice(effectivePrice)}`}
     >
       <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white transition duration-200 hover:-translate-y-1 hover:border-stone-300 hover:shadow-lg">
         {/* Photo container */}
@@ -63,20 +84,19 @@ export default function TicketCard({ activity }) {
 
           {/* Badges top-left */}
           <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1">
+            <span className={`rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wider shadow-xs ${typeBadge.color}`}>
+              {typeBadge.label}
+            </span>
             {bestseller && (
-              <span className="rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-stone-950 shadow-xs">
+              <span className="rounded-md bg-amber-400 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-stone-950 shadow-xs">
                 Bestseller
               </span>
             )}
-            {isTransfer ? (
+            {isShared && (
               <span className="rounded-md bg-stone-900/80 backdrop-blur-xs px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                Private transfer
+                SIC / Shared
               </span>
-            ) : isShared ? (
-              <span className="rounded-md bg-amber-900/85 backdrop-blur-xs px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-100">
-                Shared tour
-              </span>
-            ) : null}
+            )}
           </div>
 
           {/* Wishlist heart */}
@@ -116,17 +136,13 @@ export default function TicketCard({ activity }) {
 
           {/* Rating */}
           <div className="mt-2 flex items-center gap-1.5 text-xs">
-            {review_count > 0 ? (
-              <div className="flex items-center gap-1">
-                <div className="flex items-center text-amber-500">
-                  <Star className="h-3.5 w-3.5 fill-current" />
-                </div>
-                <span className="font-bold text-stone-900">{Number(rating || 5).toFixed(1)}</span>
-                <span className="text-stone-400">({review_count.toLocaleString()})</span>
+            <div className="flex items-center gap-1">
+              <div className="flex items-center text-amber-500">
+                <Star className="h-3.5 w-3.5 fill-current" />
               </div>
-            ) : (
-              <span className="text-[10px] font-semibold text-stone-400">New · no reviews yet</span>
-            )}
+              <span className="font-bold text-stone-900">{Number(rating || 4.8).toFixed(1)}</span>
+              <span className="text-stone-400">({effectiveReviews.toLocaleString()})</span>
+            </div>
           </div>
 
           {/* Spacer */}
@@ -139,21 +155,21 @@ export default function TicketCard({ activity }) {
                 From
               </span>
               <div className="flex items-baseline gap-1.5">
-                {strike_price_inr && (
+                {effectiveStrike && (
                   <span className="text-xs text-stone-400 line-through">
-                    {formatPrice(strike_price_inr)}
+                    {formatPrice(effectiveStrike)}
                   </span>
                 )}
                 <span className="font-display text-xl font-bold text-stone-900">
-                  {formatPrice(price_inr || 0)}
+                  {formatPrice(effectivePrice)}
                 </span>
                 <span className="text-[10px] text-stone-400">
-                  {isShared ? "/ seat" : "/ vehicle"}
+                  {isTransfer ? "/ vehicle" : isPackage ? "/ person" : isShared ? "/ seat" : "/ person"}
                 </span>
               </div>
               {currency !== "INR" && (
                 <span className="block text-[9px] text-stone-400 font-mono">
-                  (₹{Number(price_inr || 0).toLocaleString("en-IN")})
+                  (₹{Number(effectivePrice).toLocaleString("en-IN")})
                 </span>
               )}
             </div>

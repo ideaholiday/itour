@@ -20,6 +20,7 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
     // Cleanup any existing test artifacts
     db.prepare("DELETE FROM driver_assignment_events WHERE booking_id = ?").run(bookingId);
     db.prepare("DELETE FROM driver_assignments WHERE booking_id = ?").run(bookingId);
+    db.prepare("DELETE FROM financial_ledger WHERE booking_id = ?").run(bookingId);
     db.prepare("DELETE FROM bookings WHERE id = ?").run(bookingId);
     db.prepare("DELETE FROM products WHERE id = ?").run(productId);
     db.prepare("DELETE FROM suppliers WHERE id = ?").run(supplierId);
@@ -56,6 +57,7 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
     // Cleanup
     db.prepare("DELETE FROM driver_assignment_events WHERE booking_id = ?").run(bookingId);
     db.prepare("DELETE FROM driver_assignments WHERE booking_id = ?").run(bookingId);
+    db.prepare("DELETE FROM financial_ledger WHERE booking_id = ?").run(bookingId);
     db.prepare("DELETE FROM bookings WHERE id = ?").run(bookingId);
     db.prepare("DELETE FROM products WHERE id = ?").run(productId);
     db.prepare("DELETE FROM suppliers WHERE id = ?").run(supplierId);

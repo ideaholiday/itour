@@ -167,12 +167,13 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
   const getStatusBadge = (b) => {
     const st = (b.status || "confirmed").toLowerCase();
     const isPendingResp = b.supplier_response_status === "PENDING" || st === "pending_confirmation";
+    const isCircuitReconfirmation = b.supplier_assignment_status === "RESCHEDULED_RECONFIRMATION_REQUIRED";
 
     if (isPendingResp) {
       return (
         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-full animate-pulse">
           <AlertTriangle className="w-3 h-3 text-amber-600" />
-          Pending Confirmation
+          {isCircuitReconfirmation ? "New Dates Pending" : "Pending Confirmation"}
         </span>
       );
     }
@@ -339,7 +340,11 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
       setResponseMessage(data.message);
       setResponseNote("");
       if (action === "ACCEPT") {
-        setSelectedBooking((current) => current ? { ...current, supplier_response_status: "ACCEPTED", supplier_assignment_status: "SUPPLIER_ACCEPTED" } : current);
+        setSelectedBooking((current) => current ? {
+          ...current,
+          supplier_response_status: "ACCEPTED",
+          supplier_assignment_status: current.supplier_assignment_status === "RESCHEDULED_RECONFIRMATION_REQUIRED" ? "RESCHEDULE_RECONFIRMED" : "SUPPLIER_ACCEPTED",
+        } : current);
       }
       onRefresh?.();
     } catch (error) {
@@ -665,16 +670,18 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
               <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5">
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-amber-900">
-                    <Clock className="h-4 w-4 text-amber-600 animate-spin" /> Confirmation Request
+                    <Clock className="h-4 w-4 text-amber-600 animate-spin" /> {selectedBooking.supplier_assignment_status === "RESCHEDULED_RECONFIRMATION_REQUIRED" ? "Circuit Date Reconfirmation" : "Confirmation Request"}
                   </span>
-                  {selectedBooking.response_deadline && (
+                  {(selectedBooking.supplier_response_deadline || selectedBooking.response_deadline) && (
                     <span className="font-mono text-xs font-black text-amber-900 bg-amber-200 px-2 py-0.5 rounded">
-                      SLA: {responseTimeLeft(selectedBooking.response_deadline)}
+                      SLA: {responseTimeLeft(selectedBooking.supplier_response_deadline || selectedBooking.response_deadline)}
                     </span>
                   )}
                 </div>
                 <p className="mt-2 text-xs leading-relaxed text-amber-950">
-                  Please review trip requirements and fleet availability. Confirming accepts responsibility for this trip.
+                  {selectedBooking.supplier_assignment_status === "RESCHEDULED_RECONFIRMATION_REQUIRED"
+                    ? "Please verify the new date and fleet availability. A decline or missed SLA holds the complete circuit for operations review."
+                    : "Please review trip requirements and fleet availability. Confirming accepts responsibility for this trip."}
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
@@ -682,14 +689,14 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     onClick={() => handleSupplierResponse(selectedBooking, "ACCEPT")}
                     className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-2 text-xs font-bold text-stone-950 shadow-sm"
                   >
-                    <Check className="h-3.5 w-3.5" /> Accept & Confirm Trip
+                    <Check className="h-3.5 w-3.5" /> {selectedBooking.supplier_assignment_status === "RESCHEDULED_RECONFIRMATION_REQUIRED" ? "Accept New Dates" : "Accept & Confirm Trip"}
                   </button>
                   <button
                     disabled={respondingBookingId === selectedBooking.id}
                     onClick={() => handleSupplierResponse(selectedBooking, "REJECT")}
                     className="inline-flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-100 hover:bg-rose-200 px-4 py-2 text-xs font-bold text-rose-900 shadow-sm"
                   >
-                    <X className="h-3.5 w-3.5" /> Decline Trip
+                    <X className="h-3.5 w-3.5" /> {selectedBooking.supplier_assignment_status === "RESCHEDULED_RECONFIRMATION_REQUIRED" ? "Cannot Honor Dates" : "Decline Trip"}
                   </button>
                 </div>
                 {responseMessage && <p className="mt-2 text-xs font-bold text-amber-900">{responseMessage}</p>}

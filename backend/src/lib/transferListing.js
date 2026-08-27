@@ -59,9 +59,19 @@ export function validateTransferMeta(input) {
   if (!Number.isFinite(durationMins) || durationMins < 1 || durationMins > 2880) return { error: "Journey duration must be between 1 minute and 48 hours" };
   if (!Number.isFinite(freeWaitingMins) || freeWaitingMins < 0 || freeWaitingMins > 240) return { error: "Free waiting time must be between 0 and 240 minutes" };
 
+  const serviceDirection = String(input.serviceDirection || "ARRIVAL").toUpperCase();
+  if (!new Set(["ARRIVAL", "DEPARTURE"]).has(serviceDirection)) {
+    return { error: "Publish arrival and departure transfers as separate listings so each fixed terminal is unambiguous" };
+  }
+  const operationalRouteType = routeType === "AIRPORT_TRANSFER"
+    ? serviceDirection === "DEPARTURE" ? "AIRPORT_DROP" : "AIRPORT_PICKUP"
+    : routeType === "RAILWAY_TRANSFER"
+      ? serviceDirection === "DEPARTURE" ? "RAILWAY_DROP" : "RAILWAY_PICKUP"
+      : routeType === "INTERCITY_TRANSFER" ? "CITY_TO_CITY" : "POINT_TO_POINT";
+
   return {
     value: {
-      routeType,
+      routeType: operationalRouteType,
       originName,
       originLat,
       originLng,
@@ -76,10 +86,19 @@ export function validateTransferMeta(input) {
       freeWaitingMins,
       tollIncluded: input.tollIncluded === false ? 0 : 1,
       stateTaxIncluded: input.stateTaxIncluded === false ? 0 : 1,
-      serviceDirection: String(input.serviceDirection || "ARRIVAL").toUpperCase(),
+      serviceDirection,
       hubType: String(input.hubType || (routeType === "AIRPORT_TRANSFER" ? "AIRPORT" : routeType === "RAILWAY_TRANSFER" ? "RAILWAY" : "CITY")).toUpperCase(),
       zoneName: input.zoneName ? String(input.zoneName).trim() : destName,
       isFlexibleDropoff: input.isFlexibleDropoff !== false,
+      originRadiusKm: Number(input.originRadiusKm || input.radiusKm || 25),
+      destRadiusKm: Number(input.destRadiusKm || input.radiusKm || 25),
+      originIata: input.originIata ? String(input.originIata).trim().toUpperCase() : null,
+      destIata: input.destIata ? String(input.destIata).trim().toUpperCase() : null,
+      constraintMode: String(input.constraintMode || "RADIUS_FROM_CENTER").toUpperCase(),
+      allowedLocationTypes: Array.isArray(input.allowedLocationTypes) ? input.allowedLocationTypes.map((value) => String(value).toUpperCase()) : [],
+      errorMessage: input.errorMessage ? String(input.errorMessage).trim() : null,
+      interstatePermitTax: input.interstatePermitTax === true ? 1 : 0,
+      nightAllowanceInr: Math.max(0, Number(input.nightAllowanceInr || 300)),
     },
   };
 }

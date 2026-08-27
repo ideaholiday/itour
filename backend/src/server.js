@@ -21,7 +21,13 @@ import db, { databaseInfo } from "./db.js";
 import { runPendingMigrations } from "./services/migrationRunner.js";
 import { supabase } from "./supabaseClient.js";
 import { processExpiredSupplierAssignments } from "./services/assignmentSlaService.js";
-import { syncGoaSupplierAndProducts } from "./scripts/seedGoaSupplierProducts.js";
+import { processExpiredCircuitReconfirmations } from "./services/circuitOrchestrationService.js";
+import { notifyCircuitReschedule, queueNotification } from "./services/notificationService.js";
+// import { syncGoaSupplierAndProducts } from "./scripts/seedGoaSupplierProducts.js";
+// ⬆️ Plan 14 (5-product system): demo data is now managed by scripts/seed-fresh.js.
+//    The old DAY_TOUR / TRANSFER / MULTI_DAY_PACKAGE auto-sync is disabled.
+import { backfillProductLocationRules } from "./data/canonicalLocations.js";
+import { backfillProductOptions, expireBookingHolds } from "./services/logisticsService.js";
 import { configureSecurity } from "./middleware/security.js";
 import { apiNotFound, errorHandler, requestContext, requestLogger, stableErrorResponses } from "./middleware/observability.js";
 import { auditMutations } from "./services/auditService.js";
@@ -34,14 +40,16 @@ try {
     logger.info("Executed database migrations", { batch: migResult.batch, count: migResult.applied.length });
   }
 } catch (err) {
-  logger.warn("Database migration check completed with notice", { error: err.message });
+  logger.error("Database migration failed", { error: err.message, code: err.code });
+  if (process.env.NODE_ENV === "production") throw err;
 }
 
-// Ensure supplier and Goa products are synchronized across environments
+// Backfill canonical location rules and product options on startup (safe, idempotent)
 try {
-  syncGoaSupplierAndProducts(db);
+  backfillProductLocationRules(db);
+  backfillProductOptions(db);
 } catch (err) {
-  logger.warn("Goa supplier sync failed", { error: err });
+  logger.warn("Startup backfill failed", { error: err });
 }
 
 
@@ -69,6 +77,8 @@ import eventsRouter from "./routes/events.js";
 import currencyRouter from "./routes/currency.js";
 import promoRouter from "./routes/promo.js";
 import addonsRouter from "./routes/addons.js";
+import circuitOrdersRouter from "./routes/circuitOrders.js";
+import availabilityRouter from "./routes/availability.js";
 import { swaggerSpec } from "./config/swagger.js";
 
 const app = express();
@@ -144,6 +154,8 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/currency`, currencyRouter);
   app.use(`${prefix}/promo`, promoRouter);
   app.use(prefix, addonsRouter);
+  app.use(`${prefix}/circuit-orders`, circuitOrdersRouter);
+  app.use(`${prefix}/availability`, availabilityRouter);
 };
 
 mountApiRoutes("/api");
@@ -185,7 +197,12 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 8080;
 const assignmentSlaTimer = setInterval(() => {
+  try { expireBookingHolds(db); } catch (error) { logger.error("Booking hold expiry worker failed", { error }); }
   try { processExpiredSupplierAssignments(db); } catch (error) { logger.error("Supplier assignment SLA worker failed", { error }); }
+  try {
+    const result = processExpiredCircuitReconfirmations(db);
+    for (const orderId of result.orderIds) queueNotification(notifyCircuitReschedule(db, orderId, "REVIEW_REQUIRED"), "Circuit reconfirmation SLA notification");
+  } catch (error) { logger.error("Circuit reconfirmation SLA worker failed", { error }); }
 }, 30_000);
 assignmentSlaTimer.unref();
 const server = app.listen(PORT, "0.0.0.0", () => {

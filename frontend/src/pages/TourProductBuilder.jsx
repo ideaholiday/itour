@@ -132,7 +132,8 @@ export default function TourProductBuilder() {
       step2: {
         itinerary: isMulti
           ? (preset.itinerary || []).map((item, idx) => ({
-              day: idx + 1,
+            day: idx + 1,
+              city: preset.city,
               title: item.name || `Day ${idx + 1}`,
               description: item.name || "",
               placesCovered: [preset.city],
@@ -152,6 +153,12 @@ export default function TourProductBuilder() {
               description: item.description || "",
             }))
           : [],
+        pickupRuleMode: "CITY_ANYWHERE",
+        distanceKmLimit: 40,
+        advanceBookingCutoffHours: 4,
+        operatingStartTime: "06:00",
+        operatingEndTime: "22:00",
+        allowedLocationTypes: ["HOTEL_ZONE", "LANDMARK"],
       },
       step3: {
         pricingVariants: preset.pricingVariants || [
@@ -289,6 +296,42 @@ export default function TourProductBuilder() {
         inclusions: formData.step3.inclusions,
         exclusions: formData.step3.exclusions,
         itinerary: pType === "DAY_TOUR" ? JSON.stringify(formData.step2.dayStops) : JSON.stringify(formData.step2.itinerary),
+        dayTourMeta:
+          pType === "DAY_TOUR"
+            ? {
+                availableTimeSlots: formData.step2.timeSlots,
+                distanceKmLimit: formData.step2.distanceKmLimit || 40,
+                advanceBookingCutoffHours: formData.step2.advanceBookingCutoffHours ?? 4,
+                operatingStartTime: formData.step2.operatingStartTime || "06:00",
+                operatingEndTime: formData.step2.operatingEndTime || "22:00",
+                allowedLocationTypes: formData.step2.allowedLocationTypes || ["HOTEL_ZONE", "LANDMARK"],
+                maxGroupSize: formData.step4.maxGroupSize || 15,
+              }
+            : null,
+        locationRules:
+          pType === "DAY_TOUR"
+            ? ["PICKUP", "DROP"].map((side) => ({
+                side,
+                mode: formData.step2.pickupRuleMode || "CITY_ANYWHERE",
+                allowedCity: formData.step1.city,
+                allowedState: formData.step1.state,
+                radiusKm: formData.step2.distanceKmLimit || 40,
+                allowedLocationTypes: formData.step2.allowedLocationTypes || ["HOTEL_ZONE", "LANDMARK"],
+                suggestion: `Please select a hotel or pickup point in ${formData.step1.city}.`,
+              }))
+            : null,
+        options: [{
+          code: "STANDARD",
+          name: formData.step1.title || "Standard sightseeing option",
+          pickupOptionType: formData.step2.pickupRuleMode === "MEETING_POINT" ? "MEET_EVERYONE_AT_START_POINT" : "PICKUP_AND_MEET_AT_START_POINT",
+          confirmationType: "INSTANT_THEN_MANUAL",
+          supportedArrivalModes: ["OTHER"],
+          supportedDepartureModes: ["OTHER"],
+          availableStartTimes: formData.step2.timeSlots || ["09:00"],
+          allowCustomTravelerPickup: formData.step2.pickupRuleMode !== "FIXED_LOCATION",
+          pickupWindowMinutes: 30,
+          waitingTimeMinutes: 30,
+        }],
         pricingVariants:
           pType === "DAY_TOUR"
             ? isShared
@@ -315,8 +358,8 @@ export default function TourProductBuilder() {
                 totalDays: formData.step1.durationDays || 3,
                 totalNights: formData.step1.durationNights || 2,
                 dayWiseDetails: formData.step2.itinerary,
-                startCity: formData.step1.city,
-                endCity: formData.step1.city,
+                startCity: formData.step2.itinerary?.[0]?.city || formData.step1.city,
+                endCity: formData.step2.itinerary?.at(-1)?.city || formData.step1.city,
               }
             : null,
       };

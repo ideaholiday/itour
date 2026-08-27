@@ -28,8 +28,13 @@ test("traveler signs up and completes search-to-confirmation booking journey", a
   await expect(page).toHaveURL(/\/checkout\//);
   await expect(page.getByRole("heading", { name: "Review and book." })).toBeVisible();
   await expect(page.getByLabel("Full name")).toHaveValue("Browser E2E Traveler");
+  // A persisted local test account may not have a phone from an earlier run.
+  await page.getByLabel("WhatsApp / mobile").fill("+919876543210");
   await expect(page.getByLabel("Email for e-ticket")).toHaveValue(email);
-  await page.getByRole("button", { name: /Meet at departure point/i }).click();
+  const pickupInput = page.getByRole("combobox", { name: "Pickup address or meeting point" });
+  await pickupInput.fill("Calangute");
+  await page.getByRole("option", { name: /Calangute, Baga and Candolim Hotels/i }).click();
+  await expect(page.getByText("Pickup point confirmed", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Demo sandbox payment/i }).click();
 
   const confirmButton = page.getByRole("button", { name: /Confirm demo booking/i });
@@ -60,18 +65,18 @@ test("traveler signs up and completes search-to-confirmation booking journey", a
   await expect(page.getByRole("heading", { name: "My Trips & Itineraries" })).toBeVisible();
   await expect(page.getByText(bookingRef, { exact: true }).first()).toBeVisible();
 
-  await page.getByRole("button", { name: "Request Cancellation" }).click();
-  await expect(page.getByRole("heading", { name: "Cancel Booking & Process Refund" })).toBeVisible();
-  await expect(page.getByText("Cancellation Policy Evaluation", { exact: true })).toBeVisible();
-  const confirmCancellation = page.getByRole("button", { name: /Confirm (?:& Refund ₹[\d,]+|Cancellation)/ });
+  await page.getByRole("button", { name: /Request Cancellation|Cancel & Refund/ }).click();
+  await expect(page.getByRole("heading", { name: new RegExp(`Modify Trip #${bookingRef}`) })).toBeVisible();
+  await expect(page.getByText("Policy Tier:", { exact: true })).toBeVisible();
+  const confirmCancellation = page.getByRole("button", { name: "Confirm Cancellation", exact: true });
   await expect(confirmCancellation).toBeEnabled();
   const cancellationResponse = page.waitForResponse((response) => (
-    response.request().method() === "POST" && /\/api\/checkout\/cancel-booking$/.test(response.url())
+    response.request().method() === "POST" && /\/api\/bookings\/[^/]+\/self-cancel$/.test(response.url())
   ));
   await confirmCancellation.click();
   const cancellation = await cancellationResponse;
   const cancellationBody = await cancellation.json();
   expect(cancellation.status(), JSON.stringify(cancellationBody)).toBe(200);
-  expect(cancellationBody.gatewayRefundId).toMatch(/^rfnd_(?!manual_review)/);
-  await expect(page.getByText("Cancellation & Refund Confirmed!", { exact: true })).toBeVisible();
+  expect(cancellationBody).toMatchObject({ success: true, status: "cancelled", ref: bookingRef });
+  await expect(page.getByRole("heading", { name: "Request Completed" })).toBeVisible();
 });

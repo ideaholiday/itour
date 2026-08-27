@@ -21,7 +21,7 @@ import { useSearchParams } from 'next/navigation';
 import { FormEvent, useMemo, useState } from 'react';
 import LocationMapPicker, { PinLocation } from './LocationMapPicker';
 
-type FormErrors = Partial<Record<'name' | 'phone' | 'email' | 'pickup' | 'drop' | 'flightNumber' | 'arrivalTime', string>>;
+type FormErrors = Partial<Record<'name' | 'phone' | 'email' | 'pickup' | 'drop' | 'flightNumber' | 'arrivalTime' | 'departureTime', string>>;
 
 type CashfreeCheckoutResult = { error?: { message?: string } };
 type CashfreeClient = {
@@ -54,6 +54,7 @@ export default function CheckoutClient({ productId }: { productId: string }) {
   const isAirportTransfer = params.get('type') === 'transfers'
     || params.get('productType') === 'TRANSFER'
     || productId.toLowerCase().includes('transfer');
+  const isAirportDrop = /departure|drop/i.test(params.get('direction') || params.get('serviceDirection') || '');
   const baseFare = Number(params.get('amount')) || 2400;
   const productTitle = params.get('title') || (isAirportTransfer ? 'Private Airport Transfer' : 'Private Idea Holiday Experience');
   const supplierId = params.get('supplierId') || 'sup_lucknow_cabs';
@@ -76,7 +77,8 @@ export default function CheckoutClient({ productId }: { productId: string }) {
     confirmed: Boolean(params.get('dropLat') && params.get('dropLng')),
   });
   const [flightNumber, setFlightNumber] = useState('');
-  const [arrivalTime, setArrivalTime] = useState(params.get('time') || '10:00');
+  const [arrivalTime, setArrivalTime] = useState(isAirportDrop ? '' : (params.get('time') || '10:00'));
+  const [departureTime, setDepartureTime] = useState(isAirportDrop ? (params.get('time') || '10:00') : '');
   const [terminalGate, setTerminalGate] = useState('');
   const [promoInput, setPromoInput] = useState('');
   const [promoCode, setPromoCode] = useState(params.get('promo') || '');
@@ -84,6 +86,8 @@ export default function CheckoutClient({ productId }: { productId: string }) {
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [dispatchRef, setDispatchRef] = useState('');
+
+  const flightTimeForRoute = () => (isAirportDrop ? departureTime : arrivalTime);
 
   const fare = useMemo(() => {
     const gst = Math.round(baseFare * 0.05);
@@ -109,7 +113,10 @@ export default function CheckoutClient({ productId }: { productId: string }) {
     if (!pickup.confirmed || pickup.address.trim().length < 4 || !Number.isFinite(pickup.lat) || !Number.isFinite(pickup.lng)) next.pickup = 'Select the pickup from Mappls or confirm it on the map.';
     if (!drop.confirmed || drop.address.trim().length < 4 || !Number.isFinite(drop.lat) || !Number.isFinite(drop.lng)) next.drop = 'Select the drop-off from Mappls or confirm it on the map.';
     if (isAirportTransfer && !/^[A-Z0-9]{2,3}[- ]?[0-9]{1,4}[A-Z]?$/.test(flightNumber.trim().toUpperCase())) next.flightNumber = 'Use a flight number such as 6E-204.';
-    if (isAirportTransfer && !arrivalTime) next.arrivalTime = 'Select the scheduled flight arrival time.';
+    if (isAirportTransfer && !flightTimeForRoute()) {
+      if (isAirportDrop) next.departureTime = 'Select the scheduled flight departure time.';
+      else next.arrivalTime = 'Select the scheduled flight arrival time.';
+    }
     setErrors(next);
     if (Object.keys(next).length) document.getElementById('checkout-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return Object.keys(next).length === 0;
@@ -123,11 +130,22 @@ export default function CheckoutClient({ productId }: { productId: string }) {
       }
       const existing = document.getElementById('cashfree-js-sdk');
       if (existing) {
-        existing.addEventListener('load', () => {
-          if (window.Cashfree) resolve(window.Cashfree);
-          else reject(new Error('Cashfree SDK did not initialize'));
-        });
-        existing.addEventListener('error', () => reject(new Error('Cashfree SDK failed to load')));
+        if (typeof window !== 'undefined' && window.Cashfree) {
+          resolve(window.Cashfree);
+          return;
+        }
+        let attempts = 0;
+        const interval = setInterval(() => {
+          attempts++;
+          if (typeof window !== 'undefined' && window.Cashfree) {
+            clearInterval(interval);
+            resolve(window.Cashfree);
+          } else if (attempts > 40) {
+            clearInterval(interval);
+            existing.remove();
+            loadCashfreeSdk().then(resolve).catch(reject);
+          }
+        }, 50);
         return;
       }
       const script = document.createElement('script');
@@ -135,8 +153,11 @@ export default function CheckoutClient({ productId }: { productId: string }) {
       script.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
       script.async = true;
       script.onload = () => {
-        if (window.Cashfree) resolve(window.Cashfree);
-        else reject(new Error('Cashfree SDK did not initialize'));
+        if (typeof window !== 'undefined' && window.Cashfree) {
+          resolve(window.Cashfree);
+        } else {
+          reject(new Error('Cashfree SDK did not initialize'));
+        }
       };
       script.onerror = () => reject(new Error('Failed to load Cashfree payment gateway SDK'));
       document.body.appendChild(script);
@@ -154,6 +175,7 @@ export default function CheckoutClient({ productId }: { productId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           productId,
+          optionId: params.get('option') || undefined,
           supplierId,
           productType: isAirportTransfer ? 'TRANSFER' : 'DAY_TOUR',
           activityDate: params.get('date') || new Date().toISOString().slice(0, 10),
@@ -162,7 +184,8 @@ export default function CheckoutClient({ productId }: { productId: string }) {
           drop,
           flight: isAirportTransfer ? {
             number: flightNumber.trim().toUpperCase(),
-            scheduledArrival: arrivalTime,
+            scheduledArrival: arrivalTime || undefined,
+            scheduledDeparture: departureTime || undefined,
             terminalGate: terminalGate.trim(),
           } : null,
           fare: { baseFare, ...fare, promoCode: promoCode || null },
@@ -191,7 +214,8 @@ export default function CheckoutClient({ productId }: { productId: string }) {
       }
 
       const CashfreeSDK = await loadCashfreeSdk();
-      const cashfree = CashfreeSDK({ mode: 'sandbox' });
+      const mode = cfOrder.environment === 'PROD' || cfOrder.environment === 'PRODUCTION' ? 'production' : 'sandbox';
+      const cashfree = CashfreeSDK({ mode });
 
       const checkoutResult = await cashfree.checkout({
         paymentSessionId: cfOrder.paymentSessionId,
@@ -251,19 +275,19 @@ export default function CheckoutClient({ productId }: { productId: string }) {
             </section>
 
             <div>
-              <LocationMapPicker pickup={pickup} drop={drop} onPickupChange={setPickup} onDropChange={setDrop} />
+              <LocationMapPicker productId={productId} pickup={pickup} drop={drop} onPickupChange={setPickup} onDropChange={setDrop} />
               {(errors.pickup || errors.drop) && <p role="alert" className="mt-3 flex items-center gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300"><CircleAlert size={16} /> {errors.pickup || errors.drop}</p>}
             </div>
 
             {isAirportTransfer && (
               <section className="rounded-3xl border border-slate-800 bg-slate-900 p-5 shadow-xl sm:p-6">
-                <h2 className="flex items-center gap-2 text-lg font-bold text-white"><PlaneLanding size={21} className="text-amber-400" /> Flight arrival details</h2>
+                <h2 className="flex items-center gap-2 text-lg font-bold text-white"><PlaneLanding size={21} className="text-amber-400" /> {isAirportDrop ? 'Flight departure details' : 'Flight arrival details'}</h2>
                 <div className="mt-5 grid gap-4 sm:grid-cols-3">
                   <Field label="Flight number" error={errors.flightNumber}>
                     <input value={flightNumber} onChange={(event) => setFlightNumber(event.target.value.toUpperCase())} className={inputClass} placeholder="6E-204" autoCapitalize="characters" />
                   </Field>
-                  <Field label="Scheduled arrival" error={errors.arrivalTime}>
-                    <input value={arrivalTime} onChange={(event) => setArrivalTime(event.target.value)} className={`${inputClass} [color-scheme:dark]`} type="time" />
+                  <Field label={isAirportDrop ? 'Scheduled departure' : 'Scheduled arrival'} error={isAirportDrop ? errors.departureTime : errors.arrivalTime}>
+                    <input value={isAirportDrop ? departureTime : arrivalTime} onChange={(event) => (isAirportDrop ? setDepartureTime(event.target.value) : setArrivalTime(event.target.value))} className={`${inputClass} [color-scheme:dark]`} type="time" />
                   </Field>
                   <Field label="Terminal / gate (optional)">
                     <input value={terminalGate} onChange={(event) => setTerminalGate(event.target.value)} className={inputClass} placeholder="T3, Gate 2" />

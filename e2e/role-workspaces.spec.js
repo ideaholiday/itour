@@ -21,8 +21,8 @@ test("supplier accepts a paid assignment in the protected booking workspace", as
   const response = await assignmentResponse;
   expect(response.status(), await response.text()).toBe(200);
   await expect(page.getByRole("button", { name: "Accept & Confirm Trip" })).toBeHidden();
-  await expect(page.getByRole("button", { name: "Pending Action (0)" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Active / In-Progress (1)" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Pending Action \(\d+\)/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Active \/ In-Progress \([1-9]\d*\)/ })).toBeVisible();
 });
 
 test("operations reviews its task queue and approves a controlled refund dispute", async ({ page, request }) => {

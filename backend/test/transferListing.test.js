@@ -20,7 +20,10 @@ test("accepts the supported supplier transfer route types", () => {
   for (const routeType of ["AIRPORT_TRANSFER", "RAILWAY_TRANSFER", "INTERCITY_TRANSFER", "HOTEL_TRANSFER"]) {
     const result = validateTransferMeta({ ...validRoute, routeType });
     assert.equal(result.error, undefined);
-    assert.equal(result.value.routeType, routeType);
+    const expected = routeType === "AIRPORT_TRANSFER" ? "AIRPORT_PICKUP"
+      : routeType === "RAILWAY_TRANSFER" ? "RAILWAY_PICKUP"
+        : routeType === "INTERCITY_TRANSFER" ? "CITY_TO_CITY" : "POINT_TO_POINT";
+    assert.equal(result.value.routeType, expected);
   }
 });
 
@@ -39,5 +42,5 @@ test("uses the selected vehicle capacity and preserves inclusion flags", () => {
 
 test("normalizes legacy airport route values", () => {
   const result = validateTransferMeta({ ...validRoute, routeType: "AIRPORT_PICKUP" });
-  assert.equal(result.value.routeType, "AIRPORT_TRANSFER");
+  assert.equal(result.value.routeType, "AIRPORT_PICKUP");
 });

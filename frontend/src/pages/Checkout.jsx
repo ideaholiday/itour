@@ -37,21 +37,41 @@ const PAYMENT_OPTIONS = [
 
 function loadCashfreeSdk() {
   return new Promise((resolve, reject) => {
-    if (window.Cashfree) {
+    if (typeof window !== "undefined" && window.Cashfree) {
       resolve(window.Cashfree);
       return;
     }
     const existing = document.getElementById("cashfree-js-sdk");
     if (existing) {
-      existing.addEventListener("load", () => resolve(window.Cashfree));
-      existing.addEventListener("error", () => reject(new Error("Cashfree SDK failed to load")));
+      if (typeof window !== "undefined" && window.Cashfree) {
+        resolve(window.Cashfree);
+        return;
+      }
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        if (typeof window !== "undefined" && window.Cashfree) {
+          clearInterval(interval);
+          resolve(window.Cashfree);
+        } else if (attempts > 40) {
+          clearInterval(interval);
+          existing.remove();
+          loadCashfreeSdk().then(resolve).catch(reject);
+        }
+      }, 50);
       return;
     }
     const script = document.createElement("script");
     script.id = "cashfree-js-sdk";
     script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
     script.async = true;
-    script.onload = () => resolve(window.Cashfree);
+    script.onload = () => {
+      if (typeof window !== "undefined" && window.Cashfree) {
+        resolve(window.Cashfree);
+      } else {
+        reject(new Error("Cashfree SDK loaded but not initialized"));
+      }
+    };
     script.onerror = () => reject(new Error("Failed to load Cashfree payment gateway SDK"));
     document.body.appendChild(script);
   });
@@ -83,6 +103,9 @@ export default function Checkout() {
   const [dropPoint, setDropPoint] = useState(() => locationFromParams(params, "drop"));
   const [pickupTime, setPickupTime] = useState(params.get("time") || "09:00");
   const [flightNumber, setFlightNumber] = useState("");
+  const [flightTime, setFlightTime] = useState("");
+  const [terminalGate, setTerminalGate] = useState("");
+  const [packageHotels, setPackageHotels] = useState([]);
   const [pickupInstructions, setPickupInstructions] = useState("");
   const [specialRequests, setSpecialRequests] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("CASHFREE");
@@ -119,6 +142,8 @@ export default function Checkout() {
   const luggage = Number(params.get("luggage") || 0);
   const vehicle = params.get("vehicle") || "SEDAN";
   const variant = params.get("variant") || "Standard Booking";
+  const optionId = params.get("option") || activity?.options?.[0]?.id || null;
+  const hotelTierId = params.get("hotelTier") || null;
   const addonsParam = params.get("addons") || "";
 
   const selectedAddonIds = useMemo(() => {
@@ -143,6 +168,10 @@ export default function Checkout() {
       .then((data) => {
         if (!active) return;
         setActivity(data);
+        if (Array.isArray(data?.dayTour?.availableTimeSlots) && data.dayTour.availableTimeSlots.length
+          && !data.dayTour.availableTimeSlots.includes(pickupTime)) {
+          setPickupTime(data.dayTour.availableTimeSlots[0]);
+        }
         // Prepopulate origin or destination from listing transferMeta if available
         if (data?.transferMeta) {
           const meta = data.transferMeta;
@@ -153,6 +182,15 @@ export default function Checkout() {
           if (!isArr && meta.destName && !dropPoint.address) {
             setDropPoint({ address: meta.destName, lat: meta.destLat, lng: meta.destLng, mapplsPin: "", confirmed: true });
           }
+        }
+        if ((data?.productType || data?.product_type) === "MULTI_DAY_PACKAGE") {
+          const itineraryDays = data?.packageItinerary?.dayWiseDetails || [];
+          const nights = Number(data?.packageItinerary?.total_nights || Math.max(0, itineraryDays.length - 1));
+          setPackageHotels(Array.from({ length: nights }, (_, index) => ({
+            day: index + 1,
+            city: itineraryDays[index]?.city || itineraryDays[index]?.hotel_city || data?.packageItinerary?.start_city || data?.city || "",
+            point: { address: "", lat: null, lng: null, mapplsPin: "", confirmed: false },
+          })));
         }
       })
       .catch((err) => { if (active) setLoadingError(err.message || "This experience is unavailable."); });
@@ -171,7 +209,7 @@ export default function Checkout() {
     if (!activity || joiningMethod) return;
     const type = activity.productType || activity.product_type;
     const shared = vehicle === "SHARED_SEAT" || activity.groupType === "SHARED" || activity.group_type === "SHARED";
-    setJoiningMethod(type === "TRANSFER" ? "PICKUP" : type === "MULTI_DAY_PACKAGE" ? "PICKUP" : shared ? "MEET" : "PICKUP");
+    setJoiningMethod(type === "TRANSFER" || type === "MULTI_DAY_PACKAGE" ? "PICKUP" : "PICKUP");
   }, [activity, joiningMethod, vehicle]);
 
   const pickupOption = PICKUP_TYPES.find((option) => option.id === pickupType) || PICKUP_TYPES[0];
@@ -180,6 +218,10 @@ export default function Checkout() {
   const isTransfer = productType === "TRANSFER";
   const isPackage = productType === "MULTI_DAY_PACKAGE";
   const isArrivalTransfer = isTransfer && String(activity?.transferMeta?.serviceDirection || "ARRIVAL").toUpperCase() !== "DEPARTURE";
+  const pickupRule = activity?.locationRules?.find((rule) => rule.side === "PICKUP");
+  const dropRule = activity?.locationRules?.find((rule) => rule.side === "DROP");
+  const pickupIsFixed = pickupRule?.mode === "FIXED_LOCATION" || (isTransfer && isArrivalTransfer);
+  const dropIsFixed = dropRule?.mode === "FIXED_LOCATION" || (isTransfer && !isArrivalTransfer);
 
   const destinationSearchContext = [
     isPackage ? activity?.packageItinerary?.start_city : "",
@@ -207,7 +249,9 @@ export default function Checkout() {
     (pickupPoint.address.trim().length >= 3)
   );
   const travelerReady = Boolean(travelerName.trim() && travelerPhone.trim() && travelerEmail.trim());
-  const dropReady = !isTransfer || Boolean(dropLocation.trim().length >= 3);
+  const dropReady = (!isTransfer && !isPackage) || Boolean(dropLocation.trim().length >= 3 && dropPoint.confirmed);
+  const flightReady = !isTransfer || Boolean(/^[A-Z0-9]{2}[- ]?\d{1,4}$/i.test(flightNumber.trim()) && flightTime);
+  const packageHotelsReady = !isPackage || packageHotels.every((hotel) => hotel.point.confirmed && hotel.point.address.trim().length >= 3);
 
   const discountAmount = appliedPromo ? Number(appliedPromo.discountAmount || 0) : 0;
   const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount);
@@ -258,6 +302,7 @@ export default function Checkout() {
       setQuoteError("");
       api.getBookingQuote({
         product_id: id,
+        product_option_id: optionId,
         activity_date: date,
         adults,
         children,
@@ -268,6 +313,25 @@ export default function Checkout() {
         pickup_lng: pickupPoint.lng,
         drop_lat: dropPoint.lat,
         drop_lng: dropPoint.lng,
+        pickup_location: pickupPoint.address,
+        drop_location: dropPoint.address,
+        flight_number: flightNumber.trim() || null,
+        flight_arrival_time: isArrivalTransfer ? flightTime || null : null,
+        flight_departure_time: !isArrivalTransfer ? flightTime || null : null,
+        transfer_arrival_mode: isArrivalTransfer ? "AIR" : null,
+        transfer_departure_mode: !isArrivalTransfer ? "AIR" : null,
+        pickup_location_ref: pickupPoint.mapplsPin || null,
+        drop_location_ref: dropPoint.mapplsPin || null,
+        custom_pickup: false,
+        booking_question_answers: {
+          TRANSFER_ARRIVAL_MODE: isArrivalTransfer ? "AIR" : null,
+          TRANSFER_DEPARTURE_MODE: !isArrivalTransfer ? "AIR" : null,
+          FLIGHT_NUMBER: flightNumber.trim() || null,
+          FLIGHT_ARRIVAL_TIME: isArrivalTransfer ? flightTime || null : null,
+          FLIGHT_DEPARTURE_TIME: !isArrivalTransfer ? flightTime || null : null,
+        },
+        package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
+        hotel_tier_id: hotelTierId,
         origin_state: params.get("originState"),
         dest_state: params.get("destState")
       }).then((data) => {
@@ -281,13 +345,13 @@ export default function Checkout() {
       }).finally(() => setQuoteLoading(false));
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [activity, id, date, adults, children, luggage, vehicle, variant, pickupPoint.lat, pickupPoint.lng, dropPoint.lat, dropPoint.lng, params]);
+  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, packageHotels, params]);
 
   const progress = useMemo(() => [
     { label: "Traveler", ready: travelerReady, icon: UserRound },
-    { label: isTransfer ? "Route" : "Meeting", ready: pickupReady && dropReady, icon: MapPin },
+    { label: isTransfer ? "Route" : "Meeting", ready: pickupReady && dropReady && flightReady && packageHotelsReady, icon: MapPin },
     { label: "Confirm", ready: false, icon: LockKeyhole }
-  ], [dropReady, isTransfer, pickupReady, travelerReady]);
+  ], [dropReady, flightReady, isTransfer, packageHotelsReady, pickupReady, travelerReady]);
 
   const handleSubmitBooking = async (event) => {
     event.preventDefault();
@@ -302,6 +366,15 @@ export default function Checkout() {
       document.getElementById("dropoff-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    if (!flightReady) {
+      setError("Enter a valid flight number and scheduled flight time before continuing.");
+      document.getElementById("pickup-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (!packageHotelsReady) {
+      setError("Confirm the hotel location for every overnight city in this package.");
+      return;
+    }
     if (!quote) {
       setError(quoteError || "Wait for the secure server price before continuing.");
       return;
@@ -312,6 +385,7 @@ export default function Checkout() {
       const bookingRes = await api.createBooking({
         product_id: id,
         activity_id: id,
+        product_option_id: optionId,
         activity_date: date,
         pickup_type: isTransfer || joiningMethod === "PICKUP" ? pickupType : joiningMethod === "MEET" ? "MEETING_POINT" : "PROVIDE_LATER",
         pickup_time: pickupTime,
@@ -323,10 +397,27 @@ export default function Checkout() {
         drop_lat: dropPoint.lat,
         drop_lng: dropPoint.lng,
         flight_number: flightNumber.trim() || null,
+        flight_arrival_time: isArrivalTransfer ? flightTime || null : null,
+        flight_departure_time: !isArrivalTransfer ? flightTime || null : null,
+        transfer_arrival_mode: isArrivalTransfer ? "AIR" : null,
+        transfer_departure_mode: !isArrivalTransfer ? "AIR" : null,
+        pickup_location_ref: pickupPoint.mapplsPin || null,
+        drop_location_ref: dropPoint.mapplsPin || null,
+        custom_pickup: false,
+        booking_question_answers: {
+          TRANSFER_ARRIVAL_MODE: isArrivalTransfer ? "AIR" : null,
+          TRANSFER_DEPARTURE_MODE: !isArrivalTransfer ? "AIR" : null,
+          FLIGHT_NUMBER: flightNumber.trim() || null,
+          FLIGHT_ARRIVAL_TIME: isArrivalTransfer ? flightTime || null : null,
+          FLIGHT_DEPARTURE_TIME: !isArrivalTransfer ? flightTime || null : null,
+        },
+        terminal_gate: terminalGate.trim() || null,
+        package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
         origin_state: params.get("originState"),
         special_requests: specialRequests.trim(),
         promo_code: appliedPromo?.code || null,
         selected_addons: addonCalculation.addons,
+        hotel_tier_id: hotelTierId,
         adults, children, luggage_bags: luggage,
         vehicle_category: vehicle,
         variant_name: variant,
@@ -440,7 +531,7 @@ export default function Checkout() {
               {/* Experience joining methods */}
               {!isTransfer && (
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {!isPackage && (
+                  {!isPackage && activity?.dayTour?.pickup_service_type === "MEETING_POINT" && (
                     <button
                       type="button"
                       onClick={() => setJoiningMethod("MEET")}
@@ -462,7 +553,7 @@ export default function Checkout() {
                     <strong className="block text-sm text-stone-900">{isPackage ? "Airport / hotel pickup" : "Request hotel pickup"}</strong>
                     <span className="mt-1 block text-xs text-stone-600">Add the address for your operator.</span>
                   </button>
-                  {isPackage && (
+                  {isPackage && activity?.packageItinerary?.allow_later_pickup === true && (
                     <button
                       type="button"
                       onClick={() => setJoiningMethod("LATER")}
@@ -474,6 +565,13 @@ export default function Checkout() {
                       <span className="mt-1 block text-xs text-stone-600">Continue if flights or accommodation are not booked yet.</span>
                     </button>
                   )}
+                </div>
+              )}
+
+              {!isTransfer && !isPackage && Array.isArray(activity?.itinerary) && activity.itinerary.length > 0 && (
+                <div className="rounded-2xl border border-stone-200 bg-white p-4">
+                  <div className="flex items-center justify-between"><strong className="text-xs text-stone-900">Locked sightseeing itinerary</strong><span className="text-[10px] font-black text-stone-500">STOPS CANNOT BE CHANGED</span></div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-stone-700">{activity.itinerary.map((stop, index) => <React.Fragment key={`${stop?.name || stop}-${index}`}><span className="rounded-full bg-stone-100 px-3 py-1.5 font-semibold">{stop?.name || stop?.title || String(stop)}</span>{index < activity.itinerary.length - 1 && <span aria-hidden="true">→</span>}</React.Fragment>)}</div>
                 </div>
               )}
 
@@ -495,16 +593,20 @@ export default function Checkout() {
                         </div>
                         <input
                           value={pickupPoint.address}
-                          onChange={(e) => setPickupPoint((prev) => ({ ...prev, address: e.target.value }))}
+                          readOnly={pickupIsFixed}
+                          aria-readonly={pickupIsFixed}
+                          onChange={(e) => !pickupIsFixed && setPickupPoint((prev) => ({ ...prev, address: e.target.value }))}
                           placeholder="Airport or railway station terminal..."
-                          className="w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-3 text-xs text-stone-900 font-semibold focus:border-amber-500 focus:bg-white outline-none"
+                          className="w-full rounded-xl border border-stone-300 bg-stone-100 p-3 text-xs text-stone-900 font-semibold outline-none"
                         />
+                        {pickupIsFixed && <p className="text-[11px] font-bold text-amber-800">🔒 Fixed pickup point — travelers cannot override this terminal.</p>}
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="text-xs font-bold text-stone-700">
-                            Flight / Train Number <span className="text-amber-700 font-normal">(for live delay tracking)</span>
+                            Flight Number <span className="text-rose-600">*</span>
                             <input
+                              required
                               value={flightNumber}
-                              onChange={(e) => setFlightNumber(e.target.value)}
+                              onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
                               placeholder="e.g. 6E-2134 (IndiGo) or AI-864"
                               className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 focus:border-amber-500 focus:bg-white outline-none"
                             />
@@ -514,12 +616,14 @@ export default function Checkout() {
                             <input
                               type="time"
                               required
-                              value={pickupTime}
-                              onChange={(e) => setPickupTime(e.target.value)}
+                              value={flightTime}
+                              onChange={(e) => { setFlightTime(e.target.value); setPickupTime(e.target.value); }}
                               className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 focus:border-amber-500 focus:bg-white outline-none"
                             />
                           </label>
                         </div>
+                        <label className="block text-xs font-bold text-stone-700">Terminal / gate <span className="font-normal text-stone-500">(optional)</span><input value={terminalGate} onChange={(e) => setTerminalGate(e.target.value)} placeholder="e.g. Terminal 1, Gate A" className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
+                        <p className="rounded-xl bg-amber-50 p-2.5 text-[11px] font-semibold text-amber-900">Includes {activity?.transferMeta?.freeWaitingMins || 60} minutes free waiting after flight arrival.</p>
                       </div>
 
                       {/* Drop-off Destination (User Choice Hotel / Home) */}
@@ -541,6 +645,8 @@ export default function Checkout() {
                           label=""
                           kind="dropoff"
                           markerLabel="B"
+                          productId={id}
+                          validationSide="DROP"
                         />
                         <div className="rounded-xl bg-white border border-emerald-200 p-2.5 text-[11px] text-emerald-900 leading-relaxed">
                           ✨ <strong>Any Hotel or Address Covered:</strong> Your chauffeur will meet you with your nameboard at the terminal and drive you directly to this location.
@@ -566,13 +672,16 @@ export default function Checkout() {
                           searchContext={destinationSearchContext}
                           onChange={setPickupPoint}
                           placeholder="Enter your hotel name, room/lobby or pickup address..."
+                          productId={id}
+                          validationSide="PICKUP"
                         />
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="text-xs font-bold text-stone-700">
                             Departure Flight / Train Number
                             <input
+                              required
                               value={flightNumber}
-                              onChange={(e) => setFlightNumber(e.target.value)}
+                              onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
                               placeholder="e.g. 6E-5021 (IndiGo)"
                               className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 focus:border-amber-500 focus:bg-white outline-none"
                             />
@@ -588,6 +697,10 @@ export default function Checkout() {
                             />
                           </label>
                         </div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="text-xs font-bold text-stone-700">Scheduled departure time <span className="text-rose-600">*</span><input type="time" required value={flightTime} onChange={(e) => setFlightTime(e.target.value)} className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
+                          <label className="text-xs font-bold text-stone-700">Terminal / gate <span className="font-normal text-stone-500">(optional)</span><input value={terminalGate} onChange={(e) => setTerminalGate(e.target.value)} placeholder="e.g. Terminal 3" className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
+                        </div>
                       </div>
 
                       {/* Drop-off Terminal */}
@@ -597,17 +710,20 @@ export default function Checkout() {
                         </label>
                         <input
                           value={dropPoint.address}
-                          onChange={(e) => setDropPoint((prev) => ({ ...prev, address: e.target.value }))}
+                          readOnly={dropIsFixed}
+                          aria-readonly={dropIsFixed}
+                          onChange={(e) => !dropIsFixed && setDropPoint((prev) => ({ ...prev, address: e.target.value }))}
                           placeholder="Airport or station terminal..."
                           className="w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-3 text-xs text-stone-900 font-semibold focus:border-amber-500 focus:bg-white outline-none"
                         />
+                        {dropIsFixed && <p className="text-[11px] font-bold text-amber-800">🔒 Fixed airport drop-off — this terminal cannot be changed.</p>}
                       </div>
                     </>
                   )}
                 </div>
               )}
 
-              {(isTransfer || isPackage || joiningMethod === "PICKUP") && (
+              {!isTransfer && (isPackage || joiningMethod === "PICKUP") && (
                 <div className="mt-5 space-y-4">
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {PICKUP_TYPES.map((option) => (
@@ -632,17 +748,20 @@ export default function Checkout() {
                     searchContext={destinationSearchContext}
                     onChange={setPickupPoint}
                     placeholder={pickupOption.placeholder}
+                    productId={id}
+                    validationSide="PICKUP"
                   />
                   <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
                     <label className="text-xs font-bold text-stone-700">
                       {isPackage ? "Expected arrival" : "Pickup time"}
-                      <input
-                        type="time"
-                        required
-                        value={pickupTime}
-                        onChange={(e) => setPickupTime(e.target.value)}
-                        className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white"
-                      />
+                      {Array.isArray(activity?.dayTour?.availableTimeSlots) && activity.dayTour.availableTimeSlots.length ? (
+                        <select required value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white">
+                          <option value="">Choose a slot</option>
+                          {activity.dayTour.availableTimeSlots.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
+                        </select>
+                      ) : (
+                        <input type="time" required value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" />
+                      )}
                     </label>
                     <label className="text-xs font-bold text-stone-700">
                       Pickup notes <span className="font-normal text-stone-500">(optional)</span>
@@ -654,6 +773,22 @@ export default function Checkout() {
                       />
                     </label>
                   </div>
+                  {isPackage && (
+                    <div className="space-y-4 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4">
+                      <div><strong className="text-sm text-indigo-950">Final departure drop</strong><p className="text-xs text-indigo-800">Choose an airport or railway station in {activity?.packageItinerary?.end_city || activity?.city}.</p></div>
+                      <PickupPointPicker value={dropPoint} nearbyLocation={pickupPoint} searchContext={`${activity?.packageItinerary?.end_city || activity?.city}, ${activity?.state}`} onChange={setDropPoint} placeholder="Departure airport or railway station" label="Final drop-off" kind="dropoff" markerLabel="B" productId={id} validationSide="DROP" />
+                    </div>
+                  )}
+                  {isPackage && packageHotels.length > 0 && (
+                    <div className="space-y-4 rounded-2xl border border-stone-200 bg-stone-50 p-4">
+                      <div><strong className="text-sm text-stone-900">Hotels by itinerary city</strong><p className="text-xs text-stone-600">Confirm each overnight hotel so the next day's pickup can be validated.</p></div>
+                      {packageHotels.map((hotel, index) => (
+                        <div key={hotel.day} className="rounded-xl border border-stone-200 bg-white p-3">
+                          <PickupPointPicker productId={id} validationSide="PICKUP" value={hotel.point} searchContext={`${hotel.city}, ${activity?.state}`} onChange={(point) => setPackageHotels((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, point } : item))} placeholder={`Hotel name and address in ${hotel.city}`} label={`Night ${hotel.day} hotel · ${hotel.city}`} markerLabel={String(hotel.day)} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </section>

@@ -31,6 +31,8 @@ export default function PickupPointPicker({
   markerLabel = "A",
   nearbyLocation = null,
   searchContext = "",
+  productId = null,
+  validationSide = kind === "dropoff" ? "DROP" : "PICKUP",
 }) {
   const inputId = useId();
   const wrapperRef = useRef(null);
@@ -91,6 +93,22 @@ export default function PickupPointPicker({
       setSearching(true);
       setMessage("");
       try {
+        if (productId) {
+          const scopedResponse = await fetch(`/api/activities/${encodeURIComponent(productId)}/pickup-suggestions?side=${encodeURIComponent(validationSide)}&q=${encodeURIComponent(query)}`, { signal: controller.signal });
+          const scopedData = await scopedResponse.json().catch(() => ({}));
+          if (scopedResponse.ok) {
+            setSuggestions((scopedData.suggestions || []).map((place) => ({
+              id: place.id,
+              label: place.name,
+              description: place.displayHint || `${place.city}, ${place.state}`,
+              category: String(place.type || "Location").replaceAll("_", " "),
+              lat: Number(place.lat),
+              lng: Number(place.lng),
+            })));
+            setActiveIndex(-1);
+            return;
+          }
+        }
         const params = new URLSearchParams({ query });
         const bias = searchBiasRef.current;
         if (Number.isFinite(bias.lat) && Number.isFinite(bias.lng)) {
@@ -121,12 +139,24 @@ export default function PickupPointPicker({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [input, open, value.confirmed, searchContext]);
+  }, [input, open, value.confirmed, searchContext, productId, validationSide]);
 
-  const commitLocation = (location) => {
+  const commitLocation = async (location) => {
     const lat = location.lat === null || location.lat === undefined ? null : Number(location.lat);
     const lng = location.lng === null || location.lng === undefined ? null : Number(location.lng);
     const confirmed = Number.isFinite(lat) && Number.isFinite(lng);
+    if (productId && confirmed) {
+      const response = await fetch(`/api/activities/${encodeURIComponent(productId)}/validate-pickup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ side: validationSide, lat, lng, address: location.address }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.valid === false) {
+        setMessage([data.error, data.detail?.suggestion].filter(Boolean).join(" ") || `This ${pointLabel} is outside the service area.`);
+        return false;
+      }
+    }
     setInput(location.address);
     onChange({
       address: location.address,
@@ -138,6 +168,7 @@ export default function PickupPointPicker({
     setOpen(false);
     setSuggestions([]);
     setMessage("");
+    return true;
   };
 
   const chooseSuggestion = async (place) => {
@@ -165,8 +196,7 @@ export default function PickupPointPicker({
           return;
         }
       }
-      commitLocation({ address, lat, lng, mapplsPin: place.id });
-      setShowMap(true);
+      if (await commitLocation({ address, lat, lng, mapplsPin: place.id })) setShowMap(true);
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -182,10 +212,10 @@ export default function PickupPointPicker({
       const address = response.ok
         ? data.location.address
         : fallbackAddress.trim() || `Pinned location (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
-      commitLocation({ address, lat, lng });
+      await commitLocation({ address, lat, lng });
       if (!response.ok) setMessage(data.error || "The pin is confirmed; please add a landmark below.");
     } catch {
-      commitLocation({ address: fallbackAddress.trim() || `Pinned location (${lat.toFixed(6)}, ${lng.toFixed(6)})`, lat, lng });
+      await commitLocation({ address: fallbackAddress.trim() || `Pinned location (${lat.toFixed(6)}, ${lng.toFixed(6)})`, lat, lng });
       setMessage("The pin is confirmed; please add a nearby landmark below.");
     } finally {
       setPinning(false);

@@ -3,6 +3,14 @@ import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 
 const LOCAL_ORIGINS = ["http://localhost:3000", "http://localhost:5173"];
+const CASHFREE_CHECKOUT_ORIGINS = [
+  "https://sdk.cashfree.com",
+  "https://sandbox.cashfree.com",
+  "https://api.cashfree.com",
+  "https://payments-test.cashfree.com",
+  "https://payments.cashfree.com",
+  "https://*.cashfree.com",
+];
 
 function positiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -44,9 +52,10 @@ export function buildCspDirectives(environment = process.env) {
     "https://*.supabase.co",
     "https://apis.mappls.com",
     "https://outpost.mappls.com",
-    "https://sandbox.cashfree.com",
-    "https://api.cashfree.com",
+    ...CASHFREE_CHECKOUT_ORIGINS,
+    "https://*.cashfree.com",
     "https://api.razorpay.com",
+    "https://*.razorpay.com",
     "https://*.google-analytics.com",
     "https://*.analytics.google.com",
     "https://*.googletagmanager.com",
@@ -58,9 +67,15 @@ export function buildCspDirectives(environment = process.env) {
     scriptSrc: [
       "'self'",
       "'unsafe-inline'",
+      "'unsafe-eval'",
       "https://apis.mappls.com",
       "https://sdk.cashfree.com",
+      "https://sandbox.cashfree.com",
+      "https://payments-test.cashfree.com",
+      "https://payments.cashfree.com",
+      "https://*.cashfree.com",
       "https://checkout.razorpay.com",
+      "https://*.razorpay.com",
       "https://www.googletagmanager.com",
     ],
     styleSrc: [
@@ -69,6 +84,8 @@ export function buildCspDirectives(environment = process.env) {
       "https://fonts.googleapis.com",
       "https://unpkg.com",
       "https://apis.mappls.com",
+      "https://*.cashfree.com",
+      "https://*.razorpay.com",
     ],
     imgSrc: [
       "'self'",
@@ -78,23 +95,28 @@ export function buildCspDirectives(environment = process.env) {
       "https://*.tile.openstreetmap.org",
       "https://apis.mappls.com",
       "https://images.unsplash.com",
+      "https://*.cashfree.com",
+      "https://*.razorpay.com",
     ],
     fontSrc: [
       "'self'",
       "data:",
       "https://fonts.gstatic.com",
+      "https://*.cashfree.com",
+      "https://*.razorpay.com",
     ],
     connectSrc: [...new Set(connectSources)],
     frameSrc: [
       "'self'",
-      "https://sdk.cashfree.com",
-      "https://api.cashfree.com",
+      ...CASHFREE_CHECKOUT_ORIGINS,
+      "https://*.cashfree.com",
       "https://api.razorpay.com",
       "https://checkout.razorpay.com",
+      "https://*.razorpay.com",
     ],
     objectSrc: ["'none'"],
     baseUri: ["'self'"],
-    formAction: ["'self'"],
+    formAction: ["'self'", "https://*.cashfree.com", "https://*.razorpay.com"],
     frameAncestors: ["'none'"],
   };
 

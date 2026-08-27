@@ -4,6 +4,7 @@ import OpsLayout from "../components/ops/OpsLayout.jsx";
 import LiveTripBoardView from "./ops/LiveTripBoardView.jsx";
 import WhatsAppNotificationView from "./ops/WhatsAppNotificationView.jsx";
 import SupportCasesView from "./ops/SupportCasesView.jsx";
+import CircuitManagementQueueView from "./ops/CircuitManagementQueueView.jsx";
 import { authHeaders } from "../lib/api.js";
 
 function OpsTaskQueueView() {
@@ -81,6 +82,7 @@ export default function OpsPanel({ view }) {
   if (!activeView) {
     if (location.pathname.includes("/support")) activeView = "support";
     else if (location.pathname.includes("/notifications")) activeView = "notifications";
+    else if (location.pathname.includes("/circuits")) activeView = "circuits";
     else if (location.pathname.includes("/tasks")) activeView = "tasks";
     else activeView = "live";
   }
@@ -91,6 +93,7 @@ export default function OpsPanel({ view }) {
       {activeView === "notifications" && <WhatsAppNotificationView />}
       {activeView === "support" && <SupportCasesView />}
       {activeView === "tasks" && <OpsTaskQueueView />}
+      {activeView === "circuits" && <CircuitManagementQueueView />}
     </OpsLayout>
   );
 }

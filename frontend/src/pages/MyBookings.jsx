@@ -743,7 +743,16 @@ export default function MyBookings() {
                             </span>
                           )}
 
-                          {isUpcoming(booking) && confirmed && (
+                          {isUpcoming(booking) && confirmed && booking.circuit_order_id && (
+                            <Link
+                              to={`/circuit/${booking.circuit_order_id}/manage`}
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2 text-xs font-bold text-amber-900 hover:bg-amber-100"
+                            >
+                              <Compass className="h-3.5 w-3.5" /> Manage Complete Circuit
+                            </Link>
+                          )}
+
+                          {isUpcoming(booking) && confirmed && !booking.circuit_order_id && (
                             <>
                               <button
                                 onClick={() => {

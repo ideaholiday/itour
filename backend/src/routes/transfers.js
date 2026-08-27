@@ -10,6 +10,7 @@ import {
   matchSupplierGeoFences,
   calculateHaversineDistanceKm
 } from "../engine/transferEngine.js";
+import { assertBookingLocations } from "../services/locationValidationService.js";
 
 const router = express.Router();
 
@@ -140,6 +141,8 @@ router.get("/search", handleTransferSearch);
 router.post("/quote", validateBody(transferSchema), (req, res) => {
   try {
     const {
+      productId,
+      product_id,
       originLat,
       originLng,
       destLat,
@@ -150,6 +153,29 @@ router.post("/quote", validateBody(transferSchema), (req, res) => {
       luggage = 2,
       selectedVehicle = null
     } = req.body;
+
+    const scopedProductId = productId || product_id;
+    if (!scopedProductId) {
+      return res.status(400).json({
+        error: "Product context is required for a transfer quote.",
+        code: "VALIDATION_ERROR",
+        requestId: req.requestId,
+      });
+    }
+    const pickupLat = req.body.pickupLat ?? originLat;
+    const pickupLng = req.body.pickupLng ?? originLng;
+    const dropLat = req.body.dropLat ?? destLat;
+    const dropLng = req.body.dropLng ?? destLng;
+    assertBookingLocations(db, {
+      ...req.body,
+      product_id: scopedProductId,
+      pickup_lat: pickupLat,
+      pickup_lng: pickupLng,
+      drop_lat: dropLat,
+      drop_lng: dropLng,
+      pickup_location: req.body.pickupAddress || req.body.pickup_location,
+      drop_location: req.body.dropAddress || req.body.drop_location,
+    });
 
     const eligibleVehicles = getEligibleVehicleCategories(Number(passengers), Number(luggage));
     
@@ -162,10 +188,10 @@ router.post("/quote", validateBody(transferSchema), (req, res) => {
     const targetCategory = selectedVehicle || eligibleVehicles[0].code;
 
     const quote = computeTransferQuote({
-      originLat: Number(originLat) || 26.7606,
-      originLng: Number(originLng) || 80.8893,
-      destLat: Number(destLat) || 26.8467,
-      destLng: Number(destLng) || 80.9462,
+      originLat: Number(pickupLat),
+      originLng: Number(pickupLng),
+      destLat: Number(dropLat),
+      destLng: Number(dropLng),
       originState,
       destState,
       passengers: Number(passengers),
@@ -176,10 +202,10 @@ router.post("/quote", validateBody(transferSchema), (req, res) => {
     // Provide options for all eligible vehicle categories
     const allOptions = eligibleVehicles.map((veh) => {
       return computeTransferQuote({
-        originLat: Number(originLat) || 26.7606,
-        originLng: Number(originLng) || 80.8893,
-        destLat: Number(destLat) || 26.8467,
-        destLng: Number(destLng) || 80.9462,
+        originLat: Number(pickupLat),
+        originLng: Number(pickupLng),
+        destLat: Number(dropLat),
+        destLng: Number(dropLng),
         originState,
         destState,
         passengers: Number(passengers),
@@ -195,7 +221,12 @@ router.post("/quote", validateBody(transferSchema), (req, res) => {
     });
   } catch (err) {
     logger.error("Transfer quote failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: "Failed to calculate transfer quote." });
+    res.status(err.status || 500).json({
+      error: err.status ? err.message : "Failed to calculate transfer quote.",
+      code: err.code,
+      detail: err.detail,
+      requestId: req.requestId,
+    });
   }
 });
 

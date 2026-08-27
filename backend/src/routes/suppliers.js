@@ -6,10 +6,12 @@ import logger from "../config/logger.js";
 import { validateTransferMeta } from "../lib/transferListing.js";
 import { resolveIndiaCatalogLocation } from "../lib/locationCatalog.js";
 import { respondToSupplierAssignment } from "../services/assignmentSlaService.js";
+import { respondToCircuitReconfirmation } from "../services/circuitOrchestrationService.js";
 import { evaluateSupplierAvailability, normalizeAvailabilityRule } from "../services/availabilityService.js";
 import {
   notifyDispatchStatusChanged,
   notifyDriverAssigned,
+  notifyCircuitReschedule,
   notifyRefundProcessed,
   queueNotification,
   sendGuestBookingNotification,
@@ -35,9 +37,11 @@ import { nanoid } from "nanoid";
 import { validateBody } from "../middleware/validation.js";
 import { bookingSchemas, supplierSchemas } from "../validators/apiSchemas.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
+import { backfillProductOptions } from "../services/logisticsService.js";
 
 const router = express.Router();
 router.use(authenticate);
+const databaseList = (value) => databaseInfo.engine === "postgres" ? value : JSON.stringify(value);
 
 function requireSupplierAccess(req, res, next) {
   const role = String(req.user?.role || "").toUpperCase();
@@ -573,7 +577,7 @@ router.post("/:id/geofences", validateBody(supplierSchemas.geofence), (req, res)
 
     db.prepare(
       `INSERT INTO geo_fences (id, supplier_id, zone_name, city, center_lat, center_lng, radius_km, polygon_coordinates, is_active, approval_status, submitted_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'PENDING_REVIEW', datetime('now'))`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, FALSE, 'PENDING_REVIEW', datetime('now'))`
     ).run(fenceId, id, zoneName.trim(), canonicalCity, lat, lng, radius, polyJson);
 
     res.json({ success: true, fenceId, approvalStatus: "PENDING_REVIEW", message: "Coverage zone submitted for Idea Holiday admin review." });
@@ -591,6 +595,163 @@ router.delete("/:id/geofences/:fenceId", (req, res) => {
     res.json({ success: true, message: "Service zone removed" });
   } catch (err) {
     res.status(500).json({ error: "Failed to remove service zone" });
+  }
+});
+
+// POST /api/suppliers/:id/products/v2 — Unified 5-type product creation (Plan 14)
+router.post("/:id/products/v2", (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      productType, productSubType, title, city, state, country = "India",
+      category, shortDesc, fullDesc, durationHours, durationDays,
+      priceInr, strikePriceInr, heroImage, images, highlights,
+      inclusions, exclusions, essentialInfo,
+      bookingMode = "INSTANT", minAdvanceHours = 4, minPax = 1, maxPax = 20,
+      languages, freeCancellation = 1, cancellationPolicy = "FLEXIBLE_24H",
+      isInstantBooking = 1, groupType = "PRIVATE", status = "PUBLISHED",
+      itineraryItems, ticketTiers, vehicleOptions, sicHubs, hotelTiers,
+    } = req.body;
+
+    const VALID_TYPES = ["PACKAGE", "TOUR", "TRANSFER", "ATTRACTION", "EXPERIENCE"];
+    const VALID_SUBTYPES = ["WITH_HOTEL", "WITHOUT_HOTEL", "SIC", "PRIVATE",
+      "AIRPORT_RAILWAY", "INTERCITY_HOTEL", "CITY_TO_CITY",
+      "TICKET_ONLY", "TICKET_SIC", "TICKET_PRIVATE"];
+
+    const normType = String(productType || "").toUpperCase();
+    if (!VALID_TYPES.includes(normType))
+      return res.status(400).json({ error: `Invalid product type. Choose: ${VALID_TYPES.join(", ")}` });
+    const normSubType = String(productSubType || "").toUpperCase();
+    if (normSubType && !VALID_SUBTYPES.includes(normSubType))
+      return res.status(400).json({ error: `Invalid sub-type: ${normSubType}` });
+    if (!title?.trim()) return res.status(400).json({ error: "Title is required" });
+    if (!city?.trim()) return res.status(400).json({ error: "City is required" });
+    if (!state?.trim()) return res.status(400).json({ error: "State / Region is required" });
+    const normPrice = Number(priceInr);
+    if (!Number.isFinite(normPrice) || normPrice <= 0)
+      return res.status(400).json({ error: "Price must be greater than zero" });
+
+    const supplier = db.prepare("SELECT id FROM suppliers WHERE id = ?").get(id);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+
+    const typeCode = normType.slice(0, 3).toLowerCase();
+    const cityCode = city.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 4);
+    const productId = `prod_${typeCode}_${cityCode}_${nanoid(8)}`;
+
+    let normGroupType = String(groupType || "PRIVATE").toUpperCase();
+    if (["SIC", "TICKET_SIC"].includes(normSubType)) normGroupType = "SIC";
+    if (["PRIVATE", "TICKET_PRIVATE", "WITH_HOTEL", "WITHOUT_HOTEL",
+         "AIRPORT_RAILWAY", "INTERCITY_HOTEL", "CITY_TO_CITY", "TICKET_ONLY"].includes(normSubType))
+      normGroupType = "PRIVATE";
+
+    const defaultCategory = { PACKAGE: "Holiday Packages", TOUR: "Tours & Sightseeing",
+      TRANSFER: "Transfers", ATTRACTION: "Attractions", EXPERIENCE: "Experiences" }[normType];
+
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO products (
+          id, product_code, supplier_id, product_type, product_sub_type,
+          title, city, state, category, short_desc, full_desc,
+          duration_hours, duration_days, price_inr, strike_price_inr,
+          hero_image, images, highlights, inclusions, exclusions, essential_info,
+          group_type, booking_mode, min_advance_hours, min_pax, max_pax, languages,
+          free_cancellation, cancellation_policy, is_instant_booking,
+          status, is_published, rating, review_count, bestseller, created_at
+        ) VALUES (
+          ?,?,?,?,?, ?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?,?, ?,?,?,?,?,?, ?,?,?, ?,?,4.8,0,0,datetime('now')
+        )
+      `).run(
+        productId, productId, id, normType, normSubType || null,
+        title.trim(), city.trim(), state.trim(),
+        category || defaultCategory,
+        String(shortDesc || "").trim(),
+        String(fullDesc || shortDesc || "").trim(),
+        Number(durationHours) || 4, Number(durationDays) || 1,
+        normPrice, strikePriceInr ? Number(strikePriceInr) : null,
+        heroImage || null,
+        JSON.stringify(Array.isArray(images) ? images : []),
+        JSON.stringify(Array.isArray(highlights) ? highlights : []),
+        JSON.stringify(Array.isArray(inclusions) ? inclusions : []),
+        JSON.stringify(Array.isArray(exclusions) ? exclusions : []),
+        JSON.stringify(Array.isArray(essentialInfo) ? essentialInfo : []),
+        normGroupType, bookingMode,
+        Number(minAdvanceHours) || 4, Number(minPax) || 1, Number(maxPax) || 20,
+        JSON.stringify(Array.isArray(languages) ? languages : ["English"]),
+        freeCancellation ? 1 : 0, cancellationPolicy, isInstantBooking ? 1 : 0,
+        status === "DRAFT" ? "DRAFT" : "PUBLISHED",
+        status === "DRAFT" ? 0 : 1,
+      );
+
+      if (Array.isArray(itineraryItems) && itineraryItems.length > 0) {
+        const ins = db.prepare(`INSERT INTO product_itinerary_items
+          (id,product_id,day_number,time_label,title,description,location,duration_text,icon,sort_order)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`);
+        itineraryItems.forEach((item, i) => ins.run(
+          `itin_${nanoid(10)}`, productId,
+          Number(item.dayNumber)||1, String(item.timeLabel||`Step ${i+1}`),
+          String(item.title||""), String(item.description||""),
+          item.location||null, item.durationText||null, item.icon||"📍", i));
+      }
+
+      if (Array.isArray(ticketTiers) && ticketTiers.length > 0) {
+        const ins = db.prepare(`INSERT INTO product_ticket_tiers
+          (id,product_id,tier_name,age_min,age_max,price_inr,is_free,sort_order)
+          VALUES (?,?,?,?,?,?,?,?)`);
+        ticketTiers.forEach((t, i) => ins.run(
+          `tt_${nanoid(10)}`, productId,
+          String(t.tierName||`Tier ${i+1}`),
+          t.ageMin!=null?Number(t.ageMin):null,
+          t.ageMax!=null?Number(t.ageMax):null,
+          Number(t.priceInr)||0, t.isFree?1:0, i));
+      }
+
+      if (Array.isArray(vehicleOptions) && vehicleOptions.length > 0) {
+        const ins = db.prepare(`INSERT INTO product_vehicle_options
+          (id,product_id,vehicle_type,label,max_pax,max_luggage,price_inr,is_recommended,sort_order)
+          VALUES (?,?,?,?,?,?,?,?,?)`);
+        vehicleOptions.forEach((v, i) => ins.run(
+          `veh_${nanoid(10)}`, productId,
+          String(v.vehicleType||"SEDAN").toUpperCase(),
+          String(v.label||v.vehicleType||"Vehicle"),
+          Number(v.maxPax)||4, Number(v.maxLuggage)||2,
+          Number(v.priceInr)||normPrice,
+          v.isRecommended?1:0, i));
+      }
+
+      if (Array.isArray(sicHubs) && sicHubs.length > 0) {
+        const ins = db.prepare(`INSERT INTO product_sic_hubs
+          (id,product_id,hub_name,hub_address,lat,lng,departure_time,capacity,sort_order)
+          VALUES (?,?,?,?,?,?,?,?,?)`);
+        sicHubs.forEach((h, i) => ins.run(
+          `hub_${nanoid(10)}`, productId,
+          String(h.hubName||`Hub ${i+1}`),
+          h.hubAddress||null,
+          h.lat?Number(h.lat):null, h.lng?Number(h.lng):null,
+          String(h.departureTime||"09:00"),
+          Number(h.capacity)||20, i));
+      }
+
+      if (Array.isArray(hotelTiers) && hotelTiers.length > 0) {
+        const ins = db.prepare(`INSERT INTO product_hotel_tiers
+          (id,product_id,tier_name,example_properties,price_per_person_per_night_inr,is_recommended,sort_order)
+          VALUES (?,?,?,?,?,?,?)`);
+        hotelTiers.forEach((t, i) => ins.run(
+          `ht_${nanoid(10)}`, productId,
+          String(t.tierName||`${i+1}-Star`),
+          JSON.stringify(Array.isArray(t.exampleProperties)?t.exampleProperties:[]),
+          Number(t.pricePerPersonPerNightInr)||0,
+          t.isRecommended?1:0, i));
+      }
+    })();
+
+    return res.status(201).json({
+      success: true, productId,
+      message: `${normType} product created successfully`,
+      product: db.prepare("SELECT id,title,product_type,product_sub_type,city,price_inr,status FROM products WHERE id=?").get(productId),
+    });
+  } catch (err) {
+    logger.error("Product v2 creation failed", { error: err.message });
+    return res.status(500).json({ error: "Failed to create product", detail: err.message });
   }
 });
 
@@ -616,8 +777,11 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
       itinerary,
       // Metadata fields for transfers or packages
       transferMeta,
+      dayTourMeta,
       packageMeta,
-      pricingVariants
+      locationRules,
+      pricingVariants,
+      options
     } = req.body;
 
     const supplier = db.prepare("SELECT id, kyb_status FROM suppliers WHERE id = ?").get(id);
@@ -704,9 +868,19 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
       );
 
       if (normalizedProductType === "TRANSFER" && normalizedTransferMeta) {
+        const originAnchor = normalizedTransferMeta.originIata
+          ? db.prepare("SELECT id FROM canonical_locations WHERE UPPER(iata_code) = ? AND COALESCE(is_active, TRUE) = TRUE LIMIT 1").get(normalizedTransferMeta.originIata)
+          : null;
+        const destAnchor = normalizedTransferMeta.destIata
+          ? db.prepare("SELECT id FROM canonical_locations WHERE UPPER(iata_code) = ? AND COALESCE(is_active, TRUE) = TRUE LIMIT 1").get(normalizedTransferMeta.destIata)
+          : null;
         db.prepare(
-          `INSERT INTO transfer_routes (id, product_id, route_type, origin_name, origin_lat, origin_lng, dest_name, dest_lat, dest_lng, distance_km, duration_mins, vehicle_category, max_passengers, max_luggage, free_waiting_mins, toll_included, state_tax_included)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO transfer_routes (
+            id, product_id, route_type, origin_name, origin_lat, origin_lng, origin_radius_km, origin_iata, origin_location_id,
+            dest_name, dest_lat, dest_lng, dest_radius_km, dest_iata, dest_location_id,
+            distance_km, duration_mins, vehicle_category, max_passengers, max_luggage,
+            free_waiting_mins, toll_included, state_tax_included, interstate_permit_tax, night_allowance_inr
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           `tr_${Date.now()}`,
           productId,
@@ -714,9 +888,15 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
           normalizedTransferMeta.originName,
           normalizedTransferMeta.originLat,
           normalizedTransferMeta.originLng,
+          normalizedTransferMeta.originRadiusKm,
+          normalizedTransferMeta.originIata,
+          originAnchor?.id || null,
           normalizedTransferMeta.destName,
           normalizedTransferMeta.destLat,
           normalizedTransferMeta.destLng,
+          normalizedTransferMeta.destRadiusKm,
+          normalizedTransferMeta.destIata,
+          destAnchor?.id || null,
           normalizedTransferMeta.distanceKm,
           normalizedTransferMeta.durationMins,
           normalizedTransferMeta.vehicleCategory,
@@ -724,7 +904,29 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
           normalizedTransferMeta.maxBags,
           normalizedTransferMeta.freeWaitingMins,
           normalizedTransferMeta.tollIncluded,
-          normalizedTransferMeta.stateTaxIncluded
+          normalizedTransferMeta.stateTaxIncluded,
+          normalizedTransferMeta.interstatePermitTax,
+          normalizedTransferMeta.nightAllowanceInr,
+        );
+      }
+
+      if (normalizedProductType === "DAY_TOUR") {
+        const slots = Array.isArray(dayTourMeta?.availableTimeSlots) && dayTourMeta.availableTimeSlots.length
+          ? dayTourMeta.availableTimeSlots : ["09:00"];
+        const vehicleRules = Array.isArray(dayTourMeta?.vehicleRules) && dayTourMeta.vehicleRules.length
+          ? dayTourMeta.vehicleRules : [{ pax_max: Number(dayTourMeta?.maxGroupSize || 15), category: normalizedGroupType === "SHARED" ? "SHARED_SEAT" : "GROUP_TEMPO" }];
+        db.prepare(`
+          INSERT INTO day_tours (
+            id, product_id, duration_hours, distance_km_limit, available_time_slots,
+            group_type, places_covered, vehicle_rules, pickup_service_type,
+            advance_booking_cutoff_hours, operating_start_time, operating_end_time
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'HOTEL_PICKUP_ANYWHERE', ?, ?, ?)
+        `).run(
+          `day_${nanoid(12)}`, productId, Number(durationHours) || 8,
+          Number(dayTourMeta?.distanceKmLimit || 80), databaseList(slots), normalizedGroupType,
+          typeof itinerary === "string" ? itinerary : JSON.stringify(itinerary || []),
+          JSON.stringify(vehicleRules), Number(dayTourMeta?.advanceBookingCutoffHours || 4),
+          dayTourMeta?.operatingStartTime || "06:00", dayTourMeta?.operatingEndTime || "22:00",
         );
       }
 
@@ -741,6 +943,55 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
           packageMeta.startCity || canonicalLocation.city,
           packageMeta.endCity || canonicalLocation.city,
           packageMeta.vehicleCategory || "SEDAN"
+        );
+      }
+
+      const authoredRules = Array.isArray(locationRules) ? locationRules : [];
+      const ruleFor = (side) => authoredRules.find((rule) => String(rule.side || rule.ruleSide).toUpperCase() === side);
+      const insertLocationRule = db.prepare(`
+        INSERT INTO product_location_rules (
+          id, product_id, rule_side, rule_mode, fixed_location_id, allowed_location_types,
+          center_lat, center_lng, radius_km, allowed_state, allowed_city,
+          polygon_coordinates, error_message, suggestion, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+      `);
+      for (const side of ["PICKUP", "DROP"]) {
+        let rule = ruleFor(side);
+        if (!rule && normalizedProductType === "TRANSFER" && normalizedTransferMeta) {
+          const fixed = (side === "PICKUP" && normalizedTransferMeta.routeType.endsWith("_PICKUP"))
+            || (side === "DROP" && normalizedTransferMeta.routeType.endsWith("_DROP"));
+          const prefix = side === "PICKUP" ? "origin" : "dest";
+          const iata = side === "PICKUP" ? normalizedTransferMeta.originIata : normalizedTransferMeta.destIata;
+          const anchor = iata ? db.prepare("SELECT id FROM canonical_locations WHERE UPPER(iata_code) = ? LIMIT 1").get(iata) : null;
+          rule = {
+            mode: fixed ? "FIXED_LOCATION" : normalizedTransferMeta.constraintMode,
+            fixedLocationId: fixed ? anchor?.id : null,
+            allowedLocationTypes: fixed
+              ? [normalizedTransferMeta.hubType === "AIRPORT" ? "AIRPORT" : "RAILWAY_STATION"]
+              : normalizedTransferMeta.allowedLocationTypes,
+            centerLat: normalizedTransferMeta[`${prefix}Lat`],
+            centerLng: normalizedTransferMeta[`${prefix}Lng`],
+            radiusKm: normalizedTransferMeta[`${prefix}RadiusKm`],
+            allowedState: canonicalLocation.state,
+            allowedCity: canonicalLocation.city,
+            errorMessage: normalizedTransferMeta.errorMessage,
+          };
+        } else if (!rule && normalizedProductType === "DAY_TOUR") {
+          rule = { mode: "CITY_ANYWHERE", allowedLocationTypes: dayTourMeta?.allowedLocationTypes || [], allowedState: canonicalLocation.state, allowedCity: canonicalLocation.city, radiusKm: Number(dayTourMeta?.distanceKmLimit || 80) };
+        } else if (!rule && normalizedProductType === "MULTI_DAY_PACKAGE") {
+          rule = { mode: "CITY_ANYWHERE", allowedLocationTypes: ["AIRPORT", "RAILWAY_STATION"], allowedState: canonicalLocation.state, allowedCity: side === "PICKUP" ? (packageMeta?.startCity || canonicalLocation.city) : (packageMeta?.endCity || canonicalLocation.city) };
+        }
+        if (!rule) continue;
+        const allowedCity = rule.allowedCity || canonicalLocation.city;
+        const sideLabel = side === "PICKUP" ? "pickup" : "drop-off";
+        insertLocationRule.run(
+          `plr_${nanoid(12)}`, productId, side, String(rule.mode || rule.ruleMode || "CITY_ANYWHERE").toUpperCase(),
+          rule.fixedLocationId || null, databaseList(rule.allowedLocationTypes || []),
+          rule.centerLat ?? null, rule.centerLng ?? null, rule.radiusKm ?? null,
+          rule.allowedState || canonicalLocation.state, allowedCity,
+          JSON.stringify(rule.polygonCoordinates || []),
+          rule.errorMessage || `This ${sideLabel} is outside the service area for ${title.trim()}.`,
+          rule.suggestion || `Please choose a valid ${sideLabel} point in ${allowedCity}.`,
         );
       }
 
@@ -766,8 +1017,35 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
         ).run(`prc_${Date.now()}`, productId, defaultName, defaultModel, normalizedPrice);
       }
 
+      // Option-level pickup/meeting-point logistics are stored independently
+      // from the legacy product flags so each option can be changed safely.
+      const optionRows = Array.isArray(options) && options.length ? options : [{ code: "STANDARD", name: "Standard option" }];
+      for (const [index, option] of optionRows.entries()) {
+        const optionId = `opt_${nanoid(12)}`;
+        db.prepare(`INSERT INTO product_options (id, product_id, option_code, name, description, pickup_option_type, confirmation_type,
+          supported_arrival_modes, supported_departure_modes, available_start_times, allow_custom_traveler_pickup,
+          pickup_window_minutes, waiting_time_minutes, meeting_point_ref, end_point)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          optionId, productId, option.code || `OPTION_${index + 1}`, option.name || `Option ${index + 1}`, option.description || null,
+          option.pickupOptionType || "PICKUP_EVERYONE", option.confirmationType || "INSTANT_THEN_MANUAL",
+          JSON.stringify(option.supportedArrivalModes || ["AIR", "RAIL", "SEA", "OTHER"]), JSON.stringify(option.supportedDepartureModes || ["AIR", "RAIL", "SEA", "OTHER"]),
+          JSON.stringify(option.availableStartTimes || ["09:00"]), option.allowCustomTravelerPickup ? 1 : 0,
+          Number(option.pickupWindowMinutes || 30), Number(option.waitingTimeMinutes || 30), option.meetingPointRef || null, option.endPoint || null,
+        );
+        const locations = Array.isArray(option.locations) ? option.locations : [];
+        for (const [locationIndex, location] of locations.entries()) {
+          db.prepare(`INSERT INTO product_option_locations (id, option_id, location_ref, pickup_type, mode, display_label, address, city, state, lat, lng, is_meeting_point, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+            `opl_${nanoid(12)}`, optionId, location.ref || null, String(location.pickupType || "LOCATION").toUpperCase(), location.mode || null,
+            location.displayLabel, location.address || null, location.city || canonicalLocation.city, location.state || canonicalLocation.state,
+            location.lat ?? null, location.lng ?? null, location.isMeetingPoint ? 1 : 0, locationIndex,
+          );
+        }
+      }
+
       return db.prepare("SELECT * FROM products WHERE id = ?").get(productId);
     })();
+    try { backfillProductOptions(db); } catch (error) { logger.warn("Product option question backfill failed", { error: error.message }); }
     res.status(201).json({
       success: true,
       productId,
@@ -830,12 +1108,27 @@ router.post("/:id/assign-driver", optionalAuthMiddleware, requireSupplierAccess,
 // POST /api/suppliers/:id/bookings/:bookingId/respond-assignment - Accept or reject within the SLA window
 router.post("/:id/bookings/:bookingId/respond-assignment", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.assignment), (req, res) => {
   try {
-    const result = respondToSupplierAssignment(db, {
+    const booking = db.prepare("SELECT supplier_assignment_status FROM bookings WHERE id = ? OR ref = ?").get(req.params.bookingId, req.params.bookingId);
+    const isCircuitReconfirmation = booking?.supplier_assignment_status === "RESCHEDULED_RECONFIRMATION_REQUIRED";
+    const result = (isCircuitReconfirmation ? respondToCircuitReconfirmation : respondToSupplierAssignment)(db, {
       bookingId: req.params.bookingId,
       supplierId: req.params.id,
       action: req.body?.action,
       note: req.body?.note,
     });
+    if (result.circuitReconfirmation) {
+      if (result.expired) {
+        queueNotification(notifyCircuitReschedule(db, result.circuitOrderId, "REVIEW_REQUIRED"), "Circuit reconfirmation SLA notification");
+        return res.json({ ...result, message: "The reconfirmation SLA expired. The complete circuit is now held for operations review." });
+      }
+      if (result.allConfirmed) {
+        queueNotification(notifyCircuitReschedule(db, result.circuitOrderId, "CONFIRMED"), "Circuit reconfirmed notification");
+        return res.json({ ...result, message: "New dates accepted. Every supplier has reconfirmed the complete circuit." });
+      }
+      if (String(req.body?.action || "").toUpperCase() === "ACCEPT") return res.json({ ...result, message: "New dates accepted. The circuit remains pending until every supplier reconfirms." });
+      queueNotification(notifyCircuitReschedule(db, result.circuitOrderId, "REVIEW_REQUIRED"), "Circuit reconfirmation review notification");
+      return res.json({ ...result, message: "The new dates were declined. The complete circuit is held for operations review; no stop was reassigned automatically." });
+    }
     if (result.expired) {
       return res.json({ ...result, message: result.replacement ? "The response window expired, so this booking moved to the next eligible supplier." : "The response window expired and operations must assign a supplier manually." });
     }
@@ -1568,4 +1861,3 @@ router.delete("/:id/pricing-rules/:ruleId", optionalAuthMiddleware, requireSuppl
 });
 
 export default router;
-

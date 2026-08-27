@@ -32,11 +32,15 @@ export default function LocationMapPicker({
   drop,
   onPickupChange,
   onDropChange,
+  productId,
+  validationSide,
 }: {
   pickup: PinLocation;
   drop: PinLocation;
   onPickupChange: (location: PinLocation) => void;
   onDropChange: (location: PinLocation) => void;
+  productId?: string;
+  validationSide?: PinKind;
 }) {
   const autocompleteId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,6 +82,23 @@ export default function LocationMapPicker({
     else handlersRef.current.onDropChange(location);
   };
 
+  const validateLocation = async (kind: PinKind, location: PinLocation) => {
+    if (!productId) return;
+    const response = await fetch(`/api/activities/${encodeURIComponent(productId)}/validate-pickup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ side: (validationSide || kind).toUpperCase(), address: location.address, lat: location.lat, lng: location.lng }),
+    });
+    const data = await response.json().catch(() => ({}));
+    // Static/demo checkout links may not map to a published backend product;
+    // the booking endpoint remains the authoritative validation boundary.
+    if (response.status === 404) return;
+    if (!response.ok || data.valid === false) {
+      const suggestion = data.suggestion || data.detail?.suggestion;
+      throw new Error(suggestion ? `${data.error || 'This location is outside the service area.'} ${suggestion}` : (data.error || 'This location is outside the service area.'));
+    }
+  };
+
   const reversePin = async (kind: PinKind, lat: number, lng: number) => {
     const current = locationRef.current[kind];
     let address = current.address.trim() || `Pinned location (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
@@ -88,7 +109,14 @@ export default function LocationMapPicker({
     } catch {
       // The coordinate remains usable if reverse geocoding is unavailable.
     }
-    commit(kind, { ...current, address, lat, lng, confirmed: true, mapplsPin: '' });
+    const next = { ...current, address, lat, lng, confirmed: true, mapplsPin: '' };
+    try {
+      await validateLocation(kind, next);
+      commit(kind, next);
+      setSearchError('');
+    } catch (error) {
+      setSearchError((error as Error).message);
+    }
   };
 
   useEffect(() => {
@@ -108,8 +136,19 @@ export default function LocationMapPicker({
         const bias = searchBiasRef.current[searchKind];
         const params = new URLSearchParams({ query, lat: String(bias.lat), lng: String(bias.lng) });
         if (bias.address) params.set('context', bias.address);
-        const response = await fetch(`/api/places?${params}`, { signal: controller.signal });
+        const endpoint = productId
+          ? `/api/activities/${encodeURIComponent(productId)}/pickup-suggestions?side=${encodeURIComponent((validationSide || searchKind).toUpperCase())}&q=${encodeURIComponent(query)}`
+          : `/api/places?${params}`;
+        const response = await fetch(endpoint, { signal: controller.signal });
         const data = await response.json();
+        if (!response.ok && productId) {
+          const fallback = await fetch(`/api/places?${params}`, { signal: controller.signal });
+          const fallbackData = await fallback.json();
+          if (!fallback.ok) throw new Error(fallbackData.error || data.error || 'Location search is unavailable.');
+          setSuggestions(fallbackData.suggestions ?? []);
+          setActiveIndex(-1);
+          return;
+        }
         if (!response.ok) throw new Error(data.error || 'Location search is unavailable.');
         setSuggestions(data.suggestions ?? []);
         setActiveIndex(-1);
@@ -146,7 +185,9 @@ export default function LocationMapPicker({
         lng = Number(data.location.lng);
       }
       const current = locationRef.current[kind];
-      commit(kind, { ...current, address, lat, lng, confirmed: true, mapplsPin: suggestion.id });
+      const next = { ...current, address, lat, lng, confirmed: true, mapplsPin: suggestion.id };
+      await validateLocation(kind, next);
+      commit(kind, next);
       markerRefs.current[kind]?.setLatLng([lat, lng]);
       mapRef.current?.flyTo([lat, lng], 16, { duration: 0.7 });
       setSearchKind(null);
@@ -309,6 +350,11 @@ export default function LocationMapPicker({
                     autoComplete="off"
                     value={location.address}
                     onFocus={() => { selectPin(kind); setSearchKind(kind); }}
+                    onBlur={() => {
+                      if (location.confirmed) {
+                        validateLocation(kind, location).then(() => setSearchError('')).catch((error) => setSearchError((error as Error).message));
+                      }
+                    }}
                     onChange={(event) => {
                       change({ ...location, address: event.target.value, confirmed: false, mapplsPin: '' });
                       setSearchKind(kind);

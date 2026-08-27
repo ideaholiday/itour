@@ -582,7 +582,6 @@ const insertBlockedDate = db.prepare(`
   VALUES (?, ?, ?, ?, 'FULL_DAY', ?, ?, 0, 1, ?)
 `);
 
-insertBlockedDate.run("blk_1", "sup_lucknow_cabs", "prod_tr_lko_1", "PRODUCT", "2026-08-25", "2026-08-26", "Scheduled Fleet Maintenance & Oil Change");
 insertBlockedDate.run("blk_2", "sup_lucknow_cabs", null, "ALL", "2026-09-02", "2026-09-03", "Private VIP Wedding Charter Booking");
 
 // 10. Seed Multiple Bookings for Supplier Dashboard

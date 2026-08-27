@@ -35,7 +35,11 @@ describe("ItineraryService", () => {
         title TEXT NOT NULL,
         destination TEXT,
         start_date TEXT,
+        travel_date TEXT,
+        end_date TEXT,
         days_count INTEGER DEFAULT 3,
+        adults_count INTEGER DEFAULT 2,
+        children_count INTEGER DEFAULT 0,
         items TEXT DEFAULT '[]',
         is_public INTEGER DEFAULT 1,
         created_at TEXT DEFAULT (datetime('now')),
@@ -62,12 +66,14 @@ describe("ItineraryService", () => {
     assert.ok(templates.some((t) => t.id === "template_varanasi_spiritual"));
   });
 
-  it("creates a new multi-day trip itinerary with items and computes total budget and duration", () => {
+  it("creates a new multi-day trip itinerary with items and computes total budget, dates, and guests", () => {
     const payload = {
       title: "Agra Heritage 2-Day Getaway",
       destination: "Agra",
       startDate: "2026-10-15",
       daysCount: 2,
+      adultsCount: 3,
+      childrenCount: 1,
       isPublic: true,
       items: [
         { dayNumber: 1, timeSlot: "MORNING", productId: "prod_taj", notes: "Catch early sunrise view" },
@@ -81,12 +87,17 @@ describe("ItineraryService", () => {
     assert.ok(created.id.startsWith("itin_"));
     assert.strictEqual(created.title, "Agra Heritage 2-Day Getaway");
     assert.strictEqual(created.destination, "Agra");
+    assert.strictEqual(created.startDate, "2026-10-15");
+    assert.strictEqual(created.travelDate, "2026-10-15");
+    assert.strictEqual(created.endDate, "2026-10-16");
     assert.strictEqual(created.daysCount, 2);
+    assert.strictEqual(created.adultsCount, 3);
+    assert.strictEqual(created.childrenCount, 1);
     assert.strictEqual(created.isPublic, true);
     assert.strictEqual(created.activityCount, 3);
     // Total price = 2499 + 1299 + 1899 = 5697
     assert.strictEqual(created.totalEstimatedInr, 5697);
-    // Total duration = 6.0 + 3.0 + 4.5 = 13.5
+    // Total duration = 6.0 + 3.0 + 4.5 = 13.5 (no double counting)
     assert.strictEqual(created.totalDurationHours, 13.5);
     assert.strictEqual(created.items[0].product.title, "Sunrise Taj Mahal Tour");
   });
@@ -99,25 +110,35 @@ describe("ItineraryService", () => {
     assert.ok(cloned.items.length >= 6);
   });
 
-  it("clones an existing user itinerary", () => {
+  it("clones an existing user itinerary with dates and guests", () => {
     const source = ItineraryService.createItinerary(db, "usr_1", {
       title: "Family Trip to Goa",
       destination: "Goa",
+      startDate: "2026-11-01",
       daysCount: 3,
+      adultsCount: 2,
+      childrenCount: 2,
       items: [{ dayNumber: 1, timeSlot: "MORNING", title: "Beach Walk" }],
     });
 
     const cloned = ItineraryService.cloneItinerary(db, "usr_2", source.id);
     assert.strictEqual(cloned.title, "Family Trip to Goa (Copy)");
     assert.strictEqual(cloned.destination, "Goa");
+    assert.strictEqual(cloned.startDate, "2026-11-01");
+    assert.strictEqual(cloned.endDate, "2026-11-03");
+    assert.strictEqual(cloned.adultsCount, 2);
+    assert.strictEqual(cloned.childrenCount, 2);
     assert.strictEqual(cloned.userId, "usr_2");
   });
 
-  it("exports itinerary to clean markdown with day-by-day structure", () => {
+  it("exports itinerary to clean markdown with day-by-day structure, dates, and travelers", () => {
     const source = ItineraryService.createItinerary(db, "usr_1", {
       title: "Quick Weekend Circuit",
       destination: "Agra",
+      startDate: "2026-10-15",
       daysCount: 2,
+      adultsCount: 2,
+      childrenCount: 1,
       items: [
         { dayNumber: 1, timeSlot: "MORNING", title: "Sunrise Taj Mahal View", notes: "Entry at 6 AM" },
         { dayNumber: 2, timeSlot: "EVENING", title: "Local Bazaar Shopping", notes: "Buy petha" },
@@ -126,6 +147,8 @@ describe("ItineraryService", () => {
 
     const exportText = ItineraryService.exportItineraryMarkdown(db, source.id, "usr_1");
     assert.ok(exportText.includes("Quick Weekend Circuit"));
+    assert.ok(exportText.includes("Travel Dates: 2026-10-15 to 2026-10-16"));
+    assert.ok(exportText.includes("2 Adults, 1 Child"));
     assert.ok(exportText.includes("Day 1:"));
     assert.ok(exportText.includes("Sunrise Taj Mahal View"));
     assert.ok(exportText.includes("Entry at 6 AM"));

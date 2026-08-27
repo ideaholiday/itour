@@ -1,7 +1,7 @@
-import { isCoordinateInGeoFence, isPointInPolygon } from "../engine/transferEngine.js";
+import { isCoordinateInGeoFence, isPointInPolygon, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
-import { fleetSupportsVehicle } from "../lib/vehicleInventory.js";
+import { fleetSupportsVehicle, vehicleModelSupportsCategory } from "../lib/vehicleInventory.js";
 
 const ACTIVE_BOOKING_STATUSES = ["pending_payment", "confirmed", "driver_assigned", "in_progress"];
 
@@ -162,7 +162,21 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
   const candidates = rows.map((row) => {
     const isRequestedListing = row.candidate_product_id === requestedProduct.id;
     const fences = db.prepare("SELECT * FROM geo_fences WHERE supplier_id = ?").all(row.supplier_id);
-    const candidateVehicleCategory = row.route_vehicle_category || row.package_vehicle_category || quote.vehicleCategory;
+    const requestedVehicleCategory = normalizeText(quote.vehicleCategory);
+    const pricingVariants = isTransfer
+      ? db.prepare("SELECT variant_name, base_price FROM product_pricing WHERE product_id = ?").all(row.candidate_product_id)
+      : [];
+    const matchingVehicleVariant = pricingVariants.find((variant) =>
+      vehicleModelSupportsCategory(variant.variant_name, requestedVehicleCategory)
+    );
+    const routeOffersRequestedVehicle = normalizeText(row.route_vehicle_category) === requestedVehicleCategory;
+    const offersRequestedVehicle = isRequestedListing || routeOffersRequestedVehicle || Boolean(matchingVehicleVariant);
+    const candidateVehicleCategory = isTransfer && offersRequestedVehicle
+      ? requestedVehicleCategory
+      : row.route_vehicle_category || row.package_vehicle_category || quote.vehicleCategory;
+    const vehicleCapacity = isTransfer && offersRequestedVehicle
+      ? VEHICLE_TAXONOMY[requestedVehicleCategory]
+      : null;
     const activeBookingSql = `
       SELECT COUNT(*) AS count FROM bookings
       WHERE supplier_id = ? AND activity_date = ? AND LOWER(status) IN (${activePlaceholders})
@@ -184,15 +198,15 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
       supplierName: row.company_name,
       candidateProductId: row.candidate_product_id,
       productCity: row.product_city,
-      price: isRequestedListing ? quote.baseAmount : row.price_inr,
+      price: isRequestedListing ? quote.baseAmount : matchingVehicleVariant?.base_price ?? row.price_inr,
       isPublished: row.product_status === "PUBLISHED" && Number(row.is_published ?? 1) === 1,
       kybStatus: row.kyb_status,
       rating: row.rating,
       commissionRate: resolveCommissionRate(db, row.supplier_id, requestedProduct.product_type),
       routeType: row.route_type,
       vehicleCategory: candidateVehicleCategory,
-      maxPassengers: row.max_passengers ?? 99,
-      maxLuggage: row.max_luggage ?? 99,
+      maxPassengers: vehicleCapacity?.maxPax ?? row.max_passengers ?? 99,
+      maxLuggage: vehicleCapacity?.maxBags ?? row.max_luggage ?? 99,
       isBlocked: !availability.available,
       availabilityReason: availability.reasons[0],
       availability,

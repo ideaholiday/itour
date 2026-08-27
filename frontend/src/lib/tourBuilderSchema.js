@@ -48,6 +48,7 @@ export const step1Schema = z.object({
 // --- STEP 2 SCHEMA ---
 const dayItineraryItemSchema = z.object({
   day: z.number(),
+  city: z.string().min(2, "Overnight / service city is required"),
   title: z.string().min(3, "Day title required"),
   description: z.string().min(10, "Detailed description required (min 10 chars)"),
   placesCovered: z.array(z.string()).min(1, "Add at least 1 key place for this day"),
@@ -79,6 +80,12 @@ export const step2Schema = z.object({
   timeSlots: z.array(z.string()).optional(),
   pickupDropPoints: z.array(pickupDropSchema).optional(),
   dayStops: z.array(daySightseeingStopSchema).optional(),
+  pickupRuleMode: z.enum(["CITY_ANYWHERE", "RADIUS_FROM_CENTER", "ZONE_POLYGON"]).optional(),
+  distanceKmLimit: z.coerce.number().positive().max(500).optional(),
+  advanceBookingCutoffHours: z.coerce.number().min(0).max(168).optional(),
+  operatingStartTime: z.string().optional(),
+  operatingEndTime: z.string().optional(),
+  allowedLocationTypes: z.array(z.enum(["HOTEL_ZONE", "LANDMARK", "CITY_CENTER", "PICKUP_ZONE"])).optional(),
 }).superRefine((data, ctx) => {
   // If itinerary present (Multi-Day), ensure non-empty
   if (data.itinerary && data.itinerary.length === 0) {
@@ -183,6 +190,7 @@ export const DEFAULT_TOUR_FORM_STATE = {
     itinerary: [
       {
         day: 1,
+        city: "Varanasi",
         title: "Arrival, Ghats Walking Tour & Evening Ganga Aarti Cruise",
         description: "Pick up from Varanasi Airport/Station. Check-in to hotel. Guided sunset walking tour of Dashashwamedh Ghat and private boat ride for Ganga Aarti.",
         placesCovered: ["Dashashwamedh Ghat", "Manikarnika Ghat", "Kashi Vishwanath Corridor"],
@@ -190,6 +198,7 @@ export const DEFAULT_TOUR_FORM_STATE = {
       },
       {
         day: 2,
+        city: "Varanasi",
         title: "Subah-e-Banaras Boat Ride & Sarnath Excursion",
         description: "Early morning sunrise boat ride across the Ganges. Breakfast at iconic Blue Lassi. Afternoon excursion to Sarnath Dhamek Stupa & Archaeological Museum.",
         placesCovered: ["Assi Ghat Sunrise", "Subah-e-Banaras", "Sarnath Stupa", "Sarnath Museum"],
@@ -197,6 +206,7 @@ export const DEFAULT_TOUR_FORM_STATE = {
       },
       {
         day: 3,
+        city: "Varanasi",
         title: "Banarasi Silk Weaver Colony Walk & Departure",
         description: "Morning visit to Madanpura silk weaving quarter. Souvenir shopping for authentic Banarasi Sarees and drop-off at Airport/Station.",
         placesCovered: ["Madanpura Silk Colony", "Godowlia Market", "Varanasi Airport"],
@@ -215,6 +225,12 @@ export const DEFAULT_TOUR_FORM_STATE = {
       { order: 4, name: "Sarnath Excursion & Museum", duration: "2.5 Hours", description: "" },
       { order: 5, name: "Hotel / Station Drop-off", duration: "05:00 PM", description: "" },
     ],
+    pickupRuleMode: "CITY_ANYWHERE",
+    distanceKmLimit: 40,
+    advanceBookingCutoffHours: 4,
+    operatingStartTime: "06:00",
+    operatingEndTime: "22:00",
+    allowedLocationTypes: ["HOTEL_ZONE", "LANDMARK"],
   },
   step3: {
     groupType: "PRIVATE",

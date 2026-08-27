@@ -17,7 +17,9 @@ import {
 import { assignmentReason, findAutomaticSupplierAssignment } from "../services/supplierAssignmentService.js";
 import { getDispatchTimeline, updateDispatchStatus } from "../services/driverDispatchService.js";
 import { guestDocumentLinks, logGuestDocumentAccess, renderGuestDocument, verifyGuestDocumentToken } from "../services/guestDocumentService.js";
-import { guestNotificationPreferences, notifyDispatchStatusChanged, queueNotification, sendGuestBookingNotification } from "../services/notificationService.js";
+import { guestNotificationPreferences, notifyBookingLogisticsEvent, notifyDispatchStatusChanged, queueNotification, sendGuestBookingNotification } from "../services/notificationService.js";
+import { assertBookingLocations } from "../services/locationValidationService.js";
+import { bookingLogistics, buildLogisticsSnapshot, consumeBookingHold, createBookingHold, expireBookingHolds, getBookingQuestions, getOption, getProductOptions, persistBookingLogistics, validateOptionLogistics, validateQuestionAnswers } from "../services/logisticsService.js";
 
 const router = Router();
 router.use(optionalAuthMiddleware);
@@ -92,10 +94,35 @@ function validateTransferRoute(body, product) {
 
 router.post("/quote", validateBody(bookingQuoteSchema), (req, res) => {
   try {
+    const productId = req.body.product_id || req.body.activity_id;
+    const option = validateOptionLogistics(db, productId, req.body);
+    const answers = validateQuestionAnswers(db, option?.id, req.body.booking_question_answers || {}, req.body);
+    assertBookingLocations(db, req.body, { requireOperationalDetails: false, deferLocationValidation: true });
     const quote = calculateBookingQuote(db, req.body);
-    res.json({ success: true, quote: publicQuote(quote) });
+    res.json({ success: true, quote: { ...publicQuote(quote), option: option || null, bookingQuestions: option ? getBookingQuestions(db, option.id) : [], normalizedAnswers: answers } });
   } catch (error) {
-    res.status(error.status || 500).json({ error: error.message || "Could not price this booking" });
+    res.status(error.status || 500).json({
+      error: error.message || "Could not price this booking",
+      code: error.code,
+      detail: error.detail,
+      requestId: req.requestId,
+    });
+  }
+});
+
+router.post("/hold", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), validateBody(bookingQuoteSchema), (req, res) => {
+  try {
+    expireBookingHolds(db);
+    const productId = req.body.product_id || req.body.activity_id;
+    const option = validateOptionLogistics(db, productId, req.body);
+    const answers = validateQuestionAnswers(db, option?.id, req.body.booking_question_answers || {}, req.body);
+    const locationValidation = assertBookingLocations(db, req.body, { requireOperationalDetails: false });
+    const quote = calculateBookingQuote(db, req.body);
+    const logistics = buildLogisticsSnapshot(req.body, option, locationValidation);
+    const hold = createBookingHold(db, { productId, optionId: option?.id || null, activityDate: quote.activityDate, adults: quote.adults, children: quote.children, amount: quote.totalAmount, quote: publicQuote(quote), logistics: { ...logistics, answers }, clientRequestId: req.body.client_request_id || req.headers["idempotency-key"] || null });
+    res.status(201).json({ success: true, holdId: hold.id, expiresAt: hold.expires_at, quote: publicQuote(quote), option: option || null, logistics, bookingQuestions: option ? getBookingQuestions(db, option.id) : [] });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || "Could not hold this booking", code: error.code, requestId: req.requestId });
   }
 });
 
@@ -112,7 +139,11 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         return res.json({ success: true, idempotent: true, bookingId: existing.id, ref: existing.ref, supplierId: existing.supplier_id, assignmentStatus: existing.supplier_assignment_status, amount_inr: existing.amount_inr, status: existing.status, payment_status: existing.payment_status });
       }
     }
+    const locationValidation = assertBookingLocations(db, req.body, { requireOperationalDetails: true });
     const quote = calculateBookingQuote(db, req.body, { enforceListingSupplierAvailability: false });
+    const selectedOption = validateOptionLogistics(db, quote.product.id, req.body);
+    const normalizedAnswers = validateQuestionAnswers(db, selectedOption?.id, req.body.booking_question_answers || {}, req.body);
+    const logisticsSnapshot = buildLogisticsSnapshot(req.body, selectedOption, locationValidation);
     validateTransferRoute(req.body, quote.product);
 
     // Guard: block booking if the listing supplier is not KYB-approved
@@ -178,6 +209,20 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         assignmentSupplierPayout, String(req.body.payment_method || "DEMO").toUpperCase(),
         selectedSupplier.score, selectedAssignmentReason, selectedSupplier.candidateProductId
       );
+      db.prepare(`
+        UPDATE bookings
+        SET flight_departure_time = ?, location_validation_snapshot = ?, location_ops_review = ?
+        WHERE id = ?
+      `).run(
+        req.body.flight_departure_time || null,
+        JSON.stringify(locationValidation),
+        locationValidation.needsOpsReview ? 1 : 0,
+        bookingId,
+      );
+      db.prepare("UPDATE bookings SET product_option_id = ?, confirmation_type = ?, confirmation_status = 'PENDING_PAYMENT', logistics_snapshot = ? WHERE id = ?").run(selectedOption?.id || null, selectedOption?.confirmationType || "INSTANT_THEN_MANUAL", JSON.stringify(logisticsSnapshot), bookingId);
+      persistBookingLogistics(db, bookingId, logisticsSnapshot, normalizedAnswers, actor.id || null);
+      if (req.body.hold_id) consumeBookingHold(db, req.body.hold_id, bookingId);
+      else createBookingHold(db, { bookingId, productId: quote.product.id, optionId: selectedOption?.id || null, activityDate: quote.activityDate, adults: quote.adults, children: quote.children, amount: quote.totalAmount, quote: publicQuote(quote), logistics: logisticsSnapshot, clientRequestId: clientRequestId ? `${clientRequestId}:hold` : null });
       db.prepare(
         `INSERT INTO payouts (id, supplier_id, booking_id, gross_amount, commission_amount, net_payout, payout_status)
          VALUES (?, ?, ?, ?, ?, ?, 'PENDING_PAYMENT')`
@@ -208,6 +253,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       }
     })();
 
+    const bookingHold = (() => { try { return db.prepare("SELECT id, status, expires_at FROM booking_holds WHERE booking_id = ? ORDER BY created_at DESC LIMIT 1").get(bookingId); } catch { return null; } })();
     res.status(201).json({
       success: true,
       bookingId,
@@ -229,6 +275,8 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       },
       status: "pending_payment",
       payment_status: "PENDING",
+      hold: bookingHold,
+      holdExpiresAt: bookingHold?.expires_at || null,
       message: "Booking held and an eligible supplier was reserved. Complete payment to confirm it.",
     });
   } catch (error) {
@@ -237,6 +285,8 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     res.status(duplicate ? 409 : error.status || 500).json({
       error: duplicate ? "This booking request was already submitted" : error.message || "Failed to create booking",
       code: duplicate ? "DUPLICATE_REQUEST" : (error.code || undefined),
+      ...(error.detail ? { detail: error.detail } : {}),
+      requestId: req.requestId,
       ...(error.assignment ? { assignment: error.assignment } : {})
     });
   }
@@ -296,6 +346,83 @@ router.get("/notifications", authenticate, (req, res) => {
     ORDER BY created_at DESC LIMIT 100
   `).all(actor.id || "", actor.email || "", actor.email || "");
   return res.json({ success: true, deliveries });
+});
+
+function loadOwnedBooking(req) {
+  const actor = requester(req);
+  const booking = db.prepare("SELECT b.*, p.title AS product_title FROM bookings b LEFT JOIN products p ON p.id = b.product_id WHERE b.ref = ? OR b.id = ?").get(req.params.ref, req.params.ref);
+  if (!booking) { const e = new Error("Booking not found"); e.status = 404; throw e; }
+  if (!ownsBooking(actor, booking)) { const e = new Error("You do not have access to this booking"); e.status = 403; throw e; }
+  return booking;
+}
+
+router.get("/:ref/status", authenticate, (req, res) => {
+  try {
+    const booking = loadOwnedBooking(req);
+    const logistics = bookingLogistics(db, booking.id);
+    const hold = db.prepare("SELECT id, status, expires_at FROM booking_holds WHERE booking_id = ? ORDER BY created_at DESC LIMIT 1").get(booking.id);
+    res.json({ success: true, ref: booking.ref, status: booking.status, paymentStatus: booking.payment_status, confirmationStatus: booking.confirmation_status || booking.status, confirmationType: booking.confirmation_type || "INSTANT_THEN_MANUAL", supplierResponseStatus: booking.supplier_response_status, supplierResponseDeadline: booking.supplier_response_deadline, hold: hold || null, logistics });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || "Failed to load booking status" }); }
+});
+
+router.get("/:ref/logistics", authenticate, (req, res) => {
+  try { const booking = loadOwnedBooking(req); return res.json({ success: true, bookingRef: booking.ref, logistics: bookingLogistics(db, booking.id) }); }
+  catch (error) { return res.status(error.status || 500).json({ error: error.message || "Failed to load booking logistics" }); }
+});
+
+function amendmentCutoff(booking) {
+  const at = new Date(`${booking.activity_date}T${booking.pickup_time || "09:00"}:00`).getTime() - 4 * 60 * 60 * 1000;
+  return new Date(at).toISOString();
+}
+
+router.post("/:ref/amendment/check", authenticate, validateBody(bookingSchemas.amendment), (req, res) => {
+  try {
+    const booking = loadOwnedBooking(req);
+    const cutoffAt = amendmentCutoff(booking);
+    if (Date.now() >= new Date(cutoffAt).getTime()) return res.status(409).json({ error: "This booking is inside the logistics amendment cutoff", cutoffAt });
+    const proposed = { ...booking, ...req.body.proposed, product_id: booking.product_id, activity_date: booking.activity_date };
+    const option = validateOptionLogistics(db, booking.product_id, proposed);
+    const validation = assertBookingLocations(db, proposed, { requireOperationalDetails: false });
+    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false });
+    const snapshot = buildLogisticsSnapshot(proposed, option, validation);
+    res.json({ success: true, amendable: true, cutoffAt, quote: publicQuote(quote), proposedSnapshot: snapshot });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || "Amendment cannot be applied", code: error.code }); }
+});
+
+router.post("/:ref/amendment/quote", authenticate, validateBody(bookingSchemas.amendment), (req, res) => {
+  try {
+    const booking = loadOwnedBooking(req);
+    const proposed = { ...booking, ...req.body.proposed, product_id: booking.product_id, activity_date: booking.activity_date };
+    const option = validateOptionLogistics(db, booking.product_id, proposed);
+    const validation = assertBookingLocations(db, proposed, { requireOperationalDetails: false });
+    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false });
+    res.json({ success: true, cutoffAt: amendmentCutoff(booking), deltaInr: Number(quote.totalAmount) - Number(booking.amount_inr), quote: publicQuote(quote), proposedSnapshot: buildLogisticsSnapshot(proposed, option, validation) });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || "Could not quote amendment" }); }
+});
+
+router.post("/:ref/amendment/apply", authenticate, validateBody(bookingSchemas.amendment), (req, res) => {
+  try {
+    const booking = loadOwnedBooking(req);
+    const cutoffAt = amendmentCutoff(booking);
+    if (Date.now() >= new Date(cutoffAt).getTime()) return res.status(409).json({ error: "This booking is inside the logistics amendment cutoff", cutoffAt });
+    const existing = db.prepare("SELECT * FROM booking_amendment_requests WHERE booking_id = ? AND idempotency_key = ?").get(booking.id, req.body.idempotencyKey);
+    if (existing) return res.json({ success: true, idempotent: true, amendment: existing });
+    const proposed = { ...booking, ...req.body.proposed, product_id: booking.product_id, activity_date: booking.activity_date };
+    const option = validateOptionLogistics(db, booking.product_id, proposed);
+    const validation = assertBookingLocations(db, proposed, { requireOperationalDetails: false });
+    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false });
+    const snapshot = buildLogisticsSnapshot(proposed, option, validation);
+    const amendmentId = `amend_${nanoid(12)}`;
+    db.transaction(() => {
+      db.prepare(`INSERT INTO booking_amendment_requests (id, booking_id, idempotency_key, amendment_type, current_snapshot, proposed_snapshot, quoted_delta_inr, cutoff_at, status, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'APPLIED', ?)`).run(amendmentId, booking.id, req.body.idempotencyKey, req.body.amendmentType, booking.logistics_snapshot || "{}", JSON.stringify(snapshot), Number(quote.totalAmount) - Number(booking.amount_inr), cutoffAt, req.body.reason || null);
+      db.prepare(`UPDATE bookings SET pickup_type = ?, pickup_location = ?, pickup_lat = ?, pickup_lng = ?, drop_location = ?, drop_lat = ?, drop_lng = ?, amount_inr = ?, logistics_snapshot = ?, location_ops_review = ? WHERE id = ?`).run(
+        snapshot.pickupType, snapshot.pickupLocation || booking.pickup_location, snapshot.pickupLat, snapshot.pickupLng, snapshot.dropLocation || booking.drop_location, snapshot.dropLat, snapshot.dropLng, quote.totalAmount, JSON.stringify(snapshot), snapshot.needsOpsReview ? 1 : 0, booking.id);
+      persistBookingLogistics(db, booking.id, snapshot, {}, req.user?.id || null);
+    })();
+    queueNotification(notifyBookingLogisticsEvent(db, booking.id, "PICKUP_DETAILS_UPDATED"), "Booking logistics amendment notification");
+    res.json({ success: true, amendmentId, status: "APPLIED", cutoffAt, quote: publicQuote(quote), logistics: snapshot });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message || "Could not apply amendment", code: error.code }); }
 });
 
 router.post("/:ref/pickup-otp/reset", authenticate, requireRoles("ADMIN", "STAFF"), (req, res) => {

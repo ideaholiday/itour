@@ -28,6 +28,9 @@ Object.assign(process.env, {
   RAZORPAY_KEY_SECRET: "",
   LOG_LEVEL: "error",
   LOG_FORMAT: "json",
+  // Browser journeys intentionally create several isolated users in one run.
+  // Keep production's default intact while preventing cross-test rate-limit state.
+  AUTH_RATE_LIMIT: "100",
 });
 
 const [{ default: db }, { hashPassword }] = await Promise.all([

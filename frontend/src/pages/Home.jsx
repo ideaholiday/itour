@@ -15,16 +15,16 @@ const HERO_IMAGES = [
 ];
 
 const CATEGORIES = [
-  { emoji: "✈️", label: "Airport & Outstation Cabs", type: "TRANSFER", to: "/transfers" },
-  { emoji: "🤿", label: "Water Sports & Scuba", q: "Scuba" },
-  { emoji: "🏰", label: "Heritage & Monument Tours", q: "Heritage" },
-  { emoji: "🐅", label: "Wildlife & Jungle Safaris", q: "Wildlife" },
-  { emoji: "🏜️", label: "Desert Safaris & Camps", q: "Desert" },
-  { emoji: "🛶", label: "Kerala Backwaters & Shikara", q: "Backwaters" },
-  { emoji: "🏔️", label: "Hill Stations & Rafting", q: "Adventure" },
-  { emoji: "🍛", label: "Food & Culture Walks", q: "Food" },
-  { emoji: "🏛️", label: "Spiritual & Ganga Aarti", q: "Spiritual" },
-  { emoji: "🗺️", label: "Multi-Day Holiday Circuits", q: "Package" },
+  { emoji: "🎒", label: "Holiday Packages", type: "PACKAGE", to: "/search?type=PACKAGE" },
+  { emoji: "🗺️", label: "Tours & Sightseeing", type: "TOUR", to: "/search?type=TOUR" },
+  { emoji: "🚗", label: "Transfers & Cabs", type: "TRANSFER", to: "/transfers" },
+  { emoji: "🎡", label: "Attractions & Shows", type: "ATTRACTION", to: "/search?type=ATTRACTION" },
+  { emoji: "🤿", label: "Active Experiences", type: "EXPERIENCE", to: "/search?type=EXPERIENCE" },
+  { emoji: "🌊", label: "Scuba & Water Sports", q: "Scuba" },
+  { emoji: "🥘", label: "Cooking & Food Walks", q: "Cooking" },
+  { emoji: "🐅", label: "Safaris & Wildlife", q: "Safari" },
+  { emoji: "🏝️", label: "Island Trips & Boats", q: "Island" },
+  { emoji: "🏎️", label: "ATV & Off-Road", q: "ATV" },
 ];
 
 const FALLBACK_DESTINATIONS = [

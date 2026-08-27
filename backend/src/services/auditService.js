@@ -22,6 +22,7 @@ function mutationClassification(req) {
   if (/\/suppliers\/.+\/products/.test(path)) return ["SUPPLIER_LISTING_CHANGED", "PRODUCT"];
   if (/\/suppliers\/.+\/(dispatch|assign-driver|drivers|bookings)/.test(path)) return ["SUPPLIER_FULFILLMENT_CHANGED", "BOOKING"];
   if (/\/checkout\/(cancel-booking|calculate-refund)/.test(path)) return ["BOOKING_CANCELLATION_REFUND_CHANGED", "BOOKING"];
+  if (/\/api\/(?:v1\/)?circuit-orders/.test(path)) return ["CIRCUIT_ORDER_CHANGED", "CIRCUIT_ORDER"];
   if (/\/api\/support\//.test(path)) return ["SUPPORT_CASE_CHANGED", "SUPPORT_CASE"];
   if (/\/api\/bookings/.test(path)) return ["BOOKING_CHANGED", "BOOKING"];
   return [`${req.method} API_MUTATION`, "API_MUTATION"];

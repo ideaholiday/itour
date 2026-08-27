@@ -132,8 +132,8 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
   if (!booking) throw Object.assign(new Error("Booking not found"), { status: 404 });
 
   const eventType = String(requestedEventType || "DOCUMENTS").toUpperCase();
-  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE"].includes(eventType)) {
-    throw Object.assign(new Error("Choose booking confirmation, driver details, documents, pre-trip reminder, or review invite"), { status: 400 });
+  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE", "SUPPLIER_CONFIRMATION_PENDING", "PICKUP_DETAILS_UPDATED", "DRIVER_ARRIVING", "AMENDMENT_RESULT"].includes(eventType)) {
+    throw Object.assign(new Error("Choose a supported booking logistics notification"), { status: 400 });
   }
   if (eventType === "DRIVER_ASSIGNED" && !booking.driver_name) {
     throw Object.assign(new Error("Assign a driver before sending driver details"), { status: 409 });
@@ -176,6 +176,26 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nWe hope you had a wonderful journey with ${experienceName}!\n\nRate your trip and share photos here:\n${reviewUrl}\n\nThank you for choosing Idea Holiday!`,
       template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_REVIEW_REQUEST, [booking.ref, experienceName]),
     },
+    SUPPLIER_CONFIRMATION_PENDING: {
+      subject: `Supplier confirmation pending for ${booking.ref}`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nPayment is received for ${experienceName}, but the supplier is still confirming availability. We will update you before ${booking.supplier_response_deadline || "the service"}.\nPickup requested: ${booking.pickup_location || "Pending"}.`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+    },
+    PICKUP_DETAILS_UPDATED: {
+      subject: `Pickup details updated for ${booking.ref}`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour pickup details for ${experienceName} have been updated.\nPickup: ${booking.pickup_time || "Time TBC"}, ${booking.pickup_location || "See your voucher"}.\nDrop-off: ${booking.drop_location || "See your voucher"}.`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+    },
+    DRIVER_ARRIVING: {
+      subject: `Your driver is arriving (${booking.ref})`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour driver is on the way to ${booking.pickup_location || "your pickup point"}. Please keep your phone reachable.`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_DRIVER_ASSIGNED, [booking.ref, booking.driver_name, booking.driver_phone, booking.vehicle_model, booking.vehicle_number, booking.pickup_time, booking.pickup_location]),
+    },
+    AMENDMENT_RESULT: {
+      subject: `Booking logistics amendment ${booking.ref}`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour requested pickup/drop amendment has been recorded. Check My Trips for the latest voucher and logistics status.`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+    },
   }[eventType];
   const results = await sendRecipientChannels({
     database,
@@ -189,6 +209,10 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     metadata: { bookingId: booking.id, bookingRef: booking.ref, resend: true },
   });
   return { eventType, bookingId: booking.id, bookingRef: booking.ref, attempted: results.length, results };
+}
+
+export function notifyBookingLogisticsEvent(database, bookingId, eventType) {
+  return sendGuestBookingNotification(database, bookingId, eventType);
 }
 
 export async function notifyDriverAssigned(database, bookingId) {
@@ -668,4 +692,72 @@ export async function runAutomatedTripReminders(database) {
     preTripBookings: preTripResults.map((r) => r.bookingRef),
     postTripBookings: postTripResults.map((r) => r.bookingRef),
   };
+}
+
+export async function notifyCircuitReschedule(database, orderId, requestedState = "REQUESTED") {
+  const state = String(requestedState || "REQUESTED").toUpperCase();
+  const order = database.prepare("SELECT * FROM circuit_orders WHERE id = ? OR order_ref = ?").get(orderId, orderId);
+  if (!order) throw new Error("Circuit order not found for reschedule notification");
+  const items = database.prepare(`
+    SELECT coi.*, b.ref AS booking_ref, p.title AS product_title,
+      s.contact_name AS supplier_contact_name, s.company_name AS supplier_name,
+      s.email AS supplier_email, s.phone AS supplier_phone
+    FROM circuit_order_items coi
+    JOIN bookings b ON b.id = coi.booking_id
+    LEFT JOIN products p ON p.id = coi.product_id
+    LEFT JOIN suppliers s ON s.id = coi.supplier_id
+    WHERE coi.circuit_order_id = ? ORDER BY coi.sequence_number
+  `).all(order.id);
+  const operations = database.prepare("SELECT id, name, email, phone, role FROM users WHERE UPPER(role) IN ('ADMIN', 'STAFF')").all();
+  const traveler = {
+    id: order.user_id, role: "TRAVELER", name: order.traveler_name,
+    email: order.traveler_email, phone: order.traveler_phone,
+  };
+  const suppliers = items.map((item) => ({
+    id: item.supplier_id, role: "SUPPLIER", name: item.supplier_contact_name || item.supplier_name,
+    email: item.supplier_email, phone: item.supplier_phone, item,
+  }));
+  const recipientList = state === "REQUESTED"
+    ? [traveler, ...suppliers]
+    : state === "CONFIRMED"
+      ? [traveler, ...suppliers, ...operations.map((user) => ({ ...user, role: upperRole(user.role) }))]
+      : [traveler, ...operations.map((user) => ({ ...user, role: upperRole(user.role) }))];
+  const recipients = uniqueRecipients(recipientList);
+  const itinerary = items.map((item) => `Stop ${item.sequence_number}: ${item.product_title || item.booking_ref} on ${item.activity_date} at ${item.pickup_time}`).join("\n");
+  const eventType = `CIRCUIT_RESCHEDULE_${state}`;
+  const results = [];
+  for (const recipient of recipients) {
+    const supplierItems = suppliers.filter((supplier) => supplier.id === recipient.id).map((supplier) => supplier.item);
+    let subject = `Circuit ${order.order_ref} reschedule update`;
+    let message;
+    if (state === "REQUESTED" && recipient.role === "SUPPLIER") {
+      const supplierItinerary = supplierItems.map((item) => `${item.booking_ref}: ${item.product_title || "Circuit stop"} on ${item.activity_date} at ${item.pickup_time}`).join("\n");
+      subject = `Action required: reconfirm ${order.order_ref}`;
+      message = `Hello ${recipient.name || "Partner"},\n\nIdea Holiday has rescheduled your circuit stop(s).\n${supplierItinerary}\nRespond by ${order.reconfirmation_deadline || "the SLA deadline"}.\n\nThe circuit will remain grouped; a rejection or timeout sends the complete itinerary to operations review.`;
+    } else if (state === "REQUESTED") {
+      message = `Hello ${recipient.name || "Traveler"},\n\nOperations approved the new dates for circuit ${order.order_ref}. Suppliers now have until ${order.reconfirmation_deadline || "the stated SLA deadline"} to reconfirm.\n\n${itinerary}\n\nWe will notify you when every stop is confirmed.`;
+    } else if (state === "CONFIRMED") {
+      subject = `All new dates confirmed for ${order.order_ref}`;
+      message = `Hello ${recipient.name || "there"},\n\nEvery supplier has reconfirmed circuit ${order.order_ref}.\n\n${itinerary}\n\nThe complete itinerary is confirmed on the new dates.`;
+    } else {
+      subject = `Operations review required for ${order.order_ref}`;
+      message = `Hello ${recipient.name || "there"},\n\nA supplier could not reconfirm circuit ${order.order_ref} within the required SLA. The complete itinerary is held for operations review and no individual stop has been reassigned. We will share the resolution shortly.`;
+    }
+    results.push(...await sendRecipientChannels({
+      database,
+      eventType,
+      eventKeyPrefix: `${order.id}:${eventType}:${recipient.role}:${recipient.id || "external"}`,
+      recipient,
+      subject,
+      emailText: message,
+      whatsappText: message,
+      whatsappTemplate: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_CIRCUIT_RESCHEDULE, [order.order_ref, state, order.reconfirmation_deadline || ""]),
+      metadata: { circuitOrderId: order.id, circuitOrderRef: order.order_ref, state },
+    }));
+  }
+  return { eventType, circuitOrderId: order.id, attempted: results.length, results };
+}
+
+function upperRole(value) {
+  return String(value || "STAFF").toUpperCase();
 }

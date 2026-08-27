@@ -166,7 +166,12 @@ router.post("/cases/:ref/refund-decision", validateBody(supportSchemas.refundDec
     try {
       if (quote.refundAmount > 0) {
         if (!booking.razorpay_payment_id) throw Object.assign(new Error("Payment reference is missing; finance must review the provider payment"), { status: 409 });
-        providerResult = await processRazorpayRefund({ paymentId: booking.razorpay_payment_id, amount: quote.refundAmount, reason: resolution });
+        providerResult = await processRazorpayRefund({
+          paymentId: booking.razorpay_payment_id,
+          amount: quote.refundAmount,
+          reason: resolution,
+          idempotencyKey: refund.id,
+        });
       }
     } catch (error) {
       failRefund(db, refund.id, error.message);

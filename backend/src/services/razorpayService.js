@@ -110,12 +110,14 @@ export async function transferSupplierShareRoute({
   };
 }
 
-export async function processRazorpayRefund({ paymentId, amount, reason }) {
+export async function processRazorpayRefund({ paymentId, amount, reason, idempotencyKey }) {
   if (!paymentId?.startsWith("pay_demo_")) {
-    const idempotencyKey = `ih_${crypto.createHash("sha256").update(`${paymentId}:${amount}`).digest("hex").slice(0, 24)}`;
+    const providerIdempotencyKey = `ih_${crypto.createHash("sha256")
+      .update(String(idempotencyKey || `${paymentId}:${amount}`))
+      .digest("hex").slice(0, 24)}`;
     const refund = await razorpayRequest(`/v1/payments/${encodeURIComponent(paymentId)}/refund`, {
       body: { amount: Math.round(Number(amount) * 100), notes: { reason: reason || "Traveler cancellation" } },
-      headers: { "X-Refund-Idempotency": idempotencyKey }
+      headers: { "X-Refund-Idempotency": providerIdempotencyKey }
     });
     return {
       success: true,

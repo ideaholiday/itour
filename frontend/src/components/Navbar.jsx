@@ -11,7 +11,6 @@ const NAV_ITEMS = [
   { label: "Transfers", path: "/transfers" },
   { label: "Plan Circuit 🗺️", path: "/circuit-planner" },
   { label: "Travel & Earn ✨", path: "/travel-and-earn" },
-  { label: "How it works", path: "/how-it-works" },
 ];
 
 const CATEGORY_BAR = [

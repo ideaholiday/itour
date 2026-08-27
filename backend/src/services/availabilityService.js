@@ -5,6 +5,7 @@ export const AVAILABILITY_TYPES = ["FULL_DAY", "TIME_SLOT"];
 const ACTIVE_BOOKING_STATUSES = ["pending_payment", "pending_confirmation", "confirmed", "driver_assigned", "in_progress"];
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const circuitOrderSupport = new WeakMap();
 
 const upper = (value) => String(value || "").trim().toUpperCase();
 
@@ -62,10 +63,31 @@ function ruleAppliesAtTime(rule, pickupTime) {
   return pickup >= timeToMinutes(rule.start_time) && pickup < timeToMinutes(rule.end_time);
 }
 
+function supportsCircuitOrders(db) {
+  if (circuitOrderSupport.has(db)) return circuitOrderSupport.get(db);
+  try {
+    db.prepare("SELECT circuit_order_id FROM bookings LIMIT 0").all();
+    db.prepare("SELECT id FROM circuit_orders LIMIT 0").all();
+    circuitOrderSupport.set(db, true);
+    return true;
+  } catch {
+    circuitOrderSupport.set(db, false);
+    return false;
+  }
+}
+
 function countBookings(db, { supplierId, activityDate, vehicleCategory, rule }) {
   const statusSlots = ACTIVE_BOOKING_STATUSES.map(() => "?").join(", ");
   const params = [supplierId, activityDate, ...ACTIVE_BOOKING_STATUSES];
   let sql = `SELECT COUNT(*) AS count FROM bookings WHERE supplier_id = ? AND activity_date = ? AND LOWER(status) IN (${statusSlots})`;
+  if (supportsCircuitOrders(db)) {
+    sql += ` AND (circuit_order_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM circuit_orders co
+      WHERE co.id = bookings.circuit_order_id
+        AND co.status = 'PENDING_PAYMENT'
+        AND co.hold_expires_at <= datetime('now')
+    ))`;
+  }
   if (upper(rule.scope_type) === "PRODUCT" && rule.product_id) {
     sql += " AND COALESCE(assigned_supplier_product_id, product_id) = ?";
     params.push(rule.product_id);

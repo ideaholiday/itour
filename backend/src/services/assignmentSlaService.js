@@ -130,6 +130,7 @@ export function fallbackSupplierAssignment(db, booking, { outcome, note, now = n
             supplier_assignment_score = NULL, assigned_supplier_product_id = NULL
         WHERE id = ?
       `).run(responseStatus, now.toISOString(), note, "No eligible fallback supplier remained after the response SLA.", booking.id);
+      try { db.prepare("UPDATE bookings SET confirmation_status = 'REJECTED' WHERE id = ?").run(booking.id); } catch {}
       db.prepare("UPDATE payouts SET payout_status = 'ASSIGNMENT_PENDING' WHERE booking_id = ?").run(booking.id);
       db.prepare(`
         INSERT INTO staff_tasks (id, task_type, booking_id, assigned_staff_name, priority, status, notes)
@@ -187,6 +188,8 @@ export function respondToSupplierAssignment(db, { bookingId, supplierId, action,
           supplier_responded_at = ?, supplier_response_note = ?, supplier_response_deadline = NULL
         WHERE id = ? AND supplier_id = ? AND supplier_response_status = 'PENDING'
       `).run(now.toISOString(), responseNote || "Supplier accepted the booking.", booking.id, supplierId);
+      try { db.prepare("UPDATE bookings SET confirmation_status = 'CONFIRMED' WHERE id = ?").run(booking.id); } catch {}
+      try { db.prepare("UPDATE booking_logistics SET pending_supplier = FALSE, status = 'PICKUP_LOCATION_VERIFIED', updated_at = CURRENT_TIMESTAMP WHERE booking_id = ?").run(booking.id); } catch {}
       if (!updated.changes) throw Object.assign(new Error("Assignment response was already processed"), { status: 409 });
       db.prepare(`
         UPDATE supplier_assignment_attempts SET response_status = 'ACCEPTED', response_at = ?, response_note = ?
@@ -205,6 +208,7 @@ export function processExpiredSupplierAssignments(db, { now = new Date(), limit 
   const expired = db.prepare(`
     SELECT * FROM bookings
     WHERE supplier_response_status = 'PENDING' AND supplier_response_deadline IS NOT NULL
+      AND COALESCE(supplier_assignment_status, '') <> 'RESCHEDULED_RECONFIRMATION_REQUIRED'
       AND supplier_response_deadline <= ?
     ORDER BY supplier_response_deadline ASC LIMIT ?
   `).all(now.toISOString(), Number(limit) || 25);

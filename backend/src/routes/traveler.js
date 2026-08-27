@@ -1,11 +1,14 @@
 import express from "express";
 import db from "../db.js";
 import { authenticate, optionalAuthenticate } from "../middleware/auth.js";
+import { validateBody } from "../middleware/validation.js";
 import { z } from "zod";
 import crypto from "crypto";
 import logger from "../config/logger.js";
 import { sseService } from "../services/sseService.js";
 import { ItineraryService } from "../services/itineraryService.js";
+import { createCircuitQuote, getCircuitQuote } from "../services/circuitQuoteService.js";
+import { itinerarySchemas } from "../validators/apiSchemas.js";
 import { BookingModificationService } from "../services/bookingModificationService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { subscribeNewsletter, unsubscribeNewsletter, getSubscriberStats } from "../services/newsletterService.js";
@@ -191,7 +194,7 @@ router.get("/itineraries", authenticate, (req, res) => {
   }
 });
 
-router.post("/itineraries", authenticate, (req, res) => {
+router.post("/itineraries", authenticate, validateBody(itinerarySchemas.create), (req, res) => {
   try {
     const itinerary = ItineraryService.createItinerary(db, req.user.id, req.body);
     return res.status(201).json({ success: true, itinerary });
@@ -208,6 +211,29 @@ router.post("/itineraries/:id/clone", authenticate, (req, res) => {
   } catch (err) {
     logger.error("Failed to clone itinerary", { error: err.message });
     return res.status(400).json({ error: err.message || "FAILED_TO_CLONE_ITINERARY" });
+  }
+});
+
+router.post("/itineraries/:id/quote", authenticate, validateBody(itinerarySchemas.quote), (req, res) => {
+  try {
+    const itinerary = ItineraryService.getItineraryById(db, req.params.id, req.user.id);
+    if (!itinerary || itinerary.userId !== req.user.id) {
+      return res.status(404).json({ error: "ITINERARY_NOT_FOUND", code: "ITINERARY_NOT_FOUND" });
+    }
+    const quote = createCircuitQuote(db, itinerary, req.user.id, req.body);
+    return res.status(201).json({ success: true, quote });
+  } catch (err) {
+    if (err.message === "FORBIDDEN") return res.status(403).json({ error: "FORBIDDEN", code: "FORBIDDEN" });
+    logger.error("Failed to create circuit quote", { error: err.message, itineraryId: req.params.id });
+    return res.status(err.status || 500).json({ error: err.message || "FAILED_TO_QUOTE_ITINERARY", code: err.code || "CIRCUIT_QUOTE_ERROR" });
+  }
+});
+
+router.get("/itineraries/quotes/:quoteId", authenticate, (req, res) => {
+  try {
+    return res.json({ success: true, quote: getCircuitQuote(db, req.params.quoteId, req.user.id) });
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message || "FAILED_TO_FETCH_CIRCUIT_QUOTE", code: err.code || "CIRCUIT_QUOTE_ERROR" });
   }
 });
 
@@ -235,7 +261,7 @@ router.get("/itineraries/:id", optionalAuthenticate, (req, res) => {
   }
 });
 
-router.put("/itineraries/:id", authenticate, (req, res) => {
+router.put("/itineraries/:id", authenticate, validateBody(itinerarySchemas.update), (req, res) => {
   try {
     const itinerary = ItineraryService.updateItinerary(db, req.user.id, req.params.id, req.body);
     return res.json({ success: true, itinerary });

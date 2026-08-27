@@ -21,7 +21,9 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Delhi",
         notes: "Explore Jama Masjid, Asia's largest spice market at Khari Baoli, and taste authentic Chandni Chowk street food.",
         durationHours: 3.5,
+        priceInr: 1200,
         type: "TOUR",
+        productId: "prod_dt_del_1",
       },
       {
         dayNumber: 1,
@@ -30,6 +32,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Delhi",
         notes: "Visit the UNESCO World Heritage monuments showcasing red sandstone and marble craftsmanship.",
         durationHours: 3.0,
+        priceInr: 1500,
         type: "TOUR",
       },
       {
@@ -39,7 +42,9 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Delhi to Agra",
         notes: "Comfortable pickup from Delhi hotel, smooth 3.5-hour highway drive directly to your Agra stay.",
         durationHours: 3.5,
+        priceInr: 2800,
         type: "TRANSFER",
+        productId: "prod_tr_del_agr",
       },
       {
         dayNumber: 2,
@@ -48,6 +53,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Agra",
         notes: "Witness the marble changes hue at golden hour with an authorized historian guide.",
         durationHours: 4.0,
+        priceInr: 1800,
         type: "TOUR",
       },
       {
@@ -57,6 +63,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Agra to Jaipur",
         notes: "En-route stop at Emperor Akbar's abandoned red sandstone imperial capital and Abhaneri stepwell.",
         durationHours: 5.5,
+        priceInr: 3200,
         type: "TRANSFER",
       },
       {
@@ -66,6 +73,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Jaipur",
         notes: "Traditional Rajasthani thali, folk dances, puppet shows, and fire performers under the desert stars.",
         durationHours: 3.5,
+        priceInr: 1400,
         type: "EXPERIENCE",
       },
       {
@@ -75,6 +83,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Jaipur",
         notes: "Explore Sheesh Mahal (Mirror Palace) and hilltop battlements overlooking Maota Lake.",
         durationHours: 3.5,
+        priceInr: 1600,
         type: "TOUR",
       },
       {
@@ -84,6 +93,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Jaipur",
         notes: "Explore the Palace of Winds, royal courtyards, and astronomical stone dials in the Old Pink City.",
         durationHours: 3.0,
+        priceInr: 1400,
         type: "TOUR",
       },
     ],
@@ -108,6 +118,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Kochi",
         notes: "Visit St. Francis Church, Mattancherry Dutch Palace, and watch iconic 14th-century cantilevered fishing nets.",
         durationHours: 3.0,
+        priceInr: 1400,
         type: "TOUR",
       },
       {
@@ -117,6 +128,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Kochi",
         notes: "Watch the intricate facial makeup process followed by dramatic classical storytelling.",
         durationHours: 2.0,
+        priceInr: 800,
         type: "EXPERIENCE",
       },
       {
@@ -126,6 +138,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Kochi to Munnar",
         notes: "Scenic climb through Western Ghats with photo stops at Cheeyappara and Valara waterfalls.",
         durationHours: 4.0,
+        priceInr: 3400,
         type: "TRANSFER",
       },
       {
@@ -135,6 +148,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Munnar",
         notes: "Learn orthodox tea processing and enjoy lake vistas surrounded by shola forests.",
         durationHours: 3.0,
+        priceInr: 1200,
         type: "TOUR",
       },
       {
@@ -144,6 +158,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Munnar",
         notes: "Spot endangered mountain goats on rolling grasslands at south India's highest peak.",
         durationHours: 3.5,
+        priceInr: 1600,
         type: "TOUR",
       },
       {
@@ -153,6 +168,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Munnar",
         notes: "Smell fresh cinnamon, cloves, vanilla beans, and black pepper with a naturalist.",
         durationHours: 2.0,
+        priceInr: 900,
         type: "TOUR",
       },
       {
@@ -162,6 +178,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Munnar to Alleppey",
         notes: "Board your private thatched Kettuvallam houseboat with onboard chef and captain.",
         durationHours: 4.5,
+        priceInr: 3200,
         type: "TRANSFER",
       },
       {
@@ -171,6 +188,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Alleppey",
         notes: "Feast on fresh Karimeen Pollichathu while gliding past paddy fields and village canals.",
         durationHours: 4.0,
+        priceInr: 3500,
         type: "EXPERIENCE",
       },
       {
@@ -180,6 +198,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Alleppey",
         notes: "Navigate narrow palm-fringed lagoons inaccessible to larger boats.",
         durationHours: 2.5,
+        priceInr: 1200,
         type: "TOUR",
       },
     ],
@@ -204,7 +223,9 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Panaji / Old Goa",
         notes: "Admire Sé Cathedral, Basilica of Bom Jesus, and colorful Portuguese heritage lanes in Fontainhas.",
         durationHours: 3.5,
+        priceInr: 1600,
         type: "TOUR",
+        productId: "goa-fontainhas-walking-tour",
       },
       {
         dayNumber: 1,
@@ -213,7 +234,9 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Panaji",
         notes: "Sail along the Mandovi river mouth past Adil Shah Palace and Miramar beach.",
         durationHours: 2.0,
+        priceInr: 800,
         type: "EXPERIENCE",
+        productId: "goa-mandovi-sunset-cruise",
       },
       {
         dayNumber: 2,
@@ -222,7 +245,9 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Grand Island",
         notes: "Underwater corals, colorful reef fish, guided diving with PADI instructors, and beach BBQ lunch.",
         durationHours: 5.5,
+        priceInr: 2499,
         type: "TOUR",
+        productId: "goa-grand-island-scuba-5sports",
       },
       {
         dayNumber: 2,
@@ -231,6 +256,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "North Goa",
         notes: "Soak in coastal beats, sea breezes, and fresh tiger prawns under the fairy lights.",
         durationHours: 3.0,
+        priceInr: 1200,
         type: "EXPERIENCE",
       },
       {
@@ -240,7 +266,9 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Mollem National Park",
         notes: "Open jeep safari through Bhagwan Mahavir Wildlife Sanctuary with swim in freshwater pool.",
         durationHours: 6.0,
+        priceInr: 2200,
         type: "TOUR",
+        productId: "goa-dudhsagar-waterfall-safari",
       },
     ],
   },
@@ -264,6 +292,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Sarnath",
         notes: "Visit the sacred site where Lord Buddha delivered his first sermon after enlightenment, and the Ashoka Pillar museum.",
         durationHours: 3.0,
+        priceInr: 1200,
         type: "TOUR",
       },
       {
@@ -273,6 +302,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Varanasi Ghats",
         notes: "Watch the synchronized brass lamps and chanting from the serene vantage of a private boat on the Ganges.",
         durationHours: 2.5,
+        priceInr: 1400,
         type: "EXPERIENCE",
       },
       {
@@ -282,6 +312,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Old City Varanasi",
         notes: "Taste authentic Banarasi paan, malaiyo winter foam dessert, and kachori jalebi in winding alleys.",
         durationHours: 2.0,
+        priceInr: 800,
         type: "TOUR",
       },
       {
@@ -291,6 +322,7 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Varanasi Ghats",
         notes: "Witness morning prayer rituals, yoga practitioners, and sunrise reflections across the holy river.",
         durationHours: 3.0,
+        priceInr: 1200,
         type: "TOUR",
       },
       {
@@ -300,11 +332,24 @@ export const CURATED_CIRCUIT_TEMPLATES = [
         location: "Varanasi",
         notes: "Discover centuries-old jacquard weaving traditions directly with local artisan families.",
         durationHours: 2.5,
+        priceInr: 600,
         type: "TOUR",
       },
     ],
   },
 ];
+
+function computeEndDate(startDate, daysCount) {
+  if (!startDate) return null;
+  try {
+    const d = new Date(startDate);
+    if (isNaN(d.getTime())) return startDate;
+    d.setDate(d.getDate() + Math.max(0, (parseInt(daysCount, 10) || 1) - 1));
+    return d.toISOString().slice(0, 10);
+  } catch {
+    return startDate;
+  }
+}
 
 export class ItineraryService {
   static getCuratedTemplates() {
@@ -322,16 +367,20 @@ export class ItineraryService {
     const id = `itin_${crypto.randomBytes(6).toString("hex")}`;
     const title = payload.title.trim();
     const destination = payload.destination?.trim() || "India";
-    const startDate = payload.startDate || new Date().toISOString().slice(0, 10);
+    const startDate = payload.startDate || payload.travelDate || payload.travel_date || new Date().toISOString().slice(0, 10);
+    const travelDate = startDate;
     const daysCount = Math.max(1, Math.min(30, parseInt(payload.daysCount, 10) || 3));
+    const endDate = payload.endDate || payload.end_date || computeEndDate(startDate, daysCount);
+    const adultsCount = Math.max(1, Math.min(30, parseInt(payload.adultsCount ?? payload.adults ?? payload.adults_count, 10) || 2));
+    const childrenCount = Math.max(0, Math.min(30, parseInt(payload.childrenCount ?? payload.children ?? payload.children_count, 10) || 0));
     const items = Array.isArray(payload.items) ? payload.items : [];
     const isPublic = payload.isPublic !== false ? 1 : 0;
 
     database.prepare(`
       INSERT INTO traveler_itineraries (
-        id, user_id, title, destination, start_date, days_count, items, is_public, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    `).run(id, userId, title, destination, startDate, daysCount, JSON.stringify(items), isPublic);
+        id, user_id, title, destination, start_date, travel_date, end_date, days_count, adults_count, children_count, items, is_public, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `).run(id, userId, title, destination, startDate, travelDate, endDate, daysCount, adultsCount, childrenCount, JSON.stringify(items), isPublic);
 
     return this.getItineraryById(database, id, userId);
   }
@@ -347,6 +396,8 @@ export class ItineraryService {
         destination: template.destination,
         startDate: new Date().toISOString().slice(0, 10),
         daysCount: template.daysCount,
+        adultsCount: template.adultsCount || 2,
+        childrenCount: template.childrenCount || 0,
         items: template.items,
         isPublic: true,
       });
@@ -359,8 +410,11 @@ export class ItineraryService {
     return this.createItinerary(database, userId, {
       title: `${existing.title} (Copy)`,
       destination: existing.destination,
-      startDate: existing.startDate,
+      startDate: existing.startDate || existing.travelDate,
+      endDate: existing.endDate,
       daysCount: existing.daysCount,
+      adultsCount: existing.adultsCount || existing.adults || 2,
+      childrenCount: existing.childrenCount || existing.children || 0,
       items: existing.items,
       isPublic: true,
     });
@@ -382,13 +436,28 @@ export class ItineraryService {
       updates.push("destination = ?");
       params.push(payload.destination.trim());
     }
-    if (payload.startDate !== undefined) {
+    if (payload.startDate !== undefined || payload.travelDate !== undefined || payload.travel_date !== undefined) {
+      const sDate = payload.startDate || payload.travelDate || payload.travel_date;
       updates.push("start_date = ?");
-      params.push(payload.startDate);
+      params.push(sDate);
+      updates.push("travel_date = ?");
+      params.push(sDate);
+    }
+    if (payload.endDate !== undefined || payload.end_date !== undefined) {
+      updates.push("end_date = ?");
+      params.push(payload.endDate || payload.end_date);
     }
     if (payload.daysCount !== undefined) {
       updates.push("days_count = ?");
       params.push(Math.max(1, Math.min(30, parseInt(payload.daysCount, 10) || 3)));
+    }
+    if (payload.adultsCount !== undefined || payload.adults !== undefined || payload.adults_count !== undefined) {
+      updates.push("adults_count = ?");
+      params.push(Math.max(1, Math.min(30, parseInt(payload.adultsCount ?? payload.adults ?? payload.adults_count, 10) || 2)));
+    }
+    if (payload.childrenCount !== undefined || payload.children !== undefined || payload.children_count !== undefined) {
+      updates.push("children_count = ?");
+      params.push(Math.max(0, Math.min(30, parseInt(payload.childrenCount ?? payload.children ?? payload.children_count, 10) || 0)));
     }
     if (payload.items !== undefined) {
       updates.push("items = ?");
@@ -420,7 +489,31 @@ export class ItineraryService {
       ORDER BY t.updated_at DESC
     `).all(userId);
 
-    return rows.map((row) => this._enrichItinerary(database, row));
+    // Extract all product IDs across all itineraries in 1 single batch
+    const allProductIds = new Set();
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.items || "[]");
+        for (const it of parsed) {
+          if (it.productId) allProductIds.add(it.productId);
+        }
+      } catch {}
+    }
+
+    const productMap = new Map();
+    if (allProductIds.size > 0) {
+      const idList = Array.from(allProductIds);
+      const placeholders = idList.map(() => "?").join(",");
+      const products = database.prepare(`
+        SELECT id, title, price_inr, hero_image, duration_hours, rating, category, product_type
+        FROM products WHERE id IN (${placeholders})
+      `).all(...idList);
+      for (const p of products) {
+        productMap.set(p.id, p);
+      }
+    }
+
+    return rows.map((row) => this._enrichItinerary(database, row, productMap));
   }
 
   static getItineraryById(database, itineraryId, requestingUserId = null) {
@@ -456,9 +549,17 @@ export class ItineraryService {
     const itinerary = this.getItineraryById(database, itineraryId, requestingUserId);
     if (!itinerary) throw new Error("ITINERARY_NOT_FOUND");
 
+    const travelDatesFormatted = itinerary.travelDate || itinerary.startDate
+      ? `${itinerary.travelDate || itinerary.startDate}${itinerary.endDate ? ` to ${itinerary.endDate}` : ""}`
+      : "Flexible";
+    const adults = itinerary.adultsCount || itinerary.adults || 2;
+    const children = itinerary.childrenCount || itinerary.children || 0;
+    const guestsSummary = `${adults} Adult${adults > 1 ? "s" : ""}${children > 0 ? `, ${children} Child${children > 1 ? "ren" : ""}` : ""}`;
+
     let text = `✈️ *${itinerary.title}*\n`;
     text += `📍 Destination: ${itinerary.destination} | ⏳ Duration: ${itinerary.daysCount} Days\n`;
-    text += `📅 Start Date: ${itinerary.startDate || "Flexible"}\n`;
+    text += `📅 Travel Dates: ${travelDatesFormatted}\n`;
+    text += `👥 Travelers: ${guestsSummary}\n`;
     text += `💰 Estimated Total: ₹${(itinerary.totalEstimatedInr || itinerary.estimatedBudgetInr || 0).toLocaleString("en-IN")}\n\n`;
     text += `*Day-by-Day Journey Circuit:*\n`;
 
@@ -488,7 +589,7 @@ export class ItineraryService {
     return text;
   }
 
-  static _enrichItinerary(database, row) {
+  static _enrichItinerary(database, row, prefetchedProductMap = null) {
     let rawItems = [];
     try {
       rawItems = JSON.parse(row.items || "[]");
@@ -496,30 +597,36 @@ export class ItineraryService {
       rawItems = [];
     }
 
+    let productMap = prefetchedProductMap;
+    if (!productMap) {
+      const productIds = Array.from(new Set(rawItems.map((it) => it.productId).filter(Boolean)));
+      productMap = new Map();
+      if (productIds.length > 0) {
+        const placeholders = productIds.map(() => "?").join(",");
+        const products = database.prepare(`
+          SELECT id, title, price_inr, hero_image, duration_hours, rating, category, product_type
+          FROM products WHERE id IN (${placeholders})
+        `).all(...productIds);
+        for (const p of products) {
+          productMap.set(p.id, p);
+        }
+      }
+    }
+
     let totalEstimatedInr = 0;
     let totalDurationHours = 0;
 
     const enrichedItems = rawItems.map((item, index) => {
-      let product = null;
-      if (item.productId) {
-        product = database.prepare(`
-          SELECT id, title, slug, destination, price_inr, hero_image, duration_hours, rating, category, product_type
-          FROM products WHERE id = ?
-        `).get(item.productId);
-      }
+      const product = item.productId ? (productMap.get(item.productId) || null) : null;
 
-      if (product) {
-        totalEstimatedInr += (product.price_inr || 0);
-        totalDurationHours += (product.duration_hours || 0);
-      } else if (item.priceInr) {
-        totalEstimatedInr += Number(item.priceInr || 0);
-      }
+      const itemDuration = Number(product?.duration_hours ?? item.durationHours ?? 2);
+      totalDurationHours += itemDuration;
 
-      if (item.durationHours) {
-        totalDurationHours += Number(item.durationHours || 0);
-      }
+      const itemPrice = Number(product?.price_inr ?? item.priceInr ?? 0);
+      totalEstimatedInr += itemPrice;
 
       return {
+        ...item,
         id: item.id || `item_${index + 1}`,
         dayNumber: item.dayNumber || 1,
         timeSlot: item.timeSlot || "MORNING",
@@ -528,10 +635,13 @@ export class ItineraryService {
         notes: item.notes || "",
         productId: item.productId || null,
         product: product || null,
-        durationHours: item.durationHours || product?.duration_hours || 2,
+        durationHours: itemDuration,
         type: item.type || (product?.product_type === "TRANSFER" ? "TRANSFER" : "TOUR"),
       };
     });
+
+    const travelDate = row.travel_date || row.start_date;
+    const endDate = row.end_date || computeEndDate(travelDate, row.days_count);
 
     return {
       id: row.id,
@@ -539,8 +649,14 @@ export class ItineraryService {
       creatorName: row.creator_name || "Idea Holiday Traveler",
       title: row.title,
       destination: row.destination,
-      startDate: row.start_date,
+      startDate: travelDate,
+      travelDate,
+      endDate,
       daysCount: row.days_count,
+      adultsCount: row.adults_count ?? 2,
+      childrenCount: row.children_count ?? 0,
+      adults: row.adults_count ?? 2,
+      children: row.children_count ?? 0,
       isPublic: Boolean(row.is_public),
       items: enrichedItems,
       totalEstimatedInr,

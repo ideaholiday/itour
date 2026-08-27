@@ -31,6 +31,8 @@ const SupplierBookingsPage = React.lazy(() => import("./pages/SupplierBookingsPa
 const TourProductBuilder = React.lazy(() => import("./pages/TourProductBuilder.jsx"));
 const SupplierListingChooser = React.lazy(() => import("./pages/SupplierListingChooser.jsx"));
 const SupplierTransferBuilder = React.lazy(() => import("./pages/SupplierTransferBuilder.jsx"));
+const ProductBuilder = React.lazy(() => import("./pages/ProductBuilder.jsx"));
+
 const AdminPanel = React.lazy(() => import("./pages/AdminPanel.jsx"));
 const OpsPanel = React.lazy(() => import("./pages/OpsPanel.jsx"));
 const UserProfile = React.lazy(() => import("./pages/UserProfile.jsx"));
@@ -39,6 +41,9 @@ const TravelerMessages = React.lazy(() => import("./pages/TravelerMessages.jsx")
 const TripSummary = React.lazy(() => import("./pages/TripSummary.jsx"));
 const TravelAndEarn = React.lazy(() => import("./pages/TravelAndEarn.jsx"));
 const CircuitPlanner = React.lazy(() => import("./pages/CircuitPlanner.jsx"));
+const CircuitCheckout = React.lazy(() => import("./pages/CircuitCheckout.jsx"));
+const CircuitConfirmed = React.lazy(() => import("./pages/CircuitConfirmed.jsx"));
+const CircuitManage = React.lazy(() => import("./pages/CircuitManage.jsx"));
 const NotFound404 = React.lazy(() => import("./pages/NotFound404.jsx"));
 
 function AppContent() {
@@ -69,6 +74,7 @@ function AppContent() {
             <Route path="/supplier/portal" element={<SupplierPortal />} />
             <Route path="/supplier/coverage" element={<SupplierDashboardPage />} />
             <Route path="/supplier/products/create" element={<SupplierListingChooser />} />
+            <Route path="/supplier/products/new" element={<ProductBuilder />} />
             <Route path="/supplier/transfers/create" element={<SupplierTransferBuilder />} />
             <Route path="/supplier/tours/create" element={<TourProductBuilder />} />
             <Route path="/admin" element={<AdminPanel view="overview" />} />
@@ -82,6 +88,7 @@ function AppContent() {
             <Route path="/ops/notifications" element={<OpsPanel view="notifications" />} />
             <Route path="/ops/support" element={<OpsPanel view="support" />} />
             <Route path="/ops/tasks" element={<OpsPanel view="tasks" />} />
+            <Route path="/ops/circuits" element={<OpsPanel view="circuits" />} />
             <Route path="/activity/:id" element={<ActivityDetail />} />
             <Route path="/checkout/:id" element={<Checkout />} />
             <Route path="/booking-confirmed/:ref" element={<BookingConfirmed />} />
@@ -95,6 +102,9 @@ function AppContent() {
             <Route path="/referrals" element={<TravelAndEarn />} />
             <Route path="/circuit-planner" element={<CircuitPlanner />} />
             <Route path="/plan-trip" element={<CircuitPlanner />} />
+            <Route path="/circuit-checkout/:id" element={<CircuitCheckout />} />
+            <Route path="/circuit-confirmed/:ref" element={<CircuitConfirmed />} />
+            <Route path="/circuit/:ref/manage" element={<CircuitManage />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Login initialMode="signup" />} />
             <Route path="/how-it-works" element={<HowItWorks />} />

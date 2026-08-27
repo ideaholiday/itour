@@ -18,7 +18,12 @@ import {
 } from "lucide-react";
 
 export default function Step2Itinerary({ formData, category, onChange, errors }) {
-  const { itinerary = [], timeSlots = [], pickupDropPoints = [], dayStops = [] } = formData;
+  const {
+    itinerary = [], timeSlots = [], pickupDropPoints = [], dayStops = [],
+    pickupRuleMode = "CITY_ANYWHERE", distanceKmLimit = 40,
+    advanceBookingCutoffHours = 4, operatingStartTime = "06:00",
+    operatingEndTime = "22:00", allowedLocationTypes = ["HOTEL_ZONE", "LANDMARK"],
+  } = formData;
   const [openDayIndex, setOpenDayIndex] = useState(0);
   const [newTagInput, setNewTagInput] = useState({});
   const [newTimeSlotInput, setNewTimeSlotInput] = useState("");
@@ -30,6 +35,7 @@ export default function Step2Itinerary({ formData, category, onChange, errors })
     const nextDayNum = itinerary.length + 1;
     const newDayObj = {
       day: nextDayNum,
+      city: itinerary[itinerary.length - 1]?.city || "",
       title: `Day ${nextDayNum}: Sightseeing & Exploration`,
       description: "",
       placesCovered: [],
@@ -242,6 +248,10 @@ export default function Step2Itinerary({ formData, category, onChange, errors })
                   {/* Accordion Body */}
                   {isOpen && (
                     <div className="p-4 border-t border-stone-200 space-y-4 bg-[#FAF9F6] rounded-b-2xl">
+                      <div>
+                        <label className="block text-xs font-semibold text-stone-700 mb-1">Day {dayItem.day} service / hotel city <span className="text-rose-500">*</span></label>
+                        <input type="text" value={dayItem.city || ""} onChange={(e) => handleDayFieldChange(index, "city", e.target.value)} placeholder="e.g. Jaipur" className="w-full bg-white border border-stone-300 rounded-xl px-3 py-2 text-stone-900 text-sm focus:outline-none focus:border-amber-500" />
+                      </div>
                       {/* Day Title */}
                       <div>
                         <label className="block text-xs font-semibold text-stone-700 mb-1">
@@ -475,6 +485,18 @@ export default function Step2Itinerary({ formData, category, onChange, errors })
                 <Info className="w-3.5 h-3.5" /> {errors.pickupDropPoints}
               </p>
             )}
+          </div>
+
+          <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-4 space-y-4 shadow-sm">
+            <div><h3 className="text-sm font-semibold text-emerald-950 flex items-center gap-2"><MapPin className="w-4 h-4" /> Pickup service-area rules</h3><p className="mt-1 text-xs text-emerald-800">These rules are enforced by the quote and booking APIs, not only shown to travelers.</p></div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="text-xs font-semibold text-stone-700">Rule mode<select value={pickupRuleMode} onChange={(e) => onChange({ pickupRuleMode: e.target.value })} className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2"><option value="CITY_ANYWHERE">Anywhere in product city</option><option value="RADIUS_FROM_CENTER">Radius from city center</option><option value="ZONE_POLYGON">Mapped polygon</option></select></label>
+              <label className="text-xs font-semibold text-stone-700">Max distance (km)<input type="number" min="1" max="500" value={distanceKmLimit} onChange={(e) => onChange({ distanceKmLimit: Number(e.target.value) })} className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2" /></label>
+              <label className="text-xs font-semibold text-stone-700">Booking cutoff (hours)<input type="number" min="0" max="168" value={advanceBookingCutoffHours} onChange={(e) => onChange({ advanceBookingCutoffHours: Number(e.target.value) })} className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2" /></label>
+              <label className="text-xs font-semibold text-stone-700">Operating from<input type="time" value={operatingStartTime} onChange={(e) => onChange({ operatingStartTime: e.target.value })} className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2" /></label>
+              <label className="text-xs font-semibold text-stone-700">Operating until<input type="time" value={operatingEndTime} onChange={(e) => onChange({ operatingEndTime: e.target.value })} className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2" /></label>
+            </div>
+            <fieldset><legend className="text-xs font-semibold text-stone-700">Allowed pickup point types</legend><div className="mt-2 flex flex-wrap gap-2">{["HOTEL_ZONE", "LANDMARK", "CITY_CENTER", "PICKUP_ZONE"].map((type) => <label key={type} className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-2.5 py-1.5 text-[11px]"><input type="checkbox" checked={allowedLocationTypes.includes(type)} onChange={() => onChange({ allowedLocationTypes: allowedLocationTypes.includes(type) ? allowedLocationTypes.filter((item) => item !== type) : [...allowedLocationTypes, type] })} />{type.replaceAll("_", " ")}</label>)}</div></fieldset>
           </div>
 
           {/* Sightseeing Tour Stops / Breakdown */}

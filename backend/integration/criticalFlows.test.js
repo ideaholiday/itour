@@ -91,6 +91,14 @@ test("critical traveler API journey enforces identity, ownership, payment, and a
     assert.ok(activities.data.length > 0);
     assert.ok(activities.data.every((activity) => activity.productType === "DAY_TOUR"));
 
+    const detail = await requestJson(api.baseUrl, `/api/activities/${activities.data[0].id}`);
+    assert.equal(detail.response.status, 200, JSON.stringify(detail.data));
+    assert.equal(detail.data.id, activities.data[0].id);
+
+    const suggestions = await requestJson(api.baseUrl, `/api/activities/${activities.data[0].id}/pickup-suggestions?side=PICKUP`);
+    assert.equal(suggestions.response.status, 200, JSON.stringify(suggestions.data));
+    assert.equal(suggestions.data.success, true);
+
     const invalidRequestId = "integration-invalid-signup";
     const invalidSignup = await requestJson(api.baseUrl, "/api/auth/signup", {
       headers: { "X-Request-Id": invalidRequestId },
@@ -124,6 +132,93 @@ test("critical traveler API journey enforces identity, ownership, payment, and a
   });
 
   let booking;
+  await t.test("traveler converts a ready circuit quote into one idempotent held order", async () => {
+    const activities = await requestJson(api.baseUrl, "/api/activities?destination=Goa&type=DAY_TOUR");
+    const products = activities.data.slice(0, 2);
+    assert.equal(products.length, 2);
+    const travelDate = futureDate(18);
+    const itineraryResponse = await requestJson(api.baseUrl, "/api/itineraries", {
+      token: owner.token,
+      body: {
+        title: "Integration Goa circuit",
+        destination: "Goa",
+        startDate: travelDate,
+        daysCount: 2,
+        adultsCount: 2,
+        childrenCount: 0,
+        items: products.map((product, index) => ({
+          id: `integration_item_${index + 1}`,
+          dayNumber: index + 1,
+          title: product.title,
+          location: product.city || "Goa",
+          productId: product.id,
+          type: "TOUR",
+          timeSlot: index ? "AFTERNOON" : "MORNING",
+          vehicleCategory: product.groupType === "SHARED" ? "SHARED_SEAT" : "SEDAN",
+        })),
+      },
+    });
+    assert.equal(itineraryResponse.response.status, 201, JSON.stringify(itineraryResponse.data));
+    const itinerary = itineraryResponse.data.itinerary;
+
+    const quoteResponse = await requestJson(api.baseUrl, `/api/itineraries/${itinerary.id}/quote`, {
+      token: owner.token,
+      body: { startDate: travelDate, adultsCount: 2, childrenCount: 0 },
+    });
+    assert.equal(quoteResponse.response.status, 201, JSON.stringify(quoteResponse.data));
+    assert.equal(quoteResponse.data.quote.status, "READY");
+    assert.equal(quoteResponse.data.quote.lineItems.length, 2);
+
+    const createOrder = () => requestJson(api.baseUrl, "/api/circuit-orders", {
+      token: owner.token,
+      headers: { "Idempotency-Key": "integration-circuit-order-001" },
+      body: { quoteId: quoteResponse.data.quote.quoteId },
+    });
+    const created = await createOrder();
+    assert.equal(created.response.status, 201, `${JSON.stringify(created.data)}\n${api.output()}`);
+    assert.equal(created.data.order.status, "PENDING_PAYMENT");
+    assert.equal(created.data.order.items.length, 2);
+    assert.equal(created.data.order.holds.length, 2);
+    assert.ok(created.data.order.items.every((item) => item.bookingStatus === "pending_payment"));
+
+    const retry = await createOrder();
+    assert.equal(retry.response.status, 200, JSON.stringify(retry.data));
+    assert.equal(retry.data.order.idempotent, true);
+    assert.equal(retry.data.order.orderId, created.data.order.orderId);
+
+    const fetched = await requestJson(api.baseUrl, `/api/circuit-orders/${created.data.order.orderRef}`, { token: owner.token });
+    assert.equal(fetched.response.status, 200, JSON.stringify(fetched.data));
+    assert.equal(fetched.data.order.orderId, created.data.order.orderId);
+
+    const groupedPayment = await requestJson(api.baseUrl, `/api/circuit-orders/${created.data.order.orderId}/demo-payment`, {
+      token: owner.token,
+      body: {},
+    });
+    assert.equal(groupedPayment.response.status, 200, `${JSON.stringify(groupedPayment.data)}\n${api.output()}`);
+    assert.equal(groupedPayment.data.success, true);
+    assert.equal(groupedPayment.data.demo, true);
+    assert.equal(groupedPayment.data.idempotent, false);
+    assert.equal(groupedPayment.data.order.status, "CONFIRMED");
+    assert.equal(groupedPayment.data.order.payment.status, "PAID");
+    assert.equal(groupedPayment.data.bookings.length, 2);
+    assert.ok(groupedPayment.data.order.items.every((item) => item.bookingStatus === "confirmed" && item.paymentStatus === "PAID"));
+    assert.ok(groupedPayment.data.order.holds.every((hold) => hold.status === "CONSUMED"));
+
+    const paymentReplay = await requestJson(api.baseUrl, `/api/circuit-orders/${created.data.order.orderId}/demo-payment`, {
+      token: owner.token,
+      body: {},
+    });
+    assert.equal(paymentReplay.response.status, 200, JSON.stringify(paymentReplay.data));
+    assert.equal(paymentReplay.data.idempotent, true);
+    assert.equal(paymentReplay.data.order.status, "CONFIRMED");
+
+    const paidOrder = await requestJson(api.baseUrl, `/api/circuit-orders/${created.data.order.orderRef}`, { token: owner.token });
+    assert.equal(paidOrder.response.status, 200, JSON.stringify(paidOrder.data));
+    assert.equal(paidOrder.data.order.payment.paymentId, groupedPayment.data.paymentId);
+    const orderAudit = await waitForAudit((row) => row.action === "CIRCUIT_ORDER_CHANGED" && row.actor_id === owner.user.id);
+    assert.equal(orderAudit.resource_type, "CIRCUIT_ORDER");
+  });
+
   await t.test("traveler discovers, quotes, and books an approved activity", async () => {
     const activities = await requestJson(api.baseUrl, "/api/activities?destination=Goa&type=DAY_TOUR");
     const activity = activities.data.find((item) => item.groupType === "SHARED") || activities.data[0];

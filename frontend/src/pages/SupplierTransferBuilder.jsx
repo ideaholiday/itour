@@ -61,13 +61,6 @@ const SERVICE_DIRECTIONS = [
     icon: Building2,
     desc: "Driver picks up traveler from any hotel or home in the origin zone and drops them directly at their airport / station terminal."
   },
-  {
-    id: "BOTH",
-    label: "Two-Way / Both Directions",
-    badge: "Two-Way Flexible Service",
-    icon: ArrowLeftRight,
-    desc: "Service operates in both directions between the transit hub and the destination coverage zone."
-  }
 ];
 
 const VEHICLES = [
@@ -118,6 +111,10 @@ export default function SupplierTransferBuilder() {
   const [freeWaitingMins, setFreeWaitingMins] = useState(60);
   const [tollIncluded, setTollIncluded] = useState(true);
   const [stateTaxIncluded, setStateTaxIncluded] = useState(true);
+  const [constraintMode, setConstraintMode] = useState("RADIUS_FROM_CENTER");
+  const [serviceRadiusKm, setServiceRadiusKm] = useState("40");
+  const [allowedLocationTypes, setAllowedLocationTypes] = useState(["HOTEL_ZONE", "CRUISE_PORT", "CITY_CENTER"]);
+  const [locationErrorMessage, setLocationErrorMessage] = useState("Please select a hotel or address inside the listed service area.");
   const [vehiclePrices, setVehiclePrices] = useState({
     HATCHBACK: "1200",
     SEDAN: "1500",
@@ -272,6 +269,7 @@ export default function SupplierTransferBuilder() {
     if (!origin.confirmed && !origin.address) next.origin = "Select or confirm the pickup hub/origin.";
     if (!destination.confirmed && !destination.address) next.destination = "Select or confirm the destination coverage zone.";
     if (!Number(distanceKm) || !Number(durationMins)) next.route = "Confirm an estimated route distance and duration.";
+    if (!Number(serviceRadiusKm) || Number(serviceRadiusKm) > 500) next.route = "Service radius must be between 1 and 500 km.";
     if (!activeVehicles.length) next.vehicles = "Add a fare for at least one vehicle.";
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -323,11 +321,18 @@ export default function SupplierTransferBuilder() {
             originName: origin.address || hubLabel,
             originLat: origin.lat || 15.7538,
             originLng: origin.lng || 73.8643,
+            originRadiusKm: serviceDirection === "DEPARTURE" ? Number(serviceRadiusKm) : 3,
+            originIata: routeType === "AIRPORT_TRANSFER" && serviceDirection === "ARRIVAL" ? selectedHub?.id : null,
             destName: destination.address || zoneLabel,
             destLat: destination.lat || 15.5439,
             destLng: destination.lng || 73.7553,
+            destRadiusKm: serviceDirection === "ARRIVAL" ? Number(serviceRadiusKm) : 3,
+            destIata: routeType === "AIRPORT_TRANSFER" && serviceDirection === "DEPARTURE" ? selectedHub?.id : null,
             zoneName: zoneLabel,
             isFlexibleDropoff: true,
+            constraintMode,
+            allowedLocationTypes,
+            errorMessage: locationErrorMessage,
             distanceKm: Number(distanceKm),
             durationMins: Number(durationMins),
             vehicleCategory: primaryVehicle.id,
@@ -337,6 +342,17 @@ export default function SupplierTransferBuilder() {
             tollIncluded,
             stateTaxIncluded,
           },
+          options: [{
+            code: "STANDARD",
+            name: `${selectedType.label} · ${serviceDirection === "ARRIVAL" ? "Arrival" : "Departure"}`,
+            pickupOptionType: "PICKUP_EVERYONE",
+            confirmationType: "INSTANT_THEN_MANUAL",
+            supportedArrivalModes: [routeType === "RAILWAY_TRANSFER" ? "RAIL" : routeType === "AIRPORT_TRANSFER" ? "AIR" : "OTHER"],
+            supportedDepartureModes: [routeType === "RAILWAY_TRANSFER" ? "RAIL" : routeType === "AIRPORT_TRANSFER" ? "AIR" : "OTHER"],
+            allowCustomTravelerPickup: true,
+            waitingTimeMinutes: Number(freeWaitingMins),
+            locations: [{ ref: selectedHub?.id || null, pickupType: routeType === "AIRPORT_TRANSFER" ? "AIRPORT" : routeType === "RAILWAY_TRANSFER" ? "LOCATION" : "LOCATION", mode: routeType === "RAILWAY_TRANSFER" ? "RAIL" : routeType === "AIRPORT_TRANSFER" ? "AIR" : "OTHER", displayLabel: hubLabel, address: hubLabel, city, state, lat: origin.lat, lng: origin.lng }],
+          }],
           pricingVariants: activeVehicles.map((vehicle) => ({
             variantName: `${vehicle.name} (${vehicle.models}) · up to ${vehicle.pax} guests`,
             basePrice: Number(vehiclePrices[vehicle.id]),
@@ -479,7 +495,7 @@ export default function SupplierTransferBuilder() {
               {["AIRPORT_TRANSFER", "RAILWAY_TRANSFER"].includes(routeType) && (
                 <div>
                   <span className="block text-xs font-bold text-stone-700 mb-2">Service Direction</span>
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
                     {SERVICE_DIRECTIONS.map((dir) => {
                       const Icon = dir.icon;
                       const active = serviceDirection === dir.id;
@@ -514,6 +530,13 @@ export default function SupplierTransferBuilder() {
                         </button>
                       );
                     })}
+                  </div>
+
+                  <div className="grid gap-3 rounded-xl border border-emerald-200 bg-white p-3 sm:grid-cols-2">
+                    <label className="text-xs font-bold text-stone-700">Constraint mode<select value={constraintMode} onChange={(event) => setConstraintMode(event.target.value)} className="mt-1 min-h-10 w-full rounded-xl border border-stone-300 bg-white px-3 text-xs"><option value="RADIUS_FROM_CENTER">Radius from center</option><option value="CITY_ANYWHERE">Anywhere in city</option><option value="ZONE_POLYGON">Mapped polygon</option></select></label>
+                    <label className="text-xs font-bold text-stone-700">Acceptance radius (km)<input type="number" min="1" max="500" value={serviceRadiusKm} onChange={(event) => setServiceRadiusKm(event.target.value)} className="mt-1 min-h-10 w-full rounded-xl border border-stone-300 bg-white px-3 text-xs" /></label>
+                    <fieldset className="sm:col-span-2"><legend className="text-xs font-bold text-stone-700">Allowed point types</legend><div className="mt-2 flex flex-wrap gap-2">{["HOTEL_ZONE", "CRUISE_PORT", "CITY_CENTER", "LANDMARK"].map((type) => <label key={type} className="flex items-center gap-1.5 rounded-lg border border-stone-200 px-2.5 py-1.5 text-[11px]"><input type="checkbox" checked={allowedLocationTypes.includes(type)} onChange={() => setAllowedLocationTypes((current) => current.includes(type) ? current.filter((item) => item !== type) : [...current, type])} />{type.replaceAll("_", " ")}</label>)}</div></fieldset>
+                    <label className="text-xs font-bold text-stone-700 sm:col-span-2">Traveler-facing rejection message<input value={locationErrorMessage} onChange={(event) => setLocationErrorMessage(event.target.value)} className="mt-1 min-h-10 w-full rounded-xl border border-stone-300 bg-white px-3 text-xs" /></label>
                   </div>
                 </div>
               )}

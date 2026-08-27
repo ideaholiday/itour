@@ -27,6 +27,23 @@ A complete, full-stack production platform for Indian tours, airport transfers, 
   - 5% GST tax calculation.
   - Platform Commission & Net Supplier Payout calculation.
 
+#### Product-scoped pickup and drop validation
+
+Every published product is bound to typed records in `canonical_locations` and
+`product_location_rules` (migration `014_product_location_validation.sql`).
+`locationValidationService.js` validates fixed airports/stations, radius and
+polygon zones, city-only day-tour pickups, package start/end anchors, flight
+requirements, day-tour slots/cutoffs, and per-night hotel cities at quote and
+booking time. Invalid points return `INVALID_PICKUP_POINT` or
+`INVALID_DROP_POINT` with an allowed-area and actionable `suggestion`.
+
+The Express endpoints are `GET/POST /api/activities/:id/pickup-suggestions`
+and `POST /api/activities/:id/validate-pickup`; both clients use these scoped
+endpoints for autocomplete and inline confirmation, falling back to the global
+Mappls search only when a product has no published rule. Existing products are
+backfilled on startup, while new supplier listings persist their explicit
+location rules and transfer IATA anchors.
+
 ### 3. Supplier Dashboard & Listing Builder
 - **Service Area Builder**: Define operational service zones with center coordinates, radius KM, and **PostGIS polygon vertices** (`[[lat, lng], ...]`) with auto-generated bounding boxes.
 - **Sightseeing Tour Builder**: Create 4h / 8h / 12h day tours with custom places-to-visit stop sequences, inclusions/exclusions, and vehicle rules.
@@ -49,6 +66,18 @@ A complete, full-stack production platform for Indian tours, airport transfers, 
 ### 5. Booking and Pickup OTP Lifecycle
 
 The backend owns the price and booking state. Checkout first requests a canonical quote, then creates an idempotent `pending_payment` booking. A successful verified payment activates the booking; browser-supplied totals are never accepted as the source of truth.
+
+The traveler Circuit Planner follows the same rule. `POST /api/itineraries/:id/quote` reprices every linked itinerary item for its actual trip day and guest count, checks current publication and supplier availability, and persists a 15-minute `circuit_quotes` snapshot. Custom, unlinked, unpublished, or unavailable items are returned as explicit issues and never contribute browser-entered estimates to the verified total. An authenticated traveler can consume an owned, unexpired `READY` quote through `POST /api/circuit-orders`. The backend atomically creates one parent circuit order, one `pending_payment` child booking and payout snapshot per line, and 15-minute inventory holds. Consumption is idempotent, a quote can be consumed only once, and any unavailable line rolls back the complete order.
+
+Circuit orders support one parent-level Cashfree or Razorpay charge through `POST /api/circuit-orders/:id/payment-order` and `POST /api/circuit-orders/:id/verify-payment`; isolated environments can use `POST /api/circuit-orders/:id/demo-payment`. A verified charge atomically confirms every child booking, creates each pickup OTP, holds every supplier payout, consumes every inventory hold, records per-booking finance entries, and starts the supplier response SLA. Provider webhooks share the same replay-safe state machine. Failed charges release the full circuit, while late or amount-mismatched captures activate no child bookings and enter `PAYMENT_REVIEW_REQUIRED`.
+
+The Circuit Planner now exposes the complete grouped journey. A ready quote can be reserved once with a stable browser idempotency key, resumed after refresh, and opened at `/circuit-checkout/:id`. Checkout displays every held experience, the reservation countdown, the single verified INR total, and Cashfree, Razorpay, or demo payment choices. Successful verification routes to `/circuit-confirmed/:ref`, where the traveler sees the parent reference and every confirmed child booking without exposing pickup OTP secrets.
+
+The planner summary shows the four booking stages—save, quote, reserve and pay—and keeps the grouped-checkout action visible after a quote is ready. Planner exports are explicitly labeled as an estimate or live quote, while the confirmation page produces the official grouped circuit voucher with parent and child booking references. Print previews use an isolated A4 document so the application layout cannot create blank trailing pages.
+
+Confirmed circuits can be managed at `/circuit/:ref/manage`. Cancellation previews aggregate each child supplier policy into one parent refund, while reschedules preserve the circuit spacing and recheck every proposed stop. Both actions create an idempotent parent request and leave all bookings unchanged until operations reviews it at `/ops/circuits`. Approval is atomic across every child; a grouped refund is submitted once against the parent payment, and provider failure leaves all children confirmed for a safe retry.
+
+Approved circuit reschedules now enter a 24-hour supplier reconfirmation SLA. Suppliers receive the new dates and respond from their booking workspace; the parent circuit completes only after every stop is accepted. A rejection or timeout never reassigns one child independently—it holds the grouped itinerary and creates one critical operations task. Traveler, supplier and operations email/WhatsApp updates use replay-safe delivery keys. Live Cashfree and Razorpay refund webhooks reconcile the parent refund idempotently, delay the final refund notification until provider confirmation, and send failed or amount-mismatched events to operations review.
 
 The state path is:
 
@@ -103,7 +132,7 @@ Both the Vite and Next.js clients report only bounded metric name/value/rating, 
 
 Zod schemas validate authentication, booking, checkout, supplier, administration, operations, support, review, and transfer mutation payloads. Known fields are normalized and bounded while extension fields remain compatible; signed provider webhooks are not reshaped. A global boundary rejects excessive depth or collection sizes and prototype-pollution keys. Invalid input returns `400/VALIDATION_ERROR` with the current request ID and never echoes submitted values.
 
-Run `cd backend && npm run test:coverage` to execute all 100 backend tests with enforced 70% line and function coverage. Run `cd backend && npm run test:integration` for the isolated real-HTTP traveler API journey, and root `npm run test:e2e` for the three Chromium traveler, supplier, and operations/refund journeys. GitHub Actions runs all suites, the backend production dependency audit, the Vite production build with its bundle budget, and the root Next.js production build; Playwright failure artifacts are retained for diagnosis.
+Run `cd backend && npm run test:coverage` to execute the backend tests with enforced 70% line and function coverage. Run `cd backend && npm run test:integration` for the isolated real-HTTP traveler API journey, including circuit-order consumption and grouped payment, and root `npm run test:e2e` for four Chromium traveler, grouped-circuit checkout and management, supplier, and operations/refund journeys. GitHub Actions runs all suites, the backend production dependency audit, the Vite production build with its bundle budget, and the root Next.js production build; Playwright failure artifacts are retained for diagnosis.
 
 ## Analytics & Business Intelligence Command Center
 
@@ -121,6 +150,8 @@ The backend features a dual-engine (SQLite & PostgreSQL) versioned SQL migration
 - `npm run migrate:up`: Incrementally apply versioned schema changes from `backend/migrations/`.
 - `npm run migrate:down`: Safely rollback the last migration batch.
 - `_schema_migrations`: Immutable database ledger recording migration versions, checksums, and execution timestamps.
+
+Pending migrations run as one transaction. SQLite conditionally adds missing columns without relying on PostgreSQL-only syntax, applied-file checksum drift blocks deployment, and rollback refuses to remove ledger entries when a migration has no down section.
 
 WhatsApp template body variables must use these orders:
 
@@ -200,7 +231,7 @@ node seed-supabase.js
 Cloud Run runs the application with **2 GiB RAM / 2 vCPUs** while Supabase PostgreSQL stores all persistent marketplace data in the isolated `marketplace` schema. `DATABASE_URL` is injected from Google Secret Manager as `idea-holiday-database-url`.
 
 ### Automated CI/CD (GitHub Actions)
-- `.github/workflows/ci.yml`: Runs 100 backend tests, coverage gates, HTTP integration, 3 E2E journeys, and builds on PR/push.
+- `.github/workflows/ci.yml`: Runs 216 backend tests, coverage gates, HTTP integration, 4 E2E journeys, and builds on PR/push.
 - `.github/workflows/deploy.yml`: Deploys to staging on `staging` branch, and performs zero-downtime blue-green production deployment on `main` with automated smoke test verification and rollback.
 
 ### Manual / CLI Deploy

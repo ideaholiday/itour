@@ -16,6 +16,10 @@ test("buildCspDirectives constructs allowed directives for third-party integrati
   assert.ok(directives.scriptSrc.some((s) => s.includes("sdk.cashfree.com")));
   assert.ok(directives.scriptSrc.some((s) => s.includes("checkout.razorpay.com")));
   assert.ok(directives.connectSrc.some((s) => s.includes("supabase.co")));
+  assert.ok(directives.connectSrc.includes("https://payments-test.cashfree.com"));
+  assert.ok(directives.frameSrc.includes("https://sandbox.cashfree.com"));
+  assert.ok(directives.frameSrc.includes("https://payments-test.cashfree.com"));
+  assert.ok(directives.frameSrc.includes("https://payments.cashfree.com"));
   assert.ok(directives.frameAncestors.includes("'none'"));
   assert.ok(directives.objectSrc.includes("'none'"));
 });
