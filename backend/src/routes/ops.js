@@ -389,7 +389,7 @@ router.get("/logistics-queue", (req, res) => {
       b.traveler_name, b.traveler_phone, p.title AS product_title, s.company_name AS supplier_name
       FROM booking_logistics bl JOIN bookings b ON b.id = bl.booking_id
       LEFT JOIN products p ON p.id = b.product_id LEFT JOIN suppliers s ON s.id = b.supplier_id
-      WHERE COALESCE(bl.pending_supplier, 0) = 1 OR COALESCE(bl.needs_ops_review, 0) = 1 OR bl.status IN ('UNABLE_TO_LOCATE','PICKUP_CHANGE_REQUESTED')
+      WHERE (bl.pending_supplier IS NOT NULL AND CAST(bl.pending_supplier AS TEXT) NOT IN ('0', 'false')) OR (bl.needs_ops_review IS NOT NULL AND CAST(bl.needs_ops_review AS TEXT) NOT IN ('0', 'false')) OR bl.status IN ('UNABLE_TO_LOCATE','PICKUP_CHANGE_REQUESTED')
       ORDER BY bl.updated_at ASC`).all();
     return res.json({ success: true, count: rows.length, queue: rows });
   } catch (error) { return res.status(500).json({ error: "Failed to load logistics operations queue" }); }

@@ -75,8 +75,8 @@ router.get("/metrics", optionalAuthMiddleware, requireAdminAccess, (req, res) =>
     const autoAssignedBookings = db.prepare("SELECT COUNT(*) as count FROM bookings WHERE supplier_assignment_method IN ('RULE_ENGINE_V1', 'SLA_FALLBACK')").get().count;
     const supplierResponsesPending = db.prepare("SELECT COUNT(*) as count FROM bookings WHERE supplier_response_status = 'PENDING'").get().count;
     const assignmentManualReview = db.prepare("SELECT COUNT(*) as count FROM bookings WHERE supplier_assignment_status = 'MANUAL_REVIEW_REQUIRED'").get().count;
-    const geoZones = db.prepare("SELECT COUNT(*) as count FROM geo_fences WHERE COALESCE(is_active, 1) = 1").get().count;
-    const coveredCities = db.prepare("SELECT COUNT(DISTINCT city) as count FROM geo_fences WHERE COALESCE(is_active, 1) = 1").get().count;
+    const geoZones = db.prepare("SELECT COUNT(*) as count FROM geo_fences WHERE (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").get().count;
+    const coveredCities = db.prepare("SELECT COUNT(DISTINCT city) as count FROM geo_fences WHERE (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").get().count;
     const pendingCoverage = db.prepare("SELECT COUNT(*) as count FROM geo_fences WHERE approval_status = 'PENDING_REVIEW'").get().count;
 
     const gmvResult = db.prepare("SELECT SUM(amount_inr) as sum FROM bookings WHERE LOWER(status) != 'cancelled'").get();
@@ -129,8 +129,8 @@ router.get("/coverage", (req, res) => {
     `).all();
     const cityCoverage = db.prepare(`
       SELECT d.id, d.name, d.state,
-             COUNT(CASE WHEN COALESCE(gf.is_active, 1) = 1 AND COALESCE(gf.approval_status, 'APPROVED') = 'APPROVED' THEN 1 END) AS active_zones,
-             COUNT(DISTINCT CASE WHEN COALESCE(gf.is_active, 1) = 1 AND COALESCE(gf.approval_status, 'APPROVED') = 'APPROVED' THEN gf.supplier_id END) AS active_suppliers
+             COUNT(CASE WHEN (gf.is_active IS NULL OR CAST(gf.is_active AS TEXT) NOT IN ('0', 'false')) AND COALESCE(gf.approval_status, 'APPROVED') = 'APPROVED' THEN 1 END) AS active_zones,
+             COUNT(DISTINCT CASE WHEN (gf.is_active IS NULL OR CAST(gf.is_active AS TEXT) NOT IN ('0', 'false')) AND COALESCE(gf.approval_status, 'APPROVED') = 'APPROVED' THEN gf.supplier_id END) AS active_suppliers
       FROM destinations d
       LEFT JOIN geo_fences gf ON LOWER(gf.city) = LOWER(d.name)
       WHERE COALESCE(d.is_active, 1) = 1

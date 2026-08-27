@@ -51,20 +51,20 @@ export function optionView(row, locations = []) {
 
 export function getProductOptions(db, productId) {
   if (!tableReady(db, "product_options")) return [];
-  const rows = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY name").all(productId);
-  return rows.map((row) => optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY sort_order, display_label").all(row.id)));
+  const rows = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY name").all(productId);
+  return rows.map((row) => optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY sort_order, display_label").all(row.id)));
 }
 
 export function getOption(db, productId, optionId) {
   if (!optionId || !tableReady(db, "product_options")) return null;
-  const row = db.prepare("SELECT * FROM product_options WHERE id = ? AND product_id = ? AND COALESCE(is_active, 1) = 1").get(optionId, productId);
-  return row ? optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY sort_order, display_label").all(row.id)) : null;
+  const row = db.prepare("SELECT * FROM product_options WHERE id = ? AND product_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").get(optionId, productId);
+  return row ? optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY sort_order, display_label").all(row.id)) : null;
 }
 
 export function ensureDefaultProductOption(db, product) {
   if (!tableReady(db, "product_options") || !product?.id) return null;
-  const existing = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY created_at LIMIT 1").get(product.id);
-  if (existing) return optionView(existing, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY sort_order").all(existing.id));
+  const existing = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY created_at LIMIT 1").get(product.id);
+  if (existing) return optionView(existing, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY sort_order").all(existing.id));
   const route = product.product_type === "TRANSFER" ? db.prepare("SELECT * FROM transfer_routes WHERE product_id = ? LIMIT 1").get(product.id) : null;
   const dayTour = product.product_type === "DAY_TOUR" ? db.prepare("SELECT * FROM day_tours WHERE product_id = ? LIMIT 1").get(product.id) : null;
   const routeType = String(route?.route_type || "").toUpperCase();

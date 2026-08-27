@@ -869,10 +869,10 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
 
       if (normalizedProductType === "TRANSFER" && normalizedTransferMeta) {
         const originAnchor = normalizedTransferMeta.originIata
-          ? db.prepare("SELECT id FROM canonical_locations WHERE UPPER(iata_code) = ? AND COALESCE(is_active, 1) = 1 LIMIT 1").get(normalizedTransferMeta.originIata)
+          ? db.prepare("SELECT id FROM canonical_locations WHERE UPPER(iata_code) = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) LIMIT 1").get(normalizedTransferMeta.originIata)
           : null;
         const destAnchor = normalizedTransferMeta.destIata
-          ? db.prepare("SELECT id FROM canonical_locations WHERE UPPER(iata_code) = ? AND COALESCE(is_active, 1) = 1 LIMIT 1").get(normalizedTransferMeta.destIata)
+          ? db.prepare("SELECT id FROM canonical_locations WHERE UPPER(iata_code) = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) LIMIT 1").get(normalizedTransferMeta.destIata)
           : null;
         db.prepare(
           `INSERT INTO transfer_routes (
