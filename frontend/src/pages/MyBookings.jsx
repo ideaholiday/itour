@@ -582,6 +582,9 @@ export default function MyBookings() {
                             <span className="rounded-lg bg-amber-100 px-2.5 py-1 font-mono text-xs font-bold text-amber-900 border border-amber-300">
                               {booking.ref}
                             </span>
+                            <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-[9px] font-black uppercase text-stone-800 border border-stone-300">
+                              {booking.product_type || "TOUR"} {booking.product_sub_type ? `· ${booking.product_sub_type.replace(/_/g, " ")}` : ""}
+                            </span>
                             <span
                               className={`rounded-full border px-3 py-0.5 text-[10px] font-black uppercase ${statusStyles(
                                 booking

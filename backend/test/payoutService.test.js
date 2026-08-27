@@ -22,12 +22,20 @@ describe("Supplier Automated Payouts & Cashfree Ledger", () => {
 
   before(() => {
     // Clean prior test data in safe foreign-key order
-    db.prepare("DELETE FROM financial_ledger WHERE supplier_id = ? OR payout_id IN (?, ?) OR booking_id IN (?, ?)").run(testSupplierId, testPayoutId1, testPayoutId2, testBookingId1, testBookingId2);
-    db.prepare("DELETE FROM payout_batch_items WHERE payout_id IN (?, ?) OR batch_id IN (SELECT id FROM payout_batches WHERE supplier_id = ?)").run(testPayoutId1, testPayoutId2, testSupplierId);
-    db.prepare("DELETE FROM payout_batches WHERE supplier_id = ?").run(testSupplierId);
-    db.prepare("DELETE FROM payouts WHERE id IN (?, ?) OR supplier_id = ?").run(testPayoutId1, testPayoutId2, testSupplierId);
-    db.prepare("DELETE FROM bookings WHERE id IN (?, ?) OR supplier_id = ?").run(testBookingId1, testBookingId2, testSupplierId);
-    db.prepare("DELETE FROM suppliers WHERE id = ?").run(testSupplierId);
+    try { db.prepare("DELETE FROM booking_logistics_events WHERE booking_id IN (?, ?)").run(testBookingId1, testBookingId2); } catch {}
+    try { db.prepare("DELETE FROM booking_logistics_stops WHERE booking_id IN (?, ?)").run(testBookingId1, testBookingId2); } catch {}
+    try { db.prepare("DELETE FROM booking_logistics WHERE booking_id IN (?, ?)").run(testBookingId1, testBookingId2); } catch {}
+    try { db.prepare("DELETE FROM booking_modifications WHERE booking_id IN (?, ?)").run(testBookingId1, testBookingId2); } catch {}
+    try { db.prepare("DELETE FROM driver_assignments WHERE booking_id IN (?, ?)").run(testBookingId1, testBookingId2); } catch {}
+    try { db.prepare("DELETE FROM financial_ledger WHERE supplier_id = ? OR payout_id IN (?, ?) OR booking_id IN (?, ?)").run(testSupplierId, testPayoutId1, testPayoutId2, testBookingId1, testBookingId2); } catch {}
+    try { db.prepare("DELETE FROM payout_batch_items WHERE payout_id IN (?, ?) OR batch_id IN (SELECT id FROM payout_batches WHERE supplier_id = ?)").run(testPayoutId1, testPayoutId2, testSupplierId); } catch {}
+    try { db.prepare("DELETE FROM payout_batches WHERE supplier_id = ?").run(testSupplierId); } catch {}
+    try { db.prepare("DELETE FROM payouts WHERE id IN (?, ?) OR booking_id IN (?, ?) OR supplier_id = ?").run(testPayoutId1, testPayoutId2, testBookingId1, testBookingId2, testSupplierId); } catch {}
+    try { db.prepare("DELETE FROM bookings WHERE id IN (?, ?) OR ref IN ('IH-PAY-01', 'IH-PAY-02') OR supplier_id = ?").run(testBookingId1, testBookingId2, testSupplierId); } catch {}
+    try { db.prepare("DELETE FROM supplier_service_zones WHERE supplier_id = ?").run(testSupplierId); } catch {}
+    try { db.prepare("DELETE FROM supplier_vehicles WHERE supplier_id = ?").run(testSupplierId); } catch {}
+    try { db.prepare("DELETE FROM supplier_drivers WHERE supplier_id = ?").run(testSupplierId); } catch {}
+    try { db.prepare("DELETE FROM suppliers WHERE id = ? OR email = 'finance@apexvoyages.com'").run(testSupplierId); } catch {}
 
     // Insert test supplier with valid bank details & approved KYB
     db.prepare(`
@@ -56,9 +64,9 @@ describe("Supplier Automated Payouts & Cashfree Ledger", () => {
     // Insert test bookings
     db.prepare(`
       INSERT INTO bookings (
-        id, ref, supplier_id, traveler_name, traveler_email, traveler_phone,
+        id, ref, supplier_id, user_id, product_id, traveler_name, traveler_email, traveler_phone,
         product_type, activity_date, pickup_location, amount_inr, status, payment_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, 'user_traveler', 'prod_goa_tour_sic', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       testBookingId1, "IH-PAY-01", testSupplierId, "Rohan Sharma", "rohan@test.com", "9123456789",
       "DAY_TOUR", "2026-09-01", "Hotel Rajputana, Jaipur", 5000, "completed", "PAID"
@@ -66,9 +74,9 @@ describe("Supplier Automated Payouts & Cashfree Ledger", () => {
 
     db.prepare(`
       INSERT INTO bookings (
-        id, ref, supplier_id, traveler_name, traveler_email, traveler_phone,
+        id, ref, supplier_id, user_id, product_id, traveler_name, traveler_email, traveler_phone,
         product_type, activity_date, pickup_location, amount_inr, status, payment_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, 'user_traveler', 'prod_goa_tour_sic', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       testBookingId2, "IH-PAY-02", testSupplierId, "Ananya Verma", "ananya@test.com", "9123456780",
       "TRANSFER", "2026-09-02", "Jaipur Airport T2", 2000, "completed", "PAID"

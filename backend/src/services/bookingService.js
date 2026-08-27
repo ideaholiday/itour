@@ -151,7 +151,7 @@ function validateCapacity(vehicleCategory, passengers, luggage) {
 }
 
 export function calculateBookingQuote(db, input, { enforceListingSupplierAvailability = true } = {}) {
-  const productId = input.product_id || input.activity_id;
+  const productId = input.product_id || input.productId || input.activity_id || input.activityId;
   const product = db.prepare(
     `SELECT p.*, s.kyb_status, s.commission_rate, s.supplier_code, s.company_name AS supplier_name
      FROM products p LEFT JOIN suppliers s ON p.supplier_id = s.id
@@ -168,7 +168,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     throw error;
   }
 
-  const activityDate = requireBookingDate(input.activity_date);
+  const activityDate = requireBookingDate(input.activity_date || input.activityDate);
   const adults = toInteger(input.adults ?? input.passengers, 1);
   const children = toInteger(input.children, 0);
   const luggage = toInteger(input.luggage_bags ?? input.luggage, 0);
