@@ -144,7 +144,16 @@ export default function Checkout() {
   const variant = params.get("variant") || "Standard Booking";
   const optionId = params.get("option") || activity?.options?.[0]?.id || null;
   const hotelTierId = params.get("hotelTier") || null;
+  const ticketTiersParam = params.get("ticketTiers") || ""; // format: "tierId:count,tierId2:count2"
   const addonsParam = params.get("addons") || "";
+
+  // Parse ticket tier selections from URL
+  const ticketTiersParsed = ticketTiersParam
+    ? ticketTiersParam.split(",").map((t) => {
+        const [tierIdStr, countStr] = t.split(":");
+        return { tierId: tierIdStr, count: Number(countStr) || 0 };
+      }).filter((t) => t.count > 0)
+    : [];
 
   const selectedAddonIds = useMemo(() => {
     return addonsParam ? addonsParam.split(",").filter(Boolean) : [];
@@ -233,6 +242,17 @@ export default function Checkout() {
     ? activity?.packageItinerary?.start_point || activity?.packageItinerary?.start_city || `${activity?.city || "Destination"} arrival point`
     : (typeof firstStop === "string" ? firstStop : firstStop?.name) || `${activity?.city || "Destination"} meeting point`;
   const rawBaseFare = Number(quote?.breakdown?.baseAmount || 0);
+
+  // Cancellation deadline: 24h before activity date
+  const cancellationDeadline = (() => {
+    try {
+      const activityTs = new Date(`${date}T00:00:00`);
+      activityTs.setHours(activityTs.getHours() - 24);
+      return activityTs.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) + ", 11:59 PM";
+    } catch {
+      return null;
+    }
+  })();
   const fastagTolls = Number(quote?.breakdown?.fastagTolls || 0) + Number(quote?.breakdown?.stateTax || 0);
   const gstTax = Number(quote?.breakdown?.gstAmount || 0);
   const baseTotalAmount = Number(quote?.breakdown?.totalAmount || 0);
@@ -493,9 +513,49 @@ export default function Checkout() {
         <Link to={`/activity/${id}`} className="inline-flex items-center gap-2 text-xs font-bold text-stone-600 hover:text-amber-700"><ArrowLeft className="h-4 w-4" /> Back to experience</Link>
 
         <header className="mt-5 overflow-hidden rounded-[2rem] border border-stone-200 bg-white p-6 shadow-md sm:p-8">
-          <div className="flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between">
-            <div><span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-[10px] font-black uppercase tracking-[.18em] text-amber-900"><Sparkles className="h-3.5 w-3.5 text-amber-600" /> Secure booking</span><h1 className="mt-3 font-serif text-3xl font-bold text-stone-900 sm:text-4xl">Review and book.</h1><p className="mt-2 max-w-xl text-sm leading-relaxed text-stone-600">Your date, travelers and selected option are reserved while you add the details needed by the local operator.</p></div>
-            <div className="grid grid-cols-3 gap-2 sm:min-w-[420px]">{progress.map(({ label, ready, icon: Icon }, index) => <div key={label} className={`rounded-2xl border p-3 ${index === 2 ? "border-amber-400 bg-amber-50" : ready ? "border-emerald-300 bg-emerald-50" : "border-stone-200 bg-stone-50"}`}><div className="flex items-center gap-2"><span className={`grid h-6 w-6 place-items-center rounded-full text-[10px] font-black ${ready ? "bg-emerald-600 text-white" : index === 2 ? "bg-amber-500 text-stone-950" : "bg-stone-200 text-stone-600"}`}>{ready ? <Check className="h-3.5 w-3.5" /> : index + 1}</span><Icon className="h-4 w-4 text-stone-500" /></div><span className="mt-2 block text-[10px] font-bold text-stone-700">{label}</span></div>)}</div>
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <span className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-[10px] font-black uppercase tracking-[.18em] text-amber-900">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-600" /> Secure Checkout
+                </span>
+                <h1 className="mt-2 font-serif text-2xl font-bold text-stone-900 sm:text-3xl">Review &amp; Book</h1>
+              </div>
+              {user?.name && (
+                <div className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                  Profile auto-filled &mdash; {user.name}
+                </div>
+              )}
+            </div>
+
+            {/* Visual 3-step progress bar */}
+            <div className="flex items-center gap-0">
+              {progress.map(({ label, ready, icon: Icon }, index) => (
+                <React.Fragment key={label}>
+                  <div className={`flex items-center gap-2 rounded-2xl border px-3 py-2.5 transition-all ${
+                    index === progress.length - 1
+                      ? "border-amber-400 bg-amber-50"
+                      : ready
+                      ? "border-emerald-200 bg-emerald-50"
+                      : "border-stone-200 bg-stone-50"
+                  }`}>
+                    <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-black ${
+                      ready ? "bg-emerald-600 text-white" : index === progress.length - 1 ? "bg-amber-500 text-stone-950" : "bg-stone-200 text-stone-600"
+                    }`}>
+                      {ready ? <Check className="h-3.5 w-3.5" /> : index + 1}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Icon className="h-3.5 w-3.5 text-stone-500" />
+                      <span className="hidden text-[11px] font-bold text-stone-700 sm:block">{label}</span>
+                    </div>
+                  </div>
+                  {index < progress.length - 1 && (
+                    <div className={`h-0.5 flex-1 mx-1 transition-all ${ready ? "bg-emerald-400" : "bg-stone-200"}`} />
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
           </div>
         </header>
 
@@ -833,6 +893,25 @@ export default function Checkout() {
             </section>
 
             {(error || quoteError) && <div role="alert" className="flex items-start gap-2 rounded-2xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-800"><Info className="mt-0.5 h-4 w-4 shrink-0" />{error || quoteError}</div>}
+
+            {/* Trust reinforcement bar */}
+            <div className="flex flex-wrap items-center justify-center gap-4 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3 text-[11px] font-semibold text-stone-600">
+              <span className="flex items-center gap-1.5">
+                <LockKeyhole className="h-3.5 w-3.5 text-stone-500" />
+                Secured by Cashfree
+              </span>
+              <span className="text-stone-300">|</span>
+              <span className="flex items-center gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                Free cancellation
+              </span>
+              <span className="text-stone-300">|</span>
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                Instant confirmation
+              </span>
+            </div>
+
             <button
               type="submit"
               disabled={processing || quoteLoading || !quote || !travelerReady || !pickupReady || !dropReady}
@@ -861,10 +940,51 @@ export default function Checkout() {
                 <span className="text-[9px] font-black uppercase tracking-wider text-amber-700">{isPackage ? "Multi-day package" : isShared ? "Shared · per seat" : "Private experience"}</span>
                 <h2 className="mt-2 font-serif text-lg font-bold leading-snug text-stone-900">{activity.title}</h2>
                 <div className="mt-5 space-y-3 border-t border-stone-200 pt-4 text-xs">
-                  <div className="flex items-center gap-3"><CalendarDays className="h-4 w-4 text-amber-600" /><div><span className="block text-stone-500">{isPackage ? "Start date" : "Date"}</span><strong className="text-stone-900">{new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</strong></div></div>
-                  <div className="flex items-center gap-3"><Users className="h-4 w-4 text-amber-700" /><div><span className="block text-stone-500">Travelers</span><strong className="text-stone-900">{adults} adult{adults !== 1 ? "s" : ""}{children ? ` · ${children} child${children !== 1 ? "ren" : ""}` : ""}</strong></div></div>
-                  <div className="flex items-center gap-3"><Clock3 className="h-4 w-4 text-amber-700" /><div><span className="block text-stone-500">{isTransfer || joiningMethod === "PICKUP" ? "Pickup" : joiningMethod === "MEET" ? "Meeting point" : "Arrival details"}</span><strong className={pickupReady ? "text-emerald-700" : "text-amber-800 font-bold"}>{pickupReady ? `${pickupTime} · ${pickupLocation}` : "Add joining details"}</strong></div></div>
+                  <div className="flex items-center gap-3"><CalendarDays className="h-4 w-4 text-amber-600" /><div><span className="block text-stone-500">{isPackage ? "Start date" : isTransfer ? "Transfer date" : "Activity date"}</span><strong className="text-stone-900">{new Date(`${date}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</strong></div></div>
+                  {!isTransfer && (
+                    <div className="flex items-center gap-3"><Users className="h-4 w-4 text-amber-700" /><div><span className="block text-stone-500">Travelers</span><strong className="text-stone-900">{adults} adult{adults !== 1 ? "s" : ""}{children ? ` · ${children} child${children !== 1 ? "ren" : ""}` : ""}</strong></div></div>
+                  )}
+                  {/* Type-aware config line */}
+                  {ticketTiersParsed.length > 0 ? (
+                    <div className="flex items-start gap-3">
+                      <span className="text-base mt-0.5">🎟️</span>
+                      <div>
+                        <span className="block text-stone-500">Tickets selected</span>
+                        <strong className="text-stone-900 leading-relaxed">
+                          {ticketTiersParsed.map((t) => `${t.count}× Ticket`).join(" · ")}
+                        </strong>
+                      </div>
+                    </div>
+                  ) : hotelTierId ? (
+                    <div className="flex items-start gap-3">
+                      <span className="text-base mt-0.5">🏨</span>
+                      <div>
+                        <span className="block text-stone-500">Hotel category</span>
+                        <strong className="text-stone-900">Selected tier</strong>
+                      </div>
+                    </div>
+                  ) : vehicle && vehicle !== "SEDAN" ? (
+                    <div className="flex items-start gap-3">
+                      <span className="text-base mt-0.5">🚗</span>
+                      <div>
+                        <span className="block text-stone-500">{isTransfer ? "Vehicle" : "Transport"}</span>
+                        <strong className="text-stone-900">{vehicle.replace(/_/g, " ")} {isShared ? "(Shared SIC)" : "(Private)"}</strong>
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="flex items-center gap-3"><Clock3 className="h-4 w-4 text-amber-700" /><div><span className="block text-stone-500">{isTransfer || joiningMethod === "PICKUP" ? "Pickup" : joiningMethod === "MEET" ? "Meeting point" : "Arrival details"}</span><strong className={pickupReady ? "text-emerald-700" : "text-amber-800 font-bold"}>{pickupReady ? `${pickupTime} · ${pickupLocation}` : "Add joining details →"}</strong></div></div>
                 </div>
+
+                {/* Free cancellation deadline callout */}
+                {cancellationDeadline && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/80 px-3 py-2.5 text-xs">
+                    <div className="flex items-center gap-2 font-bold text-amber-900">
+                      <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                      Free cancellation until
+                    </div>
+                    <p className="mt-0.5 font-mono font-bold text-amber-950">{cancellationDeadline}</p>
+                  </div>
+                )}
 
                 {/* Pricing Breakdown */}
                 <div className="mt-5 space-y-2 border-t border-dashed border-stone-200 pt-4 text-xs text-stone-600">

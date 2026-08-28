@@ -618,6 +618,24 @@ export default function Search() {
             </>
           ) : (
             <div className="flex items-center gap-2 overflow-x-auto py-0.5 text-xs text-stone-500 no-scrollbar">
+              {recentSearches.length > 0 && (
+                <>
+                  <span className="flex items-center gap-1 font-semibold text-stone-600 dark:text-stone-400 shrink-0">
+                    🕐 Recent:
+                  </span>
+                  {recentSearches.slice(0, 4).map((s, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => { setLocalQ(s.q || s); update("q", s.q || s); }}
+                      className="shrink-0 rounded-full border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-2.5 py-1 font-semibold text-stone-600 dark:text-stone-400 hover:border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:text-amber-900 transition"
+                    >
+                      {s.q || s}
+                    </button>
+                  ))}
+                  <span className="text-stone-200 dark:text-stone-700">|</span>
+                </>
+              )}
               <span className="flex items-center gap-1 font-semibold text-stone-700 dark:text-stone-300 shrink-0">
                 <Sparkles className="h-3.5 w-3.5 text-amber-500" /> Popular:
               </span>
@@ -669,6 +687,35 @@ export default function Search() {
               <span>{viewMode === "GRID" ? "Map View" : "Grid View"}</span>
             </button>
           </div>
+        </div>
+
+        {/* ── Product Type Tab Row ── */}
+        <div className="mb-5 flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
+          {TYPE_OPTIONS.map((opt) => {
+            const count = opt.id
+              ? facets?.productTypes?.find((p) => p.type === opt.id)?.count
+              : activities.length;
+            const isActive = type === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => update("type", opt.id)}
+                className={`shrink-0 inline-flex items-center gap-1.5 rounded-full border px-4 py-2 text-xs font-bold transition ${
+                  isActive
+                    ? "border-amber-500 bg-amber-500 text-stone-950 shadow-sm"
+                    : "border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                }`}
+              >
+                {opt.label}
+                {count !== undefined && (
+                  <span className={`rounded-full px-1.5 py-px text-[9px] font-black ${isActive ? "bg-stone-950/20 text-stone-950" : "bg-stone-100 dark:bg-stone-800 text-stone-500"}`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
