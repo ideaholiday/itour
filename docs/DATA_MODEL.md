@@ -158,6 +158,41 @@ erDiagram
   - `blackout_dates`: JSON array of dates (`["YYYY-MM-DD", ...]`).
   - `time_zone`: Default `Asia/Kolkata`.
   - `provider`: Default `NATIVE`.
+  - `min_party_size`: Minimum travelers required for a departure to run (default 1).
+  - `max_party_size`: Maximum travelers per booking; `0` means no cap.
+  - `unit_prices`: JSON map of extended unit rates, e.g. `{"SENIOR": 700, "INFANT": 0}`.
+    `ADULT` and `CHILD` always come from `adult_price`/`child_price`; a unit type
+    absent from this map is not sold.
+
+- **`native_price_schedules`** (seasonal rates, migration `021`):
+  - `id`: Primary key.
+  - `option_id`, `product_id`: Owning option and product.
+  - `label`: Supplier-facing name (e.g. `"Christmas week"`).
+  - `starts_on`, `ends_on`: Inclusive date range the rate covers.
+  - `weekdays`: JSON array of day integers the rate applies to.
+  - `adult_price`, `child_price`: Rate in INR before tax.
+  - `priority`: Higher wins when ranges overlap; ties break on newest row.
+  - Resolution: highest-priority matching schedule, else the option's base
+    `adult_price`/`child_price`.
+
+- **`native_slot_overrides`** (calendar control, migration `021`):
+  - `id`: Primary key, `optionId:date:time`.
+  - `local_date`: Date the override applies to.
+  - `local_time`: A single departure, or empty string for the whole day.
+  - `capacity`: Seat count for that departure; `NULL` inherits the rule capacity.
+  - `closed`: `1` withdraws the departure from sale.
+  - `note`: Supplier reason, surfaced on the availability response.
+  - Resolution: exact `(date, time)` override, then whole-day override, then the
+    weekly operating rules and blackout dates.
+
+- **`booking_unit_items`** (billed unit breakdown, migration `022`):
+  - `booking_id`: References `bookings(id)`; unique per `(booking_id, unit_type)`.
+  - `unit_type`: One of `ADULT`, `CHILD`, `INFANT`, `SENIOR`, `YOUTH`.
+  - `quantity`, `unit_price_inr`: Travelers on that line and the price frozen at booking.
+  - **Additive only.** `bookings.adults` / `bookings.children` remain the
+    canonical seat counts read by capacity, dispatch, vouchers and notifications.
+    `ADULT`/`SENIOR`/`YOUTH` roll up into adults; `CHILD`/`INFANT` into children.
+    Every unit occupies exactly one seat.
 
 - **`native_availability_slots`**:
   - `id`: Primary key (`slot_...`).

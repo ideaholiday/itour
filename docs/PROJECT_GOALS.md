@@ -1,7 +1,18 @@
 # Project Goals: Idea Holiday
 
 ## Strategic Mission
-Transform **Idea Holiday** into a real-time reservation platform like **Viator**, prioritizing **non-tech and manual/offline suppliers first** before adding external API connections (like Bókun or FareHarbor).
+Build **two products on one backend**, prioritizing **non-tech and manual/offline
+suppliers first** before adding external API connections (like Bókun or FareHarbor):
+
+| Product | Domain | Comparable to | Serves |
+| :--- | :--- | :--- | :--- |
+| **Marketplace** | `ideaholiday.in` | Viator, GetYourGuide, Klook | Travelers discovering and booking experiences |
+| **Reservation system** | `supply.ideaholiday.in` | Bókun, FareHarbor | Suppliers running live inventory, rates and calendars |
+
+The two share one Express API, one database and one pricing authority. The
+marketplace never becomes the source of truth for price or availability — the
+reservation system is, which is what lets Phase 2 plug in external ResTech
+providers without reworking the storefront.
 
 ---
 
@@ -39,7 +50,7 @@ Build and operate a digital **Supplier Portal (Extranet) & Automated Reservation
 
 ### 3. Technical & Reliability Goals
 - **Dual-Engine Persistence**: Maintain SQLite WAL mode for fast local development and CI test execution, with Supabase PostgreSQL for cloud production.
-- **Strict Testing Gates**: Enforce >70% line and function test coverage (currently ~87% lines) across 266 unit tests in 9 suites plus 14 HTTP integration tests.
+- **Strict Testing Gates**: Enforce >70% line and function test coverage (currently ~87% lines) across 283 unit tests in 9 suites plus 16 HTTP integration tests.
 - **Security & PII Hygiene**: Redact sensitive data from logs, isolate pickup OTPs using SHA-256 verification hashes and AES-GCM encryption.
 
 ---
@@ -55,6 +66,14 @@ Build and operate a digital **Supplier Portal (Extranet) & Automated Reservation
 6. **Automated Real-Time Notifications**: Meta WhatsApp Cloud API template dispatches, SES/Brevo emails, and Twilio SMS.
 7. **OCTo-Aligned Schema Foundation**: Schema fields structured to OCTo standards (`native_inventory_rules`, `native_availability_slots`, `native_reservations`, `native_reservation_outbox`, `reservation_external_references`).
 8. **5 Product Types Modeling**: Additive tables for ticket tiers, vehicle options, SIC hubs, hotel tiers, and itinerary items.
+9. **Seasonal Rate Schedules** (`native_price_schedules`): Date-ranged, weekday-filtered, priority-resolved pricing so suppliers can charge peak rates without manual edits.
+10. **Calendar Control** (`native_slot_overrides`): Close or resize a single date or a single departure, independent of the weekly operating rules.
+11. **Party-Size Rules**: `min_party_size` for guaranteed-departure thresholds and `max_party_size` for per-booking caps.
+12. **Multi-Unit-Type Billing** (`booking_unit_items`): `SENIOR`, `INFANT` and `YOUTH` priced as first-class units while `adults`/`children` stay the canonical seat counts.
+
+> Items 9–11 close the gaps found when auditing against Bókun, Viator,
+> GetYourGuide and Klook. See [`RESERVATION_ENGINE_V2_PLAN.md`](RESERVATION_ENGINE_V2_PLAN.md)
+> for the gap analysis and the sequenced P1–P3 work that remains.
 
 ### SHOULD HAVE (High Operational Priority)
 1. **Pickup OTP Security Lifecycle**: 6-digit cryptographic handshake verified at physical pickup before trip commencement.
@@ -66,6 +85,8 @@ Build and operate a digital **Supplier Portal (Extranet) & Automated Reservation
 1. **Bókun & FareHarbor External Adapters**: Plug-in ResTech connectors implementing the OCTo provider boundary (`reservationProviders.js`).
 2. **Chauffeur Mobile PWA**: Dedicated mobile web app for roster drivers to scan passenger QR codes and input OTPs.
 3. **Mappls Turn-by-Turn Telemetry**: Real-time driver GPS tracking.
+4. **Shared Resource Capacity**: One vehicle or guide constraining several options at once (Bókun models this as *resources*).
+5. **Infant-on-Lap Units**: A unit that bills but consumes no seat; today every unit occupies one.
 
 ### NOT A GOAL (Explicit Non-Goals)
 1. **Live Airline GDS Integration**: No flight ticket sales or Amadeus/Sabre connections.

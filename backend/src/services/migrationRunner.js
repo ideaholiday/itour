@@ -116,7 +116,11 @@ function splitSqlStatements(sql) {
   return statements;
 }
 
-function executeMigrationSql(db, sql) {
+/**
+ * Applies one migration's SQL, translating `ADD COLUMN IF NOT EXISTS` for SQLite.
+ * Exported so tests can build fixtures through the same path production uses.
+ */
+export function executeMigrationSql(db, sql) {
   if (databaseDialect(db) !== "sqlite") {
     db.exec(sql);
     return;

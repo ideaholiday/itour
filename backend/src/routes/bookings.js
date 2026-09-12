@@ -1,4 +1,4 @@
-import { attachNativeReservation, reserveNativeInventory } from "../services/nativeInventoryService.js";
+import { attachNativeReservation, reserveNativeInventory, saveBookingUnitItems } from "../services/nativeInventoryService.js";
 import { Router } from "express";
 import { nanoid } from "nanoid";
 import db, { databaseInfo } from "../db.js";
@@ -250,6 +250,9 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         assignmentSupplierPayout, String(req.body.payment_method || "DEMO").toUpperCase(),
         selectedSupplier.score, selectedAssignmentReason, selectedSupplier.candidateProductId
       );
+
+      // Record the billed unit breakdown alongside the canonical seat counts.
+      saveBookingUnitItems(db, bookingId, quote.unitItems, quote.nativeSlot?.unitPrices || {});
 
       // Deduct wallet credits from user account and record transaction ledger
       if (appliedWalletCredit > 0 && existingUser) {

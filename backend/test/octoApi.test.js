@@ -7,6 +7,7 @@ import {
   getOctoProducts,
   getOctoProduct,
   getOctoAvailability,
+  countOctoUnits,
   createOctoReservation,
   confirmOctoReservation,
   cancelOctoReservation,
@@ -68,6 +69,9 @@ function setupOctoTestDb() {
       cancellation_hours INTEGER NOT NULL DEFAULT 24,
       blackout_dates TEXT NOT NULL DEFAULT '[]',
       time_zone TEXT NOT NULL DEFAULT 'Asia/Kolkata',
+      min_party_size INTEGER NOT NULL DEFAULT 1,
+      max_party_size INTEGER NOT NULL DEFAULT 0,
+      unit_prices TEXT NOT NULL DEFAULT '{}',
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -92,6 +96,7 @@ function setupOctoTestDb() {
       status TEXT NOT NULL,
       utc_expires_at TEXT NOT NULL,
       pricing_snapshot TEXT,
+      unit_items TEXT NOT NULL DEFAULT '[]',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -243,4 +248,20 @@ test("OCTo Service: full reservation lifecycle (reserve -> confirm -> cancel)", 
     localDateStart: futureDate,
   });
   assert.equal(restoredSlots[0].vacancies, 15);
+});
+
+
+test("OCTo Service: unit items are counted by declared type, not by unit id text", () => {
+  // SENIOR and YOUTH bill as adults; CHILD and INFANT bill as children.
+  assert.deepEqual(countOctoUnits([{ unitType: "SENIOR" }, { unitType: "YOUTH" }]), { adults: 2, children: 0 });
+  assert.deepEqual(countOctoUnits([{ unitType: "INFANT" }, { unitType: "CHILD" }]), { adults: 0, children: 2 });
+
+  // A unit id containing "child" must not override an explicit ADULT type.
+  assert.deepEqual(countOctoUnits([{ unitId: "child_ticket_v2", unitType: "ADULT" }]), { adults: 1, children: 0 });
+
+  // Callers that omit unitType still fall back to matching the id.
+  assert.deepEqual(countOctoUnits([{ unitId: "child_ticket" }, { unitId: "adult_ticket" }]), { adults: 1, children: 1 });
+
+  // An empty request still reserves a single adult seat.
+  assert.deepEqual(countOctoUnits([]), { adults: 1, children: 0 });
 });

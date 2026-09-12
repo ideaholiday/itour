@@ -64,16 +64,39 @@ All API endpoints follow RESTful design principles and are served under the `/ap
     {
       "slots": [
         {
-          "id": "slot_9812a0f1",
+          "id": "opt_7f3a:2026-09-20:09:00",
+          "productId": "prd_4c19",
+          "optionId": "opt_7f3a",
           "localDate": "2026-09-20",
           "localTime": "09:00",
+          "localDateTimeStart": "2026-09-20T09:00:00+05:30",
+          "utcCutoffAt": "2026-09-20T01:30:00.000Z",
+          "timeZone": "Asia/Kolkata",
           "capacity": 20,
           "vacancies": 14,
-          "closed": 0
+          "available": true,
+          "status": "AVAILABLE",
+          "adultPrice": 1200,
+          "childPrice": 600,
+          "unitPrices": { "ADULT": 1200, "CHILD": 600 },
+          "priceScheduleId": null,
+          "priceScheduleLabel": null,
+          "minPartySize": 1,
+          "maxPartySize": 0,
+          "supplierNote": null,
+          "cancellationHours": 24
         }
       ]
     }
     ```
+  - `status` is one of `AVAILABLE`, `SOLD_OUT`, `CUTOFF` (past the booking
+    deadline) or `CLOSED` (non-operating day, blackout date, or a supplier
+    calendar override).
+  - `adultPrice`/`childPrice` are the rate resolved for that travel date. When a
+    seasonal schedule applied, `priceScheduleId` and `priceScheduleLabel` name it;
+    both are `null` when the option's base rate applied.
+  - `supplierNote` carries the supplier's reason when a calendar override closed
+    or resized the departure.
 
 ---
 
@@ -91,9 +114,20 @@ All API endpoints follow RESTful design principles and are served under the `/ap
     "localTime": "09:00",
     "adults": 2,
     "children": 1,
+    "unitItems": [
+      { "unitType": "SENIOR", "quantity": 2 },
+      { "unitType": "INFANT", "quantity": 1 }
+    ],
     "requestKey": "req_8192a0d912"
   }
   ```
+- `unitItems` is optional. When present it is **authoritative** for the seat
+  counts and billing: `ADULT`/`SENIOR`/`YOUTH` roll up into `adults`,
+  `CHILD`/`INFANT` into `children`, and every unit occupies one seat. When
+  omitted, `adults`/`children` are used as before (`ADULT` and `CHILD` lines).
+- The hold freezes both the breakdown and its total, so a supplier repricing
+  mid-checkout cannot change the traveler's total. Reserving a unit type the
+  supplier has not priced returns `UNIT_TYPE_NOT_SOLD`.
 - **Response (201 Created)**:
   ```json
   {
@@ -159,9 +193,58 @@ All API endpoints follow RESTful design principles and are served under the `/ap
       "childPrice": 600,
       "cutoffMinutes": 120,
       "cancellationHours": 24,
-      "blackoutDates": ["2026-12-25"]
+      "blackoutDates": ["2026-12-25"],
+      "minPartySize": 1,
+      "maxPartySize": 0,
+      "unitPrices": { "SENIOR": 700, "INFANT": 0 }
     }
     ```
+  - `unitPrices` prices extended traveler types. `ADULT` and `CHILD` always come
+    from `adultPrice`/`childPrice`; a type left out is not sold, and reserving it
+    returns `UNIT_TYPE_NOT_SOLD`.
+  - `minPartySize` defaults to 1 and `maxPartySize` to `0` (no cap). A hold below
+    the minimum returns `BELOW_MIN_PARTY_SIZE`; above the maximum returns
+    `ABOVE_MAX_PARTY_SIZE`.
+
+### 3.1.1 Seasonal Rates
+- **`GET /api/suppliers/:supplierId/products/:productId/inventory/:optionId/rates`**:
+  - Lists date-ranged rate schedules, highest priority first.
+- **`POST .../inventory/:optionId/rates`**: Creates one schedule.
+  - **Request Body**:
+    ```json
+    {
+      "label": "Christmas week",
+      "startsOn": "2099-12-20",
+      "endsOn": "2099-12-26",
+      "weekdays": [5, 6],
+      "adultPrice": 4000,
+      "childPrice": 1800,
+      "priority": 10
+    }
+    ```
+  - The highest-`priority` schedule covering the travel date and its weekday
+    wins; otherwise the option's base price applies. A hold freezes the resolved
+    price, so repricing mid-checkout cannot change a traveler's total.
+- **`DELETE .../inventory/:optionId/rates/:rateId`**: Removes a schedule.
+
+### 3.1.2 Calendar Overrides
+- **`GET .../inventory/:optionId/calendar?from=&to=`**: Lists overrides in range.
+- **`PUT .../inventory/:optionId/calendar`**: Closes or resizes a date or a single departure.
+  - **Request Body**:
+    ```json
+    {
+      "localDate": "2099-12-25",
+      "localTime": "09:00",
+      "capacity": 4,
+      "closed": false,
+      "note": "Reduced boat capacity"
+    }
+    ```
+  - Omit `localTime` to apply to the whole day. `capacity: null` inherits the rule
+    capacity. Reducing capacity below seats already held or confirmed returns
+    `CAPACITY_BELOW_RESERVED`.
+- **`DELETE .../inventory/:optionId/calendar?localDate=&localTime=`**: Removes an
+  override, restoring the weekly rule.
 
 ### 3.2 Driver Assignment & Roster Dispatch
 - **Endpoint**: `POST /api/suppliers/bookings/:id/assign-driver`

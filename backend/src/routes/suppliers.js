@@ -1,4 +1,8 @@
-import { getInventoryRules, saveInventoryRules } from "../services/nativeInventoryService.js";
+import {
+  getInventoryRules, saveInventoryRules,
+  listPriceSchedules, savePriceSchedule, deletePriceSchedule,
+  listSlotOverrides, saveSlotOverride, deleteSlotOverride,
+} from "../services/nativeInventoryService.js";
 import { getProductOptions, ensureDefaultProductOption } from "../services/logisticsService.js";
 import { activityPath } from "../../../shared/activityUrl.js";
 import express from "express";
@@ -1677,6 +1681,58 @@ router.put("/:id/products/:productId/inventory/:optionId", requireSupplierAccess
     const rules = saveInventoryRules(db, product.id, req.params.optionId, req.body);
     res.json({ success: true, rules });
   } catch (error) { res.status(error.status || 400).json({ error: error.message, code: error.code }); }
+});
+
+// --- SEASONAL RATES & CALENDAR OVERRIDES (Reservation engine v2) ---
+// Both are scoped to a product the calling supplier owns, like the rest of the
+// extranet; see docs/RESERVATION_ENGINE_V2_PLAN.md.
+function ownedProduct(req, res) {
+  const product = db.prepare("SELECT id, product_type FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+  if (!product) { res.status(404).json({ error: "Product not found" }); return null; }
+  return product;
+}
+function inventoryFailure(res, error) {
+  const validationIssue = error?.name === "ZodError" || Array.isArray(error?.issues);
+  return res.status(validationIssue ? 400 : error.status || 400).json({
+    error: validationIssue ? "Check the submitted dates, prices and capacity." : error.message,
+    code: validationIssue ? "VALIDATION_ERROR" : error.code,
+  });
+}
+
+router.get("/:id/products/:productId/inventory/:optionId/rates", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ rates: listPriceSchedules(db, product.id, req.params.optionId) });
+});
+router.post("/:id/products/:productId/inventory/:optionId/rates", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.status(201).json({ success: true, rate: savePriceSchedule(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/rates/:rateId", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deletePriceSchedule(db, product.id, req.params.optionId, req.params.rateId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+router.get("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ overrides: listSlotOverrides(db, product.id, req.params.optionId, { from: req.query.from, to: req.query.to }) });
+});
+router.put("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, override: saveSlotOverride(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deleteSlotOverride(db, product.id, req.params.optionId, req.query.localDate, req.query.localTime || "") }); }
+  catch (error) { inventoryFailure(res, error); }
 });
 
 router.get("/:id/products/:productId/availability", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {

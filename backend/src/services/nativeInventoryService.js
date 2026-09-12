@@ -2,6 +2,62 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 export const NATIVE_HOLD_MINUTES = 10;
+
+/**
+ * Unit types the reservation engine can bill, and how each rolls up into the
+ * `adults` / `children` seat counts the rest of the platform reads.
+ *
+ * Every unit occupies one seat. Infant-on-lap (a unit that bills but does not
+ * consume capacity) is deliberately not modelled yet — see
+ * docs/RESERVATION_ENGINE_V2_PLAN.md.
+ */
+export const UNIT_TYPES = ["ADULT", "CHILD", "INFANT", "SENIOR", "YOUTH"];
+const CHILD_UNIT_TYPES = new Set(["CHILD", "INFANT"]);
+export const isChildUnit = (unitType) => CHILD_UNIT_TYPES.has(String(unitType).toUpperCase());
+
+/**
+ * Normalizes a unit-item list into a stable, deduplicated breakdown plus the
+ * adults/children totals it rolls up to.
+ *
+ * Callers that send no unit items keep the legacy behaviour: the adults and
+ * children counts become ADULT and CHILD lines.
+ */
+export function normalizeUnitItems(unitItems, { adults = 0, children = 0 } = {}) {
+  const totals = new Map();
+
+  if (Array.isArray(unitItems) && unitItems.length) {
+    for (const item of unitItems) {
+      const unitType = String(item?.unitType || "").toUpperCase();
+      if (!UNIT_TYPES.includes(unitType)) {
+        throw inventoryError(`Unknown traveler type "${item?.unitType}"`, "UNKNOWN_UNIT_TYPE", 400);
+      }
+      const quantity = Number(item?.quantity ?? 1);
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        throw inventoryError("Traveler counts must be whole numbers of at least one", "INVALID_UNIT_QUANTITY", 400);
+      }
+      totals.set(unitType, (totals.get(unitType) || 0) + quantity);
+    }
+  } else {
+    if (adults > 0) totals.set("ADULT", adults);
+    if (children > 0) totals.set("CHILD", children);
+  }
+
+  const items = UNIT_TYPES.filter((type) => totals.get(type)).map((type) => ({ unitType: type, quantity: totals.get(type) }));
+  const adultSeats = items.filter((item) => !isChildUnit(item.unitType)).reduce((sum, item) => sum + item.quantity, 0);
+  const childSeats = items.filter((item) => isChildUnit(item.unitType)).reduce((sum, item) => sum + item.quantity, 0);
+  return { items, adults: adultSeats, children: childSeats, seats: adultSeats + childSeats };
+}
+
+/** Prices a normalized breakdown against a resolved unit price map. */
+export function priceUnitItems(items, unitPrices) {
+  return items.reduce((total, item) => {
+    const price = unitPrices[item.unitType];
+    if (price == null) {
+      throw inventoryError(`This departure does not sell the ${item.unitType.toLowerCase()} traveler type`, "UNIT_TYPE_NOT_SOLD", 409);
+    }
+    return total + Number(price) * item.quantity;
+  }, 0);
+}
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((v) => Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0, 10) === v);
 export const inventoryRulesSchema = z.object({
   operatingDays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
@@ -12,11 +68,51 @@ export const inventoryRulesSchema = z.object({
   cutoffMinutes: z.number().int().min(0).max(43200),
   cancellationHours: z.number().int().min(0).max(8760),
   blackoutDates: z.array(date).max(730),
+  minPartySize: z.number().int().min(1).max(100).default(1),
+  maxPartySize: z.number().int().min(0).max(100).default(0),
+  unitPrices: z.object({
+    ADULT: z.number().int().min(0).max(10000000).optional(),
+    CHILD: z.number().int().min(0).max(10000000).optional(),
+    INFANT: z.number().int().min(0).max(10000000).optional(),
+    SENIOR: z.number().int().min(0).max(10000000).optional(),
+    YOUTH: z.number().int().min(0).max(10000000).optional(),
+  }).strict().default({}),
+}).refine((v) => v.maxPartySize === 0 || v.maxPartySize >= v.minPartySize, {
+  message: "maxPartySize must be 0 (no cap) or at least minPartySize", path: ["maxPartySize"],
+});
+
+const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+export const priceScheduleSchema = z.object({
+  label: z.string().max(120).default(""),
+  startsOn: date, endsOn: date,
+  weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).default([0, 1, 2, 3, 4, 5, 6]),
+  adultPrice: z.number().int().min(0).max(10000000),
+  childPrice: z.number().int().min(0).max(10000000),
+  priority: z.number().int().min(0).max(1000).default(0),
+  unitPrices: z.object({
+    ADULT: z.number().int().min(0).max(10000000).optional(),
+    CHILD: z.number().int().min(0).max(10000000).optional(),
+    INFANT: z.number().int().min(0).max(10000000).optional(),
+    SENIOR: z.number().int().min(0).max(10000000).optional(),
+    YOUTH: z.number().int().min(0).max(10000000).optional(),
+  }).strict().default({}),
+}).refine((v) => v.startsOn <= v.endsOn, { message: "startsOn must not be after endsOn", path: ["endsOn"] });
+
+export const slotOverrideSchema = z.object({
+  localDate: date,
+  localTime: time.optional().default(""),
+  capacity: z.number().int().min(0).max(10000).nullable().default(null),
+  closed: z.boolean().default(false),
+  note: z.string().max(280).default(""),
 });
 export const nativeHoldSchema = z.object({
   productId: z.string().min(1).max(200), optionId: z.string().min(1).max(200),
   localDate: date, localTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   adults: z.number().int().min(1).max(26), children: z.number().int().min(0).max(25).default(0),
+  unitItems: z.array(z.object({
+    unitType: z.enum(["ADULT", "CHILD", "INFANT", "SENIOR", "YOUTH"]),
+    quantity: z.number().int().min(1).max(26),
+  })).max(5).optional(),
   requestKey: z.string().min(1).max(200),
 });
 const parse = (v) => typeof v === "string" ? JSON.parse(v) : v;
@@ -45,17 +141,25 @@ export function saveInventoryRules(db, productId, optionId, input) {
       const active = db.prepare("SELECT id FROM bookings WHERE product_id = ? AND status NOT IN ('cancelled', 'completed') LIMIT 1").get(productId);
       if (active) throw inventoryError("This listing has existing reservations. Reconcile them before enabling seat inventory.", "EXISTING_RESERVATIONS");
     }
-    db.prepare(`INSERT INTO native_inventory_rules (option_id, product_id, operating_days, departure_times, capacity, adult_price, child_price, cutoff_minutes, cancellation_hours, blackout_dates)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(option_id) DO UPDATE SET operating_days=excluded.operating_days,
+    db.prepare(`INSERT INTO native_inventory_rules (option_id, product_id, operating_days, departure_times, capacity, adult_price, child_price, cutoff_minutes, cancellation_hours, blackout_dates, min_party_size, max_party_size, unit_prices)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(option_id) DO UPDATE SET operating_days=excluded.operating_days,
       departure_times=excluded.departure_times, capacity=excluded.capacity, adult_price=excluded.adult_price, child_price=excluded.child_price,
-      cutoff_minutes=excluded.cutoff_minutes, cancellation_hours=excluded.cancellation_hours, blackout_dates=excluded.blackout_dates, updated_at=CURRENT_TIMESTAMP`).run(
+      cutoff_minutes=excluded.cutoff_minutes, cancellation_hours=excluded.cancellation_hours, blackout_dates=excluded.blackout_dates,
+      min_party_size=excluded.min_party_size, max_party_size=excluded.max_party_size,
+      unit_prices=excluded.unit_prices, updated_at=CURRENT_TIMESTAMP`).run(
       optionId, productId, JSON.stringify([...new Set(rules.operatingDays)]), JSON.stringify([...new Set(rules.departureTimes)].sort()), rules.capacity,
-      rules.adultPrice, rules.childPrice, rules.cutoffMinutes, rules.cancellationHours, JSON.stringify(rules.blackoutDates));
+      rules.adultPrice, rules.childPrice, rules.cutoffMinutes, rules.cancellationHours, JSON.stringify(rules.blackoutDates),
+      rules.minPartySize, rules.maxPartySize, JSON.stringify(rules.unitPrices));
     const current = getInventoryRules(db, productId, optionId);
     for (const slot of db.prepare("SELECT * FROM native_availability_slots WHERE option_id = ?").all(optionId)) {
+      // A per-date override outranks the weekly rule, so re-sync to the effective
+      // values rather than clobbering supplier calendar edits with the rule capacity.
+      const override = resolveOverride(db, optionId, slot.local_date, slot.local_time);
+      const effectiveCapacity = override?.capacity ?? rules.capacity;
       const used = occupied(db, slot.id);
-      if (rules.capacity < used) throw inventoryError(`Capacity cannot be below ${used} reserved seats on ${slot.local_date} at ${slot.local_time}`, "CAPACITY_BELOW_RESERVED");
-      db.prepare("UPDATE native_availability_slots SET capacity = ?, closed = ? WHERE id = ?").run(rules.capacity, operates(current, slot.local_date, slot.local_time) ? 0 : 1, slot.id);
+      if (effectiveCapacity < used) throw inventoryError(`Capacity cannot be below ${used} reserved seats on ${slot.local_date} at ${slot.local_time}`, "CAPACITY_BELOW_RESERVED");
+      const open = operates(current, slot.local_date, slot.local_time) && !override?.closed;
+      db.prepare("UPDATE native_availability_slots SET capacity = ?, closed = ? WHERE id = ?").run(effectiveCapacity, open ? 0 : 1, slot.id);
     }
     db.prepare("UPDATE product_options SET confirmation_type = 'INSTANT', available_start_times = ?, capacity = ? WHERE id = ?").run(JSON.stringify(rules.departureTimes), rules.capacity, optionId);
     return current;
@@ -71,15 +175,91 @@ function occupied(db, slotId, excludeId = "") {
     LEFT JOIN bookings b ON b.id = r.booking_id WHERE r.availability_slot = ? AND r.id <> ?
     AND (b.id IS NULL OR b.status <> 'cancelled') AND (r.status = 'CONFIRMED' OR (r.status = 'ON_HOLD' AND r.utc_expires_at > ?))`).get(slotId, excludeId, new Date().toISOString()).seats);
 }
+// Pre-v2 databases and service fixtures have no v2 tables; treat them as "no rows".
+function optionalQuery(db, run) {
+  try { return run(); }
+  catch (error) { if (/no such table|does not exist/i.test(error.message)) return null; throw error; }
+}
+
+/**
+ * Resolves the rate for one travel date.
+ *
+ * The highest-priority schedule whose range covers the date and whose weekday
+ * list includes that weekday wins; ties break on the most recently created row.
+ * Falls back to the option's base adult/child price when nothing matches.
+ */
+export function resolvePricing(db, rules, localDate) {
+  const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay();
+  const rows = optionalQuery(db, () => db.prepare(
+    `SELECT * FROM native_price_schedules WHERE option_id = ? AND starts_on <= ? AND ends_on >= ?
+     ORDER BY priority DESC, created_at DESC, id DESC`
+  ).all(rules.option_id, localDate, localDate)) || [];
+
+  for (const row of rows) {
+    if (!parse(row.weekdays).includes(weekday)) continue;
+    return {
+      adultPrice: Number(row.adult_price), childPrice: Number(row.child_price),
+      unitPrices: buildUnitPrices(row.adult_price, row.child_price, row.unit_prices),
+      priceScheduleId: row.id, priceScheduleLabel: row.label || null,
+    };
+  }
+  return {
+    adultPrice: Number(rules.adult_price), childPrice: Number(rules.child_price),
+    unitPrices: buildUnitPrices(rules.adult_price, rules.child_price, rules.unit_prices),
+    priceScheduleId: null, priceScheduleLabel: null,
+  };
+}
+
+/**
+ * Builds the sellable unit price map for a rate.
+ *
+ * ADULT and CHILD always exist so legacy bookings keep working. Extra unit
+ * types appear only when the supplier priced them; an unpriced type is not
+ * sold, which `priceUnitItems` reports as `UNIT_TYPE_NOT_SOLD`.
+ */
+function buildUnitPrices(adultPrice, childPrice, extended) {
+  const prices = { ADULT: Number(adultPrice), CHILD: Number(childPrice) };
+  const configured = extended ? parse(extended) : {};
+  for (const [key, value] of Object.entries(configured || {})) {
+    const unitType = String(key).toUpperCase();
+    if (UNIT_TYPES.includes(unitType) && value != null) prices[unitType] = Number(value);
+  }
+  return prices;
+}
+
+/** Resolves a calendar override: the exact departure first, then the whole day. */
+export function resolveOverride(db, optionId, localDate, time) {
+  const rows = optionalQuery(db, () => db.prepare(
+    "SELECT * FROM native_slot_overrides WHERE option_id = ? AND local_date = ? AND local_time IN (?, '')"
+  ).all(optionId, localDate, time)) || [];
+  const match = rows.find((row) => row.local_time === time) || rows.find((row) => row.local_time === "");
+  if (!match) return null;
+  return {
+    capacity: match.capacity == null ? null : Number(match.capacity),
+    closed: Number(match.closed) === 1,
+    note: match.note || "",
+    scope: match.local_time === "" ? "DAY" : "DEPARTURE",
+  };
+}
+
 function slotView(db, rules, localDate, time, excludeId = "") {
   const id = `${rules.option_id}:${localDate}:${time}`;
   const start = `${localDate}T${time}:00+05:30`;
   const cutoff = new Date(Date.parse(start) - Number(rules.cutoff_minutes) * 60000).toISOString();
-  const vacancies = Math.max(0, Number(rules.capacity) - occupied(db, id, excludeId));
-  const status = !operates(rules, localDate, time) ? "CLOSED" : Date.parse(cutoff) <= Date.now() ? "CUTOFF" : vacancies === 0 ? "SOLD_OUT" : "AVAILABLE";
+  const override = resolveOverride(db, rules.option_id, localDate, time);
+  const pricing = resolvePricing(db, rules, localDate);
+  const capacity = override?.capacity ?? Number(rules.capacity);
+  const vacancies = Math.max(0, capacity - occupied(db, id, excludeId));
+  const open = operates(rules, localDate, time) && !override?.closed;
+  const status = !open ? "CLOSED" : Date.parse(cutoff) <= Date.now() ? "CUTOFF" : vacancies === 0 ? "SOLD_OUT" : "AVAILABLE";
+  const minPartySize = Math.max(1, Number(rules.min_party_size ?? 1));
+  const maxPartySize = Math.max(0, Number(rules.max_party_size ?? 0));
   return { id, productId: rules.product_id, optionId: rules.option_id, localDateTimeStart: start, utcCutoffAt: cutoff, timeZone: rules.time_zone,
-    localDate, localTime: time, capacity: Number(rules.capacity), vacancies, available: status === "AVAILABLE", status,
-    adultPrice: Number(rules.adult_price), childPrice: Number(rules.child_price), cancellationHours: Number(rules.cancellation_hours) };
+    localDate, localTime: time, capacity, vacancies, available: status === "AVAILABLE", status,
+    adultPrice: pricing.adultPrice, childPrice: pricing.childPrice, unitPrices: pricing.unitPrices,
+    priceScheduleId: pricing.priceScheduleId, priceScheduleLabel: pricing.priceScheduleLabel,
+    minPartySize, maxPartySize, supplierNote: override?.note || null,
+    cancellationHours: Number(rules.cancellation_hours) };
 }
 export function listNativeAvailability(db, productId, optionId, localDate) {
   date.parse(localDate);
@@ -102,14 +282,26 @@ export function checkNativeInventory(db, input, { ownerId } = {}) {
     if (!hold || hold.availability_slot !== `${rules.option_id}:${localDate}:${time}` || Number(hold.adults) !== Number(input.adults || 1) || Number(hold.children) !== Number(input.children || 0)) throw inventoryError("Reservation does not match these details", "HOLD_MISMATCH");
     if (hold.status !== "ON_HOLD" || hold.utc_expires_at <= new Date().toISOString()) throw inventoryError("Reservation expired. Start a new checkout.", "HOLD_EXPIRED");
     excludeId = hold.id;
-    heldPricing = parse(hold.pricing_snapshot || "{}");
+    // The hold's own breakdown and frozen total win over anything re-sent now.
+    heldPricing = { ...parse(hold.pricing_snapshot || "{}"), unitItems: parse(hold.unit_items || "[]") };
   }
   const slot = slotView(db, rules, localDate, time, excludeId);
   if (excludeId) return { ...slot, ...heldPricing, available: true, status: "AVAILABLE" };
-  if (!slot.available || slot.vacancies < Number(input.adults || 1) + Number(input.children || 0)) throw inventoryError("This departure no longer has enough seats or has closed. Choose another departure.");
+  const party = Number(input.adults || 1) + Number(input.children || 0);
+  if (slot.minPartySize > 1 && party < slot.minPartySize) {
+    throw inventoryError(`This departure needs at least ${slot.minPartySize} travelers to run.`, "BELOW_MIN_PARTY_SIZE");
+  }
+  if (slot.maxPartySize > 0 && party > slot.maxPartySize) {
+    throw inventoryError(`This departure allows at most ${slot.maxPartySize} travelers per booking.`, "ABOVE_MAX_PARTY_SIZE");
+  }
+  if (!slot.available || slot.vacancies < party) throw inventoryError("This departure no longer has enough seats or has closed. Choose another departure.");
   return slot;
 }
-export function reserveNativeInventory(db, { productId, optionId, localDate, localTime, adults, children = 0, ownerId, requestKey }) {
+export function reserveNativeInventory(db, { productId, optionId, localDate, localTime, adults, children = 0, unitItems, ownerId, requestKey }) {
+  // A unit breakdown, when supplied, is authoritative for the seat counts.
+  const breakdown = normalizeUnitItems(unitItems, { adults: Number(adults) || 0, children: Number(children) || 0 });
+  adults = breakdown.adults;
+  children = breakdown.children;
   if (!ownerId || typeof requestKey !== "string" || !requestKey || requestKey.length > 200 || !Number.isInteger(adults) || adults < 1 || !Number.isInteger(children) || children < 0 || adults + children > 26) throw inventoryError("Invalid reservation request", "INVALID_RESERVATION", 400);
   return db.transaction(() => {
     db.prepare("UPDATE products SET id = id WHERE id = ?").run(productId);
@@ -126,7 +318,9 @@ export function reserveNativeInventory(db, { productId, optionId, localDate, loc
     db.prepare("INSERT INTO native_availability_slots (id, product_id, option_id, local_date, local_time, capacity) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING").run(slot.id, productId, optionId, localDate, localTime, slot.capacity);
     const id = randomUUID();
     const expiresAt = new Date(Date.now() + NATIVE_HOLD_MINUTES * 60000).toISOString();
-    db.prepare("INSERT INTO native_reservations (id, availability_slot, owner_id, request_key, adults, children, status, utc_expires_at, pricing_snapshot) VALUES (?, ?, ?, ?, ?, ?, 'ON_HOLD', ?, ?)").run(id, slot.id, ownerId, requestKey, adults, children, expiresAt, JSON.stringify({ adultPrice: slot.adultPrice, childPrice: slot.childPrice, cancellationHours: slot.cancellationHours }));
+    // Priced now so a later repricing cannot move this traveler's total.
+    const unitTotal = priceUnitItems(breakdown.items, slot.unitPrices);
+    db.prepare("INSERT INTO native_reservations (id, availability_slot, owner_id, request_key, adults, children, status, utc_expires_at, pricing_snapshot, unit_items) VALUES (?, ?, ?, ?, ?, ?, 'ON_HOLD', ?, ?, ?)").run(id, slot.id, ownerId, requestKey, adults, children, expiresAt, JSON.stringify({ adultPrice: slot.adultPrice, childPrice: slot.childPrice, unitPrices: slot.unitPrices, unitTotal, cancellationHours: slot.cancellationHours, priceScheduleId: slot.priceScheduleId }), JSON.stringify(breakdown.items));
     return db.prepare("SELECT * FROM native_reservations WHERE id = ?").get(id);
   })();
 }
@@ -137,7 +331,10 @@ export function attachNativeReservation(db, holdId, booking, ownerId) {
   if (hold.status !== "ON_HOLD" || hold.utc_expires_at <= new Date().toISOString()) throw inventoryError("Reservation expired. Start a new checkout.", "HOLD_EXPIRED");
   const pricing = parse(hold.pricing_snapshot || "{}");
   if (pricing.adultPrice != null && booking.amount_inr != null) {
-    const base = Number(pricing.adultPrice) * Number(hold.adults) + Number(pricing.childPrice) * Number(hold.children);
+    // Prefer the frozen unit total; fall back to adult/child for pre-P1 holds.
+    const base = pricing.unitTotal != null
+      ? Number(pricing.unitTotal)
+      : Number(pricing.adultPrice) * Number(hold.adults) + Number(pricing.childPrice) * Number(hold.children);
     if (Number(booking.amount_inr) !== base + Math.round(base * 0.05)) throw inventoryError("Price changed before seats were reserved. Recheck the price.", "PRICE_CHANGED");
   }
   const updated = db.prepare("UPDATE native_reservations SET booking_id = ? WHERE id = ? AND booking_id IS NULL AND status = 'ON_HOLD'").run(booking.id, hold.id);
@@ -172,4 +369,120 @@ export function moveNativeReservation(db, booking, localDate, localTime = bookin
   const slot = checkNativeInventory(db, { product_id: booking.product_id, product_option_id: booking.product_option_id, activity_date: localDate, pickup_time: localTime, adults: booking.adults, children: booking.children });
   db.prepare("INSERT INTO native_availability_slots (id, product_id, option_id, local_date, local_time, capacity) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING").run(slot.id, booking.product_id, booking.product_option_id, localDate, localTime, slot.capacity);
   db.prepare("UPDATE native_reservations SET availability_slot = ? WHERE id = ? AND status = 'CONFIRMED'").run(slot.id, existing.id);
+}
+
+// --- Seasonal pricing (supplier extranet) ---------------------------------
+
+export function listPriceSchedules(db, productId, optionId) {
+  return optionalQuery(db, () => db.prepare(
+    "SELECT * FROM native_price_schedules WHERE product_id = ? AND option_id = ? ORDER BY priority DESC, starts_on ASC, id ASC"
+  ).all(productId, optionId)) || [];
+}
+
+export function savePriceSchedule(db, productId, optionId, input) {
+  const schedule = priceScheduleSchema.parse(input);
+  if (!getInventoryRules(db, productId, optionId)) {
+    throw inventoryError("Enable seat inventory before adding seasonal rates.", "INVENTORY_NOT_ENABLED", 409);
+  }
+  const id = randomUUID();
+  db.prepare(`INSERT INTO native_price_schedules (id, option_id, product_id, label, starts_on, ends_on, weekdays, adult_price, child_price, priority, unit_prices)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    id, optionId, productId, schedule.label, schedule.startsOn, schedule.endsOn,
+    JSON.stringify([...new Set(schedule.weekdays)].sort()), schedule.adultPrice, schedule.childPrice, schedule.priority,
+    JSON.stringify(schedule.unitPrices));
+  return db.prepare("SELECT * FROM native_price_schedules WHERE id = ?").get(id);
+}
+
+export function deletePriceSchedule(db, productId, optionId, scheduleId) {
+  const removed = db.prepare("DELETE FROM native_price_schedules WHERE id = ? AND product_id = ? AND option_id = ?")
+    .run(scheduleId, productId, optionId);
+  if (!removed.changes) throw inventoryError("Rate schedule not found", "SCHEDULE_NOT_FOUND", 404);
+  return { id: scheduleId };
+}
+
+// --- Calendar overrides (supplier extranet) -------------------------------
+
+export function listSlotOverrides(db, productId, optionId, { from, to } = {}) {
+  const rows = optionalQuery(db, () => db.prepare(
+    "SELECT * FROM native_slot_overrides WHERE product_id = ? AND option_id = ? ORDER BY local_date ASC, local_time ASC"
+  ).all(productId, optionId)) || [];
+  return rows.filter((row) => (!from || row.local_date >= from) && (!to || row.local_date <= to));
+}
+
+/**
+ * Closes or resizes one date, or one departure on a date.
+ *
+ * Refuses to cut capacity below seats already held or confirmed for that
+ * departure, mirroring the guard on whole-option capacity edits.
+ */
+export function saveSlotOverride(db, productId, optionId, input) {
+  const override = slotOverrideSchema.parse(input);
+  const rules = getInventoryRules(db, productId, optionId);
+  if (!rules) throw inventoryError("Enable seat inventory before editing the calendar.", "INVENTORY_NOT_ENABLED", 409);
+
+  return db.transaction(() => {
+    db.prepare("UPDATE products SET id = id WHERE id = ?").run(productId);
+
+    if (override.capacity != null) {
+      const times = override.localTime ? [override.localTime] : parse(rules.departure_times);
+      for (const time of times) {
+        const used = occupied(db, `${optionId}:${override.localDate}:${time}`);
+        if (override.capacity < used) {
+          throw inventoryError(`Capacity cannot be below ${used} reserved seats on ${override.localDate} at ${time}`, "CAPACITY_BELOW_RESERVED");
+        }
+      }
+    }
+
+    const id = `${optionId}:${override.localDate}:${override.localTime}`;
+    db.prepare(`INSERT INTO native_slot_overrides (id, option_id, product_id, local_date, local_time, capacity, closed, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(option_id, local_date, local_time) DO UPDATE SET
+      capacity=excluded.capacity, closed=excluded.closed, note=excluded.note, updated_at=CURRENT_TIMESTAMP`).run(
+      id, optionId, productId, override.localDate, override.localTime,
+      override.capacity, override.closed ? 1 : 0, override.note);
+
+    // Keep any already-materialized slots in step with the new override.
+    for (const slot of db.prepare("SELECT * FROM native_availability_slots WHERE option_id = ? AND local_date = ?").all(optionId, override.localDate)) {
+      if (override.localTime && slot.local_time !== override.localTime) continue;
+      const effective = resolveOverride(db, optionId, slot.local_date, slot.local_time);
+      const open = operates(rules, slot.local_date, slot.local_time) && !effective?.closed;
+      db.prepare("UPDATE native_availability_slots SET capacity = ?, closed = ? WHERE id = ?")
+        .run(effective?.capacity ?? Number(rules.capacity), open ? 0 : 1, slot.id);
+    }
+    return db.prepare("SELECT * FROM native_slot_overrides WHERE id = ?").get(id);
+  })();
+}
+
+export function deleteSlotOverride(db, productId, optionId, localDate, localTime = "") {
+  const removed = db.prepare("DELETE FROM native_slot_overrides WHERE product_id = ? AND option_id = ? AND local_date = ? AND local_time = ?")
+    .run(productId, optionId, localDate, localTime);
+  if (!removed.changes) throw inventoryError("Calendar override not found", "OVERRIDE_NOT_FOUND", 404);
+  return { localDate, localTime };
+}
+
+// --- Booking unit items ---------------------------------------------------
+
+/**
+ * Records the billed unit breakdown for a booking.
+ *
+ * Additive to `bookings.adults` / `bookings.children`, which stay the canonical
+ * seat counts. Safe to call for any booking: pre-P1 databases without the table
+ * are skipped rather than failing the checkout transaction.
+ */
+export function saveBookingUnitItems(db, bookingId, items, unitPrices = {}) {
+  if (!Array.isArray(items) || !items.length) return [];
+  return optionalQuery(db, () => {
+    db.prepare("DELETE FROM booking_unit_items WHERE booking_id = ?").run(bookingId);
+    for (const item of items) {
+      db.prepare(
+        "INSERT INTO booking_unit_items (id, booking_id, unit_type, quantity, unit_price_inr) VALUES (?, ?, ?, ?, ?)"
+      ).run(`${bookingId}:${item.unitType}`, bookingId, item.unitType, item.quantity, Number(unitPrices[item.unitType] ?? 0));
+    }
+    return items;
+  }) || [];
+}
+
+export function listBookingUnitItems(db, bookingId) {
+  return optionalQuery(db, () => db.prepare(
+    "SELECT unit_type AS unitType, quantity, unit_price_inr AS unitPriceInr FROM booking_unit_items WHERE booking_id = ? ORDER BY unit_type"
+  ).all(bookingId)) || [];
 }

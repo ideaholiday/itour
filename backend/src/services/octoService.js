@@ -5,6 +5,8 @@ import {
   confirmNativeReservation,
   releaseNativeReservation,
   getInventoryRules,
+  normalizeUnitItems,
+  UNIT_TYPES as NATIVE_UNIT_TYPES,
 } from "./nativeInventoryService.js";
 import { getProductOptions } from "./logisticsService.js";
 import { octoReservationView } from "./reservationProviders.js";
@@ -220,6 +222,46 @@ export function getOctoAvailability(db, { productId, optionId, localDateStart, l
   return allSlots;
 }
 
+
+/**
+ * Maps OCTo unit items onto the adults/children the reservation engine stores.
+ *
+ * Keys on the typed `unitType` (falling back to `unitId` only when a caller
+ * omits the type), because a free-text unit id such as `child_ticket` may carry
+ * any type. `SENIOR` and `YOUTH` bill as adults and `INFANT` as a child until
+ * `bookings` can represent unit items individually — see
+ * docs/RESERVATION_ENGINE_V2_PLAN.md (P1).
+ */
+export const OCTO_CHILD_UNIT_TYPES = new Set(["CHILD", "INFANT"]);
+
+export function countOctoUnits(unitItems = []) {
+  const { adults, children } = normalizeUnitItems(toNativeUnitItems(unitItems));
+  return { adults, children };
+}
+
+/**
+ * Converts OCTo unit items into the engine's unit breakdown.
+ *
+ * One OCTo unit item is one traveler. Keys on the typed `unitType`, falling back
+ * to loose matching on `unitId` only when a caller omits the type, and treats an
+ * unrecognized type as an adult so an unknown unit never blocks a reservation.
+ */
+export function toNativeUnitItems(unitItems = []) {
+  const counts = new Map();
+  for (const item of unitItems) {
+    const declared = item?.unitType ? String(item.unitType).toUpperCase() : "";
+    let unitType;
+    if (NATIVE_UNIT_TYPES.includes(declared)) unitType = declared;
+    else if (!declared && /infant/i.test(String(item?.unitId || ""))) unitType = "INFANT";
+    else if (!declared && /child/i.test(String(item?.unitId || ""))) unitType = "CHILD";
+    else if (OCTO_CHILD_UNIT_TYPES.has(declared)) unitType = declared;
+    else unitType = "ADULT";
+    counts.set(unitType, (counts.get(unitType) || 0) + Number(item?.quantity ?? 1));
+  }
+  if (!counts.size) counts.set("ADULT", 1);
+  return [...counts.entries()].map(([unitType, quantity]) => ({ unitType, quantity }));
+}
+
 export function createOctoReservation(db, input) {
   const { uuid = randomUUID(), productId, optionId, availabilityId, unitItems = [], contact } = input;
 
@@ -231,21 +273,14 @@ export function createOctoReservation(db, input) {
   const localDate = parts[1];
   const localTime = parts.slice(2).join(":");
 
-  let adults = 0;
-  let children = 0;
-  for (const item of unitItems) {
-    if (String(item.unitId).includes("child")) children += 1;
-    else adults += 1;
-  }
-  if (adults === 0 && children === 0) adults = 1;
+  const nativeUnitItems = toNativeUnitItems(unitItems);
 
   const reservation = reserveNativeInventory(db, {
     productId,
     optionId,
     localDate,
     localTime,
-    adults,
-    children,
+    unitItems: nativeUnitItems,
     ownerId: `octo_${uuid}`,
     requestKey: `octo_key_${uuid}`,
   });

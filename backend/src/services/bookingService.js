@@ -1,4 +1,4 @@
-import { checkNativeInventory } from "./nativeInventoryService.js";
+import { checkNativeInventory, normalizeUnitItems, priceUnitItems } from "./nativeInventoryService.js";
 import crypto from "crypto";
 import { computeTransferQuote, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
@@ -180,7 +180,10 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     throw error;
   }
 
+  let unitBreakdown = normalizeUnitItems(input.unit_items || input.unitItems, { adults, children });
   const nativeSlot = checkNativeInventory(db, input, { ownerId });
+  // A held reservation already froze its breakdown; keep the booking identical to it.
+  if (nativeSlot?.unitItems?.length) unitBreakdown = normalizeUnitItems(nativeSlot.unitItems);
   const vehicleCategory = String(input.vehicle_category || input.selectedVehicle || (product.group_type === "SHARED" ? "SHARED_SEAT" : "SEDAN")).toUpperCase();
   if (enforceListingSupplierAvailability) {
     const availability = evaluateSupplierAvailability(db, {
@@ -300,7 +303,13 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
   }
 
   if (nativeSlot) {
-    baseAmount = nativeSlot.adultPrice * adults + nativeSlot.childPrice * children;
+    // A held reservation carries its own frozen total; otherwise price the
+    // requested unit breakdown against the rate resolved for this date.
+    if (nativeSlot.unitTotal != null) {
+      baseAmount = Number(nativeSlot.unitTotal);
+    } else {
+      baseAmount = priceUnitItems(unitBreakdown.items, nativeSlot.unitPrices || { ADULT: nativeSlot.adultPrice, CHILD: nativeSlot.childPrice });
+    }
     tolls = 0; stateTax = 0; gstAmount = roundMoney(baseAmount * 0.05);
     totalAmount = baseAmount + gstAmount;
     pricingModel = "PER_PERSON";
@@ -312,6 +321,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     activityDate,
     adults,
     children,
+    unitItems: unitBreakdown.items,
     luggage,
     vehicleCategory,
     variantName,
