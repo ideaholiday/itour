@@ -83,6 +83,8 @@ All API endpoints follow RESTful design principles and are served under the `/ap
           "priceScheduleLabel": null,
           "minPartySize": 1,
           "maxPartySize": 0,
+          "seatlessUnits": [],
+          "sharedResource": null,
           "supplierNote": null,
           "cancellationHours": 24
         }
@@ -97,6 +99,8 @@ All API endpoints follow RESTful design principles and are served under the `/ap
     both are `null` when the option's base rate applied.
   - `supplierNote` carries the supplier's reason when a calendar override closed
     or resized the departure.
+  - `sharedResource` names the vehicle or guide capping this departure below its
+    own pool, or `null` when nothing is shared.
 
 - **`GET /api/products/:id/price-calendar?month=YYYY-MM`**:
   - One month of per-day prices for the traveler price calendar.
@@ -206,9 +210,14 @@ All API endpoints follow RESTful design principles and are served under the `/ap
       "blackoutDates": ["2026-12-25"],
       "minPartySize": 1,
       "maxPartySize": 0,
-      "unitPrices": { "SENIOR": 700, "INFANT": 0 }
+      "unitPrices": { "SENIOR": 700, "INFANT": 0 },
+      "seatlessUnits": ["INFANT"]
     }
     ```
+  - `seatlessUnits` lists types that bill but consume no seat (an infant on a
+    lap). They are excluded from the `adults`/`children` seat counts but still
+    priced and still recorded in `booking_unit_items`. `ADULT` cannot be
+    seatless. Omit-to-keep like the fields below.
   - `unitPrices` prices extended traveler types. `ADULT` and `CHILD` always come
     from `adultPrice`/`childPrice`; a type left out is not sold, and reserving it
     returns `UNIT_TYPE_NOT_SOLD`.
@@ -259,6 +268,17 @@ All API endpoints follow RESTful design principles and are served under the `/ap
     `CAPACITY_BELOW_RESERVED`.
 - **`DELETE .../inventory/:optionId/calendar?localDate=&localTime=`**: Removes an
   override, restoring the weekly rule.
+
+### 3.1.3 Shared Resources
+- **`GET /api/suppliers/:supplierId/resources`**: Lists shared vehicles/guides and the options each constrains.
+- **`POST /api/suppliers/:supplierId/resources`**: Creates one.
+  - **Request Body**: `{ "name": "Tempo Traveller GA-07", "capacity": 6, "optionIds": ["opt_a", "opt_b"] }`
+- **`PUT .../resources/:resourceId`**: Replaces name, capacity and the linked options.
+- **`DELETE .../resources/:resourceId`**: Removes it, releasing the shared cap.
+- A departure's vacancies are the smallest of its own pool and every linked
+  resource, counted per departure time. Shrinking below seats already committed
+  returns `CAPACITY_BELOW_RESERVED`; linking an option owned by another supplier
+  returns `OPTION_NOT_FOUND`.
 
 ### 3.2 Driver Assignment & Roster Dispatch
 - **Endpoint**: `POST /api/suppliers/bookings/:id/assign-driver`

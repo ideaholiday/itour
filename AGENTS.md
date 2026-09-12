@@ -124,10 +124,10 @@ Before declaring any task complete, verify:
 - **Backend API**: `cd backend && npm run dev` (Port 4000)
 - **Frontend Client**: `cd frontend && npm run dev` (Port 5173, proxies `/api` to `:4000`)
 - **Next.js Auth App**: `npm run dev` (Port 3000)
-- **Tests**: `cd backend && npm test` (288 unit tests across 9 suites)
-- **Integration**: `cd backend && npm run test:integration` (16 real-HTTP journey tests)
+- **Tests**: `cd backend && npm test` (294 unit tests across 9 suites)
+- **Integration**: `cd backend && npm run test:integration` (17 real-HTTP journey tests)
 - **Coverage**: `cd backend && npm run test:coverage` (Enforced 70% threshold)
 - **Concurrency Test**: `cd backend && node scripts/test-native-postgres.js`
-- **Migrations**: `cd backend && npm run migrate:status` / `migrate:up` (migrations 001–022)
+- **Migrations**: `cd backend && npm run migrate:status` / `migrate:up` (migrations 001–023)
 - **WhatsApp CLI Test**: `cd backend && npm run test:whatsapp <phone>`
 - **E2E Browser Tests**: `npm run test:e2e`

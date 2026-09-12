@@ -2,6 +2,7 @@ import {
   getInventoryRules, saveInventoryRules,
   listPriceSchedules, savePriceSchedule, deletePriceSchedule,
   listSlotOverrides, saveSlotOverride, deleteSlotOverride,
+  listResources, saveResource, deleteResource,
 } from "../services/nativeInventoryService.js";
 import { getProductOptions, ensureDefaultProductOption } from "../services/logisticsService.js";
 import { activityPath } from "../../../shared/activityUrl.js";
@@ -1732,6 +1733,23 @@ router.delete("/:id/products/:productId/inventory/:optionId/calendar", requireSu
   const product = ownedProduct(req, res);
   if (!product) return;
   try { res.json({ success: true, ...deleteSlotOverride(db, product.id, req.params.optionId, req.query.localDate, req.query.localTime || "") }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+// --- SHARED RESOURCES (one vehicle or guide across several options) ---
+router.get("/:id/resources", requireSupplierAccess, (req, res) => {
+  res.json({ resources: listResources(db, req.params.id) });
+});
+router.post("/:id/resources", requireSupplierAccess, (req, res) => {
+  try { res.status(201).json({ success: true, resource: saveResource(db, req.params.id, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.put("/:id/resources/:resourceId", requireSupplierAccess, (req, res) => {
+  try { res.json({ success: true, resource: saveResource(db, req.params.id, req.body, req.params.resourceId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/resources/:resourceId", requireSupplierAccess, (req, res) => {
+  try { res.json({ success: true, ...deleteResource(db, req.params.id, req.params.resourceId) }); }
   catch (error) { inventoryFailure(res, error); }
 });
 

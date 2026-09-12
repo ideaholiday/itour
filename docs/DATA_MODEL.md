@@ -185,6 +185,16 @@ erDiagram
   - Resolution: exact `(date, time)` override, then whole-day override, then the
     weekly operating rules and blackout dates.
 
+- **`native_resources`** / **`native_resource_options`** (shared capacity, migration `023`):
+  - A resource is one real vehicle, boat or guide with its own `capacity`.
+  - `native_resource_options` links it many-to-many to the options drawing on it.
+  - A departure's vacancies are the smallest of its own pool and every linked
+    resource, counted per `(local_date, local_time)`, so the same van is free
+    again at a later departure.
+  - `native_inventory_rules.seatless_units`: unit types that bill but consume no
+    seat (infant on a lap). Excluded from the `adults`/`children` seat counts,
+    still recorded in `booking_unit_items`.
+
 - **`booking_unit_items`** (billed unit breakdown, migration `022`):
   - `booking_id`: References `bookings(id)`; unique per `(booking_id, unit_type)`.
   - `unit_type`: One of `ADULT`, `CHILD`, `INFANT`, `SENIOR`, `YOUTH`.

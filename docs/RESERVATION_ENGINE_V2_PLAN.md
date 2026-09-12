@@ -1,7 +1,8 @@
 # Backend Improvement Plan: Reservation Engine v2
 
 > **Status**: P0 implemented (migration `021`). P1 implemented (migration `022`).
-> Supplier and traveler UI implemented. P2–P3 sequenced, not started.
+> P2 implemented (migration `023`). Supplier and traveler UI implemented.
+> P3 sequenced, not started.
 > **Context**: [`docs/PROJECT_GOALS.md`](PROJECT_GOALS.md) — two products, one backend:
 > `ideaholiday.in` (marketplace, Viator-like) and `supply.ideaholiday.in`
 > (supplier reservation system, Bókun-like).
@@ -161,13 +162,36 @@ it a few queries rather than one per departure per day.
 
 ---
 
-## P2 — Shared resource capacity (next)
+## P2 — Shared resource capacity *(delivered, migration `023`)*
 
-One vehicle or guide serving two options can currently be sold twice: capacity
-pools are per-option with no shared constraint. Bókun models this as *resources*.
-Needs a `native_resources` table plus a resource join on capacity checks.
+One vehicle or guide serving two options could be sold twice: capacity pools were
+per-option with no shared constraint, so two listings on one 6-seat van each sold
+6 seats. Bókun models the fix as *resources*.
 
-## P3 — Extranet depth
+- `native_resources` is a real thing the supplier owns — a van, a boat, a guide —
+  with its own seat count.
+- `native_resource_options` links it to the options that draw on it. The relation
+  is many-to-many: one van serves several options, and an option can be capped by
+  more than one resource (a van *and* a guide).
+- A departure's vacancies become the **smallest** of its own pool and every
+  resource it is linked to, counted **per departure time**, so the same van is
+  free again at a later slot.
+- Shrinking a resource below seats already committed on a shared departure is
+  refused with `CAPACITY_BELOW_RESERVED`, matching the option-level and per-date
+  guards.
+- The limiting resource is published on the availability response as
+  `sharedResource`, and the supplier manages it from the *Shared vehicle* tab.
+
+### Seatless units (infant on lap) — also delivered
+
+`native_inventory_rules.seatless_units` lists unit types that bill but consume no
+seat. A seatless infant is excluded from the `adults`/`children` seat counts, so
+two adults plus a lap infant fit a 2-seat departure, while still being priced and
+still recorded in `booking_unit_items` for the supplier's manifest. `ADULT` can
+never be seatless — somebody has to hold the lap. It is opt-in per option:
+without it, every unit occupies a seat exactly as before.
+
+## P3 — Extranet depth (next)
 
 - Bulk calendar editing across a date range in one request.
 - Promotional/last-minute rates with their own validity windows.

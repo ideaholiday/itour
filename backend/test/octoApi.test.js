@@ -72,6 +72,7 @@ function setupOctoTestDb() {
       min_party_size INTEGER NOT NULL DEFAULT 1,
       max_party_size INTEGER NOT NULL DEFAULT 0,
       unit_prices TEXT NOT NULL DEFAULT '{}',
+      seatless_units TEXT NOT NULL DEFAULT '[]',
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 

@@ -5,23 +5,24 @@ import { readFileSync } from "node:fs";
 import { processReservationOutbox } from "../src/services/reservationOutboxService.js";
 import { executeMigrationSql } from "../src/services/migrationRunner.js";
 import { calculateRefundQuote } from "../src/services/financeService.js";
-import { moveNativeReservation, checkNativeInventory, saveInventoryRules, listNativeAvailability, reserveNativeInventory, attachNativeReservation, confirmNativeReservation, releaseNativeReservation, savePriceSchedule, saveSlotOverride, deleteSlotOverride, normalizeUnitItems, saveBookingUnitItems, listBookingUnitItems, listNativeMonthPricing } from "../src/services/nativeInventoryService.js";
+import { moveNativeReservation, checkNativeInventory, saveInventoryRules, listNativeAvailability, reserveNativeInventory, attachNativeReservation, confirmNativeReservation, releaseNativeReservation, savePriceSchedule, saveSlotOverride, deleteSlotOverride, normalizeUnitItems, saveBookingUnitItems, listBookingUnitItems, listNativeMonthPricing, saveResource, listResources, deleteResource } from "../src/services/nativeInventoryService.js";
 
 const rules = { operatingDays: [0, 1, 2, 3, 4, 5, 6], departureTimes: ["09:00", "14:00"], capacity: 3, adultPrice: 1000, childPrice: 400, cutoffMinutes: 120, cancellationHours: 24, blackoutDates: [] };
 const future = "2099-05-12";
 function fixture(t) {
   const db = new Database(":memory:");
   t.after(() => db.close());
-  db.exec(`CREATE TABLE products (id TEXT PRIMARY KEY); INSERT INTO products VALUES ('p');
-    CREATE TABLE product_options (id TEXT PRIMARY KEY, product_id TEXT, name TEXT DEFAULT 'Standard', is_active INTEGER DEFAULT 1, confirmation_type TEXT, available_start_times TEXT, capacity INTEGER); INSERT INTO product_options(id, product_id) VALUES ('o', 'p');
+  db.exec(`CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT); INSERT INTO products VALUES ('p', 'sup');
+    CREATE TABLE product_options (id TEXT PRIMARY KEY, product_id TEXT, name TEXT DEFAULT 'Standard', is_active INTEGER DEFAULT 1, confirmation_type TEXT, available_start_times TEXT, capacity INTEGER); INSERT INTO product_options(id, product_id) VALUES ('o', 'p'), ('o2', 'p');
     CREATE TABLE bookings (id TEXT PRIMARY KEY, product_id TEXT, status TEXT);
-    CREATE TABLE suppliers (id TEXT PRIMARY KEY);
+    CREATE TABLE suppliers (id TEXT PRIMARY KEY); INSERT INTO suppliers VALUES ('sup');
     CREATE TABLE booking_holds (booking_id TEXT, status TEXT);`);
   db.exec(readFileSync(new URL("../migrations/017_native_reservations.sql", import.meta.url), "utf8").split("-- @down")[0]);
   db.exec(readFileSync(new URL("../migrations/018_native_reservation_delivery.sql", import.meta.url), "utf8").split("-- @down")[0]);
   db.exec(readFileSync(new URL("../migrations/019_native_hold_pricing.sql", import.meta.url), "utf8").split("-- @down")[0]);
   executeMigrationSql(db, readFileSync(new URL("../migrations/021_reservation_engine_v2.sql", import.meta.url), "utf8").split("-- @down")[0]);
   executeMigrationSql(db, readFileSync(new URL("../migrations/022_booking_unit_items.sql", import.meta.url), "utf8").split("-- @down")[0]);
+  executeMigrationSql(db, readFileSync(new URL("../migrations/023_shared_resources.sql", import.meta.url), "utf8").split("-- @down")[0]);
   saveInventoryRules(db, "p", "o", rules);
   return db;
 }
@@ -239,11 +240,11 @@ test("party-size bounds are published on every departure and validated on save",
 test("unit breakdowns roll up into adults and children and reject bad input", () => {
   assert.deepEqual(
     normalizeUnitItems([{ unitType: "SENIOR", quantity: 2 }, { unitType: "INFANT", quantity: 1 }]),
-    { items: [{ unitType: "INFANT", quantity: 1 }, { unitType: "SENIOR", quantity: 2 }], adults: 2, children: 1, seats: 3 }
+    { items: [{ unitType: "INFANT", quantity: 1, occupiesSeat: true }, { unitType: "SENIOR", quantity: 2, occupiesSeat: true }], adults: 2, children: 1, seats: 3 }
   );
   // No breakdown supplied keeps the legacy adults/children behaviour.
   assert.deepEqual(normalizeUnitItems(null, { adults: 2, children: 1 }).items,
-    [{ unitType: "ADULT", quantity: 2 }, { unitType: "CHILD", quantity: 1 }]);
+    [{ unitType: "ADULT", quantity: 2, occupiesSeat: true }, { unitType: "CHILD", quantity: 1, occupiesSeat: true }]);
   // Repeated types accumulate rather than overwrite.
   assert.equal(normalizeUnitItems([{ unitType: "ADULT", quantity: 1 }, { unitType: "ADULT", quantity: 2 }]).adults, 3);
 
@@ -382,4 +383,92 @@ test("the month price calendar is null for products without seat inventory", t =
   const db = fixture(t);
   assert.equal(listNativeMonthPricing(db, "missing-product", "2099-05"), null);
   assert.equal(listNativeMonthPricing(db, "p", "not-a-month"), null);
+});
+
+// --- P2: shared resources and seatless units ---
+
+test("two options sharing one vehicle cannot together oversell it", t => {
+  const db = fixture(t);
+  saveInventoryRules(db, "p", "o", { ...rules, capacity: 10 });
+  saveInventoryRules(db, "p", "o2", { ...rules, capacity: 10 });
+
+  // Both options run on the same 6-seat van.
+  saveResource(db, "sup", { name: "Tempo Traveller GA-01", capacity: 6, optionIds: ["o", "o2"] });
+
+  // Each option alone would advertise 10 seats; the van caps both at 6.
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].vacancies, 6);
+  assert.equal(listNativeAvailability(db, "p", "o2", future)[0].vacancies, 6);
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].sharedResource.name, "Tempo Traveller GA-01");
+
+  // Four seats sold on the first option must shrink the second.
+  reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", adults: 4, ownerId: "u1", requestKey: "k1" });
+  assert.equal(listNativeAvailability(db, "p", "o2", future)[0].vacancies, 2, "the shared van is down to two seats");
+
+  // And the van cannot be oversold across the two options.
+  assert.throws(
+    () => reserveNativeInventory(db, { productId: "p", optionId: "o2", localDate: future, localTime: "09:00", adults: 3, ownerId: "u2", requestKey: "k2" }),
+    /no longer has enough seats/
+  );
+  const fits = reserveNativeInventory(db, { productId: "p", optionId: "o2", localDate: future, localTime: "09:00", adults: 2, ownerId: "u3", requestKey: "k3" });
+  assert.equal(fits.status, "ON_HOLD");
+});
+
+test("a shared resource constrains only its own departure time", t => {
+  const db = fixture(t);
+  saveInventoryRules(db, "p", "o", { ...rules, capacity: 10 });
+  saveInventoryRules(db, "p", "o2", { ...rules, capacity: 10 });
+  saveResource(db, "sup", { name: "Van", capacity: 6, optionIds: ["o", "o2"] });
+
+  reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", adults: 6, ownerId: "u", requestKey: "k" });
+  assert.equal(listNativeAvailability(db, "p", "o2", future).find(s => s.localTime === "09:00").vacancies, 0);
+  assert.equal(listNativeAvailability(db, "p", "o2", future).find(s => s.localTime === "14:00").vacancies, 6, "the van is free again at the later departure");
+});
+
+test("a resource cannot be shrunk below seats already committed", t => {
+  const db = fixture(t);
+  saveInventoryRules(db, "p", "o", { ...rules, capacity: 10 });
+  saveResource(db, "sup", { name: "Van", capacity: 8, optionIds: ["o"] });
+  reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", adults: 5, ownerId: "u", requestKey: "k" });
+
+  const saved = listResources(db, "sup")[0];
+  assert.throws(
+    () => saveResource(db, "sup", { name: "Van", capacity: 3, optionIds: ["o"] }, saved.id),
+    /Capacity cannot be below 5 seats/
+  );
+  // Unlinking and deleting release the constraint.
+  deleteResource(db, "sup", saved.id);
+  assert.equal(listResources(db, "sup").length, 0);
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].vacancies, 5);
+});
+
+test("a resource rejects options belonging to another supplier", t => {
+  const db = fixture(t);
+  saveInventoryRules(db, "p", "o", rules);
+  assert.throws(() => saveResource(db, "other-supplier", { name: "Van", capacity: 4, optionIds: ["o"] }), /Option not found/);
+});
+
+test("seatless infants bill without consuming a seat", t => {
+  const db = fixture(t);
+  saveInventoryRules(db, "p", "o", { ...rules, capacity: 2, unitPrices: { INFANT: 200 }, seatlessUnits: ["INFANT"] });
+
+  // Two adults fill the departure; an infant on a lap still fits.
+  const hold = reserveNativeInventory(db, {
+    productId: "p", optionId: "o", localDate: future, localTime: "09:00",
+    unitItems: [{ unitType: "ADULT", quantity: 2 }, { unitType: "INFANT", quantity: 1 }],
+    ownerId: "u", requestKey: "lap",
+  });
+  assert.equal(Number(hold.adults), 2);
+  assert.equal(Number(hold.children), 0, "a seatless infant is not counted as an occupied child seat");
+  assert.equal(JSON.parse(hold.pricing_snapshot).unitTotal, 2200, "but it is still billed");
+  assert.deepEqual(JSON.parse(hold.unit_items).map(i => i.unitType), ["ADULT", "INFANT"], "and still recorded for the manifest");
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].vacancies, 0);
+});
+
+test("seatless units are opt-in and default to occupying a seat", t => {
+  const db = fixture(t);
+  saveInventoryRules(db, "p", "o", { ...rules, capacity: 2, unitPrices: { INFANT: 200 } });
+  assert.throws(
+    () => reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", unitItems: [{ unitType: "ADULT", quantity: 2 }, { unitType: "INFANT", quantity: 1 }], ownerId: "u", requestKey: "seated" }),
+    /no longer has enough seats/
+  );
 });

@@ -112,3 +112,51 @@ test("supplier sets a seasonal rate and closes one departure from the extranet",
 
   await page.screenshot({ path: "test-results/native-traveler-seasonal-pricing.png", fullPage: true });
 });
+
+// P2: a shared vehicle linked from the extranet must cap the departure.
+test("supplier links a shared vehicle and it caps the departure", async ({ page, request }) => {
+  const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
+  const account = await login.json();
+  const supplierId = account.user.supplier_id;
+  const headers = { Authorization: `Bearer ${account.token}` };
+
+  const publication = await request.post(`/api/suppliers/${supplierId}/products/v2`, { headers, data: {
+    productType: "EXPERIENCE", productSubType: "TICKET_SIC", title: "Shared vehicle browser check", city: "Goa", state: "Goa",
+    priceInr: 900, shortDesc: "Shared vehicle verification", status: "PUBLISHED" } });
+  const published = await publication.json();
+  expect(publication.status(), JSON.stringify(published)).toBe(201);
+  const productId = published.productId;
+
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.goto("/supplier/dashboard?panel=listings");
+  await page.getByPlaceholder("Search by title, city, route…").fill(published.product.title);
+  await page.getByRole("button", { name: "Seats and schedule" }).click();
+  const editor = page.getByRole("dialog", { name: "Seats and schedule" });
+  await expect(editor).toBeVisible();
+
+  await editor.getByLabel("Seats per departure").fill("12");
+  await editor.getByLabel("Adult price").fill("900");
+  await editor.getByLabel("Child price").fill("400");
+  await editor.getByLabel("Infant (₹)").fill("0");
+  await editor.getByLabel("Infant does not use a seat").check();
+  await editor.getByRole("button", { name: "Save schedule" }).click();
+  await expect(editor.getByRole("status")).toContainText("Saved.");
+
+  await editor.getByRole("button", { name: "Shared vehicle" }).click();
+  await expect(editor.getByRole("heading", { name: "Add a shared vehicle" })).toBeVisible();
+  await editor.getByLabel("Name", { exact: true }).fill("Tempo Traveller GA-09");
+  await editor.getByLabel("Total seats").fill("5");
+  await editor.getByRole("button", { name: "Add and link to this option" }).click();
+  await expect(editor.getByRole("status")).toContainText("Shared vehicle added");
+  await expect(editor.getByText("5 seats · shared by 1 option · including this one")).toBeVisible();
+  await page.screenshot({ path: "test-results/native-supplier-shared-vehicle.png" });
+
+  // The option sells 12 on its own, but the van caps the departure at 5.
+  const optionId = (await (await request.get(`/api/suppliers/${supplierId}/products/${productId}/inventory`, { headers })).json()).options[0].id;
+  const slots = await request.get(`/api/availability/native/${productId}?optionId=${optionId}&date=2099-08-14`);
+  const slot = (await slots.json()).slots[0];
+  expect(slot.capacity).toBe(12);
+  expect(slot.vacancies).toBe(5);
+  expect(slot.sharedResource.name).toBe("Tempo Traveller GA-09");
+  expect(slot.seatlessUnits).toEqual(["INFANT"]);
+});

@@ -22,7 +22,8 @@ export const isChildUnit = (unitType) => CHILD_UNIT_TYPES.has(String(unitType).t
  * Callers that send no unit items keep the legacy behaviour: the adults and
  * children counts become ADULT and CHILD lines.
  */
-export function normalizeUnitItems(unitItems, { adults = 0, children = 0 } = {}) {
+export function normalizeUnitItems(unitItems, { adults = 0, children = 0, seatlessUnits = [] } = {}) {
+  const seatless = new Set((seatlessUnits || []).map((unit) => String(unit).toUpperCase()));
   const totals = new Map();
 
   if (Array.isArray(unitItems) && unitItems.length) {
@@ -42,9 +43,14 @@ export function normalizeUnitItems(unitItems, { adults = 0, children = 0 } = {})
     if (children > 0) totals.set("CHILD", children);
   }
 
-  const items = UNIT_TYPES.filter((type) => totals.get(type)).map((type) => ({ unitType: type, quantity: totals.get(type) }));
-  const adultSeats = items.filter((item) => !isChildUnit(item.unitType)).reduce((sum, item) => sum + item.quantity, 0);
-  const childSeats = items.filter((item) => isChildUnit(item.unitType)).reduce((sum, item) => sum + item.quantity, 0);
+  const items = UNIT_TYPES.filter((type) => totals.get(type)).map((type) => ({
+    unitType: type, quantity: totals.get(type), occupiesSeat: !seatless.has(type),
+  }));
+  // Seatless units still bill and still reach the manifest through
+  // booking_unit_items; they simply do not consume capacity.
+  const seated = items.filter((item) => item.occupiesSeat);
+  const adultSeats = seated.filter((item) => !isChildUnit(item.unitType)).reduce((sum, item) => sum + item.quantity, 0);
+  const childSeats = seated.filter((item) => isChildUnit(item.unitType)).reduce((sum, item) => sum + item.quantity, 0);
   return { items, adults: adultSeats, children: childSeats, seats: adultSeats + childSeats };
 }
 
@@ -79,6 +85,8 @@ export const inventoryRulesSchema = z.object({
     SENIOR: z.number().int().min(0).max(10000000).optional(),
     YOUTH: z.number().int().min(0).max(10000000).optional(),
   }).strict().optional(),
+  // ADULT is never seatless: somebody has to hold the lap.
+  seatlessUnits: z.array(z.enum(["CHILD", "INFANT", "SENIOR", "YOUTH"])).max(4).optional(),
 });
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -140,6 +148,7 @@ export function saveInventoryRules(db, productId, optionId, input) {
     const minPartySize = rules.minPartySize ?? Number(previous?.min_party_size ?? 1);
     const maxPartySize = rules.maxPartySize ?? Number(previous?.max_party_size ?? 0);
     const unitPrices = rules.unitPrices ?? (previous?.unit_prices ? parse(previous.unit_prices) : {});
+    const seatlessUnits = rules.seatlessUnits ?? (previous?.seatless_units ? parse(previous.seatless_units) : []);
     if (maxPartySize !== 0 && maxPartySize < minPartySize) {
       throw inventoryError("Maximum party size must be 0 (no cap) or at least the minimum", "INVALID_PARTY_SIZE", 400);
     }
@@ -147,15 +156,15 @@ export function saveInventoryRules(db, productId, optionId, input) {
       const active = db.prepare("SELECT id FROM bookings WHERE product_id = ? AND status NOT IN ('cancelled', 'completed') LIMIT 1").get(productId);
       if (active) throw inventoryError("This listing has existing reservations. Reconcile them before enabling seat inventory.", "EXISTING_RESERVATIONS");
     }
-    db.prepare(`INSERT INTO native_inventory_rules (option_id, product_id, operating_days, departure_times, capacity, adult_price, child_price, cutoff_minutes, cancellation_hours, blackout_dates, min_party_size, max_party_size, unit_prices)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(option_id) DO UPDATE SET operating_days=excluded.operating_days,
+    db.prepare(`INSERT INTO native_inventory_rules (option_id, product_id, operating_days, departure_times, capacity, adult_price, child_price, cutoff_minutes, cancellation_hours, blackout_dates, min_party_size, max_party_size, unit_prices, seatless_units)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(option_id) DO UPDATE SET operating_days=excluded.operating_days,
       departure_times=excluded.departure_times, capacity=excluded.capacity, adult_price=excluded.adult_price, child_price=excluded.child_price,
       cutoff_minutes=excluded.cutoff_minutes, cancellation_hours=excluded.cancellation_hours, blackout_dates=excluded.blackout_dates,
       min_party_size=excluded.min_party_size, max_party_size=excluded.max_party_size,
-      unit_prices=excluded.unit_prices, updated_at=CURRENT_TIMESTAMP`).run(
+      unit_prices=excluded.unit_prices, seatless_units=excluded.seatless_units, updated_at=CURRENT_TIMESTAMP`).run(
       optionId, productId, JSON.stringify([...new Set(rules.operatingDays)]), JSON.stringify([...new Set(rules.departureTimes)].sort()), rules.capacity,
       rules.adultPrice, rules.childPrice, rules.cutoffMinutes, rules.cancellationHours, JSON.stringify(rules.blackoutDates),
-      minPartySize, maxPartySize, JSON.stringify(unitPrices));
+      minPartySize, maxPartySize, JSON.stringify(unitPrices), JSON.stringify(seatlessUnits));
     const current = getInventoryRules(db, productId, optionId);
     for (const slot of db.prepare("SELECT * FROM native_availability_slots WHERE option_id = ?").all(optionId)) {
       // A per-date override outranks the weekly rule, so re-sync to the effective
@@ -253,6 +262,37 @@ export function resolveOverride(db, optionId, localDate, time) {
   };
 }
 
+/** Resources constraining an option, with the seats each already has committed. */
+function linkedResources(db, optionId, localDate, time, excludeId = "") {
+  const rows = optionalQuery(db, () => db.prepare(
+    `SELECT r.id, r.name, r.capacity FROM native_resources r
+     JOIN native_resource_options ro ON ro.resource_id = r.id
+     WHERE ro.option_id = ?`
+  ).all(optionId)) || [];
+  if (!rows.length) return [];
+
+  const now = new Date().toISOString();
+  return rows.map((resource) => {
+    // Every option sharing this resource competes for the same departure time.
+    const used = Number(db.prepare(
+      `SELECT COALESCE(SUM(r.adults + r.children), 0) AS seats
+       FROM native_reservations r
+       JOIN native_availability_slots s ON s.id = r.availability_slot
+       LEFT JOIN bookings b ON b.id = r.booking_id
+       WHERE s.option_id IN (SELECT option_id FROM native_resource_options WHERE resource_id = ?)
+         AND s.local_date = ? AND s.local_time = ? AND r.id <> ?
+         AND (b.id IS NULL OR b.status <> 'cancelled')
+         AND (r.status = 'CONFIRMED' OR (r.status = 'ON_HOLD' AND r.utc_expires_at > ?))`
+    ).get(resource.id, localDate, time, excludeId, now).seats);
+    return {
+      id: resource.id,
+      name: resource.name,
+      capacity: Number(resource.capacity),
+      vacancies: Math.max(0, Number(resource.capacity) - used),
+    };
+  });
+}
+
 function slotView(db, rules, localDate, time, excludeId = "") {
   const id = `${rules.option_id}:${localDate}:${time}`;
   const start = `${localDate}T${time}:00+05:30`;
@@ -260,7 +300,13 @@ function slotView(db, rules, localDate, time, excludeId = "") {
   const override = resolveOverride(db, rules.option_id, localDate, time);
   const pricing = resolvePricing(db, rules, localDate);
   const capacity = override?.capacity ?? Number(rules.capacity);
-  const vacancies = Math.max(0, capacity - occupied(db, id, excludeId));
+  const resources = linkedResources(db, rules.option_id, localDate, time, excludeId);
+  // A shared vehicle or guide caps the departure below its own pool.
+  const vacancies = Math.min(
+    Math.max(0, capacity - occupied(db, id, excludeId)),
+    ...resources.map((resource) => resource.vacancies),
+  );
+  const limitingResource = resources.find((resource) => resource.vacancies <= vacancies) || null;
   const open = operates(rules, localDate, time) && !override?.closed;
   const status = !open ? "CLOSED" : Date.parse(cutoff) <= Date.now() ? "CUTOFF" : vacancies === 0 ? "SOLD_OUT" : "AVAILABLE";
   const minPartySize = Math.max(1, Number(rules.min_party_size ?? 1));
@@ -270,6 +316,8 @@ function slotView(db, rules, localDate, time, excludeId = "") {
     adultPrice: pricing.adultPrice, childPrice: pricing.childPrice, unitPrices: pricing.unitPrices,
     priceScheduleId: pricing.priceScheduleId, priceScheduleLabel: pricing.priceScheduleLabel,
     minPartySize, maxPartySize, supplierNote: override?.note || null,
+    seatlessUnits: parse(rules.seatless_units || "[]"),
+    sharedResource: limitingResource ? { name: limitingResource.name, capacity: limitingResource.capacity } : null,
     cancellationHours: Number(rules.cancellation_hours) };
 }
 export function listNativeAvailability(db, productId, optionId, localDate) {
@@ -310,7 +358,11 @@ export function checkNativeInventory(db, input, { ownerId } = {}) {
 }
 export function reserveNativeInventory(db, { productId, optionId, localDate, localTime, adults, children = 0, unitItems, ownerId, requestKey }) {
   // A unit breakdown, when supplied, is authoritative for the seat counts.
-  const breakdown = normalizeUnitItems(unitItems, { adults: Number(adults) || 0, children: Number(children) || 0 });
+  const optionRules = getInventoryRules(db, productId, optionId);
+  const breakdown = normalizeUnitItems(unitItems, {
+    adults: Number(adults) || 0, children: Number(children) || 0,
+    seatlessUnits: optionRules ? parse(optionRules.seatless_units || "[]") : [],
+  });
   adults = breakdown.adults;
   children = breakdown.children;
   if (!ownerId || typeof requestKey !== "string" || !requestKey || requestKey.length > 200 || !Number.isInteger(adults) || adults < 1 || !Number.isInteger(children) || children < 0 || adults + children > 26) throw inventoryError("Invalid reservation request", "INVALID_RESERVATION", 400);
@@ -535,4 +587,86 @@ export function listNativeMonthPricing(db, productId, yearMonth) {
   }
 
   return { optionId: rules.option_id, basePriceInr: Number(rules.adult_price), days };
+}
+
+// --- Shared resources (supplier extranet) ---------------------------------
+
+export const resourceSchema = z.object({
+  name: z.string().min(1).max(120),
+  capacity: z.number().int().min(0).max(10000),
+  optionIds: z.array(z.string().min(1).max(200)).max(50).default([]),
+});
+
+export function listResources(db, supplierId) {
+  const rows = optionalQuery(db, () => db.prepare(
+    "SELECT * FROM native_resources WHERE supplier_id = ? ORDER BY name ASC, id ASC"
+  ).all(supplierId)) || [];
+  return rows.map((resource) => ({
+    ...resource,
+    optionIds: (optionalQuery(db, () => db.prepare(
+      "SELECT option_id FROM native_resource_options WHERE resource_id = ?"
+    ).all(resource.id)) || []).map((row) => row.option_id),
+  }));
+}
+
+/**
+ * Creates or replaces a shared resource and the options it constrains.
+ *
+ * Refuses to shrink below seats already committed on any linked departure, the
+ * same guard the option-level and per-date capacity edits use.
+ */
+export function saveResource(db, supplierId, input, resourceId = null) {
+  const resource = resourceSchema.parse(input);
+  return db.transaction(() => {
+    for (const optionId of resource.optionIds) {
+      const owned = db.prepare(
+        `SELECT n.option_id FROM native_inventory_rules n
+         JOIN products p ON p.id = n.product_id
+         WHERE n.option_id = ? AND p.supplier_id = ?`
+      ).get(optionId, supplierId);
+      if (!owned) throw inventoryError("Option not found for this supplier", "OPTION_NOT_FOUND", 404);
+    }
+
+    const id = resourceId || randomUUID();
+    if (resourceId) {
+      const existing = db.prepare("SELECT id FROM native_resources WHERE id = ? AND supplier_id = ?").get(resourceId, supplierId);
+      if (!existing) throw inventoryError("Resource not found", "RESOURCE_NOT_FOUND", 404);
+      db.prepare("UPDATE native_resources SET name = ?, capacity = ? WHERE id = ?").run(resource.name, resource.capacity, id);
+      db.prepare("DELETE FROM native_resource_options WHERE resource_id = ?").run(id);
+    } else {
+      db.prepare("INSERT INTO native_resources (id, supplier_id, name, capacity) VALUES (?, ?, ?, ?)")
+        .run(id, supplierId, resource.name, resource.capacity);
+    }
+    for (const optionId of resource.optionIds) {
+      db.prepare("INSERT INTO native_resource_options (resource_id, option_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
+        .run(id, optionId);
+    }
+
+    const committed = Number(db.prepare(
+      `SELECT COALESCE(MAX(seats), 0) AS seats FROM (
+         SELECT s.local_date, s.local_time, SUM(r.adults + r.children) AS seats
+         FROM native_reservations r
+         JOIN native_availability_slots s ON s.id = r.availability_slot
+         LEFT JOIN bookings b ON b.id = r.booking_id
+         WHERE s.option_id IN (SELECT option_id FROM native_resource_options WHERE resource_id = ?)
+           AND (b.id IS NULL OR b.status <> 'cancelled')
+           AND (r.status = 'CONFIRMED' OR (r.status = 'ON_HOLD' AND r.utc_expires_at > ?))
+         GROUP BY s.local_date, s.local_time
+       )`
+    ).get(id, new Date().toISOString()).seats);
+    if (resource.capacity < committed) {
+      throw inventoryError(`Capacity cannot be below ${committed} seats already committed on a shared departure`, "CAPACITY_BELOW_RESERVED");
+    }
+
+    return listResources(db, supplierId).find((row) => row.id === id);
+  })();
+}
+
+export function deleteResource(db, supplierId, resourceId) {
+  const removed = db.transaction(() => {
+    db.prepare("DELETE FROM native_resource_options WHERE resource_id = ?").run(resourceId);
+    return db.prepare("DELETE FROM native_resources WHERE id = ? AND supplier_id = ?").run(resourceId, supplierId);
+  })();
+  if (!removed.changes) throw inventoryError("Resource not found", "RESOURCE_NOT_FOUND", 404);
+  return { id: resourceId };
 }

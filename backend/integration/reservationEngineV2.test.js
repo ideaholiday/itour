@@ -126,8 +126,80 @@ test("multi-unit-type holds price seniors and infants distinctly over HTTP", asy
   assert.equal(hold.response.status, 201, JSON.stringify(hold.data));
 
   const stored = db.prepare("SELECT * FROM native_reservations WHERE id = ?").get(hold.data.holdId);
-  assert.deepEqual(JSON.parse(stored.unit_items), [{ unitType: "INFANT", quantity: 1 }, { unitType: "SENIOR", quantity: 2 }]);
+  assert.deepEqual(JSON.parse(stored.unit_items), [{ unitType: "INFANT", quantity: 1, occupiesSeat: true }, { unitType: "SENIOR", quantity: 2, occupiesSeat: true }]);
   assert.equal(JSON.parse(stored.pricing_snapshot).unitTotal, 1400, "seniors bill at the senior rate");
   assert.equal(Number(stored.adults), 2, "seniors still occupy adult seats for capacity");
   assert.equal(Number(stored.children), 1, "infants still occupy child seats for capacity");
+});
+
+// P2: the overbooking case that shared resources exist to prevent.
+test("two options sharing one vehicle cannot oversell it over HTTP", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+
+  const supplierUser = db.prepare("SELECT * FROM users WHERE role = 'SUPPLIER' LIMIT 1").get();
+  const supplier = db.prepare("SELECT * FROM suppliers WHERE LOWER(email) = ?").get(supplierUser.email.toLowerCase());
+  const token = jwt.sign({ id: supplierUser.id, email: supplierUser.email, role: supplierUser.role }, "integration-jwt-secret-with-at-least-32-characters");
+  const base = `/api/suppliers/${supplier.id}/products`;
+
+  // Two separately published experiences that in reality share one van.
+  const publish = async (title) => {
+    const created = await requestJson(api.baseUrl, `${base}/v2`, { token, body: {
+      productType: "EXPERIENCE", productSubType: "TICKET_SIC", title, city: "Goa", state: "Goa",
+      priceInr: 900, shortDesc: "Shared vehicle check", status: "PUBLISHED" } });
+    assert.equal(created.response.status, 201, JSON.stringify(created.data));
+    const productId = created.data.productId;
+    const optionId = (await requestJson(api.baseUrl, `${base}/${productId}/inventory`, { token })).data.options[0].id;
+    const saved = await requestJson(api.baseUrl, `${base}/${productId}/inventory/${optionId}`, { token, method: "PUT", body: {
+      operatingDays: [0, 1, 2, 3, 4, 5, 6], departureTimes: ["08:00"], capacity: 12, adultPrice: 900, childPrice: 400,
+      cutoffMinutes: 60, cancellationHours: 24, blackoutDates: [] } });
+    assert.equal(saved.response.status, 200, JSON.stringify(saved.data));
+    return { productId, optionId };
+  };
+  const morning = await publish("Shared van morning heritage walk");
+  const sunset = await publish("Shared van sunset heritage walk");
+
+  const resource = await requestJson(api.baseUrl, `/api/suppliers/${supplier.id}/resources`, {
+    token, body: { name: "Tempo Traveller GA-07", capacity: 6, optionIds: [morning.optionId, sunset.optionId] },
+  });
+  assert.equal(resource.response.status, 201, JSON.stringify(resource.data));
+
+  const availability = async ({ productId, optionId }) => {
+    const response = await requestJson(api.baseUrl, `/api/availability/native/${productId}?optionId=${optionId}&date=2099-08-14`, {});
+    return response.data.slots[0];
+  };
+
+  // Each option's own pool is 12, but the shared van caps both at 6.
+  assert.equal((await availability(morning)).vacancies, 6);
+  assert.equal((await availability(sunset)).vacancies, 6);
+  assert.equal((await availability(sunset)).sharedResource.name, "Tempo Traveller GA-07");
+
+  const signup = await requestJson(api.baseUrl, "/api/auth/signup", {
+    body: { name: "Shared Van Traveler", email: `van-${Date.now()}@example.com`, password: "Integration@2026", phone: "+919876543212" },
+  });
+  const travelerToken = signup.data.token;
+
+  const hold = await requestJson(api.baseUrl, "/api/availability/native/hold", {
+    token: travelerToken,
+    body: { productId: morning.productId, optionId: morning.optionId, localDate: "2099-08-14", localTime: "08:00", adults: 5, requestKey: `van-${Date.now()}` },
+  });
+  assert.equal(hold.response.status, 201, JSON.stringify(hold.data));
+
+  // Those five seats are gone from the other option too.
+  assert.equal((await availability(sunset)).vacancies, 1, "the shared van has one seat left on the other option");
+
+  const oversell = await requestJson(api.baseUrl, "/api/availability/native/hold", {
+    token: travelerToken,
+    body: { productId: sunset.productId, optionId: sunset.optionId, localDate: "2099-08-14", localTime: "08:00", adults: 2, requestKey: `van-over-${Date.now()}` },
+  });
+  assert.equal(oversell.response.status, 409, JSON.stringify(oversell.data));
+  assert.match(oversell.data.error, /no longer has enough seats/);
+
+  // The last seat still sells.
+  const lastSeat = await requestJson(api.baseUrl, "/api/availability/native/hold", {
+    token: travelerToken,
+    body: { productId: sunset.productId, optionId: sunset.optionId, localDate: "2099-08-14", localTime: "08:00", adults: 1, requestKey: `van-last-${Date.now()}` },
+  });
+  assert.equal(lastSeat.response.status, 201, JSON.stringify(lastSeat.data));
+  assert.equal((await availability(morning)).vacancies, 0);
 });

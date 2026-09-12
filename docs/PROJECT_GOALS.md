@@ -50,7 +50,7 @@ Build and operate a digital **Supplier Portal (Extranet) & Automated Reservation
 
 ### 3. Technical & Reliability Goals
 - **Dual-Engine Persistence**: Maintain SQLite WAL mode for fast local development and CI test execution, with Supabase PostgreSQL for cloud production.
-- **Strict Testing Gates**: Enforce >70% line and function test coverage (currently ~87% lines) across 288 unit tests in 9 suites plus 16 HTTP integration tests.
+- **Strict Testing Gates**: Enforce >70% line and function test coverage (currently ~87% lines) across 294 unit tests in 9 suites plus 17 HTTP integration tests.
 - **Security & PII Hygiene**: Redact sensitive data from logs, isolate pickup OTPs using SHA-256 verification hashes and AES-GCM encryption.
 
 ---
@@ -70,6 +70,8 @@ Build and operate a digital **Supplier Portal (Extranet) & Automated Reservation
 10. **Calendar Control** (`native_slot_overrides`): Close or resize a single date or a single departure, independent of the weekly operating rules.
 11. **Party-Size Rules**: `min_party_size` for guaranteed-departure thresholds and `max_party_size` for per-booking caps.
 12. **Multi-Unit-Type Billing** (`booking_unit_items`): `SENIOR`, `INFANT` and `YOUTH` priced as first-class units while `adults`/`children` stay the canonical seat counts.
+13. **Shared Resource Capacity** (`native_resources`): One vehicle or guide capping every option that draws on it, preventing the same van being sold twice.
+14. **Seatless Units**: Infant-on-lap travelers billed and manifested without consuming a seat.
 
 > Items 9–11 close the gaps found when auditing against Bókun, Viator,
 > GetYourGuide and Klook. See [`RESERVATION_ENGINE_V2_PLAN.md`](RESERVATION_ENGINE_V2_PLAN.md)
@@ -85,8 +87,8 @@ Build and operate a digital **Supplier Portal (Extranet) & Automated Reservation
 1. **Bókun & FareHarbor External Adapters**: Plug-in ResTech connectors implementing the OCTo provider boundary (`reservationProviders.js`).
 2. **Chauffeur Mobile PWA**: Dedicated mobile web app for roster drivers to scan passenger QR codes and input OTPs.
 3. **Mappls Turn-by-Turn Telemetry**: Real-time driver GPS tracking.
-4. **Shared Resource Capacity**: One vehicle or guide constraining several options at once (Bókun models this as *resources*).
-5. **Infant-on-Lap Units**: A unit that bills but consumes no seat; today every unit occupies one.
+4. **Bulk Calendar Editing**: Apply a capacity or closure across a date range in one request.
+5. **Promotional / Last-Minute Rates**: Discount windows with their own validity rules.
 
 ### NOT A GOAL (Explicit Non-Goals)
 1. **Live Airline GDS Integration**: No flight ticket sales or Amadeus/Sabre connections.

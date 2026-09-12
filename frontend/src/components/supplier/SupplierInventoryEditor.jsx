@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { authHeaders } from "../../lib/api.js";
 import SupplierRatesPanel from "./SupplierRatesPanel.jsx";
 import SupplierCalendarPanel from "./SupplierCalendarPanel.jsx";
+import SupplierResourcesPanel from "./SupplierResourcesPanel.jsx";
 
 const getDefaults = (product) => {
   const basePrice = Number(product?.price_inr || product?.priceInr || 1000);
@@ -17,7 +18,8 @@ const getDefaults = (product) => {
     blackoutDates: [],
     minPartySize: 1,
     maxPartySize: 0,
-    unitPrices: {}
+    unitPrices: {},
+    seatlessUnits: []
   };
 };
 const json = value => typeof value === "string" ? JSON.parse(value) : value;
@@ -97,7 +99,7 @@ export default function SupplierInventoryEditor({ supplierId, product, onClose }
   }, [base]);
   useEffect(() => {
     const saved = options.find(option => option.id === optionId)?.inventory;
-    setRules(saved ? { operatingDays: json(saved.operating_days), departureTimes: json(saved.departure_times), capacity: Number(saved.capacity), adultPrice: Number(saved.adult_price), childPrice: Number(saved.child_price), cutoffMinutes: Number(saved.cutoff_minutes), cancellationHours: Number(saved.cancellation_hours), blackoutDates: json(saved.blackout_dates), minPartySize: Number(saved.min_party_size ?? 1), maxPartySize: Number(saved.max_party_size ?? 0), unitPrices: json(saved.unit_prices || "{}") } : getDefaults(product));
+    setRules(saved ? { operatingDays: json(saved.operating_days), departureTimes: json(saved.departure_times), capacity: Number(saved.capacity), adultPrice: Number(saved.adult_price), childPrice: Number(saved.child_price), cutoffMinutes: Number(saved.cutoff_minutes), cancellationHours: Number(saved.cancellation_hours), blackoutDates: json(saved.blackout_dates), minPartySize: Number(saved.min_party_size ?? 1), maxPartySize: Number(saved.max_party_size ?? 0), unitPrices: json(saved.unit_prices || "{}"), seatlessUnits: json(saved.seatless_units || "[]") } : getDefaults(product));
   }, [optionId, options, product]);
   const update = (key, value) => setRules(current => ({ ...current, [key]: value }));
   async function save(event) {
@@ -116,7 +118,7 @@ export default function SupplierInventoryEditor({ supplierId, product, onClose }
   return createPortal(<div ref={dialogRef} className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Seats and schedule">
     <div className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-2xl bg-white p-6 text-sm text-stone-900">
       <div className="flex justify-between gap-4"><h2 className="text-xl font-bold">Seats and schedule</h2><button type="button" onClick={onClose} aria-label="Close inventory editor">Close</button></div>
-      <p className="mt-2 text-stone-600">{product.title} · All times are India Standard Time. Every traveler, of any type, uses one seat.</p>
+      <p className="mt-2 text-stone-600">{product.title} · All times are India Standard Time. Every traveler uses one seat unless you mark their type as no-seat.</p>
       <label className="mt-4 block">Booking option
         <div className="flex items-center gap-2">
           <select disabled={isLoading || options.length === 0} className={inputClass} value={optionId} onChange={e => setOptionId(e.target.value)}>
@@ -135,7 +137,7 @@ export default function SupplierInventoryEditor({ supplierId, product, onClose }
       </label>
 
       <nav className="mt-4 flex gap-1 border-b border-stone-200" aria-label="Inventory sections">
-        {[["schedule", "Seats & schedule"], ["rates", "Seasonal rates"], ["calendar", "Calendar"]].map(([key, label]) => (
+        {[["schedule", "Seats & schedule"], ["rates", "Seasonal rates"], ["calendar", "Calendar"], ["resources", "Shared vehicle"]].map(([key, label]) => (
           <button key={key} type="button" onClick={() => setTab(key)} aria-current={tab === key ? "page" : undefined}
             className={`rounded-t-lg px-3 py-2 font-semibold ${tab === key ? "border-b-2 border-emerald-800 text-emerald-900" : "text-stone-500 hover:text-stone-800"}`}>
             {label}
@@ -176,7 +178,7 @@ export default function SupplierInventoryEditor({ supplierId, product, onClose }
       </fieldset>
       <fieldset className="mt-4">
         <legend className="font-semibold">Other traveler types</legend>
-        <p className="mt-1 text-xs text-stone-500">Leave blank if you do not sell that type. Blank types cannot be booked.</p>
+        <p className="mt-1 text-xs text-stone-500">Leave blank if you do not sell that type. Blank types cannot be booked. Tick &ldquo;No seat&rdquo; for an infant travelling on a lap — it is still billed and still appears on your manifest.</p>
         <div className="mt-2 grid grid-cols-3 gap-4">
           {[["SENIOR", "Senior (₹)"], ["YOUTH", "Youth (₹)"], ["INFANT", "Infant (₹)"]].map(([unitType, label]) => (
             <label key={unitType}>{label}
@@ -188,6 +190,14 @@ export default function SupplierInventoryEditor({ supplierId, product, onClose }
                   else next[unitType] = Number(e.target.value);
                   return next;
                 })())} />
+              <span className="mt-1 block text-xs text-stone-600">
+                <input type="checkbox" aria-label={`${label.replace(" (₹)", "")} does not use a seat`}
+                  checked={(rules.seatlessUnits || []).includes(unitType)}
+                  onChange={e => update("seatlessUnits", e.target.checked
+                    ? [...new Set([...(rules.seatlessUnits || []), unitType])]
+                    : (rules.seatlessUnits || []).filter(value => value !== unitType))} />
+                {" "}No seat
+              </span>
             </label>
           ))}
         </div>
@@ -218,6 +228,10 @@ export default function SupplierInventoryEditor({ supplierId, product, onClose }
       {tab === "rates" && (inventorySaved
         ? <SupplierRatesPanel base={base} optionId={optionId} baseRules={rules} />
         : <p className="mt-4 rounded-lg bg-amber-50 p-3">Save a schedule for this option first. Seasonal rates adjust that base price.</p>)}
+
+      {tab === "resources" && (inventorySaved
+        ? <SupplierResourcesPanel supplierId={supplierId} optionId={optionId} capacity={rules.capacity} />
+        : <p className="mt-4 rounded-lg bg-amber-50 p-3">Save a schedule for this option first. A shared vehicle limits that schedule.</p>)}
 
       {tab === "calendar" && (inventorySaved
         ? <SupplierCalendarPanel base={base} optionId={optionId} departureTimes={rules.departureTimes} capacity={rules.capacity} />

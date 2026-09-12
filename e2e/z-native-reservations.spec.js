@@ -1,12 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { E2E_ACCOUNTS, loginThroughUi } from "./helpers/marketplace.js";
 
-// KNOWN FAILING (pre-existing): the supplier and hold legs pass, but the closing
-// demo-payment leg hangs before /booking-confirmed and a 150s budget does not
-// help, so it is a hang rather than slowness. The inventory selectors this test
-// used were also stale and have been repaired, so it now exercises the whole
-// journey instead of stopping at the schedule form.
-
 test("supplier sets seat inventory and traveler sees a live ten-minute checkout hold", async ({ page, request, browser }) => {
   const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
   const account = await login.json(); expect(login.status()).toBe(200);
@@ -59,7 +53,12 @@ test("supplier sets seat inventory and traveler sees a live ten-minute checkout 
     await expect(traveler.getByText(/Seats reserved for/)).toBeVisible();
     const pickup = traveler.getByRole("combobox", { name: "Pickup address or meeting point" });
     await pickup.fill("Calangute");
-    await traveler.getByRole("option", { name: /Calangute, Baga and Candolim Hotels/i }).click();
+    // A newly published product has no location rules yet, so the scoped
+    // suggestions are empty and the field falls back to global place search.
+    // Take whatever it offers rather than a seeded product's zone name.
+    const suggestion = traveler.getByRole("option").first();
+    await suggestion.waitFor({ state: "visible" });
+    await suggestion.click();
     await traveler.getByRole("button", { name: /Demo sandbox payment/i }).click();
     await traveler.getByRole("button", { name: /Confirm demo booking/i }).click();
     await expect(traveler).toHaveURL(/booking-confirmed/);
