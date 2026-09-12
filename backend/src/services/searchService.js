@@ -1,5 +1,6 @@
 import db from "../db.js";
 import crypto from "crypto";
+import { cacheService } from "./cacheService.js";
 
 const CITY_COORDINATES = {
   "delhi": { lat: 28.6139, lng: 77.2090 },
@@ -45,6 +46,10 @@ export class SearchService {
    */
   static getSuggestions(query = "") {
     const q = String(query).trim().toLowerCase();
+    const cacheKey = `suggestions:${q}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) return cached;
+
     if (!q || q.length < 2) {
       // Return popular defaults
       const topDestinations = db.prepare(`
@@ -59,11 +64,13 @@ export class SearchService {
         "Adventure & Wildlife"
       ];
 
-      return {
+      const result = {
         destinations: topDestinations,
         experiences: ["Taj Mahal Sunrise Tour", "Jaipur Heritage City Walk", "Goa Coastal Cruise"],
         categories: topCategories,
       };
+      cacheService.set(cacheKey, result, 300);
+      return result;
     }
 
     const destinations = db.prepare(`
@@ -72,12 +79,21 @@ export class SearchService {
       LIMIT 5
     `).all(`%${q}%`, `%${q}%`).map(d => `${d.name}, ${d.state}`);
 
-    const experiences = db.prepare(`
-      SELECT title, city FROM products
+    const rawProducts = db.prepare(`
+      SELECT id, title, city, price_inr, category FROM products
       WHERE (is_published = 1 OR status = 'PUBLISHED')
         AND (LOWER(title) LIKE ? OR LOWER(city) LIKE ?)
       LIMIT 5
-    `).all(`%${q}%`, `%${q}%`).map(p => p.title);
+    `).all(`%${q}%`, `%${q}%`);
+
+    const experiences = rawProducts.map(p => p.title);
+    const products = rawProducts.map(p => ({
+      id: p.id,
+      title: p.title,
+      destination: p.city,
+      price_inr: p.price_inr,
+      category: p.category,
+    }));
 
     const categories = db.prepare(`
       SELECT DISTINCT category FROM products
@@ -86,41 +102,50 @@ export class SearchService {
       LIMIT 4
     `).all(`%${q}%`).map(c => c.category);
 
-    return {
+    const result = {
       destinations,
       experiences,
+      products,
       categories,
     };
+    cacheService.set(cacheKey, result, 300);
+    return result;
   }
 
   /**
    * Search products with faceted filtering, ranking, coordinates, and pagination
    */
-  static searchProducts({
-    query = "",
-    city = "",
-    state = "",
-    category = "",
-    productType = "",
-    type = "",
-    duration = "",
-    vehicleType = "",
-    minPrice = null,
-    maxPrice = null,
-    minRating = null,
-    groupType = "",
-    instantOnly = false,
-    freeCancellation = false,
-    bestseller = false,
-    bounds = null,
-    centerLat = null,
-    centerLng = null,
-    radiusKm = null,
-    sort = "recommended",
-    order = "desc",
-    page = 1,
-    limit = 20,
-  }) {
+  static searchProducts(options = {}) {
+    const {
+      query = "",
+      city = "",
+      state = "",
+      category = "",
+      productType = "",
+      type = "",
+      duration = "",
+      vehicleType = "",
+      minPrice = null,
+      maxPrice = null,
+      minRating = null,
+      groupType = "",
+      instantOnly = false,
+      freeCancellation = false,
+      bestseller = false,
+      bounds = null,
+      centerLat = null,
+      centerLng = null,
+      radiusKm = null,
+      sort = "recommended",
+      order = "desc",
+      page = 1,
+      limit = 20,
+    } = options;
+
+    const cacheKey = `search:${JSON.stringify(options)}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) return cached;
+
     const offset = (page - 1) * limit;
     let whereConditions = ["(p.is_published = 1 OR p.status = 'PUBLISHED')"];
     const params = [];
@@ -154,21 +179,28 @@ export class SearchService {
 
     const effectiveType = productType || type;
     if (effectiveType) {
-      whereConditions.push("p.product_type = ?");
-      params.push(effectiveType);
+      const normalizedType = String(effectiveType).trim().toUpperCase();
+      if (["TOUR", "TOURS", "DAY_TOUR"].includes(normalizedType)) {
+        whereConditions.push("p.product_type IN ('TOUR', 'DAY_TOUR')");
+      } else if (["PACKAGE", "PACKAGES", "MULTI_DAY_PACKAGE"].includes(normalizedType)) {
+        whereConditions.push("p.product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE')");
+      } else {
+        whereConditions.push("p.product_type = ?");
+        params.push(normalizedType);
+      }
     }
 
     // Duration buckets
     if (duration) {
       const d = String(duration).toLowerCase();
       if (d === "short" || d === "under_4h" || d === "0-4") {
-        whereConditions.push("(p.duration_hours < 4 AND p.product_type != 'MULTI_DAY_PACKAGE')");
+        whereConditions.push("(p.duration_hours < 4 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE'))");
       } else if (d === "half_day" || d === "4-8") {
-        whereConditions.push("(p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type != 'MULTI_DAY_PACKAGE')");
+        whereConditions.push("(p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE'))");
       } else if (d === "full_day" || d === "8-24" || d === "day") {
-        whereConditions.push("((p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type = 'DAY_TOUR'))");
+        whereConditions.push("((p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type IN ('TOUR', 'DAY_TOUR')))");
       } else if (d === "multi_day" || d === "package" || d === "multi") {
-        whereConditions.push("(p.product_type = 'MULTI_DAY_PACKAGE' OR p.duration_hours > 24)");
+        whereConditions.push("(p.product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') OR p.duration_hours > 24)");
       }
     }
 
@@ -200,8 +232,13 @@ export class SearchService {
     }
 
     if (groupType) {
-      whereConditions.push("p.group_type = ?");
-      params.push(groupType);
+      const normalizedGroup = String(groupType).toUpperCase();
+      if (normalizedGroup === "SHARED") {
+        whereConditions.push("(p.group_type IN ('SHARED', 'SIC') OR p.product_sub_type IN ('SIC', 'TICKET_SIC'))");
+      } else {
+        whereConditions.push("p.group_type = ?");
+        params.push(normalizedGroup);
+      }
     }
 
     if (instantOnly) {
@@ -282,23 +319,48 @@ export class SearchService {
     `).all(...baseParams);
 
     const typeFacets = db.prepare(`
-      SELECT product_type as type, COUNT(*) as count FROM products p ${baseWhere} GROUP BY product_type
+      SELECT CASE
+        WHEN product_type IN ('TOUR', 'DAY_TOUR') THEN 'TOUR'
+        WHEN product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 'PACKAGE'
+        ELSE product_type
+      END as type, COUNT(*) as count
+      FROM products p ${baseWhere}
+      GROUP BY CASE
+        WHEN product_type IN ('TOUR', 'DAY_TOUR') THEN 'TOUR'
+        WHEN product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 'PACKAGE'
+        ELSE product_type
+      END
     `).all(...baseParams);
 
-    const priceStats = db.prepare(`
-      SELECT MIN(price_inr) as min, MAX(price_inr) as max FROM products p ${baseWhere}
-    `).get(...baseParams) || { min: 499, max: 25000 };
+    const aggStats = db.prepare(`
+      SELECT 
+        MIN(p.price_inr) as min_price,
+        MAX(p.price_inr) as max_price,
+        COALESCE(SUM(CASE WHEN p.duration_hours < 4 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 1 ELSE 0 END), 0) as short_count,
+        COALESCE(SUM(CASE WHEN p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 1 ELSE 0 END), 0) as half_day_count,
+        COALESCE(SUM(CASE WHEN (p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type IN ('TOUR', 'DAY_TOUR')) THEN 1 ELSE 0 END), 0) as full_day_count,
+        COALESCE(SUM(CASE WHEN p.product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') OR p.duration_hours > 24 THEN 1 ELSE 0 END), 0) as multi_day_count,
+        COALESCE(SUM(CASE WHEN p.rating >= 4.5 THEN 1 ELSE 0 END), 0) as r45,
+        COALESCE(SUM(CASE WHEN p.rating >= 4.0 THEN 1 ELSE 0 END), 0) as r40,
+        COALESCE(SUM(CASE WHEN p.rating >= 3.5 THEN 1 ELSE 0 END), 0) as r35
+      FROM products p ${baseWhere}
+    `).get(...baseParams) || {};
 
-    const durationCounts = {
-      short: db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.duration_hours < 4 AND p.product_type != 'MULTI_DAY_PACKAGE'`).get(...baseParams)?.count || 0,
-      half_day: db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type != 'MULTI_DAY_PACKAGE'`).get(...baseParams)?.count || 0,
-      full_day: db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND ((p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type = 'DAY_TOUR'))`).get(...baseParams)?.count || 0,
-      multi_day: db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND (p.product_type = 'MULTI_DAY_PACKAGE' OR p.duration_hours > 24)`).get(...baseParams)?.count || 0,
+    const priceStats = {
+      min: aggStats.min_price || 499,
+      max: aggStats.max_price || 25000,
     };
 
-    const r45 = db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.rating >= 4.5`).get(...baseParams)?.count || 0;
-    const r40 = db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.rating >= 4.0`).get(...baseParams)?.count || 0;
-    const r35 = db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.rating >= 3.5`).get(...baseParams)?.count || 0;
+    const durationCounts = {
+      short: Number(aggStats.short_count) || 0,
+      half_day: Number(aggStats.half_day_count) || 0,
+      full_day: Number(aggStats.full_day_count) || 0,
+      multi_day: Number(aggStats.multi_day_count) || 0,
+    };
+
+    const r45 = Number(aggStats.r45) || 0;
+    const r40 = Number(aggStats.r40) || 0;
+    const r35 = Number(aggStats.r35) || 0;
 
     const ratingCounts = {
       "4.5": r45,
@@ -310,7 +372,7 @@ export class SearchService {
       "above_3_5": r35,
     };
 
-    return {
+    const response = {
       products,
       pagination: {
         page,
@@ -329,6 +391,8 @@ export class SearchService {
         ratings: ratingCounts,
       }
     };
+    cacheService.set(cacheKey, response, 60);
+    return response;
   }
 
   /**

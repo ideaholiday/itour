@@ -1,3 +1,4 @@
+import { activityPath } from "../lib/activityUrl.js";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -5,7 +6,7 @@ import {
   LockKeyhole, MapPin, Navigation, ShieldCheck, Sparkles, Tag, TestTube2,
   UserRound, Users, Wallet
 } from "lucide-react";
-import { api } from "../lib/api.js";
+import { api, authHeaders } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 import { useCurrency } from "../lib/currency.jsx";
@@ -92,6 +93,12 @@ export default function Checkout() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  useEffect(() => { fetch("/api/checkout/config").then(response => response.json()).then(config => setDemoEnabled(Boolean(config.demoEnabled))).catch(() => {}); }, []);
+  const [holdAttempt, setHoldAttempt] = useState(0);
+  const [nativeHold, setNativeHold] = useState(null);
+  const [nativeHoldError, setNativeHoldError] = useState("");
+  const [clockNow, setClockNow] = useState(Date.now());
   const [activity, setActivity] = useState(null);
   const [loadingError, setLoadingError] = useState("");
   const [travelerName, setTravelerName] = useState(user?.name || "");
@@ -143,6 +150,31 @@ export default function Checkout() {
   const vehicle = params.get("vehicle") || "SEDAN";
   const variant = params.get("variant") || "Standard Booking";
   const optionId = params.get("option") || activity?.options?.[0]?.id || null;
+  useEffect(() => {
+    if (!activity || !user?.id || !optionId) return;
+    let active = true;
+    setNativeHold(null); setNativeHoldError("");
+    const key = `native-checkout:${user.id}:${id}:${optionId}:${date}:${pickupTime}:${adults}:${children}`;
+    let requestKey = sessionStorage.getItem(key);
+    if (!requestKey) { requestKey = crypto.randomUUID(); sessionStorage.setItem(key, requestKey); }
+    fetch(`/api/availability/native/${encodeURIComponent(id)}?date=${encodeURIComponent(date)}&optionId=${encodeURIComponent(optionId)}`, { cache: "no-store" })
+      .then(response => response.json()).then(async data => {
+        if (!data.slots?.length || !active) return;
+        const response = await fetch("/api/availability/native/hold", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ productId: id, optionId, localDate: date, localTime: pickupTime, adults, children, requestKey }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not reserve seats");
+        if (active) setNativeHold(result);
+      }).catch(error => { if (active) setNativeHoldError(error.message); });
+    return () => { active = false; };
+  }, [activity, user?.id, id, optionId, date, pickupTime, adults, children, holdAttempt]);
+  useEffect(() => { const timer = setInterval(() => setClockNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const nativeSecondsLeft = nativeHold ? Math.max(0, Math.ceil((Date.parse(nativeHold.expiresAt) - clockNow) / 1000)) : null;
+  const retrySeatHold = () => {
+    sessionStorage.removeItem(`native-checkout:${user.id}:${id}:${optionId}:${date}:${pickupTime}:${adults}:${children}`);
+    setHoldAttempt(attempt => attempt + 1);
+  };
+
+
   const hotelTierId = params.get("hotelTier") || null;
   const ticketTiersParam = params.get("ticketTiers") || ""; // format: "tierId:count,tierId2:count2"
   const addonsParam = params.get("addons") || "";
@@ -192,7 +224,7 @@ export default function Checkout() {
             setDropPoint({ address: meta.destName, lat: meta.destLat, lng: meta.destLng, mapplsPin: "", confirmed: true });
           }
         }
-        if ((data?.productType || data?.product_type) === "MULTI_DAY_PACKAGE") {
+        if (["PACKAGE", "MULTI_DAY_PACKAGE"].includes(data?.productType || data?.product_type)) {
           const itineraryDays = data?.packageItinerary?.dayWiseDetails || [];
           const nights = Number(data?.packageItinerary?.total_nights || Math.max(0, itineraryDays.length - 1));
           setPackageHotels(Array.from({ length: nights }, (_, index) => ({
@@ -222,10 +254,15 @@ export default function Checkout() {
   }, [activity, joiningMethod, vehicle]);
 
   const pickupOption = PICKUP_TYPES.find((option) => option.id === pickupType) || PICKUP_TYPES[0];
-  const isShared = activity && (vehicle === "SHARED_SEAT" || activity.groupType === "SHARED" || activity.group_type === "SHARED");
+  const productSubType = activity?.productSubType || activity?.product_sub_type || "";
+  const isShared = activity && (vehicle === "SHARED_SEAT" || productSubType === "SIC" || productSubType === "TICKET_SIC" || activity.groupType === "SHARED" || activity.group_type === "SHARED");
   const productType = activity?.productType || activity?.product_type || "DAY_TOUR";
   const isTransfer = productType === "TRANSFER";
-  const isPackage = productType === "MULTI_DAY_PACKAGE";
+  const isPackage = productType === "PACKAGE" || productType === "MULTI_DAY_PACKAGE";
+  const requiresFlight = isTransfer && (
+    productSubType === "AIRPORT_RAILWAY" ||
+    String(activity?.transferMeta?.routeType || "").toUpperCase().includes("AIRPORT")
+  );
   const isArrivalTransfer = isTransfer && String(activity?.transferMeta?.serviceDirection || "ARRIVAL").toUpperCase() !== "DEPARTURE";
   const pickupRule = activity?.locationRules?.find((rule) => rule.side === "PICKUP");
   const dropRule = activity?.locationRules?.find((rule) => rule.side === "DROP");
@@ -269,9 +306,15 @@ export default function Checkout() {
     (pickupPoint.address.trim().length >= 3)
   );
   const travelerReady = Boolean(travelerName.trim() && travelerPhone.trim() && travelerEmail.trim());
-  const dropReady = (!isTransfer && !isPackage) || Boolean(dropLocation.trim().length >= 3 && dropPoint.confirmed);
-  const flightReady = !isTransfer || Boolean(/^[A-Z0-9]{2}[- ]?\d{1,4}$/i.test(flightNumber.trim()) && flightTime);
+  const dropAllowsTypedAddress = !dropRule || dropRule.mode === "CITY_ANYWHERE";
+  const dropReady = (!isTransfer && !isPackage) || Boolean(
+    dropLocation.trim().length >= 3 && (dropPoint.confirmed || dropAllowsTypedAddress)
+  );
+  const flightReady = !requiresFlight || Boolean(/^[A-Z0-9]{2}[- ]?\d{1,4}$/i.test(flightNumber.trim()) && flightTime);
   const packageHotelsReady = !isPackage || packageHotels.every((hotel) => hotel.point.confirmed && hotel.point.address.trim().length >= 3);
+  const ticketSelections = useMemo(() => Object.fromEntries(
+    ticketTiersParsed.map(({ tierId, count }) => [tierId, count])
+  ), [ticketTiersParam]);
 
   const discountAmount = appliedPromo ? Number(appliedPromo.discountAmount || 0) : 0;
   const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount);
@@ -323,35 +366,42 @@ export default function Checkout() {
       api.getBookingQuote({
         product_id: id,
         product_option_id: optionId,
+        native_hold_id: nativeHold?.holdId,
+        pickup_time: pickupTime,
         activity_date: date,
         adults,
         children,
         luggage_bags: luggage,
         vehicle_category: vehicle,
         variant_name: variant,
-        pickup_lat: pickupPoint.lat,
-        pickup_lng: pickupPoint.lng,
-        drop_lat: dropPoint.lat,
-        drop_lng: dropPoint.lng,
-        pickup_location: pickupPoint.address,
-        drop_location: dropPoint.address,
+        pickup_lat: pickupPoint.confirmed ? pickupPoint.lat : null,
+        pickup_lng: pickupPoint.confirmed ? pickupPoint.lng : null,
+        drop_lat: dropPoint.confirmed ? dropPoint.lat : null,
+        drop_lng: dropPoint.confirmed ? dropPoint.lng : null,
+        // Don't send a still-being-typed address to the quote/validation
+        // endpoint — it isn't a location yet, just keystrokes, and sending it
+        // makes the backend validate (and reject) an unconfirmed address on
+        // every character typed. Only pass it once the point is confirmed.
+        pickup_location: pickupPoint.confirmed ? pickupPoint.address : "",
+        drop_location: dropPoint.confirmed ? dropPoint.address : "",
         flight_number: flightNumber.trim() || null,
-        flight_arrival_time: isArrivalTransfer ? flightTime || null : null,
-        flight_departure_time: !isArrivalTransfer ? flightTime || null : null,
-        transfer_arrival_mode: isArrivalTransfer ? "AIR" : null,
-        transfer_departure_mode: !isArrivalTransfer ? "AIR" : null,
+        flight_arrival_time: requiresFlight && isArrivalTransfer ? flightTime || null : null,
+        flight_departure_time: requiresFlight && !isArrivalTransfer ? flightTime || null : null,
+        transfer_arrival_mode: requiresFlight && isArrivalTransfer ? "AIR" : undefined,
+        transfer_departure_mode: requiresFlight && !isArrivalTransfer ? "AIR" : undefined,
         pickup_location_ref: pickupPoint.mapplsPin || null,
         drop_location_ref: dropPoint.mapplsPin || null,
         custom_pickup: false,
-        booking_question_answers: {
+        booking_question_answers: requiresFlight ? {
           TRANSFER_ARRIVAL_MODE: isArrivalTransfer ? "AIR" : null,
           TRANSFER_DEPARTURE_MODE: !isArrivalTransfer ? "AIR" : null,
           FLIGHT_NUMBER: flightNumber.trim() || null,
           FLIGHT_ARRIVAL_TIME: isArrivalTransfer ? flightTime || null : null,
           FLIGHT_DEPARTURE_TIME: !isArrivalTransfer ? flightTime || null : null,
-        },
+        } : {},
         package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
         hotel_tier_id: hotelTierId,
+        ticket_selections: Object.keys(ticketSelections).length ? ticketSelections : undefined,
         origin_state: params.get("originState"),
         dest_state: params.get("destState")
       }).then((data) => {
@@ -365,7 +415,7 @@ export default function Checkout() {
       }).finally(() => setQuoteLoading(false));
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, packageHotels, params]);
+  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, requiresFlight, packageHotels, params, ticketSelections, pickupTime, nativeHold?.holdId]);
 
   const progress = useMemo(() => [
     { label: "Traveler", ready: travelerReady, icon: UserRound },
@@ -400,15 +450,19 @@ export default function Checkout() {
       return;
     }
 
+    if (nativeHoldError || nativeHold && nativeSecondsLeft === 0 || quote.nativeSlot && !nativeHold) {
+      setError(nativeHoldError || "Your seat hold expired or is not ready. Return to the experience to start a new checkout."); return;
+    }
     setProcessing(true);
     try {
       const bookingRes = await api.createBooking({
         product_id: id,
         activity_id: id,
         product_option_id: optionId,
+        native_hold_id: nativeHold?.holdId,
+        pickup_time: pickupTime,
         activity_date: date,
         pickup_type: isTransfer || joiningMethod === "PICKUP" ? pickupType : joiningMethod === "MEET" ? "MEETING_POINT" : "PROVIDE_LATER",
-        pickup_time: pickupTime,
         pickup_location: pickupLocation.trim(),
         pickup_instructions: pickupInstructions.trim(),
         pickup_lat: pickupPoint.lat,
@@ -417,27 +471,29 @@ export default function Checkout() {
         drop_lat: dropPoint.lat,
         drop_lng: dropPoint.lng,
         flight_number: flightNumber.trim() || null,
-        flight_arrival_time: isArrivalTransfer ? flightTime || null : null,
-        flight_departure_time: !isArrivalTransfer ? flightTime || null : null,
-        transfer_arrival_mode: isArrivalTransfer ? "AIR" : null,
-        transfer_departure_mode: !isArrivalTransfer ? "AIR" : null,
+        flight_arrival_time: requiresFlight && isArrivalTransfer ? flightTime || null : null,
+        flight_departure_time: requiresFlight && !isArrivalTransfer ? flightTime || null : null,
+        transfer_arrival_mode: requiresFlight && isArrivalTransfer ? "AIR" : undefined,
+        transfer_departure_mode: requiresFlight && !isArrivalTransfer ? "AIR" : undefined,
         pickup_location_ref: pickupPoint.mapplsPin || null,
         drop_location_ref: dropPoint.mapplsPin || null,
         custom_pickup: false,
-        booking_question_answers: {
+        booking_question_answers: requiresFlight ? {
           TRANSFER_ARRIVAL_MODE: isArrivalTransfer ? "AIR" : null,
           TRANSFER_DEPARTURE_MODE: !isArrivalTransfer ? "AIR" : null,
           FLIGHT_NUMBER: flightNumber.trim() || null,
           FLIGHT_ARRIVAL_TIME: isArrivalTransfer ? flightTime || null : null,
           FLIGHT_DEPARTURE_TIME: !isArrivalTransfer ? flightTime || null : null,
-        },
+        } : {},
         terminal_gate: terminalGate.trim() || null,
         package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
         origin_state: params.get("originState"),
         special_requests: specialRequests.trim(),
         promo_code: appliedPromo?.code || null,
+        wallet_credit_inr: useWalletCredits ? walletDiscountAmount : 0,
         selected_addons: addonCalculation.addons,
         hotel_tier_id: hotelTierId,
+        ticket_selections: Object.keys(ticketSelections).length ? ticketSelections : undefined,
         adults, children, luggage_bags: luggage,
         vehicle_category: vehicle,
         variant_name: variant,
@@ -510,7 +566,7 @@ export default function Checkout() {
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900">
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
-        <Link to={`/activity/${id}`} className="inline-flex items-center gap-2 text-xs font-bold text-stone-600 hover:text-amber-700"><ArrowLeft className="h-4 w-4" /> Back to experience</Link>
+        <Link to={activityPath(id, activity?.title)} className="inline-flex items-center gap-2 text-xs font-bold text-stone-600 hover:text-amber-700"><ArrowLeft className="h-4 w-4" /> Back to experience</Link>
 
         <header className="mt-5 overflow-hidden rounded-[2rem] border border-stone-200 bg-white p-6 shadow-md sm:p-8">
           <div className="flex flex-col gap-5">
@@ -529,6 +585,10 @@ export default function Checkout() {
               )}
             </div>
 
+            {quote?.nativeSlot && <p className="text-sm text-stone-700">Free cancellation until {quote.nativeSlot.cancellationHours} hours before departure. After that, this booking is non-refundable.</p>}
+            {nativeHold && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">{nativeSecondsLeft > 0 ? `Seats reserved for ${Math.floor(nativeSecondsLeft / 60)}:${String(nativeSecondsLeft % 60).padStart(2, "0")}. Complete payment before the hold expires.` : "Seat hold expired. Return to the experience and start a new checkout."}</p>}
+            {nativeHoldError && <p role="alert" className="text-red-700">{nativeHoldError}</p>}
+            {(nativeHoldError || nativeHold && nativeSecondsLeft === 0) && <button type="button" onClick={retrySeatHold} className="rounded-lg border border-emerald-800 px-4 py-2 text-emerald-900">Check availability and reserve again</button>}
             {/* Visual 3-step progress bar */}
             <div className="flex items-center gap-0">
               {progress.map(({ label, ready, icon: Icon }, index) => (
@@ -638,8 +698,41 @@ export default function Checkout() {
               {/* Transfer Details Form */}
               {isTransfer && (
                 <div className="space-y-4">
-                  {/* Arrival Transfer Route */}
-                  {isArrivalTransfer ? (
+                  {!requiresFlight ? (
+                    <>
+                      <div className="rounded-2xl border border-emerald-300 bg-emerald-50/40 p-4 space-y-3">
+                        <label className="text-xs font-bold text-emerald-950">Pickup address</label>
+                        <PickupPointPicker
+                          value={pickupPoint}
+                          nearbyLocation={dropPoint}
+                          searchContext={destinationSearchContext}
+                          onChange={setPickupPoint}
+                          placeholder="Enter the pickup hotel, home or complete address..."
+                          productId={id}
+                          validationSide="PICKUP"
+                        />
+                        <label className="block text-xs font-bold text-stone-700">
+                          Pickup time
+                          <input type="time" required value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} className="mt-1 w-full rounded-xl border border-stone-300 bg-white p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" />
+                        </label>
+                      </div>
+                      <div id="dropoff-details" className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
+                        <label className="text-xs font-bold text-indigo-950">Drop-off address</label>
+                        <PickupPointPicker
+                          value={dropPoint}
+                          nearbyLocation={pickupPoint}
+                          searchContext={destinationSearchContext}
+                          onChange={setDropPoint}
+                          placeholder="Enter the destination hotel, home or complete address..."
+                          label=""
+                          kind="dropoff"
+                          markerLabel="B"
+                          productId={id}
+                          validationSide="DROP"
+                        />
+                      </div>
+                    </>
+                  ) : isArrivalTransfer ? (
                     <>
                       {/* Pickup Hub (Airport / Station) */}
                       <div className="rounded-2xl border border-stone-200 bg-white p-4 space-y-3">
@@ -854,9 +947,9 @@ export default function Checkout() {
             </section>
 
             <section className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
-              <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-100 text-emerald-800"><LockKeyhole className="h-5 w-5" /></span><div><h2 className="font-serif text-xl font-bold text-stone-900">Choose payment method</h2><p className="text-xs text-stone-500">Select Cashfree for live sandbox testing or Demo for instant bypass.</p></div></div>
+              <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-100 text-emerald-800"><LockKeyhole className="h-5 w-5" /></span><div><h2 className="font-serif text-xl font-bold text-stone-900">Choose payment method</h2><p className="text-xs text-stone-500">Your seats are confirmed after secure payment verification.</p></div></div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {PAYMENT_OPTIONS.map((option) => {
+                {PAYMENT_OPTIONS.filter(option => option.id !== "DEMO" || demoEnabled).map((option) => {
                   const Icon = option.icon;
                   const selected = paymentMethod === option.id;
                   return (
@@ -914,7 +1007,7 @@ export default function Checkout() {
 
             <button
               type="submit"
-              disabled={processing || quoteLoading || !quote || !travelerReady || !pickupReady || !dropReady}
+              disabled={processing || quoteLoading || !quote || !travelerReady || !pickupReady || !dropReady || !flightReady || !packageHotelsReady}
               className="w-full rounded-2xl bg-amber-500 hover:bg-amber-400 px-6 py-4 text-sm font-black text-stone-950 shadow-md shadow-amber-500/20 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {processing

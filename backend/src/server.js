@@ -1,3 +1,4 @@
+import { processReservationOutbox } from "./services/reservationOutboxService.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -22,10 +23,8 @@ import { runPendingMigrations } from "./services/migrationRunner.js";
 import { supabase } from "./supabaseClient.js";
 import { processExpiredSupplierAssignments } from "./services/assignmentSlaService.js";
 import { processExpiredCircuitReconfirmations } from "./services/circuitOrchestrationService.js";
-import { notifyCircuitReschedule, queueNotification } from "./services/notificationService.js";
-// import { syncGoaSupplierAndProducts } from "./scripts/seedGoaSupplierProducts.js";
-// ⬆️ Plan 14 (5-product system): demo data is now managed by scripts/seed-fresh.js.
-//    The old DAY_TOUR / TRANSFER / MULTI_DAY_PACKAGE auto-sync is disabled.
+import { notifyBookingConfirmed, notifyCircuitReschedule, queueNotification } from "./services/notificationService.js";
+import { syncGoaSupplierAndProducts } from "./scripts/seedGoaSupplierProducts.js";
 import { backfillProductLocationRules } from "./data/canonicalLocations.js";
 import { backfillProductOptions, expireBookingHolds } from "./services/logisticsService.js";
 import { configureSecurity } from "./middleware/security.js";
@@ -50,6 +49,20 @@ try {
   backfillProductOptions(db);
 } catch (err) {
   logger.warn("Startup backfill failed", { error: err });
+}
+
+// Tests and explicitly configured demo environments need a complete, bookable
+// marketplace without copying a developer database. This seed is idempotent
+// and never runs implicitly in production or normal development.
+if (process.env.SEED_DEMO_DATA === "true" && process.env.NODE_ENV !== "production") {
+  try {
+    syncGoaSupplierAndProducts(db);
+    backfillProductLocationRules(db);
+    backfillProductOptions(db);
+  } catch (err) {
+    logger.error("Demo marketplace initialization failed", { error: err });
+    throw err;
+  }
 }
 
 
@@ -79,6 +92,8 @@ import promoRouter from "./routes/promo.js";
 import addonsRouter from "./routes/addons.js";
 import circuitOrdersRouter from "./routes/circuitOrders.js";
 import availabilityRouter from "./routes/availability.js";
+import octoRouter from "./routes/octo.js";
+import supplierChannelsRouter from "./routes/supplierChannels.js";
 import { swaggerSpec } from "./config/swagger.js";
 
 const app = express();
@@ -138,6 +153,8 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/bookings`, bookingsRouter);
   app.use(`${prefix}/transfers`, transfersRouter);
   app.use(`${prefix}/suppliers`, suppliersRouter);
+  app.use(`${prefix}/supplier-channels`, supplierChannelsRouter);
+  app.use(`${prefix}/octo`, octoRouter);
   app.use(`${prefix}/admin`, adminRouter);
   app.use(`${prefix}/analytics`, analyticsRouter);
   app.use(`${prefix}/ops`, opsRouter);
@@ -160,6 +177,7 @@ const mountApiRoutes = (prefix) => {
 
 mountApiRoutes("/api");
 mountApiRoutes("/api/v1");
+app.use("/octo", octoRouter);
 
 app.use("/", securityTxtRouter);
 app.use("/", seoRouter);
@@ -196,7 +214,14 @@ app.use(apiNotFound);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 8080;
+const reservationDeliveryTimer = setInterval(() => {
+  queueNotification(processReservationOutbox(db, notifyBookingConfirmed), "Reservation confirmation outbox");
+}, 5000);
+reservationDeliveryTimer.unref();
 const assignmentSlaTimer = setInterval(() => {
+  try {
+    db.prepare("UPDATE native_reservations SET status = 'EXPIRED' WHERE status = 'ON_HOLD' AND utc_expires_at <= ?").run(new Date().toISOString());
+  } catch (error) { logger.error("Native reservation expiry failed", { error }); }
   try { expireBookingHolds(db); } catch (error) { logger.error("Booking hold expiry worker failed", { error }); }
   try { processExpiredSupplierAssignments(db); } catch (error) { logger.error("Supplier assignment SLA worker failed", { error }); }
   try {
@@ -216,6 +241,8 @@ const server = app.listen(PORT, "0.0.0.0", () => {
 
 const shutdown = (signal) => {
   logger.info("Shutdown signal received", { signal });
+  clearInterval(reservationDeliveryTimer);
+  clearInterval(assignmentSlaTimer);
   server.close(() => {
     try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (error) { logger.warn("SQLite checkpoint failed", { error }); }
     try { db.close(); } catch (error) { logger.warn("SQLite close failed", { error }); }

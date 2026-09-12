@@ -140,6 +140,32 @@ function executeMigrationSql(db, sql) {
 }
 
 /**
+ * Finds migration files that share the same numeric prefix.
+ *
+ * Migrations are applied in lexicographic filename order and tracked by full
+ * filename, so duplicates are not fatal — but they make the apply order depend
+ * on the description text rather than the number, which is easy to get wrong.
+ * Reported by `npm run migrate:status` so the next author picks a free number.
+ *
+ * @param {Array<{ name: string }>} files
+ * @returns {Array<{ prefix: string, names: string[] }>}
+ */
+export function findDuplicateMigrationPrefixes(files) {
+  const byPrefix = new Map();
+
+  for (const file of files) {
+    const prefix = String(file.name).match(/^(\d+)/)?.[1];
+    if (!prefix) continue;
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+    byPrefix.get(prefix).push(file.name);
+  }
+
+  return [...byPrefix.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([prefix, names]) => ({ prefix, names }));
+}
+
+/**
  * Discovers and parses SQL migration files from the migrations directory.
  * @param {string} [dir]
  * @returns {Array<{ name: string, path: string, upSql: string, downSql: string }>}

@@ -5,10 +5,11 @@ import {
   Plus, Trash2, Star, MapPin, Clock, Users, Zap, Globe,
   Camera, Package, Navigation, Ticket, Sparkles, Loader2,
   Building2, Car, Bus, Plane, Train, AlertCircle, CheckCircle2,
-  Eye, DollarSign, Settings, FileText, Calendar, Image
+  Eye, DollarSign, Settings, FileText, Calendar, Image, Copy, ExternalLink
 } from "lucide-react";
 import { useAuth } from "../lib/auth.jsx";
 import { authHeaders } from "../lib/api.js";
+import { activityPath } from "../lib/activityUrl.js";
 
 // ─── Product taxonomy ─────────────────────────────────────────────────────────
 const PRODUCT_TYPES = {
@@ -961,6 +962,8 @@ export default function ProductBuilder() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishError, setPublishError] = useState("");
   const [publishedId, setPublishedId] = useState(null);
+  const [publishedProduct, setPublishedProduct] = useState(null);
+  const [copiedSuccessLink, setCopiedSuccessLink] = useState(false);
 
   // Auto-save draft
   const draftTimerRef = useRef(null);
@@ -1026,9 +1029,12 @@ export default function ProductBuilder() {
         return;
       }
       setPublishedId(json.productId);
+      setPublishedProduct({
+        id: json.productId,
+        title: formData.basic?.title || "",
+        url: json.url || activityPath({ id: json.productId, title: formData.basic?.title || "" })
+      });
       localStorage.removeItem(DRAFT_KEY);
-      // Navigate to supplier dashboard
-      setTimeout(() => navigate("/supplier/dashboard"), 2000);
     } catch (err) {
       setPublishError("Network error. Please try again.");
       setIsPublishing(false);
@@ -1037,19 +1043,64 @@ export default function ProductBuilder() {
 
   // Success screen
   if (publishedId) {
+    const canonicalPath = publishedProduct?.url || activityPath({ id: publishedId, title: formData.basic?.title || "" });
+    const fullPublicUrl = `${window.location.origin}${canonicalPath}`;
+
+    const handleCopyPublicUrl = () => {
+      navigator.clipboard?.writeText(fullPublicUrl);
+      setCopiedSuccessLink(true);
+      setTimeout(() => setCopiedSuccessLink(false), 2500);
+    };
+
     return (
-      <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center px-4">
-        <div className="max-w-md w-full text-center">
-          <div className="h-20 w-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-6">
+      <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center px-4 py-12">
+        <div className="max-w-lg w-full bg-white rounded-3xl p-8 border border-stone-200 shadow-sm text-center">
+          <div className="h-20 w-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-5">
             <CheckCircle2 className="h-10 w-10 text-emerald-600" />
           </div>
           <h1 className="text-2xl font-bold text-stone-900">Product Published! 🎉</h1>
-          <p className="mt-2 text-stone-600">Your {PRODUCT_TYPES[productType]?.label} is now live on IdeaHoliday marketplace.</p>
-          <p className="mt-1 text-xs text-stone-400">Product ID: {publishedId}</p>
-          <p className="mt-4 text-sm text-stone-500">Redirecting to dashboard…</p>
-          <Link to="/supplier/dashboard" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-6 py-3 text-sm font-bold text-white hover:bg-amber-600 transition">
-            Go to Dashboard <ArrowRight className="h-4 w-4" />
-          </Link>
+          <p className="mt-2 text-stone-600">
+            "{formData.basic?.title || "Your listing"}" is now live on IdeaHoliday marketplace.
+          </p>
+
+          <div className="mt-6 text-left rounded-2xl bg-stone-50 p-4 border border-stone-200">
+            <span className="text-xs font-semibold uppercase tracking-wider text-stone-500">Public SEO Marketplace Link</span>
+            <div className="mt-1.5 flex items-center gap-2">
+              <input
+                readOnly
+                value={fullPublicUrl}
+                className="flex-1 bg-white border border-stone-300 rounded-xl px-3 py-2 text-xs font-mono text-stone-800 select-all"
+              />
+              <button
+                type="button"
+                onClick={handleCopyPublicUrl}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 px-3.5 py-2 text-xs font-bold text-white transition shadow-sm whitespace-nowrap"
+              >
+                {copiedSuccessLink ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                <span>{copiedSuccessLink ? "Copied!" : "Copy Link"}</span>
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-stone-500 font-mono">
+              Product ID: {publishedId}
+            </p>
+          </div>
+
+          <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+            <a
+              href={canonicalPath}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-stone-300 bg-white px-5 py-3 text-sm font-bold text-stone-700 hover:bg-stone-50 transition shadow-sm"
+            >
+              <ExternalLink className="h-4 w-4 text-amber-600" /> View Live Listing
+            </a>
+            <Link
+              to="/supplier/dashboard?panel=listings"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-stone-900 px-6 py-3 text-sm font-bold text-white hover:bg-stone-800 transition shadow-sm"
+            >
+              Go to Listings <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
       </div>
     );

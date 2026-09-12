@@ -43,6 +43,8 @@ export function calculateRefundQuote(database, bookingOrId, { now = new Date(), 
   if (!booking) throw financeError("Booking not found", 404);
   const totalAmount = money(booking.amount_inr);
   const hours = hoursUntilPickup(booking, now);
+  const snapshot = typeof booking.logistics_snapshot === "string" ? JSON.parse(booking.logistics_snapshot || "{}") : booking.logistics_snapshot || {};
+  const nativeCancellationHours = snapshot.nativeCancellationHours;
   const policy = String(booking.cancellation_policy || "FLEXIBLE_24H").toUpperCase();
   
   // Calculate hours elapsed since booking was created
@@ -57,6 +59,10 @@ export function calculateRefundQuote(database, bookingOrId, { now = new Date(), 
     percentage = Number(overridePercentage);
     if (![0, 50, 100].includes(percentage)) throw financeError("Refund override must be 0%, 50% or 100%");
     tier = `Admin override (${percentage}% refund)`;
+  } else if (nativeCancellationHours != null) {
+    const startsAt = Date.parse(`${booking.activity_date}T${booking.pickup_time || "09:00"}:00+05:30`);
+    percentage = (startsAt - now.getTime()) / 3600000 >= Number(nativeCancellationHours) ? 100 : 0;
+    tier = `Full refund until ${nativeCancellationHours} hours before departure`;
   } else if (isWithinBookingGrace && policy !== "NON_REFUNDABLE") {
     percentage = 100;
     tier = "Booking Grace Period: 100% full refund within 24 hours of booking";

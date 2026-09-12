@@ -75,6 +75,7 @@ export async function startTestServer(overrides = {}) {
       OTP_SECRET: "integration-otp-secret-with-at-least-32-characters",
       DEMO_PAYMENT_ONLY: "true",
       ENABLE_DEMO_PAYMENT: "true",
+      SEED_DEMO_DATA: "true",
       EMAIL_NOTIFICATIONS_ENABLED: "false",
       WHATSAPP_CLOUD_API_ENABLED: "false",
       NOTIFICATIONS_ENABLED: "false",

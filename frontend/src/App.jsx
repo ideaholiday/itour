@@ -32,6 +32,10 @@ const TourProductBuilder = React.lazy(() => import("./pages/TourProductBuilder.j
 const SupplierListingChooser = React.lazy(() => import("./pages/SupplierListingChooser.jsx"));
 const SupplierTransferBuilder = React.lazy(() => import("./pages/SupplierTransferBuilder.jsx"));
 const ProductBuilder = React.lazy(() => import("./pages/ProductBuilder.jsx"));
+const SupplierChannelManagerPage = React.lazy(() => import("./pages/supplier/SupplierChannelManagerPage.jsx"));
+const SupplierLoginPage = React.lazy(() => import("./pages/SupplierLoginPage.jsx"));
+const AdminLoginPage = React.lazy(() => import("./pages/AdminLoginPage.jsx"));
+import { getDomainInfo, getPortalUrls } from "./lib/domainContext.js";
 
 const AdminPanel = React.lazy(() => import("./pages/AdminPanel.jsx"));
 const OpsPanel = React.lazy(() => import("./pages/OpsPanel.jsx"));
@@ -49,19 +53,58 @@ const NotFound404 = React.lazy(() => import("./pages/NotFound404.jsx"));
 function AppContent() {
   const location = useLocation();
   const { user } = useAuth();
-  const isWorkspace = ["/supplier", "/admin", "/ops"].some((prefix) => location.pathname.startsWith(prefix));
+  const domain = getDomainInfo();
+  const portalUrls = getPortalUrls();
+  const isWorkspace = ["/supplier", "/admin", "/ops"].some((prefix) => location.pathname.startsWith(prefix)) || domain.isSupplier || domain.isAdmin;
 
   React.useEffect(() => {
     analytics.trackPageView(location.pathname + location.search);
   }, [location.pathname, location.search]);
 
+  const userRole = String(user?.role || user?.user_metadata?.role || "").toUpperCase();
+
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF9F6] dark:bg-stone-950 text-stone-900 dark:text-stone-100 font-sans pb-16 md:pb-0">
+      {/* Cross-Domain Portal Switcher Banner for Logged-In Operators on Traveler Site */}
+      {domain.isTraveler && (userRole === "SUPPLIER" || userRole === "ADMIN" || userRole === "STAFF") && (
+        <div className="bg-stone-900 text-stone-300 text-xs px-4 py-2 border-b border-stone-800 flex items-center justify-between">
+          <span>
+            Logged in as <strong className="text-amber-400">{userRole}</strong> ({user?.email})
+          </span>
+          <a
+            href={userRole === "SUPPLIER" ? portalUrls.supplier : portalUrls.admin}
+            className="font-bold text-amber-400 hover:text-amber-300 underline underline-offset-2"
+          >
+            Switch to {userRole === "SUPPLIER" ? "Supplier Portal (supply.ideaholiday.in)" : "Admin Panel (admin.ideaholiday.in)"} →
+          </a>
+        </div>
+      )}
       {!isWorkspace && <Navbar />}
       <main className="flex-1">
-        <React.Suspense fallback={<div className="grid min-h-[55vh] place-items-center bg-[#FAF9F6] dark:bg-stone-950 text-sm font-semibold text-stone-600 dark:text-stone-400">Loading your Idea Holiday workspace…</div>}>
+        <React.Suspense fallback={
+          <div className="grid min-h-[55vh] place-items-center bg-[#FAF9F6] dark:bg-stone-950">
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 shadow-glow-gold animate-pulse-glow">
+                <span className="text-2xl font-black text-stone-950 font-display">IH</span>
+              </div>
+              <p className="text-xs font-semibold text-stone-400 dark:text-stone-500 tracking-wider uppercase">Loading…</p>
+            </div>
+          </div>
+        }>
           <Routes>
-            <Route path="/" element={<Home />} />
+            {/* Root Route Handled According to Domain */}
+            <Route
+              path="/"
+              element={
+                domain.isSupplier ? (
+                  userRole === "SUPPLIER" ? <SupplierDashboardPage /> : <SupplierLoginPage />
+                ) : domain.isAdmin ? (
+                  userRole === "ADMIN" || userRole === "STAFF" ? <AdminPanel view="overview" /> : <AdminLoginPage />
+                ) : (
+                  <Home />
+                )
+              }
+            />
             <Route path="/search" element={<Search />} />
             <Route path="/transfers" element={<TransferSearch />} />
             <Route path="/profile" element={<UserProfile />} />
@@ -73,6 +116,9 @@ function AppContent() {
             <Route path="/supplier/bookings" element={<SupplierBookingsPage />} />
             <Route path="/supplier/portal" element={<SupplierPortal />} />
             <Route path="/supplier/coverage" element={<SupplierDashboardPage />} />
+            <Route path="/supplier/channels" element={<SupplierChannelManagerPage />} />
+            <Route path="/supplier/login" element={<SupplierLoginPage />} />
+            <Route path="/admin/login" element={<AdminLoginPage />} />
             <Route path="/supplier/products/create" element={<SupplierListingChooser />} />
             <Route path="/supplier/products/new" element={<ProductBuilder />} />
             <Route path="/supplier/transfers/create" element={<SupplierTransferBuilder />} />
@@ -90,6 +136,7 @@ function AppContent() {
             <Route path="/ops/tasks" element={<OpsPanel view="tasks" />} />
             <Route path="/ops/circuits" element={<OpsPanel view="circuits" />} />
             <Route path="/activity/:id" element={<ActivityDetail />} />
+            <Route path="/activity/:slug/:id" element={<ActivityDetail />} />
             <Route path="/checkout/:id" element={<Checkout />} />
             <Route path="/booking-confirmed/:ref" element={<BookingConfirmed />} />
             <Route path="/bookings" element={<MyBookings />} />
@@ -105,7 +152,10 @@ function AppContent() {
             <Route path="/circuit-checkout/:id" element={<CircuitCheckout />} />
             <Route path="/circuit-confirmed/:ref" element={<CircuitConfirmed />} />
             <Route path="/circuit/:ref/manage" element={<CircuitManage />} />
-            <Route path="/login" element={<Login />} />
+            <Route
+              path="/login"
+              element={domain.isSupplier ? <SupplierLoginPage /> : domain.isAdmin ? <AdminLoginPage /> : <Login />}
+            />
             <Route path="/signup" element={<Login initialMode="signup" />} />
             <Route path="/how-it-works" element={<HowItWorks />} />
             <Route path="/terms" element={<TermsPage />} />

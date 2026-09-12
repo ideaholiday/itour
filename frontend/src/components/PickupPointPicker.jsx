@@ -2,15 +2,39 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import {
-  Check, ChevronDown, Crosshair, LoaderCircle, LocateFixed, MapPin,
+  Check, ChevronDown, Clock, Crosshair, LoaderCircle, LocateFixed, MapPin,
   Navigation, Search, X
 } from "lucide-react";
 
 const INDIA_CENTER = { lat: 22.9734, lng: 78.6569 };
+const RECENT_PLACES_KEY = "ih_recent_places_v1";
+const RECENT_PLACES_LIMIT = 5;
 
 function displayAddress(place) {
   if (!place.description || place.description.toLowerCase().includes(place.label.toLowerCase())) return place.label;
   return `${place.label}, ${place.description}`;
+}
+
+function loadRecentPlaces() {
+  try {
+    const raw = window.localStorage.getItem(RECENT_PLACES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.slice(0, RECENT_PLACES_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentPlace(entry) {
+  if (!entry.address || !Number.isFinite(entry.lat) || !Number.isFinite(entry.lng)) return loadRecentPlaces();
+  try {
+    const existing = loadRecentPlaces().filter((place) => place.address !== entry.address);
+    const next = [{ ...entry, ts: Date.now() }, ...existing].slice(0, RECENT_PLACES_LIMIT);
+    window.localStorage.setItem(RECENT_PLACES_KEY, JSON.stringify(next));
+    return next;
+  } catch {
+    return loadRecentPlaces();
+  }
 }
 
 function locationIcon(markerLabel) {
@@ -55,6 +79,8 @@ export default function PickupPointPicker({
   const [locating, setLocating] = useState(false);
   const [pinning, setPinning] = useState(false);
   const [message, setMessage] = useState("");
+  const [recentPlaces, setRecentPlaces] = useState(loadRecentPlaces);
+  const [provider, setProvider] = useState("");
   const pointLabel = kind === "dropoff" ? "drop-off" : "pickup";
 
   useEffect(() => {
@@ -96,7 +122,13 @@ export default function PickupPointPicker({
         if (productId) {
           const scopedResponse = await fetch(`/api/activities/${encodeURIComponent(productId)}/pickup-suggestions?side=${encodeURIComponent(validationSide)}&q=${encodeURIComponent(query)}`, { signal: controller.signal });
           const scopedData = await scopedResponse.json().catch(() => ({}));
-          if (scopedResponse.ok) {
+          // The scoped endpoint only searches a small curated list of
+          // canonical anchors (airports, stations, hotel zones). When it has
+          // no match for what the traveler typed, fall through to the
+          // general address search below instead of leaving them stuck with
+          // an empty dropdown for a real hotel/address that just isn't in
+          // that curated list.
+          if (scopedResponse.ok && (scopedData.suggestions || []).length > 0) {
             setSuggestions((scopedData.suggestions || []).map((place) => ({
               id: place.id,
               label: place.name,
@@ -124,6 +156,7 @@ export default function PickupPointPicker({
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || "Location search is unavailable.");
         setSuggestions(data.suggestions || []);
+        if (data.provider) setProvider(data.provider);
         setActiveIndex(-1);
       } catch (error) {
         if (error.name !== "AbortError") {
@@ -165,6 +198,7 @@ export default function PickupPointPicker({
       mapplsPin: location.mapplsPin || "",
       confirmed,
     });
+    if (confirmed) setRecentPlaces(saveRecentPlace({ address: location.address, lat, lng, mapplsPin: location.mapplsPin || "" }));
     setOpen(false);
     setSuggestions([]);
     setMessage("");
@@ -341,6 +375,25 @@ export default function PickupPointPicker({
           )}
         </div>
 
+        {open && input.trim().length < 2 && recentPlaces.length > 0 && !value.confirmed && (
+          <div id={`${inputId}-results`} role="listbox" className="absolute inset-x-0 top-full z-[1000] mt-2 max-h-80 overflow-y-auto rounded-2xl border border-stone-200 bg-white p-2 shadow-2xl">
+            <p className="px-3 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wide text-stone-400">Recent addresses</p>
+            {recentPlaces.map((place, index) => (
+              <button
+                key={`${place.address}-${index}`}
+                role="option"
+                aria-selected={false}
+                type="button"
+                onClick={() => commitLocation(place).then((ok) => { if (ok) setShowMap(true); })}
+                className="flex min-h-14 w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-stone-50"
+              >
+                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-stone-100 text-stone-500"><Clock className="h-4 w-4" /></span>
+                <span className="min-w-0 flex-1"><strong className="block truncate text-sm font-bold text-stone-900">{place.address}</strong></span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {open && input.trim().length >= 2 && (
           <div id={`${inputId}-results`} role="listbox" className="absolute inset-x-0 top-full z-[1000] mt-2 max-h-80 overflow-y-auto rounded-2xl border border-stone-200 bg-white p-2 shadow-2xl">
             {suggestions.map((place, index) => (
@@ -358,8 +411,9 @@ export default function PickupPointPicker({
                 <span className="min-w-0 flex-1"><strong className="block truncate text-sm font-bold text-stone-900">{place.label}</strong><span className="mt-0.5 block text-xs leading-relaxed text-stone-500">{place.description}</span></span>
               </button>
             ))}
-            {!searching && !suggestions.length && !message && <p className="px-4 py-5 text-center text-xs text-stone-500">No matching {pointLabel} points. Try a hotel, landmark, airport or full address.</p>}
-            <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by Mappls</p>
+            {!searching && !suggestions.length && !message && <p className="px-4 py-5 text-center text-xs text-stone-500">No matching {pointLabel} points. Try a hotel, landmark, airport, or drop a pin on the map below.</p>}
+            {provider === "mappls" && <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by Mappls</p>}
+            {provider === "osm" && <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by OpenStreetMap</p>}
           </div>
         )}
       </div>

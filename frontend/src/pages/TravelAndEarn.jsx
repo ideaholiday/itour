@@ -3,11 +3,15 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   Award,
+  Calendar,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
+  Clock,
   Copy,
   Gift,
   HelpCircle,
+  History,
   IndianRupee,
   Lock,
   MessageCircle,
@@ -248,6 +252,215 @@ export default function TravelAndEarn() {
           </div>
         </div>
       </section>
+
+      {/* ─── LIVE USER DASHBOARD (IF LOGGED IN) ─────────────────────────── */}
+      {user && profile && (
+        <section className="mx-auto max-w-6xl px-5 -mt-8 relative z-10 sm:px-8 mb-8">
+          <div className="rounded-3xl bg-white p-6 sm:p-8 shadow-xl border border-stone-200/90">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-stone-100">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-800">Your Traveler Rewards Hub</span>
+                <h2 className="font-display text-2xl sm:text-3xl font-bold text-stone-900 mt-1">
+                  Welcome back, {user.name || "Traveler"}
+                </h2>
+              </div>
+              <div className="flex items-center gap-3">
+                <Link
+                  to="/search"
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-800 hover:bg-amber-900 text-white text-xs sm:text-sm font-bold px-4 py-2.5 shadow-sm transition"
+                >
+                  <Wallet className="h-4 w-4" />
+                  <span>Book with Credits</span>
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
+            </div>
+
+            {/* 4 Metric Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 my-6">
+              <div className="rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50/50 p-4 border border-amber-200/70">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-stone-600">Wallet Balance</span>
+                  <Wallet className="h-4 w-4 text-amber-700" />
+                </div>
+                <div className="font-mono text-2xl sm:text-3xl font-extrabold text-amber-950">
+                  ₹{Number(profile.walletBalanceInr || 0).toLocaleString("en-IN")}
+                </div>
+                <span className="text-[11px] text-amber-800/80 mt-1 block font-medium">
+                  Instant checkout credit
+                </span>
+              </div>
+
+              <div className="rounded-2xl bg-stone-50 p-4 border border-stone-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-stone-600">Total Earned</span>
+                  <TrendingUp className="h-4 w-4 text-emerald-600" />
+                </div>
+                <div className="font-mono text-2xl sm:text-3xl font-extrabold text-stone-900">
+                  ₹{Number(profile.totalCreditsEarned || 0).toLocaleString("en-IN")}
+                </div>
+                <span className="text-[11px] text-stone-500 mt-1 block font-medium">
+                  Lifetime earned rewards
+                </span>
+              </div>
+
+              <div className="rounded-2xl bg-stone-50 p-4 border border-stone-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-stone-600">Pending Credits</span>
+                  <Clock className="h-4 w-4 text-amber-600" />
+                </div>
+                <div className="font-mono text-2xl sm:text-3xl font-extrabold text-stone-900">
+                  ₹{Number(profile.pendingCredits || 0).toLocaleString("en-IN")}
+                </div>
+                <span className="text-[11px] text-stone-500 mt-1 block font-medium">
+                  Credits released upon trip completion
+                </span>
+              </div>
+
+              <div className="rounded-2xl bg-stone-50 p-4 border border-stone-200">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-stone-600">Friends Invited</span>
+                  <Users className="h-4 w-4 text-indigo-600" />
+                </div>
+                <div className="font-mono text-2xl sm:text-3xl font-extrabold text-stone-900">
+                  {profile.friendsInvitedCount || 0}
+                </div>
+                <span className="text-[11px] text-stone-500 mt-1 block font-medium">
+                  {profile.successfulReferralsCount || 0} trips completed
+                </span>
+              </div>
+            </div>
+
+            {/* Tier Progress Bar */}
+            <div className="rounded-2xl bg-stone-900 text-white p-5 sm:p-6 mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2.5">
+                  <Award className="h-5 w-5 text-amber-400" />
+                  <span className="font-bold text-sm sm:text-base">
+                    Current Tier: <strong className="text-amber-300">{profile.tier?.name || "Explorer"}</strong> (₹{profile.tier?.rewardPerFriendInr || 250}/referral)
+                  </span>
+                </div>
+                {profile.nextTier ? (
+                  <span className="text-xs font-medium text-stone-300 bg-stone-800 px-3 py-1 rounded-full border border-stone-700">
+                    {profile.referralsToNextTier} more {profile.referralsToNextTier === 1 ? "friend" : "friends"} to reach <strong className="text-amber-300">{profile.nextTier.name}</strong> (₹{profile.nextTier.rewardPerFriendInr}/friend)
+                  </span>
+                ) : (
+                  <span className="text-xs font-bold text-amber-300 bg-amber-950/60 border border-amber-500/40 px-3 py-1 rounded-full">
+                    👑 Maximum Loyalty Tier Unlocked!
+                  </span>
+                )}
+              </div>
+              <div className="w-full bg-stone-800 h-2.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-amber-500 to-amber-300 h-full rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, Math.max(10, profile.progressPct || 0))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Two Columns: Referral Activity & Wallet Ledger */}
+            <div className="grid lg:grid-cols-2 gap-6 pt-2">
+              {/* Column 1: Invited Friends */}
+              <div className="rounded-2xl border border-stone-200 bg-stone-50/60 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-stone-700" />
+                    <h3 className="font-bold text-stone-900 text-sm">Invited Friends Activity</h3>
+                  </div>
+                  <span className="text-xs text-stone-500 font-medium">
+                    {profile.referrals?.length || 0} total
+                  </span>
+                </div>
+
+                {!profile.referrals?.length ? (
+                  <div className="text-center py-8 text-stone-500">
+                    <Gift className="h-8 w-8 mx-auto mb-2 text-stone-400" />
+                    <p className="text-xs font-medium">No friends joined yet.</p>
+                    <p className="text-[11px] text-stone-400 mt-1">
+                      Share your code <strong className="text-amber-900 font-mono">{referralCode}</strong> to earn your first reward!
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-stone-200/80 max-h-72 overflow-y-auto pr-1">
+                    {profile.referrals.map((ref) => (
+                      <div key={ref.id} className="py-3 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-semibold text-stone-900 block">{ref.referredName}</span>
+                          <span className="text-[11px] text-stone-500 font-mono">
+                            Ref: {ref.bookingRef}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          {ref.status === "REWARDED" ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-bold text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3" />
+                              ₹{ref.rewardInr} Credited
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-800">
+                              <Clock className="h-3 w-3" />
+                              Pending Trip
+                            </span>
+                          )}
+                          <span className="text-[10px] text-stone-400 block mt-0.5">
+                            {new Date(ref.createdAt).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Column 2: Wallet Transaction Ledger */}
+              <div className="rounded-2xl border border-stone-200 bg-stone-50/60 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <History className="h-4 w-4 text-stone-700" />
+                    <h3 className="font-bold text-stone-900 text-sm">Wallet Ledger & History</h3>
+                  </div>
+                  <span className="text-xs text-stone-500 font-mono font-medium">
+                    Balance: ₹{Number(profile.walletBalanceInr || 0).toLocaleString("en-IN")}
+                  </span>
+                </div>
+
+                {!profile.transactions?.length ? (
+                  <div className="text-center py-8 text-stone-500">
+                    <Wallet className="h-8 w-8 mx-auto mb-2 text-stone-400" />
+                    <p className="text-xs font-medium">No wallet transactions yet.</p>
+                    <p className="text-[11px] text-stone-400 mt-1">
+                      Credits earned or redeemed will be recorded here automatically.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-stone-200/80 max-h-72 overflow-y-auto pr-1">
+                    {profile.transactions.map((tx) => (
+                      <div key={tx.id} className="py-3 flex items-start justify-between text-xs gap-2">
+                        <div>
+                          <span className="font-medium text-stone-800 block leading-snug">
+                            {tx.description}
+                          </span>
+                          <span className="text-[10px] text-stone-400 mt-0.5 block">
+                            {new Date(tx.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
+                          </span>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className={`font-mono font-bold text-xs ${tx.amount_inr >= 0 ? "text-emerald-700" : "text-stone-800"}`}>
+                            {tx.amount_inr >= 0 ? `+₹${tx.amount_inr}` : `-₹${Math.abs(tx.amount_inr)}`}
+                          </span>
+                          <span className="text-[10px] text-stone-400 block font-mono">
+                            Bal: ₹{Number(tx.balance_after_inr || 0).toLocaleString("en-IN")}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ─── INTERACTIVE EARNINGS CALCULATOR ────────────────────────────── */}
       <section className="mx-auto max-w-5xl px-5 py-16 sm:px-8">

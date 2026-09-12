@@ -1,5 +1,7 @@
+import LiveDeparturePicker from "../components/traveler/LiveDeparturePicker.jsx";
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { activityPath } from "../lib/activityUrl.js";
 import {
   ArrowRight,
   CalendarDays,
@@ -611,7 +613,13 @@ export default function ActivityDetail() {
   const { formatPrice, currency } = useCurrency();
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [activity, setActivity] = useState(null);
+  useEffect(() => {
+    if (activity?.id === id && location.pathname !== activityPath(activity)) {
+      navigate(`${activityPath(activity)}${location.search}${location.hash}`, { replace: true });
+    }
+  }, [activity, id, location.pathname, location.search, location.hash, navigate]);
   const [date, setDate] = useState(() => localDate(1));
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
@@ -715,7 +723,20 @@ export default function ActivityDetail() {
   const itineraryItems = activity?.itineraryItems || [];
   const dayWiseDetails = activity?.packageItinerary?.dayWiseDetails || [];
   const sightseeingStops = Array.isArray(activity?.itinerary) ? activity.itinerary : [];
-  const startTime = useMemo(() => startTimeFromActivity(activity), [activity]);
+  const [nativeDeparture, setNativeDeparture] = useState(null);
+  const startTime = nativeDeparture?.localTime || startTimeFromActivity(activity);
+  const multiDayItinerary = useMemo(() => {
+    if (!itineraryItems.length) return null;
+    const isMulti = itineraryItems.some((item) => Number(item.day_number ?? item.dayNumber) > 0) || isPackage;
+    if (!isMulti) return null;
+    const grouped = {};
+    itineraryItems.forEach((item) => {
+      const day = Number(item.day_number ?? item.dayNumber ?? 1);
+      if (!grouped[day]) grouped[day] = [];
+      grouped[day].push(item);
+    });
+    return grouped;
+  }, [itineraryItems, isPackage]);
 
   // ── Live quote ──
   useEffect(() => {
@@ -730,6 +751,8 @@ export default function ActivityDetail() {
       api.getBookingQuote({
         product_id: id,
         activity_date: date,
+        pickup_time: startTime,
+        product_option_id: nativeDeparture?.optionId,
         adults: adults || 1,
         children: children || 0,
         luggage_bags: 0,
@@ -745,11 +768,12 @@ export default function ActivityDetail() {
         .finally(() => setQuoteLoading(false));
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [activity, id, date, adults, children, selectedVehicle, selectedHotelTierId, ticketSelections]);
+  }, [activity, id, date, adults, children, selectedVehicle, selectedHotelTierId, ticketSelections, startTime, nativeDeparture?.optionId]);
 
   // ── Checkout nav ──
   const goToCheckout = () => {
     const params = new URLSearchParams({ date, adults: String(adults || 1), children: String(children || 0), time: startTime });
+    if (nativeDeparture?.optionId) params.set("option", nativeDeparture.optionId);
     if (isTransfer) {
       params.set("vehicle", selectedVehicle);
       params.set("variant", "Private chauffeur transfer");
@@ -757,6 +781,9 @@ export default function ActivityDetail() {
       const isSIC = productSubType === "SIC" || activity?.groupType === "SHARED" || activity?.group_type === "SHARED";
       params.set("vehicle", isSIC ? "SHARED_SEAT" : selectedVehicle);
       params.set("variant", isSIC ? "Shared SIC tour" : "Private tour");
+    } else if (productSubType === "TICKET_PRIVATE") {
+      params.set("vehicle", selectedVehicle);
+      params.set("variant", "Ticket with private transfer");
     }
     if (selectedHotelTierId) params.set("hotelTier", selectedHotelTierId);
     if (selectedAddonIds.length > 0) params.set("addons", selectedAddonIds.join(","));
@@ -777,24 +804,11 @@ export default function ActivityDetail() {
     ? activity.images.filter(Boolean)
     : [activity.heroImage || activity.hero_image].filter(Boolean);
 
-  const multiDayItinerary = useMemo(() => {
-    if (!itineraryItems.length) return null;
-    const isMulti = itineraryItems.some((i) => Number(i.day_number || i.dayNumber) > 0) || isPackage;
-    if (!isMulti) return null;
-    const grouped = {};
-    itineraryItems.forEach((item) => {
-      const d = Number(item.day_number || item.dayNumber || 1);
-      if (!grouped[d]) grouped[d] = [];
-      grouped[d].push(item);
-    });
-    return grouped;
-  }, [itineraryItems, isPackage]);
-
   const productJsonLd = {
     "@context": "https://schema.org",
     "@graph": [{
       "@type": isPackage ? "TouristTrip" : "Product",
-      "@id": `https://ideaholiday.in/activity/${activity.id}#product`,
+      "@id": `https://ideaholiday.in${activityPath(activity)}#product`,
       "name": activity.title,
       "description": activity.shortDesc || activity.short_desc || activity.title,
       "image": imagesList.length ? imagesList : ["https://ideaholiday.in/idea-holiday-social.png"],
@@ -803,7 +817,7 @@ export default function ActivityDetail() {
         "@type": "Offer", "priceCurrency": "INR",
         "price": activity.priceInr || activity.price_inr || 999,
         "availability": "https://schema.org/InStock",
-        "url": `https://ideaholiday.in/activity/${activity.id}`,
+        "url": `https://ideaholiday.in${activityPath(activity)}`,
         "seller": { "@type": "Organization", "name": "Idea Holiday" },
       },
       "aggregateRating": {
@@ -846,7 +860,7 @@ export default function ActivityDetail() {
       <SeoHead
         title={`${activity.title} - Book on Idea Holiday`}
         description={activity.shortDesc || activity.short_desc || `Book ${activity.title} in ${activity.city || "India"} on Idea Holiday.`}
-        canonical={`https://ideaholiday.in/activity/${activity.id}`}
+        canonical={`https://ideaholiday.in${activityPath(activity)}`}
         image={imagesList[0] || "https://ideaholiday.in/idea-holiday-social.png"}
         jsonLd={productJsonLd}
       />
@@ -1296,7 +1310,7 @@ export default function ActivityDetail() {
 
           {/* Right: Type-Specific Booking Panel */}
           <aside className="h-fit lg:sticky lg:top-[140px] space-y-4">
-            {bookingPanel}
+            <LiveDeparturePicker productId={id} date={date} selectedTime={startTime} selectedOptionId={nativeDeparture?.optionId} onSelect={setNativeDeparture} />{serverQuote?.nativeSlot && <p className="my-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">Instant confirmation. Free cancellation until {serverQuote.nativeSlot.cancellationHours} hours before departure. Each adult and child uses one seat.</p>}{bookingPanel}
             <Link
               to={`/circuit-planner?addActivityId=${id}&destination=${encodeURIComponent(activity.destination || activity.city || "")}`}
               className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-stone-300 bg-white hover:bg-stone-50 px-4 py-3 text-xs font-bold text-stone-700 transition shadow-sm"

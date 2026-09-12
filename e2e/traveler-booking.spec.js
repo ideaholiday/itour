@@ -21,12 +21,10 @@ test("traveler signs up and completes search-to-confirmation booking journey", a
 
   await expect(page).toHaveURL(/\/activity\//);
   await expect(page.getByRole("heading", { name: activityTitle, exact: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Check availability" }).click();
-  await page.getByText("Select option", { exact: true }).first().click();
-  await page.getByRole("button", { name: /Continue to booking/i }).click();
+  await page.getByRole("button", { name: /Reserve My Seat|Book Private Tour/i }).click();
 
   await expect(page).toHaveURL(/\/checkout\//);
-  await expect(page.getByRole("heading", { name: "Review and book." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Review\s*&\s*Book/i })).toBeVisible();
   await expect(page.getByLabel("Full name")).toHaveValue("Browser E2E Traveler");
   // A persisted local test account may not have a phone from an earlier run.
   await page.getByLabel("WhatsApp / mobile").fill("+919876543210");
@@ -57,9 +55,9 @@ test("traveler signs up and completes search-to-confirmation booking journey", a
   await expect(page).toHaveURL(/\/booking-confirmed\/IH-[^?]+\?demo=1$/);
   const bookingRef = page.url().match(/\/booking-confirmed\/(IH-[^?]+)/)?.[1];
   expect(bookingRef).toBeTruthy();
-  await expect(page.getByText("Booking confirmed", { exact: true })).toBeVisible();
-  await expect(page.getByText("PAID · CONFIRMED", { exact: true })).toBeVisible();
-  await expect(page.getByText("Traveler-only pickup code", { exact: true })).toBeVisible();
+  await expect(page.getByText("Booking Confirmed & Guaranteed", { exact: true })).toBeVisible();
+  await expect(page.getByText(/DAY_TOUR CONFIRMED/i)).toBeVisible();
+  await expect(page.getByText("Traveler Pickup Verification OTP", { exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: /Open My Trips/i }).click();
   await expect(page.getByRole("heading", { name: "My Trips & Itineraries" })).toBeVisible();

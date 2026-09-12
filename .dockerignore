@@ -19,3 +19,11 @@ observability
 playwright.config.js
 scripts
 
+**/.env.*
+**/*.sqlite
+**/*.sqlite3
+**/*.pem
+**/*.key
+**/*.p12
+**/*service-account*.json
+**/*service_account*.json

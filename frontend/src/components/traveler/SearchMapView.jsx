@@ -1,3 +1,4 @@
+import { activityPath } from "../../lib/activityUrl.js";
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -176,7 +177,7 @@ export default function SearchMapView({
               <ShieldCheck className="w-3 h-3 text-emerald-600" /> Verified Tour
             </span>
             <Link
-              to={`/activity/${selectedProduct.id}`}
+              to={activityPath(selectedProduct)}
               className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 dark:text-amber-400 hover:underline"
             >
               <span>View Details</span>

@@ -137,3 +137,7 @@ export async function processRazorpayRefund({ paymentId, amount, reason, idempot
     status: "PROCESSED"
   };
 }
+
+export async function getRazorpayPayment(paymentId) {
+  return razorpayRequest(`/v1/payments/${encodeURIComponent(paymentId)}`, { method: "GET" });
+}

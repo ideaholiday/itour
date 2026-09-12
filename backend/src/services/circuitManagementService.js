@@ -1,3 +1,4 @@
+import { moveNativeReservation } from "./nativeInventoryService.js";
 import { nanoid } from "nanoid";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { calculateRefundQuote, createRefundRecord, finalizeRefund } from "./financeService.js";
@@ -326,6 +327,7 @@ function applyReschedule(database, request, order, actor, now) {
   database.transaction(() => {
     for (const item of preview.items) {
       const modificationId = `mod_${nanoid(12)}`;
+      moveNativeReservation(database, database.prepare("SELECT * FROM bookings WHERE id = ?").get(item.bookingId), item.proposedDate);
       database.prepare(`
         UPDATE bookings SET original_activity_date = COALESCE(original_activity_date, activity_date),
           activity_date = ?, rescheduled_at = ?, supplier_assignment_status = 'RESCHEDULED_RECONFIRMATION_REQUIRED',

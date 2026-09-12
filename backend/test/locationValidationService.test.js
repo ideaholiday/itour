@@ -113,6 +113,44 @@ test("day tours accept configured slots and reject arbitrary times", () => {
   assert.match(invalid.error, /available departure slots/i);
 });
 
+test("day-tour without an explicit drop-off reuses the pickup point", () => {
+  const db = fixture();
+  // Regression test: SIC/shared day tours should accept an empty drop_location and reuse pickup.
+  // When drop_lat/drop_lng are absent and drop_location is "" (empty string), the validation should
+  // succeed by treating the drop as identical to the pickup, not reject with "drop-off is outside X".
+  const result = validateBookingLocations(db, {
+    product_id: "tour",
+    activity_date: "2035-01-15",
+    pickup_lat: 15.545,
+    pickup_lng: 73.7523,
+    pickup_location: "North Goa Hotel",
+    drop_location: "", // Explicitly empty; SIC tours have no separate drop UI.
+    pickup_time: "09:00",
+    adults: 2,
+  }, { now: new Date("2035-01-14T00:00:00"), requireOperationalDetails: false });
+  assert.equal(result.valid, true, "Empty drop_location should fall back to pickup for day tours");
+});
+
+test("day-tour with undefined drop coordinates but empty drop address falls back to pickup", () => {
+  const db = fixture();
+  // Regression test: when drop_lat/drop_lng are absent AND drop_location is ""(empty),
+  // tours should reuse pickup (not pickup address, just the string). This simulates the
+  // actual checkout scenario where frontend sends drop_location: "" for a SIC tour.
+  const result = validateBookingLocations(db, {
+    product_id: "tour",
+    activity_date: "2035-01-15",
+    pickup_lat: 15.545,
+    pickup_lng: 73.7523,
+    pickup_location: "North Goa Hotel",
+    drop_location: "", // Empty string, no coordinates.
+    // No drop_lat/drop_lng
+    pickup_time: "09:00",
+    adults: 2,
+  }, { now: new Date("2035-01-14T00:00:00"), requireOperationalDetails: false });
+  assert.equal(result.valid, true, "Empty drop with no coords should fall back to pickup for tours");
+  assert.equal(result.pickup.valid, true, "Pickup validation should pass");
+});
+
 test("day-tour cutoff rejects bookings less than four hours before departure", () => {
   const db = fixture();
   const result = validateBookingLocations(db, { product_id: "tour", activity_date: "2035-01-15", pickup_lat: 15.545, pickup_lng: 73.7523, pickup_time: "09:00", adults: 2 }, { now: new Date("2035-01-15T06:30:00") });

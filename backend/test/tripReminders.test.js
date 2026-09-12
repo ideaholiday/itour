@@ -25,6 +25,7 @@ describe("WhatsApp & Email Automated Trip Reminders", () => {
     db.prepare("DELETE FROM payout_batches WHERE supplier_id = ?").run(testSupplierId);
     db.prepare("DELETE FROM payouts WHERE booking_id IN (?, ?) OR supplier_id = ?").run(testBookingUpcoming, testBookingCompleted, testSupplierId);
     db.prepare("DELETE FROM supplier_drivers WHERE supplier_id = ?").run(testSupplierId);
+    db.prepare("DELETE FROM booking_modifications WHERE booking_id IN (?, ?)").run(testBookingUpcoming, testBookingCompleted);
     db.prepare("DELETE FROM bookings WHERE id IN (?, ?) OR supplier_id = ?").run(testBookingUpcoming, testBookingCompleted, testSupplierId);
     db.prepare("DELETE FROM suppliers WHERE id = ?").run(testSupplierId);
 

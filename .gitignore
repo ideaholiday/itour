@@ -19,8 +19,13 @@ dist/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 playwright-report/
 test-results/
+coverage/
+tmp/
 .monitoring.env
 observability/secrets/
 backend/uploads/*

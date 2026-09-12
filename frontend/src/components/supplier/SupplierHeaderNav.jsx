@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart3, Bell, CalendarCheck, ChevronDown, ExternalLink, FileCheck, LayoutDashboard, LogOut, Map, PlusCircle, Store, Users } from "lucide-react";
+import { BarChart3, Bell, CalendarCheck, ChevronDown, ExternalLink, FileCheck, LayoutDashboard, LogOut, Map, PlusCircle, RefreshCw, Store, Users } from "lucide-react";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { useAuth } from "../../lib/auth.jsx";
 import SupplierNotificationBell from "./SupplierNotificationBell.jsx";
@@ -19,6 +19,7 @@ export default function SupplierHeaderNav({ supplierData, activeTab }) {
     ["DASHBOARD", "Overview", "/supplier/dashboard", LayoutDashboard],
     ["BOOKINGS", "Bookings", "/supplier/bookings", CalendarCheck, pendingCount || null],
     ["BUILDER", "Listings", "/supplier/dashboard?panel=listings", PlusCircle, supplierData?.products?.length || null],
+    ["CHANNELS", "Channel Manager", "/supplier/channels", RefreshCw],
     ["FLEET", "Fleet", "/supplier/dashboard?panel=fleet", Users, supplierData?.drivers?.length || null],
     ["ANALYTICS", "Analytics", "/supplier/dashboard?panel=analytics", BarChart3],
     ["KYB", "Compliance", "/supplier/dashboard?panel=compliance", FileCheck, isKybPending ? (supplier.kyb_status === "REJECTED" ? "Rejected" : "Action") : null]

@@ -74,6 +74,12 @@ gcloud run deploy "$SERVICE_NAME" \
   --set-secrets "$DEPLOY_SECRETS" \
   --quiet
 
+gcloud run services update-traffic "$SERVICE_NAME" \
+  --to-latest \
+  --project "$PROJECT_ID" \
+  --region "$REGION" \
+  --quiet
+
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --project="$PROJECT_ID" --region="$REGION" --format="value(status.url)")
 
 echo "✅ Deployed successfully! Live URL: $SERVICE_URL"

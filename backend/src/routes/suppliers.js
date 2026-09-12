@@ -1,3 +1,6 @@
+import { getInventoryRules, saveInventoryRules } from "../services/nativeInventoryService.js";
+import { getProductOptions, ensureDefaultProductOption } from "../services/logisticsService.js";
+import { activityPath } from "../../../shared/activityUrl.js";
 import express from "express";
 import db, { databaseInfo } from "../db.js";
 import { canTransitionBooking } from "../services/bookingService.js";
@@ -38,10 +41,12 @@ import { validateBody } from "../middleware/validation.js";
 import { bookingSchemas, supplierSchemas } from "../validators/apiSchemas.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { backfillProductOptions } from "../services/logisticsService.js";
+import { backfillProductLocationRules } from "../data/canonicalLocations.js";
+import { creditReferralRewardOnCompletion } from "../services/loyaltyService.js";
 
 const router = express.Router();
 router.use(authenticate);
-const databaseList = (value) => databaseInfo.engine === "postgres" ? value : JSON.stringify(value);
+const databaseList = (value) => JSON.stringify(value);
 
 function requireSupplierAccess(req, res, next) {
   const role = String(req.user?.role || "").toUpperCase();
@@ -688,7 +693,7 @@ router.post("/:id/products/v2", (req, res) => {
           VALUES (?,?,?,?,?,?,?,?,?,?)`);
         itineraryItems.forEach((item, i) => ins.run(
           `itin_${nanoid(10)}`, productId,
-          Number(item.dayNumber)||1, String(item.timeLabel||`Step ${i+1}`),
+          Number.isFinite(Number(item.dayNumber)) ? Number(item.dayNumber) : 1, String(item.timeLabel||`Step ${i+1}`),
           String(item.title||""), String(item.description||""),
           item.location||null, item.durationText||null, item.icon||"📍", i));
       }
@@ -742,12 +747,19 @@ router.post("/:id/products/v2", (req, res) => {
           Number(t.pricePerPersonPerNightInr)||0,
           t.isRecommended?1:0, i));
       }
+      // Required booking data belongs to the same transaction as publication.
+      backfillProductLocationRules(db, productId);
+      backfillProductOptions(db, productId);
     })();
 
+    const createdProduct = db.prepare("SELECT id,title,product_type,product_sub_type,city,price_inr,status,is_published FROM products WHERE id=?").get(productId);
+
     return res.status(201).json({
-      success: true, productId,
+      success: true,
+      productId,
+      url: activityPath(createdProduct || { id: productId, title }),
       message: `${normType} product created successfully`,
-      product: db.prepare("SELECT id,title,product_type,product_sub_type,city,price_inr,status FROM products WHERE id=?").get(productId),
+      product: createdProduct,
     });
   } catch (err) {
     logger.error("Product v2 creation failed", { error: err.message });
@@ -1074,6 +1086,7 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
       success: true,
       is_published: isPublished,
       status,
+      url: activityPath(product),
       message: isPublished ? "Listing is live in marketplace search." : "Listing moved to draft and removed from marketplace search."
     });
   } catch (err) {
@@ -1479,6 +1492,13 @@ router.patch("/:id/bookings/:bookingId/status", optionalAuthMiddleware, requireS
       }
       if (nextStatus === "cancelled") db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(bookingId);
     })();
+    if (nextStatus === "completed") {
+      try {
+        creditReferralRewardOnCompletion(db, bookingId);
+      } catch (rewardErr) {
+        logger.warn("Referral reward credit on supplier completion failed", { bookingId, error: rewardErr.message });
+      }
+    }
     res.json({ success: true, status: nextStatus, message: `Booking status updated to ${nextStatus}` });
   } catch (err) {
     res.status(500).json({ error: "Failed to update booking status" });
@@ -1635,6 +1655,30 @@ router.delete("/:id/products/:productId/media/:mediaId", optionalAuthMiddleware,
 });
 
 // --- INVENTORY CALENDAR & CAPACITY ---
+router.get("/:id/products/:productId/inventory", requireSupplierAccess, (req, res) => {
+  const product = db.prepare("SELECT * FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+  if (!product) return res.status(404).json({ error: "Product not found" });
+  let options = getProductOptions(db, product.id);
+  if (!options || options.length === 0) {
+    try {
+      ensureDefaultProductOption(db, product);
+      options = getProductOptions(db, product.id);
+    } catch (e) {
+      logger.warn("Failed to ensure default product option for inventory", { productId: product.id, error: e.message });
+    }
+  }
+  res.json({ options: (options || []).map(option => ({ ...option, inventory: getInventoryRules(db, product.id, option.id) || null })) });
+});
+router.put("/:id/products/:productId/inventory/:optionId", requireSupplierAccess, (req, res) => {
+  try {
+    const product = db.prepare("SELECT id, product_type FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    if (product.product_type === "TRANSFER") return res.status(400).json({ error: "Seat inventory is for experiences. Transfers use vehicle availability." });
+    const rules = saveInventoryRules(db, product.id, req.params.optionId, req.body);
+    res.json({ success: true, rules });
+  } catch (error) { res.status(error.status || 400).json({ error: error.message, code: error.code }); }
+});
+
 router.get("/:id/products/:productId/availability", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
   const { productId } = req.params;
   const availability = db.prepare("SELECT * FROM product_availability WHERE product_id = ?").all(productId);
@@ -1728,6 +1772,8 @@ router.post("/:id/products/:productId/clone", optionalAuthMiddleware, requireSup
     original.group_type, original.hero_image, original.images, original.inclusions, original.exclusions, original.itinerary
   );
 
+  backfillProductLocationRules(db);
+  backfillProductOptions(db);
   return res.status(201).json({ success: true, clonedProductId: newId, title: newTitle });
 });
 

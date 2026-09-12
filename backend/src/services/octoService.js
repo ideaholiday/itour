@@ -1,0 +1,328 @@
+import { randomUUID, createHash } from "node:crypto";
+import {
+  listNativeAvailability,
+  reserveNativeInventory,
+  confirmNativeReservation,
+  releaseNativeReservation,
+  getInventoryRules,
+} from "./nativeInventoryService.js";
+import { getProductOptions } from "./logisticsService.js";
+import { octoReservationView } from "./reservationProviders.js";
+import logger from "../config/logger.js";
+
+function stableUnitUuid(seed) {
+  const bytes = createHash("sha256").update(seed).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 15) | 80;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function getOctoCapabilities() {
+  return [
+    { id: "octo/core", revision: 1, required: true },
+    { id: "octo/pricing", revision: 1, required: false },
+    { id: "octo/content", revision: 1, required: false },
+    { id: "octo/webhooks", revision: 1, required: false },
+  ];
+}
+
+export function getOctoSuppliers(db) {
+  const rows = db.prepare(`
+    SELECT id, company_name, contact_name, email, phone, city, state
+    FROM suppliers
+    WHERE is_verified = 1 OR kyb_status = 'VERIFIED'
+    ORDER BY company_name ASC
+  `).all();
+
+  return rows.map((sup) => ({
+    id: sup.id,
+    name: sup.company_name,
+    endpoint: `${process.env.PUBLIC_APP_URL || "https://supply.ideaholiday.in"}/api/octo`,
+    contact: {
+      fullName: sup.contact_name,
+      email: sup.email,
+      telephone: sup.phone,
+      address: `${sup.city || ""}, ${sup.state || ""}`.trim().replace(/^,|,$/g, ""),
+    },
+  }));
+}
+
+export function formatOctoProduct(db, product) {
+  let options = [];
+  try {
+    options = db.prepare("SELECT * FROM product_options WHERE product_id = ?").all(product.id);
+  } catch (_) {
+    options = getProductOptions(db, product.id) || [];
+  }
+  const rules = db.prepare("SELECT * FROM native_inventory_rules WHERE product_id = ?").all(product.id);
+  const rulesByOption = new Map(rules.map((r) => [r.option_id, r]));
+
+  const octoOptions = options.map((opt) => {
+    const optRules = rulesByOption.get(opt.id);
+    let departureTimes = ["09:00", "14:00"];
+    let adultPriceInr = product.price_inr || 0;
+    let childPriceInr = Math.round(adultPriceInr * 0.75);
+    let cutoffHours = 2;
+    let cancellationHours = 24;
+
+    if (optRules) {
+      try {
+        departureTimes = typeof optRules.departure_times === "string" ? JSON.parse(optRules.departure_times) : optRules.departure_times;
+      } catch (e) { /* fallback */ }
+      adultPriceInr = optRules.adult_price || adultPriceInr;
+      childPriceInr = optRules.child_price || childPriceInr;
+      cutoffHours = Math.round((optRules.cutoff_minutes || 120) / 60);
+      cancellationHours = optRules.cancellation_hours || 24;
+    }
+
+    return {
+      id: opt.id,
+      default: Boolean(opt.is_default),
+      internalName: opt.name || opt.variant_name || "Standard Departure",
+      reference: opt.id,
+      availabilityLocalStartTimes: departureTimes,
+      cancellationCutoff: `${cancellationHours} hours`,
+      cancellationCutoffAmount: cancellationHours,
+      cancellationCutoffUnit: "hour",
+      requiredContactFields: ["fullName", "email", "phoneNumber"],
+      restrictions: {
+        minUnits: 1,
+        maxUnits: optRules?.capacity || opt.capacity || 20,
+      },
+      units: [
+        {
+          id: `${opt.id}:adult`,
+          internalName: "Adult",
+          reference: "ADULT",
+          type: "ADULT",
+          pricingFrom: [
+            {
+              original: Math.round(adultPriceInr * 100),
+              retail: Math.round(adultPriceInr * 100),
+              net: Math.round(adultPriceInr * 80),
+              currency: "INR",
+              currencyPrecision: 2,
+            },
+          ],
+        },
+        {
+          id: `${opt.id}:child`,
+          internalName: "Child",
+          reference: "CHILD",
+          type: "CHILD",
+          pricingFrom: [
+            {
+              original: Math.round(childPriceInr * 100),
+              retail: Math.round(childPriceInr * 100),
+              net: Math.round(childPriceInr * 80),
+              currency: "INR",
+              currencyPrecision: 2,
+            },
+          ],
+        },
+      ],
+    };
+  });
+
+  return {
+    id: product.id,
+    internalName: product.title,
+    reference: product.product_code || product.id,
+    locale: "en",
+    timeZone: "Asia/Kolkata",
+    instantConfirmation: Boolean(product.is_instant_booking ?? 1),
+    instantDelivery: true,
+    availabilityRequired: true,
+    availabilityType: "START_TIME",
+    deliveryFormats: ["QRCODE", "PDF_URL"],
+    deliveryMethods: ["TICKET", "VOUCHER"],
+    settlementMethod: "DEFERRED",
+    redemptionMethod: "DIGITAL",
+    options: octoOptions,
+  };
+}
+
+export function getOctoProducts(db, { supplierId } = {}) {
+  let query = "SELECT * FROM products WHERE (status = 'PUBLISHED' OR is_published = 1)";
+  const params = [];
+  if (supplierId) {
+    query += " AND supplier_id = ?";
+    params.push(supplierId);
+  }
+  query += " ORDER BY created_at DESC LIMIT 100";
+
+  const rows = db.prepare(query).all(...params);
+  return rows.map((product) => formatOctoProduct(db, product));
+}
+
+export function getOctoProduct(db, productId) {
+  const row = db.prepare("SELECT * FROM products WHERE id = ?").get(productId);
+  if (!row) return null;
+  return formatOctoProduct(db, row);
+}
+
+export function getOctoAvailability(db, { productId, optionId, localDateStart, localDateEnd }) {
+  const dates = [];
+  const start = new Date(localDateStart);
+  const end = localDateEnd ? new Date(localDateEnd) : start;
+
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    dates.push(d.toISOString().slice(0, 10));
+  }
+
+  const allSlots = [];
+  for (const dateStr of dates) {
+    try {
+      const slots = listNativeAvailability(db, productId, optionId, dateStr);
+      for (const slot of slots) {
+        allSlots.push({
+          id: slot.id,
+          localDateTimeStart: slot.localDateTimeStart,
+          localDateTimeEnd: slot.localDateTimeStart,
+          allDay: false,
+          available: slot.available,
+          status: slot.status,
+          vacancies: slot.vacancies,
+          capacity: slot.capacity,
+          maxUnits: slot.capacity,
+          utcCutoffAt: slot.utcCutoffAt,
+          openingHours: [],
+          unitPricing: [
+            {
+              unitId: `${slot.optionId}:adult`,
+              pricing: {
+                original: Math.round(slot.adultPrice * 100),
+                retail: Math.round(slot.adultPrice * 100),
+                net: Math.round(slot.adultPrice * 80),
+                currency: "INR",
+                currencyPrecision: 2,
+              },
+            },
+            {
+              unitId: `${slot.optionId}:child`,
+              pricing: {
+                original: Math.round(slot.childPrice * 100),
+                retail: Math.round(slot.childPrice * 100),
+                net: Math.round(slot.childPrice * 80),
+                currency: "INR",
+                currencyPrecision: 2,
+              },
+            },
+          ],
+        });
+      }
+    } catch (err) {
+      logger.warn("OCTo availability lookup error for date", { dateStr, error: err.message });
+    }
+  }
+
+  return allSlots;
+}
+
+export function createOctoReservation(db, input) {
+  const { uuid = randomUUID(), productId, optionId, availabilityId, unitItems = [], contact } = input;
+
+  if (!productId || !optionId || !availabilityId) {
+    throw Object.assign(new Error("productId, optionId, and availabilityId are required"), { status: 400 });
+  }
+
+  const parts = availabilityId.split(":");
+  const localDate = parts[1];
+  const localTime = parts.slice(2).join(":");
+
+  let adults = 0;
+  let children = 0;
+  for (const item of unitItems) {
+    if (String(item.unitId).includes("child")) children += 1;
+    else adults += 1;
+  }
+  if (adults === 0 && children === 0) adults = 1;
+
+  const reservation = reserveNativeInventory(db, {
+    productId,
+    optionId,
+    localDate,
+    localTime,
+    adults,
+    children,
+    ownerId: `octo_${uuid}`,
+    requestKey: `octo_key_${uuid}`,
+  });
+
+  return octoReservationView(db, reservation.id, `octo_${uuid}`);
+}
+
+export function confirmOctoReservation(db, input) {
+  const { uuid, contact = {} } = input;
+  if (!uuid) throw Object.assign(new Error("uuid is required"), { status: 400 });
+
+  const reservation = db.prepare("SELECT * FROM native_reservations WHERE id = ? OR owner_id = ?").get(uuid, `octo_${uuid}`);
+  if (!reservation) throw Object.assign(new Error("Reservation not found"), { status: 404 });
+
+  if (reservation.status === "CONFIRMED") {
+    return octoReservationView(db, reservation.id, reservation.owner_id);
+  }
+
+  const bookingId = `bk_octo_${uuid.slice(0, 12)}`;
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO bookings (id, user_id, product_id, activity_date, pickup_time, adults, children, total_amount_inr, status, payment_status, traveler_name, traveler_email, traveler_phone)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', 'PAID', ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING
+    `).run(
+      bookingId,
+      reservation.owner_id,
+      reservation.availability_slot.split(":")[0],
+      reservation.availability_slot.split(":")[1],
+      reservation.availability_slot.split(":")[2],
+      reservation.adults,
+      reservation.children,
+      1000,
+      contact.fullName || "OCTo Guest",
+      contact.email || "octo@ideaholiday.in",
+      contact.phoneNumber || "+919999999999"
+    );
+
+    db.prepare("UPDATE native_reservations SET status = 'CONFIRMED', booking_id = ? WHERE id = ?").run(bookingId, reservation.id);
+  })();
+
+  const confirmedView = octoReservationView(db, reservation.id, reservation.owner_id);
+  return {
+    ...confirmedView,
+    status: "CONFIRMED",
+    voucher: {
+      redemptionMethod: "DIGITAL",
+      deliveryOptions: [
+        {
+          deliveryFormat: "QRCODE",
+          deliveryValue: `https://ideaholiday.in/trip/${bookingId}`,
+        },
+      ],
+    },
+  };
+}
+
+export function cancelOctoReservation(db, input) {
+  const { uuid, reason = "Customer request" } = input;
+  const reservation = db.prepare("SELECT * FROM native_reservations WHERE id = ? OR owner_id = ?").get(uuid, `octo_${uuid}`);
+  if (!reservation) throw Object.assign(new Error("Reservation not found"), { status: 404 });
+
+  db.transaction(() => {
+    db.prepare("UPDATE native_reservations SET status = 'CANCELLED' WHERE id = ?").run(reservation.id);
+    if (reservation.booking_id) {
+      db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").run(reservation.booking_id);
+    }
+  })();
+
+  return {
+    id: reservation.id,
+    uuid: reservation.id,
+    status: "CANCELLED",
+    cancellation: {
+      refund: "FULL",
+      reason,
+      utcCancelledAt: new Date().toISOString(),
+    },
+  };
+}

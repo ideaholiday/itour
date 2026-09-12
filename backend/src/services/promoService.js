@@ -204,11 +204,34 @@ export function processReferralRewardOnCompletion(database, bookingId) {
   const referral = database.prepare("SELECT * FROM user_referrals WHERE booking_id = ? AND status = 'PENDING'").get(bookingId);
   if (!referral) return null;
 
-  database.prepare(`
-    UPDATE user_referrals
-    SET status = 'REWARDED', rewarded_at = datetime('now')
-    WHERE id = ?
-  `).run(referral.id);
+  const referrer = database.prepare("SELECT id, name, email, phone, wallet_balance_inr FROM users WHERE id = ?").get(referral.referrer_user_id);
+  const rewardAmount = Number(referral.reward_inr) || 250;
+  const currentBalance = Number(referrer?.wallet_balance_inr || 0);
+  const newBalance = currentBalance + rewardAmount;
 
-  return { referralId: referral.id, rewarded: true };
+  database.transaction(() => {
+    database.prepare(`
+      UPDATE user_referrals
+      SET status = 'REWARDED', rewarded_at = datetime('now')
+      WHERE id = ?
+    `).run(referral.id);
+
+    if (referrer) {
+      database.prepare("UPDATE users SET wallet_balance_inr = ? WHERE id = ?").run(newBalance, referrer.id);
+      database.prepare(`
+        INSERT INTO wallet_transactions (
+          id, user_id, type, amount_inr, balance_after_inr, reference_id, description, created_at
+        ) VALUES (?, ?, 'REFERRAL_REWARD', ?, ?, ?, ?, datetime('now'))
+      `).run(
+        `wtx_${nanoid(12)}`,
+        referrer.id,
+        rewardAmount,
+        newBalance,
+        referral.id,
+        `Earned ₹${rewardAmount} for successful friend referral (#${bookingId})`
+      );
+    }
+  })();
+
+  return { referralId: referral.id, rewarded: true, rewardAmount, newBalance };
 }

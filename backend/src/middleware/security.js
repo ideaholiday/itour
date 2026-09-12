@@ -2,7 +2,14 @@ import cors from "cors";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 
-const LOCAL_ORIGINS = ["http://localhost:3000", "http://localhost:5173"];
+const LOCAL_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://supply.localhost:5173",
+  "http://admin.localhost:5173",
+  "http://supply.localhost:3000",
+  "http://admin.localhost:3000",
+];
 const CASHFREE_CHECKOUT_ORIGINS = [
   "https://sdk.cashfree.com",
   "https://sandbox.cashfree.com",

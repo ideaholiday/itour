@@ -38,7 +38,7 @@ router.post("/whatsapp", (req, res) => {
     return res.sendStatus(200);
   } catch (error) {
     logger.error("WhatsApp webhook processing failed", { requestId: req.requestId, error });
-    return res.sendStatus(200);
+    return res.sendStatus(503);
   }
 });
 

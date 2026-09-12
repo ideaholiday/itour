@@ -1,8 +1,9 @@
+import { getInventoryRules, reserveNativeInventory, attachNativeReservation } from "./nativeInventoryService.js";
 import { nanoid } from "nanoid";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
 
-const HOLD_VALIDITY_MS = 15 * 60 * 1000;
+const HOLD_VALIDITY_MS = 10 * 60 * 1000;
 const ACTIVE_ORDER_STATUS = "PENDING_PAYMENT";
 
 function orderError(message, status = 400, code = "CIRCUIT_ORDER_ERROR", details = undefined) {
@@ -343,6 +344,15 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
         totalAmount, taxesAmount, commissionAmount, commissionRate, supplierPayout,
         "Reserved from an owned, ready circuit quote", product.id,
       );
+      const nativeRules = getInventoryRules(database, product.id);
+      if (nativeRules) {
+        const hold = reserveNativeInventory(database, { productId: product.id, optionId: nativeRules.option_id,
+          localDate: line.activityDate, localTime: linePickupTime, adults: Number(line.adults ?? quote.adults_count),
+          children: Number(line.children ?? quote.children_count), ownerId: userId, requestKey: `circuit:${orderId}:${line.itemId}` });
+        database.prepare("UPDATE bookings SET product_option_id = ?, confirmation_type = 'INSTANT', logistics_snapshot = ? WHERE id = ?")
+          .run(nativeRules.option_id, JSON.stringify({ nativeCancellationHours: Number(nativeRules.cancellation_hours) }), bookingId);
+        attachNativeReservation(database, hold.id, database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId), userId);
+      }
       database.prepare(`
         INSERT INTO circuit_order_items (
           id, circuit_order_id, quote_line_item_id, booking_id, sequence_number, product_id,

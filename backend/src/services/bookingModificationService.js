@@ -1,3 +1,4 @@
+import { moveNativeReservation } from "./nativeInventoryService.js";
 import crypto from "crypto";
 
 export class BookingModificationService {
@@ -107,6 +108,7 @@ export class BookingModificationService {
     const requesterId = actor?.id || booking.user_id || "traveler";
 
     database.transaction(() => {
+      moveNativeReservation(database, booking, newDate, targetTime);
       database.prepare(`
         UPDATE bookings
         SET

@@ -129,7 +129,7 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
   const requestedRoute = isTransfer
     ? db.prepare("SELECT * FROM transfer_routes WHERE product_id = ? LIMIT 1").get(requestedProduct.id)
     : null;
-  const requestedPackage = requestedProduct.product_type === "MULTI_DAY_PACKAGE"
+  const requestedPackage = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(requestedProduct.product_type)
     ? db.prepare("SELECT * FROM package_itineraries WHERE product_id = ? LIMIT 1").get(requestedProduct.id)
     : null;
   const sql = isTransfer

@@ -7,7 +7,17 @@ types.setTypeParser(1700, (value) => Number(value));
 
 const encoder = new TextEncoder();
 const connection = workerData.connection;
-const client = new Client({ ...connection, application_name: "idea-holiday-cloud-run" });
+const client = new Client({
+  ...connection,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+  statement_timeout: 25000,
+  query_timeout: 25000,
+  application_name: "idea-holiday-cloud-run",
+});
+client.on("error", (err) => {
+  console.error("PostgreSQL worker client error:", err.message);
+});
 
 function writeResponse(sharedBuffer, status, payload) {
   const control = new Int32Array(sharedBuffer, 0, 2);
