@@ -72,18 +72,25 @@ function localDate(daysFromToday = 0) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
-function startTimeFromActivity(activity) {
-  if (activity?.itineraryItems?.length) {
-    const first = activity.itineraryItems[0];
-    if (first.time_label || first.timeLabel) return first.time_label || first.timeLabel;
-  }
-  const firstStop = Array.isArray(activity?.itinerary) ? activity.itinerary[0] : null;
-  const match = String(firstStop?.duration || firstStop?.time || "").match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-  if (!match) return "09:00";
+// Itinerary labels are free text ("Day 1", "Morning", "10:00 AM onwards"), but the
+// quote API only accepts a clock time, so pull one out or return null.
+function parseClockTime(value) {
+  const match = String(value ?? "").match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!match) return null;
   let hours = Number(match[1]);
-  if (match[3]?.toUpperCase() === "PM" && hours < 12) hours += 12;
-  if (match[3]?.toUpperCase() === "AM" && hours === 12) hours = 0;
+  const meridiem = match[3]?.toUpperCase();
+  if (meridiem === "PM" && hours < 12) hours += 12;
+  if (meridiem === "AM" && hours === 12) hours = 0;
+  if (hours > 23 || Number(match[2]) > 59) return null;
   return `${String(hours).padStart(2, "0")}:${match[2]}`;
+}
+
+function startTimeFromActivity(activity) {
+  const first = activity?.itineraryItems?.[0];
+  const fromItem = parseClockTime(first?.time_label || first?.timeLabel);
+  if (fromItem) return fromItem;
+  const firstStop = Array.isArray(activity?.itinerary) ? activity.itinerary[0] : null;
+  return parseClockTime(firstStop?.duration || firstStop?.time) || "09:00";
 }
 
 // ─── Shared UI helpers ────────────────────────────────────────
@@ -724,7 +731,7 @@ export default function ActivityDetail() {
   const dayWiseDetails = activity?.packageItinerary?.dayWiseDetails || [];
   const sightseeingStops = Array.isArray(activity?.itinerary) ? activity.itinerary : [];
   const [nativeDeparture, setNativeDeparture] = useState(null);
-  const startTime = nativeDeparture?.localTime || startTimeFromActivity(activity);
+  const startTime = parseClockTime(nativeDeparture?.localTime) || startTimeFromActivity(activity);
   const multiDayItinerary = useMemo(() => {
     if (!itineraryItems.length) return null;
     const isMulti = itineraryItems.some((item) => Number(item.day_number ?? item.dayNumber) > 0) || isPackage;
@@ -763,7 +770,11 @@ export default function ActivityDetail() {
         .then((data) => setServerQuote(data.quote))
         .catch((error) => {
           setServerQuote(null);
-          setQuoteError(error.message || "Pricing currently unavailable for this configuration.");
+          // A schema rejection is our bug, not something the traveler can act on, so
+          // never surface the raw backend wording.
+          setQuoteError(error.code === "VALIDATION_ERROR" || !error.message
+            ? "Pricing currently unavailable for this configuration."
+            : error.message);
         })
         .finally(() => setQuoteLoading(false));
     }, 300);

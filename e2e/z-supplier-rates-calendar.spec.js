@@ -244,3 +244,63 @@ test("supplier runs a promotion and the traveler sees the discounted rate", asyn
 
   await page.screenshot({ path: "test-results/native-traveler-promotion.png", fullPage: true });
 });
+
+// Bulk calendar editing: close a whole season from one form.
+test("supplier closes a date range from the extranet in one action", async ({ page, request }) => {
+  const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
+  const account = await login.json();
+  const supplierId = account.user.supplier_id;
+  const headers = { Authorization: `Bearer ${account.token}` };
+
+  const publication = await request.post(`/api/suppliers/${supplierId}/products/v2`, { headers, data: {
+    productType: "EXPERIENCE", productSubType: "TICKET_SIC", title: "Bulk calendar browser check", city: "Goa", state: "Goa",
+    priceInr: 1000, shortDesc: "Bulk calendar verification", status: "PUBLISHED" } });
+  const published = await publication.json();
+  expect(publication.status(), JSON.stringify(published)).toBe(201);
+  const productId = published.productId;
+
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.goto("/supplier/dashboard?panel=listings");
+  await page.getByPlaceholder("Search by title, city, route…").fill(published.product.title);
+  await page.getByRole("button", { name: "Seats and schedule" }).click();
+  const editor = page.getByRole("dialog", { name: "Seats and schedule" });
+  await expect(editor).toBeVisible();
+
+  await editor.getByLabel("Seats per departure").fill("8");
+  await editor.getByLabel("Adult price").fill("1000");
+  await editor.getByLabel("Child price").fill("400");
+  await editor.getByRole("button", { name: "Save schedule" }).click();
+  await expect(editor.getByRole("status")).toContainText("Saved.");
+
+  await editor.getByRole("button", { name: "Calendar" }).click();
+  await expect(editor.getByRole("heading", { name: "Apply across a date range" })).toBeVisible();
+  await editor.getByLabel("Range from").fill("2099-07-01");
+  await editor.getByLabel("Range to").fill("2099-07-07");
+  await editor.getByLabel("Reason (optional)").fill("Monsoon closure");
+  await editor.getByRole("button", { name: "Apply to range" }).click();
+  await expect(editor.getByRole("status")).toContainText("Updated 7 dates.");
+  await page.screenshot({ path: "test-results/native-supplier-bulk-calendar.png" });
+
+  const optionId = (await (await request.get(`/api/suppliers/${supplierId}/products/${productId}/inventory`, { headers })).json()).options[0].id;
+  const slotsOn = async (date) => {
+    const response = await request.get(`/api/availability/native/${productId}?optionId=${optionId}&date=${date}`);
+    return (await response.json()).slots;
+  };
+
+  for (const date of ["2099-07-01", "2099-07-04", "2099-07-07"]) {
+    const slots = await slotsOn(date);
+    expect(slots.every(slot => slot.status === "CLOSED"), `${date} should be fully closed`).toBe(true);
+    expect(slots[0].supplierNote).toBe("Monsoon closure");
+  }
+  expect((await slotsOn("2099-07-08"))[0].status).toBe("AVAILABLE");
+
+  // Clearing the range reopens everything it covered.
+  await editor.getByLabel("Range from").fill("2099-07-01");
+  await editor.getByLabel("Range to").fill("2099-07-07");
+  await editor.getByRole("button", { name: "Clear range" }).click();
+  await expect(editor.getByRole("status")).toContainText("Cleared 7 overrides.");
+
+  const reopened = await slotsOn("2099-07-04");
+  expect(reopened[0].status).toBe("AVAILABLE");
+  expect(reopened[0].capacity).toBe(8);
+});

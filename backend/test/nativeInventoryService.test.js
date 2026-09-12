@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { processReservationOutbox } from "../src/services/reservationOutboxService.js";
 import { executeMigrationSql } from "../src/services/migrationRunner.js";
 import { calculateRefundQuote } from "../src/services/financeService.js";
-import { moveNativeReservation, checkNativeInventory, saveInventoryRules, listNativeAvailability, reserveNativeInventory, attachNativeReservation, confirmNativeReservation, releaseNativeReservation, savePriceSchedule, saveSlotOverride, deleteSlotOverride, normalizeUnitItems, saveBookingUnitItems, listBookingUnitItems, listNativeMonthPricing, saveResource, listResources, deleteResource, savePromotion, listPromotions, deletePromotion } from "../src/services/nativeInventoryService.js";
+import { moveNativeReservation, checkNativeInventory, saveInventoryRules, listNativeAvailability, reserveNativeInventory, attachNativeReservation, confirmNativeReservation, releaseNativeReservation, savePriceSchedule, saveSlotOverride, deleteSlotOverride, normalizeUnitItems, saveBookingUnitItems, listBookingUnitItems, listNativeMonthPricing, saveResource, listResources, deleteResource, savePromotion, listPromotions, deletePromotion, saveSlotOverrideRange, deleteSlotOverrideRange, listSlotOverrides } from "../src/services/nativeInventoryService.js";
 
 const rules = { operatingDays: [0, 1, 2, 3, 4, 5, 6], departureTimes: ["09:00", "14:00"], capacity: 3, adultPrice: 1000, childPrice: 400, cutoffMinutes: 120, cancellationHours: 24, blackoutDates: [] };
 const future = "2099-05-12";
@@ -604,4 +604,107 @@ test("the month price calendar shows public promotions but hides coded ones", t 
 
   assert.equal(byDate["2099-05-25"].priceInr, 1000, "dates outside the promotion window are undiscounted");
   assert.equal(byDate["2099-05-25"].promotionLabel, null);
+});
+
+// --- Bulk calendar editing ---
+
+test("a range closure applies to every operating date in one call", t => {
+  const db = fixture(t);
+  const result = saveSlotOverrideRange(db, "p", "o", { from: "2099-05-10", to: "2099-05-14", closed: true, note: "Monsoon" });
+
+  assert.equal(result.appliedCount, 5);
+  assert.deepEqual(result.applied, ["2099-05-10", "2099-05-11", "2099-05-12", "2099-05-13", "2099-05-14"]);
+  for (const day of result.applied) {
+    for (const slot of listNativeAvailability(db, "p", "o", day)) {
+      assert.equal(slot.status, "CLOSED", `${day} ${slot.localTime} should be closed`);
+      assert.equal(slot.supplierNote, "Monsoon");
+    }
+  }
+  // Dates outside the range are untouched.
+  assert.equal(listNativeAvailability(db, "p", "o", "2099-05-15")[0].status, "AVAILABLE");
+});
+
+test("a range can target selected weekdays only", t => {
+  const db = fixture(t);
+  // 2099-05-10 is a Sunday, so Mondays in this window are the 11th and 18th.
+  const result = saveSlotOverrideRange(db, "p", "o", { from: "2099-05-10", to: "2099-05-20", weekdays: [1], capacity: 1 });
+
+  assert.deepEqual(result.applied, ["2099-05-11", "2099-05-18"]);
+  assert.equal(listNativeAvailability(db, "p", "o", "2099-05-11")[0].capacity, 1);
+  assert.equal(listNativeAvailability(db, "p", "o", "2099-05-12")[0].capacity, 3, "other weekdays keep the rule capacity");
+});
+
+test("a range targets one departure when a time is given", t => {
+  const db = fixture(t);
+  saveSlotOverrideRange(db, "p", "o", { from: "2099-05-10", to: "2099-05-11", localTime: "09:00", closed: true });
+
+  for (const day of ["2099-05-10", "2099-05-11"]) {
+    const slots = listNativeAvailability(db, "p", "o", day);
+    assert.equal(slots.find(s => s.localTime === "09:00").status, "CLOSED");
+    assert.equal(slots.find(s => s.localTime === "14:00").status, "AVAILABLE", "the other departure keeps selling");
+  }
+});
+
+test("a range skips dates the option does not operate on", t => {
+  const db = fixture(t);
+  // Operate Mondays only, then sweep a full week.
+  saveInventoryRules(db, "p", "o", { ...rules, operatingDays: [1] });
+  const result = saveSlotOverrideRange(db, "p", "o", { from: "2099-05-10", to: "2099-05-16", closed: true });
+
+  assert.deepEqual(result.applied, ["2099-05-11"]);
+  assert.equal(result.skippedNonOperating.length, 6);
+});
+
+test("one conflicting date leaves the whole range untouched", t => {
+  const db = fixture(t);
+  // Three seats held on the 12th; a range shrinking to 1 must fail atomically.
+  reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: "2099-05-12", localTime: "09:00", adults: 2, children: 1, ownerId: "u", requestKey: "held" });
+
+  assert.throws(
+    () => saveSlotOverrideRange(db, "p", "o", { from: "2099-05-10", to: "2099-05-14", capacity: 1 }),
+    /Capacity cannot be below 3 reserved seats/
+  );
+  // The 10th and 11th were processed before the 12th threw — they must be rolled back.
+  assert.equal(listSlotOverrides(db, "p", "o").length, 0, "no partial range should survive");
+  assert.equal(listNativeAvailability(db, "p", "o", "2099-05-10")[0].capacity, 3);
+});
+
+test("range bounds are validated", t => {
+  const db = fixture(t);
+  assert.throws(() => saveSlotOverrideRange(db, "p", "o", { from: "2099-05-20", to: "2099-05-10", closed: true }));
+  assert.throws(
+    () => saveSlotOverrideRange(db, "p", "o", { from: "2099-01-01", to: "2101-01-01", closed: true }),
+    /cannot exceed 366 days/
+  );
+});
+
+test("a range delete reopens every date it covers", t => {
+  const db = fixture(t);
+  saveSlotOverrideRange(db, "p", "o", { from: "2099-05-10", to: "2099-05-14", closed: true, capacity: 1 });
+  assert.equal(listSlotOverrides(db, "p", "o").length, 5);
+
+  const removed = deleteSlotOverrideRange(db, "p", "o", { from: "2099-05-10", to: "2099-05-12" });
+  assert.equal(removed.removedCount, 3);
+  assert.equal(listSlotOverrides(db, "p", "o").length, 2);
+
+  assert.equal(listNativeAvailability(db, "p", "o", "2099-05-10")[0].status, "AVAILABLE");
+  assert.equal(listNativeAvailability(db, "p", "o", "2099-05-10")[0].capacity, 3, "rule capacity is restored");
+  assert.equal(listNativeAvailability(db, "p", "o", "2099-05-13")[0].status, "CLOSED", "dates outside the delete stay closed");
+});
+
+test("an explicitly empty departure time means the whole day", t => {
+  const db = fixture(t);
+  // Clients send localTime as an empty string for "whole day" rather than
+  // omitting it, so the empty case must validate, not just default.
+  saveSlotOverride(db, "p", "o", { localDate: future, localTime: "", closed: true, note: "Whole day off" });
+  for (const slot of listNativeAvailability(db, "p", "o", future)) {
+    assert.equal(slot.status, "CLOSED");
+    assert.equal(slot.supplierNote, "Whole day off");
+  }
+
+  saveSlotOverrideRange(db, "p", "o", { from: "2099-06-01", to: "2099-06-02", localTime: "", capacity: 2 });
+  assert.equal(listNativeAvailability(db, "p", "o", "2099-06-01")[0].capacity, 2);
+
+  // A malformed time is still rejected.
+  assert.throws(() => saveSlotOverride(db, "p", "o", { localDate: future, localTime: "99:99" }));
 });

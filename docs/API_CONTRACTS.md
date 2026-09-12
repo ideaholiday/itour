@@ -277,6 +277,30 @@ All API endpoints follow RESTful design principles and are served under the `/ap
     `CAPACITY_BELOW_RESERVED`.
 - **`DELETE .../inventory/:optionId/calendar?localDate=&localTime=`**: Removes an
   override, restoring the weekly rule.
+- **`PUT .../inventory/:optionId/calendar/range`**: Applies one override across a
+  date range in a **single transaction**.
+  - **Request Body**:
+    ```json
+    {
+      "from": "2099-07-01",
+      "to": "2099-07-31",
+      "weekdays": [1, 2],
+      "localTime": "09:00",
+      "capacity": null,
+      "closed": true,
+      "note": "Monsoon closure"
+    }
+    ```
+  - `weekdays` is optional and narrows the range ("every Monday in July");
+    omitted means every day. `localTime` omitted or `""` means the whole day.
+  - Dates the option does not operate on are **skipped**, and reported in
+    `skippedNonOperating`. The response returns `applied` and `appliedCount`.
+  - **All-or-nothing**: if any date in the range already has more seats reserved
+    than the new capacity, nothing is written and `CAPACITY_BELOW_RESERVED` is
+    returned. A range longer than 366 days returns `RANGE_TOO_LONG`.
+- **`DELETE .../inventory/:optionId/calendar/range?from=&to=&localTime=`**: Clears
+  every override in the range, reopening those dates onto the weekly rules.
+  Returns `removedCount`.
 
 ### 3.1.2b Promotions
 - **`GET .../inventory/:optionId/promotions`**: Lists promotions with live `redeemed` counts.

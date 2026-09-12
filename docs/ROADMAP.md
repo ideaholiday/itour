@@ -21,6 +21,7 @@ Do not rebuild these. Extend them if asked.
 | Unit types | Senior/youth/infant priced; seatless infant-on-lap |
 | Shared resources | One vehicle or guide capping every option that uses it |
 | Promotional rates | Percent/flat discounts, promo codes, last-minute and early-bird windows |
+| Bulk calendar editing | Close or resize a date range in one atomic request |
 | Channel manager | Bókun, FareHarbor, Bookingkit, Palisis/TourCMS, Activitar, Anchor, generic OCTo — connect and import |
 | OCTo v1 API | `/api/octo` and `/octo` |
 | Transfer engine | PostGIS geo-fencing, tolls, permits, GST |
@@ -40,22 +41,17 @@ Standing obligations that apply to every change:
 
 - Keep `npm audit --omit=dev` at **0 vulnerabilities**.
 - Keep coverage above the **70%** gate.
-- Keep all suites green: 305 unit, 17 integration, 11 e2e.
+- Keep all suites green: 313 unit, 17 integration, 12 e2e.
 
 ---
 
 ## NEXT — ready to start, highest value first
 
-**1. Bulk calendar editing**
-Applying a capacity change or closure across a date range takes one request per
-date. Suppliers closing a monsoon month feel this immediately.
-→ `RESERVATION_ENGINE.md` §8, `nativeInventoryService.saveSlotOverride`.
-
-**2. Branch coverage on error paths**
+**1. Branch coverage on error paths**
 Line coverage is ~88% but branch coverage is ~63%. The gap is error handling —
 where undiscovered bugs live. Target the payment, refund and dispatch services.
 
-**3. Real external provider adapter**
+**2. Real external provider adapter**
 The channel manager imports products, but `reservationProviders.js` still runs
 only `NATIVE` for live availability and booking. A true Bókun or FareHarbor
 adapter needs supplier auth, capability discovery, its own idempotency and

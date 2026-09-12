@@ -16,7 +16,7 @@
 | :--- | :--- |
 | **Seats & schedule** | Operating weekdays, departure times, seats per departure, adult/child prices, senior/youth/infant prices, seatless units, party-size bounds, cut-off minutes, free-cancellation hours, blackout dates |
 | **Seasonal rates** | Date-ranged, weekday-filtered rates with a priority |
-| **Calendar** | Close or resize one date, or one departure on a date |
+| **Calendar** | Close or resize one date, one departure, or a whole date range |
 | **Promotions** | Percentage or flat discounts, optionally behind a promo code, optionally keyed on booking lead time |
 | **Shared vehicle** | Link this option to a vehicle or guide shared with other options |
 
@@ -27,6 +27,12 @@ Guard rails: a listing with untracked existing reservations cannot enable seat
 inventory until reconciled; capacity can never drop below seats already
 reserved; blackouts and closures stop new sales without cancelling held or
 confirmed reservations.
+
+A range edit (`calendar/range`) applies to every operating date in one
+transaction, optionally narrowed to selected weekdays. It is deliberately
+**all-or-nothing**: one date with too many seats already reserved leaves the
+whole range untouched rather than half-edited. Non-operating dates are skipped
+and reported back.
 
 ---
 

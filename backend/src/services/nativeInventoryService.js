@@ -90,6 +90,9 @@ export const inventoryRulesSchema = z.object({
 });
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+// An empty localTime means "the whole day". Clients send the field explicitly,
+// so the empty case has to be accepted, not just defaulted.
+const timeOrWholeDay = z.union([time, z.literal("")]);
 export const priceScheduleSchema = z.object({
   label: z.string().max(120).default(""),
   startsOn: date, endsOn: date,
@@ -108,11 +111,21 @@ export const priceScheduleSchema = z.object({
 
 export const slotOverrideSchema = z.object({
   localDate: date,
-  localTime: time.optional().default(""),
+  localTime: timeOrWholeDay.optional().default(""),
   capacity: z.number().int().min(0).max(10000).nullable().default(null),
   closed: z.boolean().default(false),
   note: z.string().max(280).default(""),
 });
+
+export const MAX_OVERRIDE_RANGE_DAYS = 366;
+export const slotOverrideRangeSchema = z.object({
+  from: date, to: date,
+  weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+  localTime: timeOrWholeDay.optional().default(""),
+  capacity: z.number().int().min(0).max(10000).nullable().default(null),
+  closed: z.boolean().default(false),
+  note: z.string().max(280).default(""),
+}).refine((v) => v.from <= v.to, { message: "from must not be after to", path: ["to"] });
 export const nativeHoldSchema = z.object({
   productId: z.string().min(1).max(200), optionId: z.string().min(1).max(200),
   localDate: date, localTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
@@ -576,40 +589,129 @@ export function listSlotOverrides(db, productId, optionId, { from, to } = {}) {
  * Refuses to cut capacity below seats already held or confirmed for that
  * departure, mirroring the guard on whole-option capacity edits.
  */
+/**
+ * Writes one date's override. Caller owns the transaction, so a range edit is
+ * all-or-nothing rather than leaving half a month changed.
+ */
+function applySlotOverride(db, productId, optionId, rules, override) {
+  if (override.capacity != null) {
+    const times = override.localTime ? [override.localTime] : parse(rules.departure_times);
+    for (const time of times) {
+      const used = occupied(db, `${optionId}:${override.localDate}:${time}`);
+      if (override.capacity < used) {
+        throw inventoryError(`Capacity cannot be below ${used} reserved seats on ${override.localDate} at ${time}`, "CAPACITY_BELOW_RESERVED");
+      }
+    }
+  }
+
+  const id = `${optionId}:${override.localDate}:${override.localTime}`;
+  db.prepare(`INSERT INTO native_slot_overrides (id, option_id, product_id, local_date, local_time, capacity, closed, note)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(option_id, local_date, local_time) DO UPDATE SET
+    capacity=excluded.capacity, closed=excluded.closed, note=excluded.note, updated_at=CURRENT_TIMESTAMP`).run(
+    id, optionId, productId, override.localDate, override.localTime,
+    override.capacity, override.closed ? 1 : 0, override.note);
+
+  // Keep any already-materialized slots in step with the new override.
+  for (const slot of db.prepare("SELECT * FROM native_availability_slots WHERE option_id = ? AND local_date = ?").all(optionId, override.localDate)) {
+    if (override.localTime && slot.local_time !== override.localTime) continue;
+    const effective = resolveOverride(db, optionId, slot.local_date, slot.local_time);
+    const open = operates(rules, slot.local_date, slot.local_time) && !effective?.closed;
+    db.prepare("UPDATE native_availability_slots SET capacity = ?, closed = ? WHERE id = ?")
+      .run(effective?.capacity ?? Number(rules.capacity), open ? 0 : 1, slot.id);
+  }
+  return db.prepare("SELECT * FROM native_slot_overrides WHERE id = ?").get(id);
+}
+
 export function saveSlotOverride(db, productId, optionId, input) {
   const override = slotOverrideSchema.parse(input);
+  const rules = requireInventory(db, productId, optionId);
+  return db.transaction(() => {
+    db.prepare("UPDATE products SET id = id WHERE id = ?").run(productId);
+    return applySlotOverride(db, productId, optionId, rules, override);
+  })();
+}
+
+function requireInventory(db, productId, optionId) {
   const rules = getInventoryRules(db, productId, optionId);
   if (!rules) throw inventoryError("Enable seat inventory before editing the calendar.", "INVENTORY_NOT_ENABLED", 409);
+  return rules;
+}
+
+/** Inclusive list of YYYY-MM-DD dates, capped so one request cannot rewrite years. */
+function expandDates(from, to) {
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  const days = Math.round((end - start) / 86400000) + 1;
+  if (days > MAX_OVERRIDE_RANGE_DAYS) {
+    throw inventoryError(`A range cannot exceed ${MAX_OVERRIDE_RANGE_DAYS} days`, "RANGE_TOO_LONG", 400);
+  }
+  const dates = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    dates.push(cursor.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+/**
+ * Applies one override across a date range in a single transaction.
+ *
+ * Closing a monsoon month was one request per date. This does it in one, and
+ * because the whole range shares a transaction a single conflicting date leaves
+ * the calendar untouched rather than half-edited.
+ *
+ * `weekdays` narrows the range — "every Monday in June" — and defaults to
+ * every day. Dates the option does not operate on are skipped: writing an
+ * override for a non-operating day would be noise.
+ */
+export function saveSlotOverrideRange(db, productId, optionId, input) {
+  const range = slotOverrideRangeSchema.parse(input);
+  const rules = requireInventory(db, productId, optionId);
+  const weekdays = range.weekdays ? new Set(range.weekdays) : null;
+  const operatingDays = new Set(parse(rules.operating_days));
 
   return db.transaction(() => {
     db.prepare("UPDATE products SET id = id WHERE id = ?").run(productId);
+    const applied = [];
+    const skipped = [];
 
-    if (override.capacity != null) {
-      const times = override.localTime ? [override.localTime] : parse(rules.departure_times);
-      for (const time of times) {
-        const used = occupied(db, `${optionId}:${override.localDate}:${time}`);
-        if (override.capacity < used) {
-          throw inventoryError(`Capacity cannot be below ${used} reserved seats on ${override.localDate} at ${time}`, "CAPACITY_BELOW_RESERVED");
-        }
-      }
+    for (const localDate of expandDates(range.from, range.to)) {
+      const weekday = new Date(`${localDate}T00:00:00Z`).getUTCDay();
+      if (weekdays && !weekdays.has(weekday)) continue;
+      if (!operatingDays.has(weekday)) { skipped.push(localDate); continue; }
+      applySlotOverride(db, productId, optionId, rules, {
+        localDate, localTime: range.localTime,
+        capacity: range.capacity, closed: range.closed, note: range.note,
+      });
+      applied.push(localDate);
     }
+    return { applied, appliedCount: applied.length, skippedNonOperating: skipped };
+  })();
+}
 
-    const id = `${optionId}:${override.localDate}:${override.localTime}`;
-    db.prepare(`INSERT INTO native_slot_overrides (id, option_id, product_id, local_date, local_time, capacity, closed, note)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(option_id, local_date, local_time) DO UPDATE SET
-      capacity=excluded.capacity, closed=excluded.closed, note=excluded.note, updated_at=CURRENT_TIMESTAMP`).run(
-      id, optionId, productId, override.localDate, override.localTime,
-      override.capacity, override.closed ? 1 : 0, override.note);
+/** Clears overrides across a range, reopening a whole month in one request. */
+export function deleteSlotOverrideRange(db, productId, optionId, { from, to, localTime = "" }) {
+  const bounds = z.object({ from: date, to: date }).refine((v) => v.from <= v.to, {
+    message: "from must not be after to", path: ["to"],
+  }).parse({ from, to });
+  const rules = requireInventory(db, productId, optionId);
 
-    // Keep any already-materialized slots in step with the new override.
-    for (const slot of db.prepare("SELECT * FROM native_availability_slots WHERE option_id = ? AND local_date = ?").all(optionId, override.localDate)) {
-      if (override.localTime && slot.local_time !== override.localTime) continue;
+  return db.transaction(() => {
+    const removed = db.prepare(
+      `DELETE FROM native_slot_overrides WHERE product_id = ? AND option_id = ?
+       AND local_date >= ? AND local_date <= ? AND local_time = ?`
+    ).run(productId, optionId, bounds.from, bounds.to, localTime);
+
+    // Re-sync every materialized slot in the range back to the weekly rules.
+    for (const slot of db.prepare(
+      "SELECT * FROM native_availability_slots WHERE option_id = ? AND local_date >= ? AND local_date <= ?"
+    ).all(optionId, bounds.from, bounds.to)) {
+      if (localTime && slot.local_time !== localTime) continue;
       const effective = resolveOverride(db, optionId, slot.local_date, slot.local_time);
       const open = operates(rules, slot.local_date, slot.local_time) && !effective?.closed;
       db.prepare("UPDATE native_availability_slots SET capacity = ?, closed = ? WHERE id = ?")
         .run(effective?.capacity ?? Number(rules.capacity), open ? 0 : 1, slot.id);
     }
-    return db.prepare("SELECT * FROM native_slot_overrides WHERE id = ?").get(id);
+    return { removedCount: removed.changes, from: bounds.from, to: bounds.to, localTime };
   })();
 }
 

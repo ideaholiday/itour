@@ -2,6 +2,7 @@ import {
   getInventoryRules, saveInventoryRules,
   listPriceSchedules, savePriceSchedule, deletePriceSchedule,
   listSlotOverrides, saveSlotOverride, deleteSlotOverride,
+  saveSlotOverrideRange, deleteSlotOverrideRange,
   listResources, saveResource, deleteResource,
   listPromotions, savePromotion, deletePromotion,
 } from "../services/nativeInventoryService.js";
@@ -1748,6 +1749,22 @@ router.put("/:id/products/:productId/inventory/:optionId/calendar", requireSuppl
   try { res.json({ success: true, override: saveSlotOverride(db, product.id, req.params.optionId, req.body) }); }
   catch (error) { inventoryFailure(res, error); }
 });
+router.put("/:id/products/:productId/inventory/:optionId/calendar/range", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...saveSlotOverrideRange(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/calendar/range", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try {
+    res.json({ success: true, ...deleteSlotOverrideRange(db, product.id, req.params.optionId, {
+      from: req.query.from, to: req.query.to, localTime: req.query.localTime || "",
+    }) });
+  } catch (error) { inventoryFailure(res, error); }
+});
+
 router.delete("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
   const product = ownedProduct(req, res);
   if (!product) return;

@@ -123,12 +123,12 @@ cd frontend && npm run dev               # Marketplace on :5173, proxies /api
 npm run dev                              # Next.js auth app on :3000
 
 # Check it
-cd backend && npm test                   # 305 unit tests, 9 suites
+cd backend && npm test                   # 313 unit tests, 9 suites
 cd backend && npm run test:integration   # 17 real-HTTP journeys
 cd backend && npm run test:coverage      # 70% gate (currently ~87%)
 cd backend && npm audit --omit=dev       # must stay at 0
 cd frontend && npm run build             # includes bundle budget
-npx playwright test                      # 11 browser journeys
+npx playwright test                      # 12 browser journeys
 
 # Database
 cd backend && npm run migrate:status     # also warns on duplicate numbers
