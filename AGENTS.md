@@ -123,12 +123,12 @@ cd frontend && npm run dev               # Marketplace on :5173, proxies /api
 npm run dev                              # Next.js auth app on :3000
 
 # Check it
-cd backend && npm test                   # 294 unit tests, 9 suites
+cd backend && npm test                   # 305 unit tests, 9 suites
 cd backend && npm run test:integration   # 17 real-HTTP journeys
 cd backend && npm run test:coverage      # 70% gate (currently ~87%)
 cd backend && npm audit --omit=dev       # must stay at 0
 cd frontend && npm run build             # includes bundle budget
-npx playwright test                      # 10 browser journeys
+npx playwright test                      # 11 browser journeys
 
 # Database
 cd backend && npm run migrate:status     # also warns on duplicate numbers
@@ -136,4 +136,4 @@ cd backend && npm run migrate:up
 cd backend && npm run migrate:down       # rolls back the last batch
 ```
 
-Migrations `001`–`023`. SQLite locally and in CI; Supabase PostgreSQL in production.
+Migrations `001`–`024`. SQLite locally and in CI; Supabase PostgreSQL in production.

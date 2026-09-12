@@ -16,7 +16,7 @@ router.get("/native/:productId", (req, res) => {
     const product = db.prepare("SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED'").get(req.params.productId);
     if (!product) return res.status(404).json({ error: "Product not found" });
     res.set("Cache-Control", "no-store");
-    res.json({ slots: getReservationProvider().availability(db, { productId: product.id, optionId: req.query.optionId, localDate: req.query.date }) });
+    res.json({ slots: getReservationProvider().availability(db, { productId: product.id, optionId: req.query.optionId, localDate: req.query.date, promoCode: req.query.promoCode || null }) });
   } catch (error) {
     const validationIssue = error?.name === "ZodError" || Array.isArray(error?.issues);
     res.status(error.status || 400).json({

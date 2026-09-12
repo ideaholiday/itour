@@ -6,7 +6,7 @@ import { listNativeAvailability, reserveNativeInventory, confirmNativeReservatio
 // reservation_external_references. They must never mutate native capacity directly.
 const nativeProvider = Object.freeze({
   id: "NATIVE",
-  availability: (db, { productId, optionId, localDate }) => listNativeAvailability(db, productId, optionId, localDate),
+  availability: (db, { productId, optionId, localDate, promoCode = null }) => listNativeAvailability(db, productId, optionId, localDate, { promoCode }),
   reserve: (db, input) => reserveNativeInventory(db, input),
   confirm: (db, booking) => db.transaction(() => confirmNativeReservation(db, booking))(),
   release: (db, bookingId) => db.transaction(() => releaseNativeReservation(db, bookingId))(),

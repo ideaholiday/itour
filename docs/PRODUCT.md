@@ -87,7 +87,7 @@ Treat this as the current baseline — **do not rebuild it**.
 - **Supplier extranet**: listings, operating days, departure times, seat capacity,
   adult/child prices, cut-offs, cancellation windows, blackout dates, **seasonal
   rates**, **per-departure calendar control**, **party-size rules**, **shared
-  vehicle capacity**.
+  vehicle capacity**, **promotions with optional promo codes**.
 - **Reservation engine**: live vacancies, 10-minute holds, atomic capacity
   deduction on verified payment, cut-off enforcement, QR vouchers. See
   [`RESERVATION_ENGINE.md`](RESERVATION_ENGINE.md).

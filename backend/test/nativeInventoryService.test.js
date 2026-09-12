@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { processReservationOutbox } from "../src/services/reservationOutboxService.js";
 import { executeMigrationSql } from "../src/services/migrationRunner.js";
 import { calculateRefundQuote } from "../src/services/financeService.js";
-import { moveNativeReservation, checkNativeInventory, saveInventoryRules, listNativeAvailability, reserveNativeInventory, attachNativeReservation, confirmNativeReservation, releaseNativeReservation, savePriceSchedule, saveSlotOverride, deleteSlotOverride, normalizeUnitItems, saveBookingUnitItems, listBookingUnitItems, listNativeMonthPricing, saveResource, listResources, deleteResource } from "../src/services/nativeInventoryService.js";
+import { moveNativeReservation, checkNativeInventory, saveInventoryRules, listNativeAvailability, reserveNativeInventory, attachNativeReservation, confirmNativeReservation, releaseNativeReservation, savePriceSchedule, saveSlotOverride, deleteSlotOverride, normalizeUnitItems, saveBookingUnitItems, listBookingUnitItems, listNativeMonthPricing, saveResource, listResources, deleteResource, savePromotion, listPromotions, deletePromotion } from "../src/services/nativeInventoryService.js";
 
 const rules = { operatingDays: [0, 1, 2, 3, 4, 5, 6], departureTimes: ["09:00", "14:00"], capacity: 3, adultPrice: 1000, childPrice: 400, cutoffMinutes: 120, cancellationHours: 24, blackoutDates: [] };
 const future = "2099-05-12";
@@ -23,6 +23,7 @@ function fixture(t) {
   executeMigrationSql(db, readFileSync(new URL("../migrations/021_reservation_engine_v2.sql", import.meta.url), "utf8").split("-- @down")[0]);
   executeMigrationSql(db, readFileSync(new URL("../migrations/022_booking_unit_items.sql", import.meta.url), "utf8").split("-- @down")[0]);
   executeMigrationSql(db, readFileSync(new URL("../migrations/023_shared_resources.sql", import.meta.url), "utf8").split("-- @down")[0]);
+  executeMigrationSql(db, readFileSync(new URL("../migrations/024_native_promotions.sql", import.meta.url), "utf8").split("-- @down")[0]);
   saveInventoryRules(db, "p", "o", rules);
   return db;
 }
@@ -471,4 +472,136 @@ test("seatless units are opt-in and default to occupying a seat", t => {
     () => reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", unitItems: [{ unitType: "ADULT", quantity: 2 }, { unitType: "INFANT", quantity: 1 }], ownerId: "u", requestKey: "seated" }),
     /no longer has enough seats/
   );
+});
+
+// --- Promotional rates ---
+
+const promoBase = { discountType: "PERCENT", discountValue: 20 };
+
+test("a public promotion discounts the resolved rate for everyone", t => {
+  const db = fixture(t);
+  savePromotion(db, "p", "o", { ...promoBase, label: "Monsoon sale" });
+
+  const slot = listNativeAvailability(db, "p", "o", future)[0];
+  assert.equal(slot.listAdultPrice, 1000, "the list price is still published");
+  assert.equal(slot.adultPrice, 800, "and the traveler pays the discounted rate");
+  assert.equal(slot.unitPrices.CHILD, 320);
+  assert.equal(slot.promotion.label, "Monsoon sale");
+  assert.equal(slot.promotion.requiresCode, false);
+});
+
+test("a promotion discounts the seasonal rate, not the base rate", t => {
+  const db = fixture(t);
+  savePriceSchedule(db, "p", "o", { startsOn: future, endsOn: future, adultPrice: 2000, childPrice: 800, priority: 5 });
+  savePromotion(db, "p", "o", { ...promoBase, discountValue: 25 });
+
+  const slot = listNativeAvailability(db, "p", "o", future)[0];
+  assert.equal(slot.listAdultPrice, 2000);
+  assert.equal(slot.adultPrice, 1500, "25% off the seasonal 2000, not the base 1000");
+});
+
+test("a coded promotion stays hidden until the traveler supplies the code", t => {
+  const db = fixture(t);
+  savePromotion(db, "p", "o", { ...promoBase, code: "MONSOON20", label: "Coded" });
+
+  const public_ = listNativeAvailability(db, "p", "o", future)[0];
+  assert.equal(public_.promotion, null, "an unredeemed code must not leak into public availability");
+  assert.equal(public_.adultPrice, 1000);
+
+  const withCode = listNativeAvailability(db, "p", "o", future, { promoCode: "monsoon20" })[0];
+  assert.equal(withCode.adultPrice, 800, "the code applies case-insensitively");
+  assert.equal(withCode.promotion.requiresCode, true);
+});
+
+test("a wrong or inapplicable code is rejected instead of silently charging full price", t => {
+  const db = fixture(t);
+  savePromotion(db, "p", "o", { ...promoBase, code: "REAL20" });
+  assert.throws(
+    () => reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", adults: 1, promoCode: "WRONG", ownerId: "u", requestKey: "bad" }),
+    /not valid for this departure/
+  );
+});
+
+test("last-minute and early-bird windows key on booking lead time", t => {
+  const db = fixture(t);
+  // Last minute: only within 48 hours of departure. `future` is years away.
+  savePromotion(db, "p", "o", { ...promoBase, label: "Last minute", maxLeadHours: 48 });
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].promotion, null);
+
+  const soon = new Date(Date.now() + 24 * 3600000).toISOString().slice(0, 10);
+  const soonSlot = listNativeAvailability(db, "p", "o", soon).find(s => s.promotion);
+  assert.ok(soonSlot, "a departure inside the window gets the last-minute discount");
+  assert.equal(soonSlot.promotion.label, "Last minute");
+
+  // Early bird: only when booked well ahead.
+  const db2 = fixture(t);
+  savePromotion(db2, "p", "o", { ...promoBase, label: "Early bird", minLeadHours: 720 });
+  assert.equal(listNativeAvailability(db2, "p", "o", future)[0].promotion.label, "Early bird");
+  assert.equal(listNativeAvailability(db2, "p", "o", soon).find(s => s.promotion) ?? null, null);
+});
+
+test("flat discounts never drive a unit price below zero", t => {
+  const db = fixture(t);
+  savePromotion(db, "p", "o", { discountType: "FLAT", discountValue: 5000 });
+  const slot = listNativeAvailability(db, "p", "o", future)[0];
+  assert.equal(slot.adultPrice, 0);
+  assert.equal(slot.unitPrices.CHILD, 0);
+});
+
+test("only the best promotion applies and discounts never stack", t => {
+  const db = fixture(t);
+  savePromotion(db, "p", "o", { ...promoBase, label: "Small", discountValue: 10, priority: 1 });
+  savePromotion(db, "p", "o", { ...promoBase, label: "Big", discountValue: 30, priority: 9 });
+
+  const slot = listNativeAvailability(db, "p", "o", future)[0];
+  assert.equal(slot.promotion.label, "Big");
+  assert.equal(slot.adultPrice, 700, "30% off once — not 30% then 10%");
+});
+
+test("a promotion stops applying once its redemption cap is reached", t => {
+  const db = fixture(t);
+  savePromotion(db, "p", "o", { ...promoBase, maxRedemptions: 1 });
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].adultPrice, 800);
+
+  reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", adults: 1, ownerId: "u", requestKey: "r1" });
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].promotion, null, "the cap is consumed");
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].adultPrice, 1000);
+});
+
+test("a hold freezes its promotion even after the supplier withdraws it", t => {
+  const db = fixture(t);
+  const promo = savePromotion(db, "p", "o", { ...promoBase, label: "Flash" });
+  const hold = reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", adults: 2, children: 1, ownerId: "u", requestKey: "frozen" });
+
+  assert.equal(hold.promotion_id, promo.id);
+  assert.equal(JSON.parse(hold.pricing_snapshot).unitTotal, 2 * 800 + 1 * 320);
+
+  deletePromotion(db, "p", "o", promo.id);
+  const held = checkNativeInventory(db, { product_id: "p", product_option_id: "o", activity_date: future, pickup_time: "09:00", adults: 2, children: 1, native_hold_id: hold.id }, { ownerId: "u" });
+  assert.equal(held.adultPrice, 800, "the traveler keeps the price captured at hold time");
+  assert.equal(listNativeAvailability(db, "p", "o", future)[0].adultPrice, 1000, "while new travelers pay full price");
+});
+
+test("promotion windows and percentages are validated on save", t => {
+  const db = fixture(t);
+  assert.throws(() => savePromotion(db, "p", "o", { discountType: "PERCENT", discountValue: 150 }));
+  assert.throws(() => savePromotion(db, "p", "o", { ...promoBase, minLeadHours: 100, maxLeadHours: 10 }));
+  savePromotion(db, "p", "o", { ...promoBase, code: "DUPE" });
+  assert.throws(() => savePromotion(db, "p", "o", { ...promoBase, code: "dupe" }), /already exists/);
+});
+
+test("the month price calendar shows public promotions but hides coded ones", t => {
+  const db = fixture(t);
+  savePromotion(db, "p", "o", { ...promoBase, label: "Monsoon sale", travelFrom: "2099-05-01", travelUntil: "2099-05-15" });
+  savePromotion(db, "p", "o", { ...promoBase, label: "Insider", code: "SECRET50", discountValue: 50, priority: 9 });
+
+  const byDate = Object.fromEntries(listNativeMonthPricing(db, "p", "2099-05").days.map(d => [d.date, d]));
+
+  assert.equal(byDate["2099-05-12"].listPriceInr, 1000);
+  assert.equal(byDate["2099-05-12"].priceInr, 800, "the public promotion reaches the calendar");
+  assert.equal(byDate["2099-05-12"].promotionLabel, "Monsoon sale");
+  assert.notEqual(byDate["2099-05-12"].priceInr, 500, "the coded promotion must not leak into the calendar");
+
+  assert.equal(byDate["2099-05-25"].priceInr, 1000, "dates outside the promotion window are undiscounted");
+  assert.equal(byDate["2099-05-25"].promotionLabel, null);
 });

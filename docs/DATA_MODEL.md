@@ -200,6 +200,18 @@ erDiagram
     seat (infant on a lap). Excluded from the `adults`/`children` seat counts,
     still recorded in `booking_unit_items`.
 
+- **`native_promotions`** (promotional rates, migration `024`):
+  - `code`: `NULL` = public promotion; otherwise the traveler must supply it.
+  - `discount_type` / `discount_value`: `PERCENT` (0–100) or `FLAT` INR, applied
+    per unit price and floored at zero.
+  - `book_from` / `book_until`, `travel_from` / `travel_until`: optional windows.
+  - `min_lead_hours` / `max_lead_hours`: early-bird and last-minute windows,
+    measured from booking time to departure. This is the dimension seasonal rates
+    cannot express.
+  - `min_party_size`, `max_redemptions` (`0` = unlimited), `priority`, `active`.
+  - `native_reservations.promotion_id` records which promotion a hold used;
+    redemptions are counted from those rows rather than a counter column.
+
 - **`booking_unit_items`** (billed unit breakdown, migration `022`):
   - `booking_id`: References `bookings(id)`; unique per `(booking_id, unit_type)`.
   - `unit_type`: One of `ADULT`, `CHILD`, `INFANT`, `SENIOR`, `YOUTH`.

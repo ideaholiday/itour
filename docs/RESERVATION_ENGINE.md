@@ -10,13 +10,14 @@
 
 ## 1. What a supplier configures
 
-**Supplier dashboard → Listings → Seats and schedule**, four tabs:
+**Supplier dashboard → Listings → Seats and schedule**, five tabs:
 
 | Tab | Sets |
 | :--- | :--- |
 | **Seats & schedule** | Operating weekdays, departure times, seats per departure, adult/child prices, senior/youth/infant prices, seatless units, party-size bounds, cut-off minutes, free-cancellation hours, blackout dates |
 | **Seasonal rates** | Date-ranged, weekday-filtered rates with a priority |
 | **Calendar** | Close or resize one date, or one departure on a date |
+| **Promotions** | Percentage or flat discounts, optionally behind a promo code, optionally keyed on booking lead time |
 | **Shared vehicle** | Link this option to a vehicle or guide shared with other options |
 
 Times are `Asia/Kolkata`. Prices are INR **before** the 5% tax calculation.
@@ -46,6 +47,20 @@ seasonal rate deliberately overrides it.
 1. An override for that exact `(date, time)`.
 2. An override for the whole `(date)`.
 3. The weekly operating rules and blackout dates.
+
+**Promotion** — applied *after* the rate resolves, discounting whatever price
+that day already had:
+1. Collect active promotions whose every declared window is satisfied — booking
+   date, travel date, party size, redemption cap, and **booking lead time**.
+2. A promotion with no `code` is public. One with a code applies only when the
+   traveler supplies it, so unredeemed codes never appear in public availability
+   or the price calendar.
+3. Highest priority wins, then the deepest discount. **At most one promotion ever
+   applies — discounts never stack**, because a stacked total is impossible to
+   explain back to a supplier.
+
+The slot publishes both: `listAdultPrice`/`listUnitPrices` (before discount) and
+`adultPrice`/`unitPrices` (what the traveler pays), plus `promotion`.
 
 **Final vacancies** are the **smallest** of the departure's own pool and every
 shared resource linked to it, counted per departure time — so one van is free
@@ -109,7 +124,23 @@ production cannot issue free confirmations even if legacy demo flags are set.
 
 ---
 
-## 5. Notifications
+## 5. Three pricing mechanisms, kept distinct
+
+Easy to confuse, so: they key on different things and stack in this order.
+
+| Mechanism | Keyed on | Produces |
+| :--- | :--- | :--- |
+| `native_price_schedules` | **travel** date + weekday | an absolute seasonal rate |
+| `native_promotions` | **booking** time, lead time, party size, code | a discount off the resolved rate |
+| `promo_codes` (`promoService`) | a traveler-entered platform code at checkout | a discount off the booking **total** |
+
+A supplier promotion changes the departure's price and is visible in availability.
+A platform promo code is applied later, at checkout, against the whole order.
+They are independent and can both apply to one booking.
+
+---
+
+## 6. Notifications
 
 Confirmation inserts a durable outbox row in the **same transaction** as seat
 confirmation. Delivery starts immediately; a five-second worker recovers pending
@@ -122,7 +153,7 @@ unconfigured. Operations can inspect `/api/ops/notification-health`.
 
 ---
 
-## 6. OCTo alignment
+## 7. OCTo alignment
 
 | Internal concept | OCTo field / state |
 | :--- | :--- |
@@ -141,7 +172,7 @@ This is an **OCTo-aligned internal foundation**, not an OCTo-certified public AP
 
 ---
 
-## 7. Schema
+## 8. Schema
 
 | Migration | Adds |
 | :--- | :--- |
@@ -151,6 +182,7 @@ This is an **OCTo-aligned internal foundation**, not an OCTo-certified public AP
 | `021_reservation_engine_v2` | Seasonal rates, calendar overrides, party-size bounds |
 | `022_booking_unit_items` | Extended unit prices, billed unit breakdown |
 | `023_shared_resources` | Shared vehicles/guides, seatless units |
+| `024_native_promotions` | Promotional rates, promo codes, redemption tracking |
 
 Apply with `cd backend && npm run migrate:up`. Server startup also applies
 pending migrations. Field-level detail is in [`DATA_MODEL.md`](DATA_MODEL.md);
@@ -158,12 +190,10 @@ endpoints are in [`API_CONTRACTS.md`](API_CONTRACTS.md).
 
 ---
 
-## 8. Known gaps
+## 9. Known gaps
 
 - **Bulk calendar editing** — a capacity or closure across a date range needs one
   request per date today.
-- **Promotional / last-minute rates** — discount windows with their own validity
-  rules, distinct from seasonal schedules.
 - **External provider adapters** — the channel manager imports products, but
   `reservationProviders.js` still runs only `NATIVE` for live availability and
   booking. A real Bókun/FareHarbor adapter must implement supplier

@@ -121,6 +121,7 @@ export const nativeHoldSchema = z.object({
     unitType: z.enum(["ADULT", "CHILD", "INFANT", "SENIOR", "YOUTH"]),
     quantity: z.number().int().min(1).max(26),
   })).max(5).optional(),
+  promoCode: z.string().trim().min(1).max(60).optional(),
   requestKey: z.string().min(1).max(200),
 });
 const parse = (v) => typeof v === "string" ? JSON.parse(v) : v;
@@ -247,6 +248,86 @@ function buildUnitPrices(adultPrice, childPrice, extended) {
   return prices;
 }
 
+/**
+ * Picks the one promotion that applies to a departure, if any.
+ *
+ * Conditions are all-or-nothing: a promotion applies only when every window it
+ * declares is satisfied. At most one ever applies — highest priority, then the
+ * deepest discount — because stacking supplier discounts is a footgun that makes
+ * a quoted total impossible to explain back to a supplier.
+ *
+ * A promotion with no `code` is public. One with a code applies only when the
+ * traveler supplies it, so unredeemed codes never leak into public availability.
+ */
+export function resolvePromotion(db, rules, localDate, localTime, { code = null, partySize = 0, now = new Date() } = {}) {
+  const rows = optionalQuery(db, () => db.prepare(
+    "SELECT * FROM native_promotions WHERE option_id = ? AND active = 1"
+  ).all(rules.option_id)) || [];
+  if (!rows.length) return null;
+
+  const supplied = code ? String(code).trim().toUpperCase() : null;
+  const bookingDay = now.toISOString().slice(0, 10);
+  const departureAt = Date.parse(`${localDate}T${localTime}:00+05:30`);
+  const leadHours = (departureAt - now.getTime()) / 3600000;
+
+  const eligible = rows.filter((row) => {
+    if (row.code) { if (!supplied || String(row.code).toUpperCase() !== supplied) return false; }
+    if (row.book_from && bookingDay < row.book_from) return false;
+    if (row.book_until && bookingDay > row.book_until) return false;
+    if (row.travel_from && localDate < row.travel_from) return false;
+    if (row.travel_until && localDate > row.travel_until) return false;
+    if (row.min_lead_hours != null && leadHours < Number(row.min_lead_hours)) return false;
+    if (row.max_lead_hours != null && leadHours > Number(row.max_lead_hours)) return false;
+    if (row.min_party_size != null && partySize > 0 && partySize < Number(row.min_party_size)) return false;
+    if (Number(row.max_redemptions) > 0 && redemptionCount(db, row.id) >= Number(row.max_redemptions)) return false;
+    return true;
+  });
+  if (!eligible.length) return null;
+
+  eligible.sort((a, b) =>
+    Number(b.priority) - Number(a.priority) ||
+    discountWeight(b) - discountWeight(a) ||
+    String(a.id).localeCompare(String(b.id)));
+  const best = eligible[0];
+  return {
+    id: best.id,
+    label: best.label || null,
+    code: best.code || null,
+    discountType: best.discount_type,
+    discountValue: Number(best.discount_value),
+    requiresCode: Boolean(best.code),
+  };
+}
+
+// Rough comparator only, for picking between equal-priority promotions.
+function discountWeight(row) {
+  return row.discount_type === "PERCENT" ? Number(row.discount_value) * 100 : Number(row.discount_value);
+}
+
+/** Seats already committed against a promotion, counted from live reservations. */
+function redemptionCount(db, promotionId) {
+  return Number(optionalQuery(db, () => db.prepare(
+    `SELECT COUNT(*) AS used FROM native_reservations r
+     LEFT JOIN bookings b ON b.id = r.booking_id
+     WHERE r.promotion_id = ? AND (b.id IS NULL OR b.status <> 'cancelled')
+       AND (r.status = 'CONFIRMED' OR (r.status = 'ON_HOLD' AND r.utc_expires_at > ?))`
+  ).get(promotionId, new Date().toISOString())?.used) || 0);
+}
+
+/** Applies a promotion to every unit price. Never produces a negative price. */
+export function applyPromotion(unitPrices, promotion) {
+  if (!promotion) return unitPrices;
+  const discounted = {};
+  for (const [unitType, price] of Object.entries(unitPrices)) {
+    const value = Number(price);
+    const off = promotion.discountType === "PERCENT"
+      ? Math.round(value * promotion.discountValue / 100)
+      : promotion.discountValue;
+    discounted[unitType] = Math.max(0, value - off);
+  }
+  return discounted;
+}
+
 /** Resolves a calendar override: the exact departure first, then the whole day. */
 export function resolveOverride(db, optionId, localDate, time) {
   const rows = optionalQuery(db, () => db.prepare(
@@ -293,12 +374,15 @@ function linkedResources(db, optionId, localDate, time, excludeId = "") {
   });
 }
 
-function slotView(db, rules, localDate, time, excludeId = "") {
+function slotView(db, rules, localDate, time, excludeId = "", promoContext = {}) {
   const id = `${rules.option_id}:${localDate}:${time}`;
   const start = `${localDate}T${time}:00+05:30`;
   const cutoff = new Date(Date.parse(start) - Number(rules.cutoff_minutes) * 60000).toISOString();
   const override = resolveOverride(db, rules.option_id, localDate, time);
   const pricing = resolvePricing(db, rules, localDate);
+  // A promotion discounts the resolved seasonal or base rate; it never replaces it.
+  const promotion = resolvePromotion(db, rules, localDate, time, promoContext);
+  const unitPrices = applyPromotion(pricing.unitPrices, promotion);
   const capacity = override?.capacity ?? Number(rules.capacity);
   const resources = linkedResources(db, rules.option_id, localDate, time, excludeId);
   // A shared vehicle or guide caps the departure below its own pool.
@@ -313,20 +397,26 @@ function slotView(db, rules, localDate, time, excludeId = "") {
   const maxPartySize = Math.max(0, Number(rules.max_party_size ?? 0));
   return { id, productId: rules.product_id, optionId: rules.option_id, localDateTimeStart: start, utcCutoffAt: cutoff, timeZone: rules.time_zone,
     localDate, localTime: time, capacity, vacancies, available: status === "AVAILABLE", status,
-    adultPrice: pricing.adultPrice, childPrice: pricing.childPrice, unitPrices: pricing.unitPrices,
+    adultPrice: unitPrices.ADULT ?? pricing.adultPrice, childPrice: unitPrices.CHILD ?? pricing.childPrice,
+    unitPrices,
+    listAdultPrice: pricing.adultPrice, listUnitPrices: pricing.unitPrices,
     priceScheduleId: pricing.priceScheduleId, priceScheduleLabel: pricing.priceScheduleLabel,
+    promotion,
     minPartySize, maxPartySize, supplierNote: override?.note || null,
     seatlessUnits: parse(rules.seatless_units || "[]"),
     sharedResource: limitingResource ? { name: limitingResource.name, capacity: limitingResource.capacity } : null,
     cancellationHours: Number(rules.cancellation_hours) };
 }
-export function listNativeAvailability(db, productId, optionId, localDate) {
+export function listNativeAvailability(db, productId, optionId, localDate, { promoCode = null } = {}) {
   date.parse(localDate);
   const rules = optionId
     ? [getInventoryRules(db, productId, optionId)].filter(Boolean)
     : db.prepare(`SELECT n.*, o.name AS option_name FROM native_inventory_rules n JOIN product_options o ON o.id = n.option_id
       WHERE n.product_id = ? AND (o.is_active IS NULL OR CAST(o.is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY o.name, o.id`).all(productId);
-  return rules.flatMap(rule => parse(rule.departure_times).map(time => ({ ...slotView(db, rule, localDate, time), optionName: rule.option_name || null })));
+  return rules.flatMap(rule => parse(rule.departure_times).map(time => ({
+    ...slotView(db, rule, localDate, time, "", { code: promoCode }),
+    optionName: rule.option_name || null,
+  })));
 }
 export function checkNativeInventory(db, input, { ownerId } = {}) {
   const productId = input.product_id || input.activity_id;
@@ -344,9 +434,12 @@ export function checkNativeInventory(db, input, { ownerId } = {}) {
     // The hold's own breakdown and frozen total win over anything re-sent now.
     heldPricing = { ...parse(hold.pricing_snapshot || "{}"), unitItems: parse(hold.unit_items || "[]") };
   }
-  const slot = slotView(db, rules, localDate, time, excludeId);
-  if (excludeId) return { ...slot, ...heldPricing, available: true, status: "AVAILABLE" };
   const party = Number(input.adults || 1) + Number(input.children || 0);
+  const slot = slotView(db, rules, localDate, time, excludeId, {
+    code: input.promo_code || input.promoCode || null,
+    partySize: party,
+  });
+  if (excludeId) return { ...slot, ...heldPricing, available: true, status: "AVAILABLE" };
   if (slot.minPartySize > 1 && party < slot.minPartySize) {
     throw inventoryError(`This departure needs at least ${slot.minPartySize} travelers to run.`, "BELOW_MIN_PARTY_SIZE");
   }
@@ -356,7 +449,7 @@ export function checkNativeInventory(db, input, { ownerId } = {}) {
   if (!slot.available || slot.vacancies < party) throw inventoryError("This departure no longer has enough seats or has closed. Choose another departure.");
   return slot;
 }
-export function reserveNativeInventory(db, { productId, optionId, localDate, localTime, adults, children = 0, unitItems, ownerId, requestKey }) {
+export function reserveNativeInventory(db, { productId, optionId, localDate, localTime, adults, children = 0, unitItems, promoCode = null, ownerId, requestKey }) {
   // A unit breakdown, when supplied, is authoritative for the seat counts.
   const optionRules = getInventoryRules(db, productId, optionId);
   const breakdown = normalizeUnitItems(unitItems, {
@@ -376,14 +469,19 @@ export function reserveNativeInventory(db, { productId, optionId, localDate, loc
     }
     const activeOption = db.prepare("SELECT id FROM product_options WHERE id = ? AND product_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").get(optionId, productId);
     if (!activeOption) throw inventoryError("This option is no longer available", "OPTION_NOT_AVAILABLE");
-    const slot = checkNativeInventory(db, { product_id: productId, product_option_id: optionId, activity_date: localDate, pickup_time: localTime, adults, children });
+    const slot = checkNativeInventory(db, { product_id: productId, product_option_id: optionId, activity_date: localDate, pickup_time: localTime, adults, children, promo_code: promoCode });
     if (!slot) throw inventoryError("Seat inventory is not enabled for this option", "INVENTORY_NOT_ENABLED");
+    // Silently ignoring a bad code would charge the traveler full price after
+    // they believed a discount applied.
+    if (promoCode && !slot.promotion) {
+      throw inventoryError("That promo code is not valid for this departure", "PROMO_NOT_APPLICABLE", 400);
+    }
     db.prepare("INSERT INTO native_availability_slots (id, product_id, option_id, local_date, local_time, capacity) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING").run(slot.id, productId, optionId, localDate, localTime, slot.capacity);
     const id = randomUUID();
     const expiresAt = new Date(Date.now() + NATIVE_HOLD_MINUTES * 60000).toISOString();
     // Priced now so a later repricing cannot move this traveler's total.
     const unitTotal = priceUnitItems(breakdown.items, slot.unitPrices);
-    db.prepare("INSERT INTO native_reservations (id, availability_slot, owner_id, request_key, adults, children, status, utc_expires_at, pricing_snapshot, unit_items) VALUES (?, ?, ?, ?, ?, ?, 'ON_HOLD', ?, ?, ?)").run(id, slot.id, ownerId, requestKey, adults, children, expiresAt, JSON.stringify({ adultPrice: slot.adultPrice, childPrice: slot.childPrice, unitPrices: slot.unitPrices, unitTotal, cancellationHours: slot.cancellationHours, priceScheduleId: slot.priceScheduleId }), JSON.stringify(breakdown.items));
+    db.prepare("INSERT INTO native_reservations (id, availability_slot, owner_id, request_key, adults, children, status, utc_expires_at, pricing_snapshot, unit_items, promotion_id) VALUES (?, ?, ?, ?, ?, ?, 'ON_HOLD', ?, ?, ?, ?)").run(id, slot.id, ownerId, requestKey, adults, children, expiresAt, JSON.stringify({ adultPrice: slot.adultPrice, childPrice: slot.childPrice, unitPrices: slot.unitPrices, unitTotal, cancellationHours: slot.cancellationHours, priceScheduleId: slot.priceScheduleId, promotion: slot.promotion || null }), JSON.stringify(breakdown.items), slot.promotion?.id || null);
     return db.prepare("SELECT * FROM native_reservations WHERE id = ?").get(id);
   })();
 }
@@ -578,11 +676,20 @@ export function listNativeMonthPricing(db, productId, yearMonth) {
     const pricing = resolvePricing(db, rules, localDate);
     const open = departures.some((time) =>
       operates(rules, localDate, time) && !resolveOverride(db, rules.option_id, localDate, time)?.closed);
+    // Public promotions must reach the calendar too, or it contradicts the
+    // departure picker on the same screen. No code is supplied, so coded
+    // promotions stay hidden here exactly as they do in availability.
+    const representativeTime = departures.find((time) => operates(rules, localDate, time)) || departures[0] || "09:00";
+    const promotion = resolvePromotion(db, rules, localDate, representativeTime);
+    const listPrice = pricing.adultPrice;
+    const priceInr = applyPromotion({ ADULT: listPrice }, promotion).ADULT;
     days.push({
       date: localDate,
-      priceInr: pricing.adultPrice,
+      priceInr,
+      listPriceInr: listPrice,
       available: open,
       scheduleLabel: pricing.priceScheduleLabel,
+      promotionLabel: promotion?.label || null,
     });
   }
 
@@ -669,4 +776,64 @@ export function deleteResource(db, supplierId, resourceId) {
   })();
   if (!removed.changes) throw inventoryError("Resource not found", "RESOURCE_NOT_FOUND", 404);
   return { id: resourceId };
+}
+
+// --- Promotions (supplier extranet) ---------------------------------------
+
+const promoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
+export const promotionSchema = z.object({
+  label: z.string().max(120).default(""),
+  code: z.string().trim().min(3).max(60).regex(/^[A-Za-z0-9_-]+$/).nullable().optional(),
+  discountType: z.enum(["PERCENT", "FLAT"]),
+  discountValue: z.number().int().min(0).max(10000000),
+  bookFrom: promoDate, bookUntil: promoDate,
+  travelFrom: promoDate, travelUntil: promoDate,
+  minLeadHours: z.number().int().min(0).max(8760).nullable().optional(),
+  maxLeadHours: z.number().int().min(0).max(8760).nullable().optional(),
+  minPartySize: z.number().int().min(1).max(100).nullable().optional(),
+  maxRedemptions: z.number().int().min(0).max(1000000).default(0),
+  priority: z.number().int().min(0).max(1000).default(0),
+  active: z.boolean().default(true),
+}).refine((v) => v.discountType !== "PERCENT" || v.discountValue <= 100, {
+  message: "A percentage discount cannot exceed 100", path: ["discountValue"],
+}).refine((v) => v.minLeadHours == null || v.maxLeadHours == null || v.minLeadHours <= v.maxLeadHours, {
+  message: "minLeadHours must not exceed maxLeadHours", path: ["maxLeadHours"],
+});
+
+export function listPromotions(db, productId, optionId) {
+  const rows = optionalQuery(db, () => db.prepare(
+    "SELECT * FROM native_promotions WHERE product_id = ? AND option_id = ? ORDER BY priority DESC, created_at DESC, id ASC"
+  ).all(productId, optionId)) || [];
+  return rows.map((row) => ({ ...row, redeemed: redemptionCount(db, row.id) }));
+}
+
+export function savePromotion(db, productId, optionId, input) {
+  const promotion = promotionSchema.parse(input);
+  if (!getInventoryRules(db, productId, optionId)) {
+    throw inventoryError("Enable seat inventory before adding a promotion.", "INVENTORY_NOT_ENABLED", 409);
+  }
+  const code = promotion.code ? promotion.code.toUpperCase() : null;
+  if (code) {
+    const clash = optionalQuery(db, () => db.prepare(
+      "SELECT id FROM native_promotions WHERE option_id = ? AND code = ?"
+    ).get(optionId, code));
+    if (clash) throw inventoryError("That promo code already exists for this option", "PROMO_CODE_EXISTS", 409);
+  }
+  const id = randomUUID();
+  db.prepare(`INSERT INTO native_promotions
+    (id, option_id, product_id, label, code, discount_type, discount_value, book_from, book_until,
+     travel_from, travel_until, min_lead_hours, max_lead_hours, min_party_size, max_redemptions, priority, active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    id, optionId, productId, promotion.label, code, promotion.discountType, promotion.discountValue,
+    promotion.bookFrom ?? null, promotion.bookUntil ?? null, promotion.travelFrom ?? null, promotion.travelUntil ?? null,
+    promotion.minLeadHours ?? null, promotion.maxLeadHours ?? null, promotion.minPartySize ?? null,
+    promotion.maxRedemptions, promotion.priority, promotion.active ? 1 : 0);
+  return db.prepare("SELECT * FROM native_promotions WHERE id = ?").get(id);
+}
+
+export function deletePromotion(db, productId, optionId, promotionId) {
+  const removed = db.prepare("DELETE FROM native_promotions WHERE id = ? AND product_id = ? AND option_id = ?")
+    .run(promotionId, productId, optionId);
+  if (!removed.changes) throw inventoryError("Promotion not found", "PROMOTION_NOT_FOUND", 404);
+  return { id: promotionId };
 }

@@ -98,6 +98,7 @@ function setupOctoTestDb() {
       utc_expires_at TEXT NOT NULL,
       pricing_snapshot TEXT,
       unit_items TEXT NOT NULL DEFAULT '[]',
+      promotion_id TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 

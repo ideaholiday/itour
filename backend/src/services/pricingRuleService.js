@@ -133,8 +133,9 @@ export class PricingRuleService {
             priceInr: entry.priceInr,
             tier: ratio > 1.05 ? "PEAK" : ratio < 0.95 ? "SAVER" : "STANDARD",
             available: entry.available,
-            hasRules: Boolean(entry.scheduleLabel),
-            rulesSummary: entry.scheduleLabel || "",
+            listPriceInr: entry.listPriceInr,
+            hasRules: Boolean(entry.scheduleLabel || entry.promotionLabel),
+            rulesSummary: [entry.scheduleLabel, entry.promotionLabel].filter(Boolean).join(" · "),
           };
         }),
       };

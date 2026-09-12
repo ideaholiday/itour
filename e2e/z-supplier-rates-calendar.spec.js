@@ -160,3 +160,87 @@ test("supplier links a shared vehicle and it caps the departure", async ({ page,
   expect(slot.sharedResource.name).toBe("Tempo Traveller GA-09");
   expect(slot.seatlessUnits).toEqual(["INFANT"]);
 });
+
+// Promotional rates: supplier runs a discount, traveler sees the reduced price.
+test("supplier runs a promotion and the traveler sees the discounted rate", async ({ page, request }) => {
+  const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
+  const account = await login.json();
+  const supplierId = account.user.supplier_id;
+  const headers = { Authorization: `Bearer ${account.token}` };
+
+  const publication = await request.post(`/api/suppliers/${supplierId}/products/v2`, { headers, data: {
+    productType: "EXPERIENCE", productSubType: "TICKET_SIC", title: "Promotion browser check", city: "Goa", state: "Goa",
+    priceInr: 1000, shortDesc: "Promotional rate verification", status: "PUBLISHED" } });
+  const published = await publication.json();
+  expect(publication.status(), JSON.stringify(published)).toBe(201);
+  const productId = published.productId;
+
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.goto("/supplier/dashboard?panel=listings");
+  await page.getByPlaceholder("Search by title, city, route…").fill(published.product.title);
+  await page.getByRole("button", { name: "Seats and schedule" }).click();
+  const editor = page.getByRole("dialog", { name: "Seats and schedule" });
+  await expect(editor).toBeVisible();
+
+  await editor.getByLabel("Seats per departure").fill("10");
+  await editor.getByLabel("Adult price").fill("1000");
+  await editor.getByLabel("Child price").fill("400");
+  await editor.getByRole("button", { name: "Save schedule" }).click();
+  await expect(editor.getByRole("status")).toContainText("Saved.");
+
+  // A public 20% promotion — no code, so everyone sees it.
+  await editor.getByRole("button", { name: "Promotions" }).click();
+  await expect(editor.getByRole("heading", { name: "Add a promotion" })).toBeVisible();
+  await editor.getByLabel("Name (optional)").fill("Monsoon sale");
+  await editor.getByLabel("Percent (%)").fill("20");
+  await editor.getByRole("button", { name: "Add promotion" }).click();
+  await expect(editor.getByRole("status")).toContainText("Promotion added.");
+  await expect(editor.getByText("shown to everyone")).toBeVisible();
+  await expect(editor.getByText("20% off · any booking time")).toBeVisible();
+  await page.screenshot({ path: "test-results/native-supplier-promotions.png" });
+
+  const optionId = (await (await request.get(`/api/suppliers/${supplierId}/products/${productId}/inventory`, { headers })).json()).options[0].id;
+  const slotFor = async (query = "") => {
+    const response = await request.get(`/api/availability/native/${productId}?optionId=${optionId}&date=2099-10-10${query}`);
+    return (await response.json()).slots[0];
+  };
+
+  const discounted = await slotFor();
+  expect(discounted.listAdultPrice).toBe(1000);
+  expect(discounted.adultPrice).toBe(800);
+  expect(discounted.unitPrices.CHILD).toBe(320);
+  expect(discounted.promotion.label).toBe("Monsoon sale");
+  expect(discounted.promotion.requiresCode).toBe(false);
+
+  // A coded promotion must stay hidden until the code is supplied.
+  const coded = await request.post(`/api/suppliers/${supplierId}/products/${productId}/inventory/${optionId}/promotions`, {
+    headers, data: { label: "Insider", code: "INSIDER40", discountType: "PERCENT", discountValue: 40, priority: 9 },
+  });
+  expect(coded.status(), JSON.stringify(await coded.json())).toBe(201);
+
+  const withoutCode = await slotFor();
+  expect(withoutCode.promotion.label).toBe("Monsoon sale");
+  expect(withoutCode.adultPrice).toBe(800);
+
+  const withCode = await slotFor("&promoCode=insider40");
+  expect(withCode.promotion.label).toBe("Insider");
+  expect(withCode.adultPrice).toBe(600);
+
+  // The traveler page shows the discount without needing a code.
+  await page.goto(`/activity/${productId}`);
+  await expect(page.getByRole("heading", { name: "Live departure availability" })).toBeVisible();
+  await expect(page.getByText("Monsoon sale — discount already applied below.")).toBeVisible();
+  await expect(page.getByText("Monsoon sale applied").first()).toBeVisible();
+
+  // The month calendar must agree with the picker rather than showing the list price.
+  const calendar = await request.get(`/api/products/${productId}/price-calendar?month=2099-10`);
+  const calendarBody = await calendar.json();
+  expect(calendarBody.pricingSource).toBe("NATIVE_INVENTORY");
+  const day = calendarBody.days.find(entry => entry.date === "2099-10-10");
+  expect(day.listPriceInr).toBe(1000);
+  expect(day.priceInr).toBe(800);
+  expect(day.rulesSummary).toContain("Monsoon sale");
+  expect(day.priceInr).not.toBe(600); // the coded 40% deal must not leak
+
+  await page.screenshot({ path: "test-results/native-traveler-promotion.png", fullPage: true });
+});

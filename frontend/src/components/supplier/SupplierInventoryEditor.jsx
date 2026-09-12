@@ -4,6 +4,7 @@ import { authHeaders } from "../../lib/api.js";
 import SupplierRatesPanel from "./SupplierRatesPanel.jsx";
 import SupplierCalendarPanel from "./SupplierCalendarPanel.jsx";
 import SupplierResourcesPanel from "./SupplierResourcesPanel.jsx";
+import SupplierPromotionsPanel from "./SupplierPromotionsPanel.jsx";
 
 const getDefaults = (product) => {
   const basePrice = Number(product?.price_inr || product?.priceInr || 1000);
@@ -137,7 +138,7 @@ export default function SupplierInventoryEditor({ supplierId, product, onClose }
       </label>
 
       <nav className="mt-4 flex gap-1 border-b border-stone-200" aria-label="Inventory sections">
-        {[["schedule", "Seats & schedule"], ["rates", "Seasonal rates"], ["calendar", "Calendar"], ["resources", "Shared vehicle"]].map(([key, label]) => (
+        {[["schedule", "Seats & schedule"], ["rates", "Seasonal rates"], ["calendar", "Calendar"], ["promotions", "Promotions"], ["resources", "Shared vehicle"]].map(([key, label]) => (
           <button key={key} type="button" onClick={() => setTab(key)} aria-current={tab === key ? "page" : undefined}
             className={`rounded-t-lg px-3 py-2 font-semibold ${tab === key ? "border-b-2 border-emerald-800 text-emerald-900" : "text-stone-500 hover:text-stone-800"}`}>
             {label}
@@ -228,6 +229,10 @@ export default function SupplierInventoryEditor({ supplierId, product, onClose }
       {tab === "rates" && (inventorySaved
         ? <SupplierRatesPanel base={base} optionId={optionId} baseRules={rules} />
         : <p className="mt-4 rounded-lg bg-amber-50 p-3">Save a schedule for this option first. Seasonal rates adjust that base price.</p>)}
+
+      {tab === "promotions" && (inventorySaved
+        ? <SupplierPromotionsPanel base={base} optionId={optionId} baseRules={rules} />
+        : <p className="mt-4 rounded-lg bg-amber-50 p-3">Save a schedule for this option first. A promotion discounts that rate.</p>)}
 
       {tab === "resources" && (inventorySaved
         ? <SupplierResourcesPanel supplierId={supplierId} optionId={optionId} capacity={rules.capacity} />

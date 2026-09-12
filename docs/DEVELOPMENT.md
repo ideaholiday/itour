@@ -74,7 +74,7 @@ npm run migrate:postgres
 ```
 
 Migration files live under `backend/migrations/` and use standard versioned filenames:
-- `001_initial_schema.sql` ... `023_shared_resources.sql`.
+- `001_initial_schema.sql` ... `024_native_promotions.sql`.
 - Migration state is recorded in the `_schema_migrations` table.
 
 **Numbering rule:** give every new migration a number no existing file uses.
@@ -91,7 +91,7 @@ renamed file as new and run it a second time.
 Execute test suites from the respective package roots:
 
 ```bash
-# Backend unit test suite (294 tests across 9 suites using node:test)
+# Backend unit test suite (305 tests across 9 suites using node:test)
 cd backend && npm test
 
 # Backend coverage test (enforces 70% line & function coverage gate)

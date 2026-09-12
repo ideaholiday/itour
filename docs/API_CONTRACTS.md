@@ -79,6 +79,9 @@ All API endpoints follow RESTful design principles and are served under the `/ap
           "adultPrice": 1200,
           "childPrice": 600,
           "unitPrices": { "ADULT": 1200, "CHILD": 600 },
+          "listAdultPrice": 1200,
+          "listUnitPrices": { "ADULT": 1200, "CHILD": 600 },
+          "promotion": null,
           "priceScheduleId": null,
           "priceScheduleLabel": null,
           "minPartySize": 1,
@@ -101,6 +104,12 @@ All API endpoints follow RESTful design principles and are served under the `/ap
     or resized the departure.
   - `sharedResource` names the vehicle or guide capping this departure below its
     own pool, or `null` when nothing is shared.
+  - `listAdultPrice`/`listUnitPrices` are the price **before** any promotion;
+    `adultPrice`/`unitPrices` are what the traveler pays. `promotion` describes
+    the one that applied, or `null`.
+  - Add `?promoCode=CODE` to see a coded promotion's price. Holding with a code
+    that does not apply returns `PROMO_NOT_APPLICABLE` rather than silently
+    charging full price.
 
 - **`GET /api/products/:id/price-calendar?month=YYYY-MM`**:
   - One month of per-day prices for the traveler price calendar.
@@ -268,6 +277,38 @@ All API endpoints follow RESTful design principles and are served under the `/ap
     `CAPACITY_BELOW_RESERVED`.
 - **`DELETE .../inventory/:optionId/calendar?localDate=&localTime=`**: Removes an
   override, restoring the weekly rule.
+
+### 3.1.2b Promotions
+- **`GET .../inventory/:optionId/promotions`**: Lists promotions with live `redeemed` counts.
+- **`POST .../inventory/:optionId/promotions`**: Creates one.
+  - **Request Body**:
+    ```json
+    {
+      "label": "Monsoon flash sale",
+      "code": "MONSOON20",
+      "discountType": "PERCENT",
+      "discountValue": 20,
+      "maxLeadHours": 48,
+      "minLeadHours": null,
+      "travelFrom": "2099-06-01",
+      "travelUntil": "2099-09-30",
+      "minPartySize": null,
+      "maxRedemptions": 100,
+      "priority": 10,
+      "active": true
+    }
+    ```
+  - `code` omitted or `null` makes the promotion **public** — shown to everyone in
+    availability and in the price calendar. With a code it applies only when the
+    traveler supplies one, and never leaks into public responses.
+  - `maxLeadHours` is last-minute ("within 48h of departure"); `minLeadHours` is
+    early-bird ("booked 30 days ahead"). Both are optional.
+  - `PERCENT` values above 100 return `VALIDATION_ERROR`. A duplicate code on the
+    same option returns `PROMO_CODE_EXISTS`. `maxRedemptions: 0` means unlimited;
+    redemptions are counted live from reservations, so the count cannot drift.
+  - **At most one promotion applies** — highest priority, then deepest discount.
+- **`DELETE .../inventory/:optionId/promotions/:promotionId`**: Removes it. Holds
+  already taken keep their frozen discounted price.
 
 ### 3.1.3 Shared Resources
 - **`GET /api/suppliers/:supplierId/resources`**: Lists shared vehicles/guides and the options each constrains.

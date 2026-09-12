@@ -43,7 +43,7 @@ Open <http://localhost:5173>. Add `MAPPLS_API_KEY` to `backend/.env` if you want
 ### Checking your work
 
 ```bash
-cd backend && npm test              # 294 unit tests across 9 suites
+cd backend && npm test              # 305 unit tests across 9 suites
 cd backend && npm run test:integration  # 17 real-HTTP journey tests
 cd backend && npm run test:coverage     # enforces 70% line + function coverage
 cd frontend && npm run build            # includes the bundle-size budget check
@@ -312,7 +312,7 @@ Cloud Run runs the application with **2 GiB RAM / 2 vCPUs** while Supabase Postg
 
 ### Automated CI/CD (GitHub Actions)
 
-- `.github/workflows/ci.yml`: Runs 294 backend unit tests across 9 suites, 17 HTTP integration tests, coverage gates, Playwright E2E journeys, and builds on PR/push.
+- `.github/workflows/ci.yml`: Runs 305 backend unit tests across 9 suites, 17 HTTP integration tests, coverage gates, Playwright E2E journeys, and builds on PR/push.
 - `.github/workflows/deploy.yml`: Deploys to staging on `staging` branch, and performs zero-downtime blue-green production deployment on `main` with automated smoke test verification and rollback.
 
 ### Manual / CLI deploy
@@ -339,7 +339,7 @@ bash scripts/smoke-tests.sh https://idea-holiday-marketplace-723912383049.us-cen
 │   ├── ci.yml                       # CI Quality Pipeline & Coverage Gate
 │   └── deploy.yml                   # Staging & Blue-Green Production CD
 ├── backend/
-│   ├── migrations/                  # Versioned SQL Migration Files (001 to 023)
+│   ├── migrations/                  # Versioned SQL Migration Files (001 to 024)
 │   ├── src/
 │   │   ├── engine/
 │   │   │   └── transferEngine.js   # Haversine & Ray-Casting Geo-Fence Engine
@@ -366,7 +366,7 @@ bash scripts/smoke-tests.sh https://idea-holiday-marketplace-723912383049.us-cen
 │   │   ├── middleware/              # Auth, RBAC, Validation & Observability
 │   │   ├── db.js                    # Dual SQLite/Postgres Layer
 │   │   └── server.js                # Express App Server Entry
-│   ├── test/                        # 294 Deterministic Backend Unit Tests (9 Suites)
+│   ├── test/                        # 305 Deterministic Backend Unit Tests (9 Suites)
 │   └── integration/                 # 17 Real-HTTP Isolated Journey Tests
 ├── frontend/
 │   ├── src/

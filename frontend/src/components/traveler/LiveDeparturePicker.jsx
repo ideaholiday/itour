@@ -50,10 +50,12 @@ export default function LiveDeparturePicker({ productId, date, selectedTime, sel
   // traveler sees the rule before they start picking times.
   const minimum = Math.max(0, ...slots.map(slot => Number(slot.minPartySize) || 0));
   const seasonal = slots.find(slot => slot.priceScheduleLabel)?.priceScheduleLabel;
+  const promoted = slots.find(slot => slot.promotion)?.promotion?.label;
 
   return <section className="my-4 rounded-xl border border-emerald-200 bg-white p-4"><h3 className="font-bold text-stone-900">Live departure availability</h3><p className="mt-1 text-xs text-stone-600">India Standard Time · Updated every 15 seconds</p>
     {error && <p role="alert">{error}</p>}
     {seasonal && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{seasonal} pricing applies on this date.</p>}
+    {promoted && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900">{promoted} — discount already applied below.</p>}
     {minimum > 1 && <p className="mt-2 text-xs text-stone-600">This experience runs with a minimum of {minimum} travelers.</p>}
     <div className="mt-3 flex flex-wrap gap-2">{slots.map(slot => {
       const selected = selectedTime === slot.localTime && (!selectedOptionId || selectedOptionId === slot.optionId);
@@ -62,8 +64,17 @@ export default function LiveDeparturePicker({ productId, date, selectedTime, sel
         <span className="block font-semibold">{slot.optionName ? `${slot.optionName} · ` : ""}{slot.localTime}</span>
         <span className="block text-xs text-stone-600">
           {slot.available ? `${slot.vacancies} seats left` : slot.status.replaceAll("_", " ")}
-          {slot.adultPrice != null && ` · ${rupees(slot.adultPrice)} per adult`}
+          {slot.adultPrice != null && (
+            <> · {slot.listAdultPrice > slot.adultPrice && (
+              <span className="text-stone-400 line-through">{rupees(slot.listAdultPrice)}</span>
+            )} <span className={slot.listAdultPrice > slot.adultPrice ? "font-semibold text-emerald-800" : ""}>{rupees(slot.adultPrice)}</span> per adult</>
+          )}
         </span>
+        {slot.promotion && (
+          <span className="block text-xs font-semibold text-emerald-800">
+            {slot.promotion.label || "Promotion"} applied
+          </span>
+        )}
         {slot.supplierNote && <span className="block text-xs text-amber-800">{slot.supplierNote}</span>}
       </button>;
     })}</div>

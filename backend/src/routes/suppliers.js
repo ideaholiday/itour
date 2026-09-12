@@ -3,6 +3,7 @@ import {
   listPriceSchedules, savePriceSchedule, deletePriceSchedule,
   listSlotOverrides, saveSlotOverride, deleteSlotOverride,
   listResources, saveResource, deleteResource,
+  listPromotions, savePromotion, deletePromotion,
 } from "../services/nativeInventoryService.js";
 import { getProductOptions, ensureDefaultProductOption } from "../services/logisticsService.js";
 import { activityPath } from "../../../shared/activityUrl.js";
@@ -1715,6 +1716,24 @@ router.delete("/:id/products/:productId/inventory/:optionId/rates/:rateId", requ
   const product = ownedProduct(req, res);
   if (!product) return;
   try { res.json({ success: true, ...deletePriceSchedule(db, product.id, req.params.optionId, req.params.rateId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+router.get("/:id/products/:productId/inventory/:optionId/promotions", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ promotions: listPromotions(db, product.id, req.params.optionId) });
+});
+router.post("/:id/products/:productId/inventory/:optionId/promotions", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.status(201).json({ success: true, promotion: savePromotion(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/promotions/:promotionId", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deletePromotion(db, product.id, req.params.optionId, req.params.promotionId) }); }
   catch (error) { inventoryFailure(res, error); }
 });
 
