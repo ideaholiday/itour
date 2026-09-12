@@ -14,9 +14,9 @@ This glossary defines project-specific domain and technical terminology to ensur
 
 ### 5-Product-Types Taxonomy
 - **Transfer (`TRANSFER`)**: Point-to-point, airport, or intercity transportation backed by vehicle options, distance calculation, FASTag highway tolls, and interstate taxes.
-- **Day Sightseeing Tour (`DAY_TOUR`)**: Curated 4h, 8h, or 12h city sightseeing itineraries with predefined stop sequences, private vehicle categories, or SIC shared departures.
-- **Multi-Day Packaged Holiday (`MULTI_DAY_PACKAGE`)**: Multi-day packaged tours featuring day-by-day activity timelines, vehicle inclusions, and tiered hotel accommodation options (`Cab Only`, `3-Star`, `4-Star`, `5-Star`).
-- **Attraction Ticket (`ATTRACTION_TICKET`)**: Theme parks, monuments, museums, shows with ticket tiers (`Adult`, `Child`, `Senior`, `Infant`).
+- **Day Sightseeing Tour (`TOUR`, legacy `DAY_TOUR`)**: Curated 4h, 8h, or 12h city sightseeing itineraries with predefined stop sequences, private vehicle categories, or SIC shared departures.
+- **Multi-Day Packaged Holiday (`PACKAGE`, legacy `MULTI_DAY_PACKAGE`)**: Multi-day packaged tours featuring day-by-day activity timelines, vehicle inclusions, and tiered hotel accommodation options (`Cab Only`, `3-Star`, `4-Star`, `5-Star`).
+- **Attraction Ticket (`ATTRACTION`)**: Theme parks, monuments, museums, shows with ticket tiers (`Adult`, `Child`, `Senior`, `Infant`).
 - **Experiential Activity (`EXPERIENCE`)**: Water sports, cooking classes, scuba diving, hot air ballooning, and outdoor workshops with departure slot times and seat capacity.
 
 ---

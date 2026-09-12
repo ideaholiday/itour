@@ -141,7 +141,7 @@ location rules and transfer IATA anchors.
 
 ### 5. Supplier dashboard and listing builder
 
-Native seat reservations are available under **Listings → Seats and schedule** (`SupplierInventoryEditor.jsx`). See [Phase 1 setup, behavior and verification](docs/native-reservations-phase1.md) for operating days, departures, capacity, blackout dates, 10-minute holds, instant confirmation, QR vouchers, notification setup, and the OCTO-aligned provider boundary.
+Native seat reservations are available under **Listings → Seats and schedule** (`SupplierInventoryEditor.jsx`). See [the reservation engine guide](docs/RESERVATION_ENGINE.md) for operating days, departures, capacity, blackout dates, 10-minute holds, instant confirmation, QR vouchers, notification setup, and the OCTO-aligned provider boundary.
 
 - **Service Area Builder**: Define operational service zones with center coordinates, radius KM, and **PostGIS polygon vertices** (`[[lat, lng], ...]`) with auto-generated bounding boxes.
 - **Sightseeing Tour Builder**: Create 4h / 8h / 12h day tours with custom places-to-visit stop sequences, inclusions/exclusions, vehicle rules, and Seat-In-Coach hubs (`product_sic_hubs`).
@@ -394,17 +394,18 @@ bash scripts/smoke-tests.sh https://idea-holiday-marketplace-723912383049.us-cen
 
 ## Documentation map
 
-Reference docs live in [`docs/`](docs/). Read the one that matches your task rather than all of them — [`AGENTS.md`](AGENTS.md) carries the same routing table for AI agents.
+Reference docs live in [`docs/`](docs/). **Read the one that matches your task, not all of them** — each doc owns one subject and does not repeat the others. [`AGENTS.md`](AGENTS.md) carries the same table plus the operating rules for AI agents.
 
 | Your task | Start here |
 | :--- | :--- |
-| Understand scope and product intent | [`docs/PROJECT_GOALS.md`](docs/PROJECT_GOALS.md), [`docs/PRD.md`](docs/PRD.md), [`docs/SCOPE.md`](docs/SCOPE.md) |
-| Seat capacity, holds, reservations | [`docs/native-reservations-phase1.md`](docs/native-reservations-phase1.md), [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) |
-| Pricing, commission, booking state | [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) |
+| Understand the goal, users, scope, non-goals | [`docs/PRODUCT.md`](docs/PRODUCT.md) |
+| Decide what to build next | [`docs/ROADMAP.md`](docs/ROADMAP.md) |
+| Seats, holds, rates, calendar, capacity | [`docs/RESERVATION_ENGINE.md`](docs/RESERVATION_ENGINE.md) |
+| Pricing, commission, refunds, booking state | [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) |
 | Schema or field changes | [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md), [`docs/DECISIONS.md`](docs/DECISIONS.md) |
 | Adding or changing an API route | [`docs/API_CONTRACTS.md`](docs/API_CONTRACTS.md), [`docs/SECURITY.md`](docs/SECURITY.md) |
 | Third-party integrations | [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md), [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) |
 | Local setup, migrations, tooling | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) |
 | Writing tests | [`docs/TESTING.md`](docs/TESTING.md) |
-| Architecture background | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md) |
+| How it fits together, request flows | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | Terminology | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) |

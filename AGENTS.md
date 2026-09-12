@@ -1,133 +1,139 @@
-# Operational Guidelines & Rules for AI Agents: Idea Holiday
+# AGENTS.md — read this first
 
-> **READ THIS FILE BEFORE WORKING ON THE PROJECT.**
->
-> All AI coding assistants, planning agents, and human developers must adhere strictly to the rules, task boundaries, and routing instructions defined herein.
->
-> The core principle is:
-> **GOAL-DRIVEN → SCOPE-CONTROLLED → MINIMAL → TESTED → DOCUMENTED**
+Operating rules for AI agents and developers on **Idea Holiday**.
+
+**Principle: GOAL-DRIVEN → SCOPE-CONTROLLED → MINIMAL → TESTED → DOCUMENTED**
 
 ---
 
-## 1. Documentation Router (Context-Efficient Task Mapping)
-**Do NOT read all 20 documentation files for every task.**
-Use this task router to identify and read only the **1 to 3 specific documents** relevant to your immediate assignment:
+## 1. What we are building
 
-| Task Type | Read These Documents First |
+Two products on one backend:
+
+- **`ideaholiday.in`** — the traveler marketplace (Viator / GetYourGuide / Klook).
+- **`supply.ideaholiday.in`** — the supplier reservation system (Bókun / FareHarbor).
+
+One Express API, one database, **one pricing authority**. The reservation system
+owns price and availability; the marketplace only displays them.
+
+Full detail: [`docs/PRODUCT.md`](docs/PRODUCT.md).
+
+### Never break these
+
+1. **Backend owns price.** Checkout takes a server quote; a browser total is never trusted.
+2. **Backend owns booking state.** Transitions happen server-side, in a transaction.
+3. **A hold freezes its price.** Repricing mid-checkout cannot move a traveler's total.
+4. **Capacity is atomic.** `vacancies = capacity − confirmed − active holds`.
+5. **Seat counts stay canonical.** `bookings.adults`/`children` drive capacity, dispatch and vouchers.
+6. **Migrations are append-only.** Never edit or renumber an applied migration.
+7. **No secrets in the repo** — not in code, tests, fixtures or docs.
+
+---
+
+## 2. Which docs to read
+
+**Read 1–3 files, not all of them.** Each doc owns one subject and does not repeat the others.
+
+| Your task | Read |
 | :--- | :--- |
-| **New Feature / Product Requirement** | [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) • [`docs/PROJECT_GOALS.md`](docs/PROJECT_GOALS.md) • [`docs/PRD.md`](docs/PRD.md) • [`docs/SCOPE.md`](docs/SCOPE.md) |
-| **Native Reservations / Seat Capacity / Holds** | [`docs/native-reservations-phase1.md`](docs/native-reservations-phase1.md) • [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) • [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) • [`docs/native-reservations-release-verification.md`](docs/native-reservations-release-verification.md) |
-| **Pricing, Commission, Fares, or Booking State** | [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) • [`docs/PRD.md`](docs/PRD.md) |
-| **Database Schema, Table, or Field Mutation** | [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) • [`docs/DECISIONS.md`](docs/DECISIONS.md) |
-| **API Route Creation, Modification, or Validation** | [`docs/API_CONTRACTS.md`](docs/API_CONTRACTS.md) • [`docs/SECURITY.md`](docs/SECURITY.md) |
-| **Third-Party Integrations (WhatsApp, PG, SES, SMS)**| [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) • [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) |
-| **Authentication, RBAC, Passwords, or Secrets** | [`docs/SECURITY.md`](docs/SECURITY.md) • [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) |
-| **Local Setup, Running, Migrations, or Tooling** | [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) |
-| **Writing Tests or Verifying CI Quality Gates** | [`docs/TESTING.md`](docs/TESTING.md) |
-| **Strategic Planning or Scope Confirmation** | [`docs/SCOPE.md`](docs/SCOPE.md) • [`docs/ROADMAP.md`](docs/ROADMAP.md) |
-| **Terminology or Domain Concept Clarification** | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) |
+| Understand the goal, users, scope, non-goals | [`PRODUCT.md`](docs/PRODUCT.md) |
+| Decide what to work on next | [`ROADMAP.md`](docs/ROADMAP.md) |
+| Seats, holds, rates, calendar, capacity | [`RESERVATION_ENGINE.md`](docs/RESERVATION_ENGINE.md) |
+| Pricing, commission, refunds, booking state | [`BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) |
+| Schema, tables, fields | [`DATA_MODEL.md`](docs/DATA_MODEL.md) |
+| Add or change an endpoint | [`API_CONTRACTS.md`](docs/API_CONTRACTS.md) + [`SECURITY.md`](docs/SECURITY.md) |
+| Auth, RBAC, PII, dependency CVEs | [`SECURITY.md`](docs/SECURITY.md) |
+| How the system fits together, request flows | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| WhatsApp, payments, email, SMS, channel manager | [`INTEGRATIONS.md`](docs/INTEGRATIONS.md) + [`ENVIRONMENT.md`](docs/ENVIRONMENT.md) |
+| Run it locally, migrations, tooling | [`DEVELOPMENT.md`](docs/DEVELOPMENT.md) |
+| Write or fix tests | [`TESTING.md`](docs/TESTING.md) |
+| Why something was done this way | [`DECISIONS.md`](docs/DECISIONS.md) |
+| A term you don't recognise | [`GLOSSARY.md`](docs/GLOSSARY.md) |
+
+When docs conflict, resolve in this order:
+**user request → AGENTS.md → PRODUCT.md → BUSINESS_RULES / SECURITY → ARCHITECTURE → the code → your assumptions.**
+An assumption never outranks a rule.
 
 ---
 
-## 2. Core Operational Rules for AI Agents
+## 3. Rules
 
-### Rule 1: Project-First Rule
-Understand the project's actual goals, architecture, and current scope before making changes. The agent's mission is to fulfill the user's specific request within established constraints—not to redesign or inflate the project.
+**R1 — Do the requested task.** Fulfil the actual request within existing
+constraints. Do not redesign or inflate the project around it.
 
-### Rule 2: Do Not Expand Scope
-- Only build functionality authorized for the requested task.
-- Do not introduce new third-party libraries, framework changes, extra microservices, or complex background queues unless explicitly requested.
-- Review [`docs/SCOPE.md`](docs/SCOPE.md) and [`docs/ROADMAP.md`](docs/ROADMAP.md). Never convert a roadmap "NEXT" or "LATER" item into current implementation without an explicit user prompt.
+**R2 — Do not expand scope.** No new libraries, frameworks, services or queues
+unless asked. Never promote a `NEXT`/`LATER` roadmap item to current work without
+being told.
 
-### Rule 3: Do Not Invent
-Do not invent:
-- Non-existent API endpoints or query parameters.
-- Database tables, columns, or relationships not in [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md).
-- Fabricated business or pricing rules.
-- Fake credentials, tokens, or provider behaviors.
-If details are unknown, inspect the existing code or mark assumptions explicitly as `UNKNOWN` or `TO BE CONFIRMED`.
+**R3 — Do not invent.** No imaginary endpoints, columns, pricing rules or
+provider behaviour. Inspect the code. If something is genuinely unknown, mark it
+`UNKNOWN` rather than guessing.
 
-### Rule 4: Minimal Change Rule
-- Make the smallest safe, idiomatic change necessary to accomplish the requested task.
-- Do not touch unrelated files or rewrite working modules.
-- Preserve existing comments, formatting, and docstrings unrelated to your change.
+**R4 — Make the smallest safe change.** Don't touch unrelated files. Preserve
+surrounding comments, formatting and idiom.
 
-### Rule 5: Preserve Existing Functionality
-- Before modifying a function or component, trace its upstream and downstream dependencies.
-- Ensure that fixing one feature does not break adjacent workflows (e.g. altering transfer calculations must not break circuit order pricing).
+**R5 — Preserve what works.** Trace callers before changing a function. Fixing
+transfers must not break circuit pricing.
 
-### Rule 6: No Unrequested Refactoring
-Do not perform unrelated:
-- Refactoring or code restructuring.
-- Dependency upgrades or package replacements.
-- UI redesigns or CSS framework replacements.
-- Database schema normalizations or renames.
-- Mass re-formatting across untouched files.
+**R6 — No unrequested refactors**, dependency bumps, UI redesigns, schema
+renames or mass reformatting.
 
-### Rule 7: Migrations Are Append-Only
-- Add a **new** file in `backend/migrations/` for every schema change. Give it a
-  number no existing file uses (`npm run migrate:status` warns about duplicates).
-- **Never edit or rename an already-applied migration.** The `_schema_migrations`
-  ledger keys on the full filename and stores a checksum: editing one blocks
-  deployment with `MIGRATION_CHECKSUM_MISMATCH`, and renaming one makes it run a
-  second time against databases that already have it.
-- Every migration should carry a `-- @down` section; rollback refuses batches
-  without one.
+**R7 — Migrations are append-only.** Add a **new** file with an unused number
+(`npm run migrate:status` warns on duplicates). Never edit or rename an applied
+migration — the ledger keys on filename and checksum, so editing blocks
+deployment with `MIGRATION_CHECKSUM_MISMATCH` and renaming re-runs it against
+databases that already have it. Give every migration a `-- @down` section.
 
 ---
 
-## 3. Requirement Priority Hierarchy
-When instructions or specifications appear to conflict, resolve them using this strict order of precedence:
+## 4. Workflow
 
-1. **Explicit current user request**
-2. [`AGENTS.md`](AGENTS.md) (This file)
-3. [`docs/PROJECT_GOALS.md`](docs/PROJECT_GOALS.md)
-4. [`docs/PRD.md`](docs/PRD.md)
-5. [`docs/SCOPE.md`](docs/SCOPE.md)
-6. [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) & [`docs/SECURITY.md`](docs/SECURITY.md)
-7. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) & [`docs/SYSTEM_DESIGN.md`](docs/SYSTEM_DESIGN.md)
-8. Existing codebase implementation
-9. Agent assumptions (Never let an assumption override an explicit rule)
+**Before coding**
+1. Read this file.
+2. Read the 1–3 docs the table points to.
+3. Inspect the real implementation with grep/read.
+4. Plan the minimal change.
 
----
+**Stop and ask** when:
+- Requirements are ambiguous or contradict an invariant.
+- A change risks data loss or dropping production tables/columns.
+- You hit an architectural fork (payment provider, identity scheme).
+- Required secrets are missing.
+- The request contradicts a non-goal in [`PRODUCT.md`](docs/PRODUCT.md).
 
-## 4. Agent Workflow & Execution Checklists
+**Before calling it done**
+- [ ] The requested behaviour actually works — verified, not assumed.
+- [ ] `cd backend && npm test` passes.
+- [ ] `cd backend && npm run test:integration` passes.
+- [ ] `cd frontend && npm run build` passes (bundle budget included).
+- [ ] New behaviour has a test that fails without the change.
+- [ ] Docs updated **only** if schema, rules, contracts or architecture moved.
+- [ ] No secrets staged. No scope creep.
 
-### Before Coding Checklist
-1. Read this [`AGENTS.md`](AGENTS.md) file.
-2. Route to and read the 1–3 relevant documents in [`docs/`](docs/) based on Section 1 above.
-3. Inspect the existing implementation in the workspace using grep/view tools.
-4. Formulate a minimal, concrete plan.
-5. Execute only the requested changes.
-
-### Stop Conditions (Stop & Ask Clarification)
-The agent must **STOP** and ask the user for direction when:
-- Requirements are ambiguous, contradictory, or directly conflict with existing business rules.
-- A proposed change would cause irreversible data loss or require dropping production database tables/columns.
-- A critical architectural fork is reached (e.g., changing payment providers or identity schemes). 
-- Secrets or third-party credentials are missing and cannot be loaded from environment files.
-- The user request contradicts core project goals or explicitly out-of-scope boundaries.
-
-### Completion Verification Checklist
-Before declaring any task complete, verify:
-- [ ] The requested requirement is fully implemented.
-- [ ] Existing functionality remains unbroken.
-- [ ] Backend tests pass: `cd backend && npm test`.
-- [ ] Frontend bundle budget is respected: `cd frontend && npm run check:bundle` (or build passes).
-- [ ] No secrets, keys, or `.env` files are exposed or committed.
-- [ ] Relevant documentation in `docs/` was updated if architecture, schema, or rules were materially altered.
-- [ ] Scope was strictly controlled.
+Report honestly: if something is broken, skipped or unverified, say so plainly.
 
 ---
 
-## 5. Quick Development Reference
-- **Backend API**: `cd backend && npm run dev` (Port 4000)
-- **Frontend Client**: `cd frontend && npm run dev` (Port 5173, proxies `/api` to `:4000`)
-- **Next.js Auth App**: `npm run dev` (Port 3000)
-- **Tests**: `cd backend && npm test` (294 unit tests across 9 suites)
-- **Integration**: `cd backend && npm run test:integration` (17 real-HTTP journey tests)
-- **Coverage**: `cd backend && npm run test:coverage` (Enforced 70% threshold)
-- **Concurrency Test**: `cd backend && node scripts/test-native-postgres.js`
-- **Migrations**: `cd backend && npm run migrate:status` / `migrate:up` (migrations 001–023)
-- **WhatsApp CLI Test**: `cd backend && npm run test:whatsapp <phone>`
-- **E2E Browser Tests**: `npm run test:e2e`
+## 5. Commands
+
+```bash
+# Run it
+cd backend && npm run dev                # API on :4000
+cd frontend && npm run dev               # Marketplace on :5173, proxies /api
+npm run dev                              # Next.js auth app on :3000
+
+# Check it
+cd backend && npm test                   # 294 unit tests, 9 suites
+cd backend && npm run test:integration   # 17 real-HTTP journeys
+cd backend && npm run test:coverage      # 70% gate (currently ~87%)
+cd backend && npm audit --omit=dev       # must stay at 0
+cd frontend && npm run build             # includes bundle budget
+npx playwright test                      # 10 browser journeys
+
+# Database
+cd backend && npm run migrate:status     # also warns on duplicate numbers
+cd backend && npm run migrate:up
+cd backend && npm run migrate:down       # rolls back the last batch
+```
+
+Migrations `001`–`023`. SQLite locally and in CI; Supabase PostgreSQL in production.

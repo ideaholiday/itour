@@ -81,7 +81,12 @@ erDiagram
   - `id`: Primary key (`prd_...`).
   - `supplier_id`: Foreign key to `suppliers(id)`.
   - `title`, `slug`, `description`, `city`, `state`, `category`.
-  - `product_type`: `TRANSFER`, `DAY_TOUR`, `MULTI_DAY_PACKAGE`, `ATTRACTION_TICKET`, `EXPERIENCE`.
+  - `product_type`: `TRANSFER`, `TOUR`, `PACKAGE`, `ATTRACTION`, `EXPERIENCE` — the
+    values `POST /products/v2` accepts. Older rows may still hold the legacy
+    `DAY_TOUR` (= `TOUR`) and `MULTI_DAY_PACKAGE` (= `PACKAGE`); code matches both.
+  - `product_sub_type`: `WITH_HOTEL`, `WITHOUT_HOTEL`, `SIC`, `PRIVATE`,
+    `AIRPORT_RAILWAY`, `INTERCITY_HOTEL`, `CITY_TO_CITY`, `TICKET_ONLY`,
+    `TICKET_SIC`, `TICKET_PRIVATE`.
   - `product_sub_type`: Subcategory discriminator (e.g. `AIRPORT_TRANSFER`, `INTERCITY_TRANSFER`, `PRIVATE_TOUR`, `SIC_TOUR`, `WITH_HOTEL`, `CAB_ONLY`, `THEME_PARK`, `MONUMENT`, `WATER_SPORTS`, `CULINARY`).
   - `essential_info`: JSON array of important instructions.
   - `booking_mode`: `INSTANT` or `REQUEST`.

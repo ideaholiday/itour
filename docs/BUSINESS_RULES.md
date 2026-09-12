@@ -41,17 +41,17 @@ $$\text{Vacancies} = \text{Configured Max Capacity} - \text{Confirmed Seats} - \
 ## 3. Pricing, Taxes & 5 Product Types Fare Modeling
 
 ### 3.1 5 Product Types Fare Rules
-1. **Attraction Tickets & Experiential Tours (`ATTRACTION_TICKET`, `EXPERIENCE`)**:
+1. **Attraction Tickets & Experiential Tours (`ATTRACTION`, `EXPERIENCE`)**:
    - Priced per passenger ticket tier (`Adult`, `Child`, `Senior`, `Infant`) defined in `product_ticket_tiers`.
    - Free infant tiers (`is_free = 1`) count towards max group occupancy but add zero fare.
 2. **Transfers (`TRANSFER`)**:
    - Point-to-point and airport transfer routes priced by vehicle category (`product_vehicle_options` or dynamic transfer engine):
      $$\text{Total Price} = \max(\text{Base Fare}, \text{Calculated KM} \times \text{Per-KM Rate}) + \text{Tolls} + \text{Interstate Permit} + \text{GST (5\%)}$$
      Where $\text{Calculated KM} = \text{Haversine Distance} \times 1.25$.
-3. **Day Sightseeing Tours (`DAY_TOUR`)**:
+3. **Day Sightseeing Tours (`TOUR`)**:
    - Private tours priced per vehicle category (`SEDAN`, `SUV`, `TEMPO`).
    - Shared tours (SIC) priced per seat from designated `product_sic_hubs`.
-4. **Multi-Day Packaged Holidays (`MULTI_DAY_PACKAGE`)**:
+4. **Multi-Day Packaged Holidays (`PACKAGE`)**:
    - Tiered hotel packages (`Cab Only`, `3-Star`, `4-Star`, `5-Star`) priced per person per night + base transport fare.
 
 ### 3.2 Platform Commission & Supplier Net Earnings
