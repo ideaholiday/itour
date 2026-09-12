@@ -8,7 +8,7 @@ Idea Holiday follows a strict pyramid of automated testing to ensure zero regres
 ## 1. Test Levels & Commands
 
 ### 1.1 Backend Unit & Functional Tests (`node:test`)
-- **Location**: `backend/test/*.test.js` (283 test cases across 9 suites).
+- **Location**: `backend/test/*.test.js` (285 test cases across 9 suites).
 - **Execution Command**:
   ```bash
   cd backend && npm test
@@ -74,7 +74,7 @@ Idea Holiday follows a strict pyramid of automated testing to ensure zero regres
 ## 2. Pre-Deployment Verification Checklist
 
 Before pushing code to `main` or initiating a deployment to Cloud Run, agents and developers **MUST verify**:
-1. All 283 backend unit tests pass: `cd backend && npm test`.
+1. All 285 backend unit tests pass: `cd backend && npm test`.
 2. All 16 HTTP integration tests pass: `cd backend && npm run test:integration`.
 3. Coverage gate passes: `cd backend && npm run test:coverage`.
 4. Frontend builds without errors: `cd frontend && npm run build`.

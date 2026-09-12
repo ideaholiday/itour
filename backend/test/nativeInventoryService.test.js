@@ -315,3 +315,31 @@ test("booking unit items are skipped on databases without the table", t => {
   assert.deepEqual(saveBookingUnitItems(db, "b1", [{ unitType: "ADULT", quantity: 1 }], { ADULT: 1000 }), []);
   assert.deepEqual(listBookingUnitItems(db, "b1"), []);
 });
+
+test("a pre-v2 rules payload leaves party sizes and unit prices untouched", t => {
+  const db = fixture(t);
+  saveInventoryRules(db, "p", "o", { ...rules, minPartySize: 4, maxPartySize: 8, unitPrices: { SENIOR: 700 } });
+
+  // The supplier UI that predates v2 sends only the original eight fields.
+  saveInventoryRules(db, "p", "o", rules);
+
+  const slot = listNativeAvailability(db, "p", "o", future)[0];
+  assert.equal(slot.minPartySize, 4, "an omitted minPartySize must not reset to 1");
+  assert.equal(slot.maxPartySize, 8, "an omitted maxPartySize must not reset to 0");
+  assert.equal(slot.unitPrices.SENIOR, 700, "an omitted unitPrices must not wipe configured rates");
+
+  // Explicitly sending values still overwrites them.
+  saveInventoryRules(db, "p", "o", { ...rules, minPartySize: 1, maxPartySize: 0, unitPrices: {} });
+  const reset = listNativeAvailability(db, "p", "o", future)[0];
+  assert.equal(reset.minPartySize, 1);
+  assert.equal(reset.maxPartySize, 0);
+  assert.equal(reset.unitPrices.SENIOR, undefined);
+});
+
+test("a maximum party size below the minimum is rejected", t => {
+  const db = fixture(t);
+  assert.throws(() => saveInventoryRules(db, "p", "o", { ...rules, minPartySize: 6, maxPartySize: 2 }), /at least the minimum/);
+  // A stored minimum is respected when only the maximum is sent.
+  saveInventoryRules(db, "p", "o", { ...rules, minPartySize: 6 });
+  assert.throws(() => saveInventoryRules(db, "p", "o", { ...rules, maxPartySize: 2 }), /at least the minimum/);
+});

@@ -202,6 +202,10 @@ All API endpoints follow RESTful design principles and are served under the `/ap
   - `unitPrices` prices extended traveler types. `ADULT` and `CHILD` always come
     from `adultPrice`/`childPrice`; a type left out is not sold, and reserving it
     returns `UNIT_TYPE_NOT_SOLD`.
+  - `minPartySize`, `maxPartySize` and `unitPrices` are **omit-to-keep**: leaving a
+    field out preserves the stored value, so a client that predates these fields
+    cannot silently reset them. Send an explicit value (`{}` for `unitPrices`) to
+    clear one. A `maxPartySize` below `minPartySize` returns `INVALID_PARTY_SIZE`.
   - `minPartySize` defaults to 1 and `maxPartySize` to `0` (no cap). A hold below
     the minimum returns `BELOW_MIN_PARTY_SIZE`; above the maximum returns
     `ABOVE_MAX_PARTY_SIZE`.

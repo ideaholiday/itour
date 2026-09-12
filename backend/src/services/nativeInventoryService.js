@@ -68,17 +68,17 @@ export const inventoryRulesSchema = z.object({
   cutoffMinutes: z.number().int().min(0).max(43200),
   cancellationHours: z.number().int().min(0).max(8760),
   blackoutDates: z.array(date).max(730),
-  minPartySize: z.number().int().min(1).max(100).default(1),
-  maxPartySize: z.number().int().min(0).max(100).default(0),
+  // Optional, not defaulted: an omitted field must leave the stored value alone
+  // so a client that only knows the pre-v2 payload cannot silently reset it.
+  minPartySize: z.number().int().min(1).max(100).optional(),
+  maxPartySize: z.number().int().min(0).max(100).optional(),
   unitPrices: z.object({
     ADULT: z.number().int().min(0).max(10000000).optional(),
     CHILD: z.number().int().min(0).max(10000000).optional(),
     INFANT: z.number().int().min(0).max(10000000).optional(),
     SENIOR: z.number().int().min(0).max(10000000).optional(),
     YOUTH: z.number().int().min(0).max(10000000).optional(),
-  }).strict().default({}),
-}).refine((v) => v.maxPartySize === 0 || v.maxPartySize >= v.minPartySize, {
-  message: "maxPartySize must be 0 (no cap) or at least minPartySize", path: ["maxPartySize"],
+  }).strict().optional(),
 });
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
@@ -137,6 +137,12 @@ export function saveInventoryRules(db, productId, optionId, input) {
     const option = db.prepare("SELECT id FROM product_options WHERE id = ? AND product_id = ?").get(optionId, productId);
     if (!option) throw inventoryError("Option not found", "OPTION_NOT_FOUND", 404);
     const previous = getInventoryRules(db, productId, optionId);
+    const minPartySize = rules.minPartySize ?? Number(previous?.min_party_size ?? 1);
+    const maxPartySize = rules.maxPartySize ?? Number(previous?.max_party_size ?? 0);
+    const unitPrices = rules.unitPrices ?? (previous?.unit_prices ? parse(previous.unit_prices) : {});
+    if (maxPartySize !== 0 && maxPartySize < minPartySize) {
+      throw inventoryError("Maximum party size must be 0 (no cap) or at least the minimum", "INVALID_PARTY_SIZE", 400);
+    }
     if (!previous) {
       const active = db.prepare("SELECT id FROM bookings WHERE product_id = ? AND status NOT IN ('cancelled', 'completed') LIMIT 1").get(productId);
       if (active) throw inventoryError("This listing has existing reservations. Reconcile them before enabling seat inventory.", "EXISTING_RESERVATIONS");
@@ -149,7 +155,7 @@ export function saveInventoryRules(db, productId, optionId, input) {
       unit_prices=excluded.unit_prices, updated_at=CURRENT_TIMESTAMP`).run(
       optionId, productId, JSON.stringify([...new Set(rules.operatingDays)]), JSON.stringify([...new Set(rules.departureTimes)].sort()), rules.capacity,
       rules.adultPrice, rules.childPrice, rules.cutoffMinutes, rules.cancellationHours, JSON.stringify(rules.blackoutDates),
-      rules.minPartySize, rules.maxPartySize, JSON.stringify(rules.unitPrices));
+      minPartySize, maxPartySize, JSON.stringify(unitPrices));
     const current = getInventoryRules(db, productId, optionId);
     for (const slot of db.prepare("SELECT * FROM native_availability_slots WHERE option_id = ?").all(optionId)) {
       // A per-date override outranks the weekly rule, so re-sync to the effective
