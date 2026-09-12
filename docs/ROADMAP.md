@@ -22,6 +22,7 @@ Do not rebuild these. Extend them if asked.
 | Shared resources | One vehicle or guide capping every option that uses it |
 | Promotional rates | Percent/flat discounts, promo codes, last-minute and early-bird windows |
 | Bulk calendar editing | Close or resize a date range in one atomic request |
+| External provider boundary | OCTo client for availability/reserve/confirm/cancel; external names no longer fall back to native |
 | Channel manager | Bókun, FareHarbor, Bookingkit, Palisis/TourCMS, Activitar, Anchor, generic OCTo — connect and import |
 | OCTo v1 API | `/api/octo` and `/octo` |
 | Transfer engine | PostGIS geo-fencing, tolls, permits, GST |
@@ -41,23 +42,29 @@ Standing obligations that apply to every change:
 
 - Keep `npm audit --omit=dev` at **0 vulnerabilities**.
 - Keep coverage above the **70%** gate.
-- Keep all suites green: 338 unit, 17 integration, 12 e2e.
+- Keep all suites green: 347 unit, 19 integration, 12 e2e.
 
 ---
 
 ## NEXT — ready to start, highest value first
 
 **1. Branch coverage on error paths** *(in progress)*
-Branch coverage is ~65% against ~88% line. The payment, channel and SLA services
-have had a first pass (Cashfree 21→63%, channel manager 31→57%, SLA 36→62%),
-which surfaced two real refund bugs. Still thin: `bookingService`,
-`cashfreeSecureIdService`, `driverDispatchService`, `analyticsService`.
+Branch coverage is ~65% against ~89% line. Payment, channel, SLA and the
+provider boundary have had a pass, surfacing two refund bugs and six in the OCTo
+confirmation path. Still thin: `bookingService`, `cashfreeSecureIdService`,
+`driverDispatchService`, `analyticsService`, and the six unimplemented adapters.
 
-**2. Real external provider adapter**
-The channel manager imports products, but `reservationProviders.js` still runs
-only `NATIVE` for live availability and booking. A true Bókun or FareHarbor
-adapter needs supplier auth, capability discovery, its own idempotency and
-reconciliation. Biggest single piece of remaining Phase 2 work.
+A lesson worth keeping: the OCTo bugs were all masked by a unit-test fixture that
+hand-rolled a `bookings` table not matching production. Prefer fixtures built
+from the real migrations.
+
+**2. Provider-specific adapters**
+`OCTO_GENERIC` now does availability, reserve, confirm and cancel, and the
+provider boundary is real. The remaining six adapters (Bókun, FareHarbor,
+Bookingkit, TourCMS, Activitar, Anchor) still only import products and return
+`PROVIDER_CAPABILITY_MISSING` for live operations. Each needs that provider's
+own credentials and API documentation — they cannot be written honestly without
+them, so treat each as its own scoped piece of work.
 
 ---
 

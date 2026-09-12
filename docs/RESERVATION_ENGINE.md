@@ -176,6 +176,37 @@ IDs to local product/option/unit/availability/booking IDs.
 
 This is an **OCTo-aligned internal foundation**, not an OCTo-certified public API.
 
+### The provider boundary
+
+`getReservationProvider(name)` resolves who owns a product's availability and
+reservations:
+
+- `NATIVE` → the seat engine in this document.
+- `OCTO_GENERIC`, `BOKUN`, `FAREHARBOR`, `BOOKINGKIT`, `TOURCMS`, `ACTIVITAR`,
+  `ANCHOR` → an **external provider** bound to the supplier's connected channel.
+- Anything else → `PROVIDER_NOT_CONNECTED` (409).
+
+An external name **no longer falls back to the native engine**. It used to, which
+meant an externally sourced product would advertise native capacity the platform
+does not own. Now:
+
+| Situation | Result |
+| :--- | :--- |
+| No `ACTIVE` channel connection for that supplier | `PROVIDER_NOT_CONNECTED` (409) |
+| Adapter has not implemented the operation | `PROVIDER_CAPABILITY_MISSING` (501) |
+| Provider returns no reservation reference | `PROVIDER_BAD_RESPONSE` (502) |
+| Provider returns an error | that error's message and code are passed through |
+
+An external provider never touches native capacity — for an imported product we
+are not the authority on seats. Only the identity mapping is kept locally, in
+`reservation_external_references` (`resource_type` `PRODUCT`, `OPTION`,
+`BOOKING`). The caller's `requestKey` is passed to the provider as its
+idempotency key so a retry reaches it as the same reservation, not a second one.
+
+`OCTO_GENERIC` is verified by round-tripping against this application's own
+`/octo` server in `integration/externalProviderRoundTrip.test.js` — if the client
+and server ever disagree on shapes, that test fails without needing a third party.
+
 ---
 
 ## 8. Schema
@@ -200,7 +231,9 @@ endpoints are in [`API_CONTRACTS.md`](API_CONTRACTS.md).
 
 - **Bulk calendar editing** — a capacity or closure across a date range needs one
   request per date today.
-- **External provider adapters** — the channel manager imports products, but
-  `reservationProviders.js` still runs only `NATIVE` for live availability and
-  booking. A real Bókun/FareHarbor adapter must implement supplier
-  authentication, capability discovery, its own idempotency and reconciliation.
+- **Provider-specific adapters beyond OCTo** — `OCTO_GENERIC` speaks availability,
+  reserve, confirm and cancel. Bókun, FareHarbor, Bookingkit, TourCMS, Activitar
+  and Anchor still implement only `testConnection` and `fetchProducts`, so those
+  operations return `PROVIDER_CAPABILITY_MISSING` (501). Each needs its own
+  proprietary API work; none can be written honestly without that provider's
+  credentials and documentation.

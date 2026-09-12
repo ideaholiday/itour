@@ -300,20 +300,63 @@ export function confirmOctoReservation(db, input) {
   }
 
   const bookingId = `bk_octo_${uuid.slice(0, 12)}`;
+
+  // The slot carries the real product, date and time. Parsing them out of the
+  // slot id is wrong: the id is `optionId:date:HH:MM`, so splitting on ":"
+  // yields the OPTION id and a truncated "HH" rather than the product and time.
+  const slot = db.prepare("SELECT product_id, option_id, local_date, local_time FROM native_availability_slots WHERE id = ?")
+    .get(reservation.availability_slot);
+  if (!slot) throw Object.assign(new Error("Reservation departure not found"), { status: 409 });
+
+  // Bill the price frozen on the hold rather than a placeholder.
+  const snapshot = (() => {
+    try { return JSON.parse(reservation.pricing_snapshot || "{}"); } catch { return {}; }
+  })();
+  const base = Number(snapshot.unitTotal) > 0
+    ? Number(snapshot.unitTotal)
+    : Number(snapshot.adultPrice || 0) * Number(reservation.adults || 0)
+      + Number(snapshot.childPrice || 0) * Number(reservation.children || 0);
+  const amountInr = base > 0 ? base + Math.round(base * 0.05) : 0;
+
+  // bookings.ref, product_type and pickup_location are NOT NULL: an OCTo
+  // confirmation has to populate the same required shape as a native booking.
+  const product = db.prepare("SELECT product_type, supplier_id, city FROM products WHERE id = ?").get(slot.product_id) || {};
+  const bookingRef = `IH-${randomUUID().replace(/-/g, "").slice(0, 7).toUpperCase()}`;
+
   db.transaction(() => {
+    // bookings.user_id is a real foreign key, but an OCTo reservation's owner is
+    // the synthetic `octo_<uuid>` identity. Materialise a guest traveler for it,
+    // the same way the checkout route does for an external booker.
+    const ownerExists = db.prepare("SELECT id FROM users WHERE id = ?").get(reservation.owner_id);
+    if (!ownerExists) {
+      db.prepare("INSERT INTO users (id, name, email, password, phone, role) VALUES (?, ?, ?, ?, ?, 'TRAVELER')")
+        .run(
+          reservation.owner_id,
+          contact.fullName || "OCTo Guest",
+          (contact.email || `${reservation.owner_id}@octo.ideaholiday.in`).toLowerCase(),
+          `external_${randomUUID()}`,
+          contact.phoneNumber || "+919999999999"
+        );
+    }
+
     db.prepare(`
-      INSERT INTO bookings (id, user_id, product_id, activity_date, pickup_time, adults, children, total_amount_inr, status, payment_status, traveler_name, traveler_email, traveler_phone)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', 'PAID', ?, ?, ?)
+      INSERT INTO bookings (id, ref, user_id, product_id, product_option_id, supplier_id, product_type, activity_date, pickup_time, pickup_location, adults, children, amount_inr, status, payment_status, traveler_name, traveler_email, traveler_phone)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', 'PAID', ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
     `).run(
       bookingId,
+      bookingRef,
       reservation.owner_id,
-      reservation.availability_slot.split(":")[0],
-      reservation.availability_slot.split(":")[1],
-      reservation.availability_slot.split(":")[2],
+      slot.product_id,
+      slot.option_id,
+      product.supplier_id || null,
+      product.product_type || "EXPERIENCE",
+      slot.local_date,
+      slot.local_time,
+      product.city || "To be confirmed",
       reservation.adults,
       reservation.children,
-      1000,
+      amountInr,
       contact.fullName || "OCTo Guest",
       contact.email || "octo@ideaholiday.in",
       contact.phoneNumber || "+919999999999"

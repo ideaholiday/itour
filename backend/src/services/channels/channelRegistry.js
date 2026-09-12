@@ -73,6 +73,76 @@ export class GenericOctoAdapter extends ResTechAdapter {
     }
   }
 
+  /** Shared JSON call with a timeout and the provider's own error text. */
+  async _call(credentials, path, { method = "GET", body, timeoutMs = 10000 } = {}) {
+    const endpoint = (credentials.endpointUrl || "").replace(/\/+$/, "");
+    if (!endpoint) throw new Error("Endpoint URL is required");
+    const res = await fetch(`${endpoint}${path}`, {
+      method,
+      headers: this._getHeaders(credentials),
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw Object.assign(new Error(data.error || data.errorMessage || `Provider returned HTTP ${res.status}`), {
+        status: res.status, code: data.code || "PROVIDER_ERROR",
+      });
+    }
+    return data;
+  }
+
+  async fetchAvailability(credentials, externalProductId, { optionId, localDateStart, localDateEnd } = {}) {
+    const data = await this._call(credentials, "/availability", {
+      method: "POST",
+      body: { productId: externalProductId, optionId, localDateStart, localDateEnd: localDateEnd || localDateStart },
+    });
+    const slots = Array.isArray(data) ? data : data.availability || [];
+    // Normalise OCTo availability onto the shape the marketplace renders.
+    return slots.map((slot) => ({
+      id: slot.id,
+      productId: externalProductId,
+      optionId: slot.optionId || optionId || null,
+      localDate: String(slot.localDateTimeStart || "").slice(0, 10),
+      localTime: String(slot.localDateTimeStart || "").slice(11, 16),
+      localDateTimeStart: slot.localDateTimeStart,
+      utcCutoffAt: slot.utcCutoffAt || null,
+      capacity: Number(slot.capacity ?? 0),
+      vacancies: Number(slot.vacancies ?? 0),
+      available: Boolean(slot.available ?? Number(slot.vacancies ?? 0) > 0),
+      status: slot.status || (slot.available ? "AVAILABLE" : "SOLD_OUT"),
+      external: true,
+    }));
+  }
+
+  async createReservation(credentials, { externalProductId, externalOptionId, availabilityId, unitItems, idempotencyKey, contact }) {
+    return this._call(credentials, "/bookings/reservation", {
+      method: "POST",
+      body: {
+        uuid: idempotencyKey,
+        productId: externalProductId,
+        optionId: externalOptionId,
+        availabilityId,
+        unitItems: unitItems || [],
+        contact: contact || {},
+      },
+    });
+  }
+
+  async confirmReservation(credentials, { uuid, contact }) {
+    return this._call(credentials, "/bookings/confirmation", {
+      method: "POST",
+      body: { uuid, contact: contact || {} },
+    });
+  }
+
+  async cancelReservation(credentials, { uuid, reason }) {
+    return this._call(credentials, "/bookings/cancellation", {
+      method: "POST",
+      body: { uuid, reason: reason || "Cancelled by marketplace" },
+    });
+  }
+
   async fetchProducts(credentials) {
     const endpoint = (credentials.endpointUrl || "").replace(/\/+$/, "");
     const res = await fetch(`${endpoint}/products`, {

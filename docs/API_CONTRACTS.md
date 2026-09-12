@@ -419,6 +419,7 @@ Compliant with OCTo specification v1. Used by external distributors, OTAs, and A
 - **`GET /api/octo/products/:id`**: Returns a single OCTo product with full unit definitions and cancellation terms.
 - **`POST /api/octo/availability`**: Checks availability slots and vacancies for given `productId`, `optionId`, and date range.
 - **`POST /api/octo/bookings/reservation`**: Creates an owner-scoped 10-minute temporary seat reservation (`native_reservations`).
+- **`POST /api/octo/bookings/confirmation`**: Confirms a reservation into a booking. Populates the same required booking shape as a native checkout (`ref`, `product_type`, `pickup_location`, `amount_inr` from the hold's frozen price) and materialises a guest traveler for the synthetic OCTo owner.
 - **`POST /api/octo/bookings/confirmation`**: Commits reservation into confirmed booking with QR code voucher payload.
 - **`POST /api/octo/bookings/cancellation`**: Cancels reservation and releases seats back into availability.
 - **`GET /api/octo/bookings/:id`**: Fetches booking status and details.

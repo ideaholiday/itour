@@ -30,10 +30,15 @@ function setupOctoTestDb() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY, name TEXT, email TEXT, password TEXT, phone TEXT, role TEXT
+    );
+
     CREATE TABLE products (
       id TEXT PRIMARY KEY,
       product_code TEXT,
       supplier_id TEXT,
+      product_type TEXT DEFAULT 'EXPERIENCE',
       title TEXT NOT NULL,
       city TEXT,
       price_inr REAL,
@@ -110,7 +115,12 @@ function setupOctoTestDb() {
       pickup_time TEXT,
       adults INTEGER,
       children INTEGER,
-      total_amount_inr REAL,
+      amount_inr INTEGER NOT NULL,
+      ref TEXT NOT NULL,
+      product_option_id TEXT,
+      supplier_id TEXT,
+      product_type TEXT NOT NULL,
+      pickup_location TEXT NOT NULL,
       status TEXT,
       payment_status TEXT,
       traveler_name TEXT,
