@@ -124,7 +124,7 @@ Before declaring any task complete, verify:
 - **Backend API**: `cd backend && npm run dev` (Port 4000)
 - **Frontend Client**: `cd frontend && npm run dev` (Port 5173, proxies `/api` to `:4000`)
 - **Next.js Auth App**: `npm run dev` (Port 3000)
-- **Tests**: `cd backend && npm test` (286 unit tests across 9 suites)
+- **Tests**: `cd backend && npm test` (288 unit tests across 9 suites)
 - **Integration**: `cd backend && npm run test:integration` (16 real-HTTP journey tests)
 - **Coverage**: `cd backend && npm run test:coverage` (Enforced 70% threshold)
 - **Concurrency Test**: `cd backend && node scripts/test-native-postgres.js`

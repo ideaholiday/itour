@@ -98,6 +98,16 @@ All API endpoints follow RESTful design principles and are served under the `/ap
   - `supplierNote` carries the supplier's reason when a calendar override closed
     or resized the departure.
 
+- **`GET /api/products/:id/price-calendar?month=YYYY-MM`**:
+  - One month of per-day prices for the traveler price calendar.
+  - When the product has native seat inventory, days resolve through the same
+    seasonal rates and calendar overrides the departure picker uses, and the
+    response carries `pricingSource: "NATIVE_INVENTORY"`. Each day reports
+    `priceInr`, `tier` (`PEAK`/`SAVER`/`STANDARD`) and `available`; a date the
+    supplier closed returns `available: false`.
+  - Products without seat inventory keep demand-rule pricing over `price_inr`
+    and omit `pricingSource`.
+
 ---
 
 ## 2. Traveler Endpoints (Requires `TRAVELER`, `ADMIN`, or `STAFF`)

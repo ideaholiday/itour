@@ -91,7 +91,7 @@ renamed file as new and run it a second time.
 Execute test suites from the respective package roots:
 
 ```bash
-# Backend unit test suite (286 tests across 9 suites using node:test)
+# Backend unit test suite (288 tests across 9 suites using node:test)
 cd backend && npm test
 
 # Backend coverage test (enforces 70% line & function coverage gate)

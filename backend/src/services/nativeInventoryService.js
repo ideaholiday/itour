@@ -497,3 +497,42 @@ export function listBookingUnitItems(db, bookingId) {
     "SELECT unit_type AS unitType, quantity, unit_price_inr AS unitPriceInr FROM booking_unit_items WHERE booking_id = ? ORDER BY unit_type"
   ).all(bookingId)) || [];
 }
+
+// --- Month pricing (traveler price calendar) ------------------------------
+
+/**
+ * Resolves one month of seasonal prices and open/closed state for a product.
+ *
+ * Deliberately avoids per-slot occupancy counting: a month calendar only needs
+ * the rate and whether the date sells at all, so this stays a handful of queries
+ * rather than one per departure per day.
+ *
+ * @returns {null|{optionId: string, basePriceInr: number, days: Array}} null when
+ *   the product has no native inventory, so callers can fall back to their own
+ *   pricing.
+ */
+export function listNativeMonthPricing(db, productId, yearMonth) {
+  if (!/^\d{4}-\d{2}$/.test(String(yearMonth || ""))) return null;
+  const rules = getInventoryRules(db, productId);
+  if (!rules) return null;
+
+  const [year, month] = yearMonth.split("-").map(Number);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const departures = parse(rules.departure_times);
+  const days = [];
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const localDate = `${yearMonth}-${String(day).padStart(2, "0")}`;
+    const pricing = resolvePricing(db, rules, localDate);
+    const open = departures.some((time) =>
+      operates(rules, localDate, time) && !resolveOverride(db, rules.option_id, localDate, time)?.closed);
+    days.push({
+      date: localDate,
+      priceInr: pricing.adultPrice,
+      available: open,
+      scheduleLabel: pricing.priceScheduleLabel,
+    });
+  }
+
+  return { optionId: rules.option_id, basePriceInr: Number(rules.adult_price), days };
+}

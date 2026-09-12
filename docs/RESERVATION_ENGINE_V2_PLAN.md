@@ -140,18 +140,24 @@ has been closed for that date, instead of landing them on an error.
 
 Covered end to end by `e2e/z-supplier-rates-calendar.spec.js`.
 
-### Known inconsistency, not yet addressed
+### One price per screen
 
-Two older surfaces on the activity page still price from the product's static
-`price_inr` and do not know about seasonal rates, so they can disagree with the
-departure picker on the same screen:
+Two older surfaces used to price from the product's static `price_inr` and could
+contradict the departure picker on the same screen. Both now follow native
+inventory when a product sells seats:
 
-- the **"From ₹…" headline** in the booking sidebar, and
-- the **"Seasonal & Demand Price Calendar"** widget, which renders its own
-  weekend/peak pricing unrelated to `native_price_schedules`.
+- The **"From ₹…" headline** takes the selected departure's rate, so it matches
+  the picker instead of quoting the base price during a peak week.
+- The **"Seasonal & Demand Price Calendar"** is served by
+  `GET /api/products/:id/price-calendar`, which now resolves each day through
+  `listNativeMonthPricing` and returns `pricingSource: "NATIVE_INVENTORY"`.
+  Dates the supplier closed render as unavailable rather than advertising a
+  price. Products without seat inventory keep the previous demand-rule pricing
+  unchanged.
 
-Reconciling them means teaching both to read native availability. Worth doing
-before this goes in front of real travelers.
+The month resolver deliberately skips per-slot occupancy counting — a calendar
+needs the rate and whether the date sells at all, not live vacancy — which keeps
+it a few queries rather than one per departure per day.
 
 ---
 

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { processReservationOutbox } from "../src/services/reservationOutboxService.js";
 import { executeMigrationSql } from "../src/services/migrationRunner.js";
 import { calculateRefundQuote } from "../src/services/financeService.js";
-import { moveNativeReservation, checkNativeInventory, saveInventoryRules, listNativeAvailability, reserveNativeInventory, attachNativeReservation, confirmNativeReservation, releaseNativeReservation, savePriceSchedule, saveSlotOverride, deleteSlotOverride, normalizeUnitItems, saveBookingUnitItems, listBookingUnitItems } from "../src/services/nativeInventoryService.js";
+import { moveNativeReservation, checkNativeInventory, saveInventoryRules, listNativeAvailability, reserveNativeInventory, attachNativeReservation, confirmNativeReservation, releaseNativeReservation, savePriceSchedule, saveSlotOverride, deleteSlotOverride, normalizeUnitItems, saveBookingUnitItems, listBookingUnitItems, listNativeMonthPricing } from "../src/services/nativeInventoryService.js";
 
 const rules = { operatingDays: [0, 1, 2, 3, 4, 5, 6], departureTimes: ["09:00", "14:00"], capacity: 3, adultPrice: 1000, childPrice: 400, cutoffMinutes: 120, cancellationHours: 24, blackoutDates: [] };
 const future = "2099-05-12";
@@ -358,4 +358,28 @@ test("a seasonal rate inherits base unit prices it does not override", t => {
   // And it remains reservable in season.
   const hold = reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", unitItems: [{ unitType: "SENIOR", quantity: 1 }], ownerId: "u", requestKey: "senior-peak" });
   assert.equal(JSON.parse(hold.pricing_snapshot).unitTotal, 700);
+});
+
+test("the month price calendar follows seasonal rates and closed dates", t => {
+  const db = fixture(t);
+  // future is 2099-05-12 (a Tuesday); price peak rates for that week only.
+  savePriceSchedule(db, "p", "o", { label: "May peak", startsOn: "2099-05-10", endsOn: "2099-05-16", adultPrice: 2500, childPrice: 900, priority: 5 });
+  saveSlotOverride(db, "p", "o", { localDate: "2099-05-20", closed: true });
+
+  const calendar = listNativeMonthPricing(db, "p", "2099-05");
+  const byDate = Object.fromEntries(calendar.days.map(day => [day.date, day]));
+
+  assert.equal(calendar.basePriceInr, 1000);
+  assert.equal(calendar.days.length, 31);
+  assert.equal(byDate["2099-05-12"].priceInr, 2500, "in-season dates use the seasonal rate");
+  assert.equal(byDate["2099-05-12"].scheduleLabel, "May peak");
+  assert.equal(byDate["2099-05-25"].priceInr, 1000, "out-of-season dates use the base rate");
+  assert.equal(byDate["2099-05-20"].available, false, "a whole-day closure marks the date unavailable");
+  assert.equal(byDate["2099-05-21"].available, true);
+});
+
+test("the month price calendar is null for products without seat inventory", t => {
+  const db = fixture(t);
+  assert.equal(listNativeMonthPricing(db, "missing-product", "2099-05"), null);
+  assert.equal(listNativeMonthPricing(db, "p", "not-a-month"), null);
 });

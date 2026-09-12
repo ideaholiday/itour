@@ -58,7 +58,7 @@ The marketplace supports 5 distinct operational product models:
 ## Current Project Status
 - **Phase 1 & Phase 2 Active**: Core Supplier Extranet, Native Automated Reservation Engine, Multi-Domain Ecosystem (`ideaholiday.in`, `supply.ideaholiday.in`, `admin.ideaholiday.in`), Standard OCTo API (`/api/octo`), and Multi-Channel ResTech Ingestion (Bókun, FareHarbor, Bookingkit, Palisis/TourCMS, Activitar, Anchor, Generic OCTo) deployed and operational.
 - **Infrastructure**: Google Cloud Run (Container runtime, 2 GiB RAM / 2 vCPUs) + Supabase PostgreSQL (PostGIS enabled) for production; SQLite (WAL mode) for local zero-config testing and development.
-- **Automated Testing**: 286 backend unit tests across 9 suites and isolated HTTP integration tests passing; Playwright E2E browser tests covering extranet setup, live availability selection, held checkout, payment, and QR voucher generation.
+- **Automated Testing**: 288 backend unit tests across 9 suites and isolated HTTP integration tests passing; Playwright E2E browser tests covering extranet setup, live availability selection, held checkout, payment, and QR voucher generation.
 - **Notifications**: Live Meta WhatsApp Cloud API (App ID `1488217219329539`), Amazon SES / Brevo transactional emails, and optional Twilio SMS.
 
 ---

@@ -96,5 +96,19 @@ test("supplier sets a seasonal rate and closes one departure from the extranet",
   await expect(page.getByText("minimum of 2 travelers")).toBeVisible();
   await expect(page.getByText("Crew on leave")).toBeVisible();
   await expect(page.getByText("₹4,000 per adult").first()).toBeVisible();
+
+  // The month calendar must price from native inventory, not the product's
+  // static price, so peak dates read the same as the departure picker.
+  // (Off-peak dates legitimately still show the ₹1,000 base rate.)
+  await expect(page.getByText("₹4,000", { exact: true }).first()).toBeVisible();
+  const calendar = await request.get(`/api/products/${productId}/price-calendar?month=${localDate(1).slice(0, 7)}`);
+  const calendarBody = await calendar.json();
+  expect(calendarBody.pricingSource).toBe("NATIVE_INVENTORY");
+  const peakDay = calendarBody.days.find(day => day.date === localDate(1));
+  expect(peakDay.priceInr).toBe(4000);
+  expect(peakDay.tier).toBe("PEAK");
+  const offPeakDay = calendarBody.days.find(day => day.date === localDate(12));
+  if (offPeakDay) expect(offPeakDay.priceInr).toBe(1000);
+
   await page.screenshot({ path: "test-results/native-traveler-seasonal-pricing.png", fullPage: true });
 });

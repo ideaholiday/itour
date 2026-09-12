@@ -255,7 +255,7 @@ function BookingTrustFooter() {
 // ─── Booking Panel: PACKAGE ───────────────────────────────────
 
 function BookingPanelPackage({
-  activity, date, setDate, adults, setAdults, children, setChildren,
+  activity, date, setDate, nativeDeparture, adults, setAdults, children, setChildren,
   hotelTiers, selectedHotelTierId, setSelectedHotelTierId,
   serverQuote, quoteLoading, quoteError, formatPrice, addonsTotalInr, currency,
   availableAddons, selectedAddonIds, toggleAddon, headcount, onBook,
@@ -266,7 +266,7 @@ function BookingPanelPackage({
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
       <QuoteSummary serverQuote={serverQuote} quoteLoading={quoteLoading} formatPrice={formatPrice}
         addonsTotalInr={addonsTotalInr} currency={currency}
-        basePrice={activity.priceInr ?? activity.price_inr} priceUnit="per person" />
+        basePrice={nativeDeparture?.adultPrice ?? activity.priceInr ?? activity.price_inr} priceUnit="per person" />
 
       <div className="space-y-3 border-t border-stone-200 pt-4">
         <div>
@@ -342,7 +342,7 @@ function BookingPanelPackage({
 // ─── Booking Panel: TOUR ──────────────────────────────────────
 
 function BookingPanelTour({
-  activity, date, setDate, adults, setAdults, children, setChildren,
+  activity, date, setDate, nativeDeparture, adults, setAdults, children, setChildren,
   vehicleOptions, selectedVehicle, setSelectedVehicle, sicHubs,
   serverQuote, quoteLoading, quoteError, formatPrice, addonsTotalInr, currency,
   availableAddons, selectedAddonIds, toggleAddon, headcount, onBook,
@@ -355,7 +355,7 @@ function BookingPanelTour({
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
       <QuoteSummary serverQuote={serverQuote} quoteLoading={quoteLoading} formatPrice={formatPrice}
         addonsTotalInr={addonsTotalInr} currency={currency}
-        basePrice={activity.priceInr ?? activity.price_inr} priceUnit={isSIC ? "per seat" : "per vehicle"} />
+        basePrice={nativeDeparture?.adultPrice ?? activity.priceInr ?? activity.price_inr} priceUnit={isSIC ? "per seat" : "per vehicle"} />
 
       <div className="space-y-3 border-t border-stone-200 pt-4">
         <div>
@@ -424,7 +424,7 @@ function BookingPanelTour({
 // ─── Booking Panel: TRANSFER ──────────────────────────────────
 
 function BookingPanelTransfer({
-  activity, date, setDate, vehicleOptions, selectedVehicle, setSelectedVehicle,
+  activity, date, setDate, nativeDeparture, vehicleOptions, selectedVehicle, setSelectedVehicle,
   serverQuote, quoteLoading, quoteError, formatPrice, currency, onBook,
 }) {
   const subType = activity.productSubType || activity.product_sub_type || "";
@@ -435,7 +435,7 @@ function BookingPanelTransfer({
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
       <QuoteSummary serverQuote={serverQuote} quoteLoading={quoteLoading} formatPrice={formatPrice}
         addonsTotalInr={0} currency={currency}
-        basePrice={activity.priceInr ?? activity.price_inr} priceUnit="per vehicle (all-inclusive)" />
+        basePrice={nativeDeparture?.adultPrice ?? activity.priceInr ?? activity.price_inr} priceUnit="per vehicle (all-inclusive)" />
 
       <div className="space-y-3 border-t border-stone-200 pt-4">
         <div>
@@ -482,7 +482,7 @@ function BookingPanelTransfer({
 // ─── Booking Panel: ATTRACTION / EXPERIENCE ───────────────────
 
 function BookingPanelAttractionExperience({
-  activity, date, setDate,
+  activity, date, setDate, nativeDeparture,
   ticketTiers, ticketSelections, setTicketSelections,
   vehicleOptions, selectedVehicle, setSelectedVehicle, sicHubs,
   serverQuote, quoteLoading, quoteError, formatPrice, addonsTotalInr, currency,
@@ -499,7 +499,7 @@ function BookingPanelAttractionExperience({
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
       <QuoteSummary serverQuote={serverQuote} quoteLoading={quoteLoading} formatPrice={formatPrice}
         addonsTotalInr={addonsTotalInr} currency={currency}
-        basePrice={activity.priceInr ?? activity.price_inr} priceUnit="per ticket" />
+        basePrice={nativeDeparture?.adultPrice ?? activity.priceInr ?? activity.price_inr} priceUnit="per ticket" />
 
       <div className="space-y-3 border-t border-stone-200 pt-4">
         <div>
@@ -831,7 +831,7 @@ export default function ActivityDetail() {
 
   // ── Select correct booking panel ──
   const sharedProps = {
-    activity, date, setDate,
+    activity, date, setDate, nativeDeparture,
     vehicleOptions, selectedVehicle, setSelectedVehicle,
     serverQuote, quoteLoading, quoteError, formatPrice, currency,
     addonsTotalInr, availableAddons, selectedAddonIds, toggleAddon, headcount,

@@ -1,3 +1,4 @@
+import { listNativeMonthPricing } from "./nativeInventoryService.js";
 import crypto from "crypto";
 
 export class PricingRuleService {
@@ -111,6 +112,32 @@ export class PricingRuleService {
     if (productId) {
       const product = database.prepare("SELECT price_inr FROM products WHERE id = ?").get(productId);
       if (product?.price_inr) basePrice = Number(product.price_inr);
+    }
+
+    // Once a product sells seats, native inventory is the authority on price and
+    // on whether a date sells at all. Demand rules over the static product price
+    // would contradict the departure picker on the same screen.
+    const native = listNativeMonthPricing(database, productId, ym);
+    if (native) {
+      return {
+        month: ym,
+        productId,
+        basePriceInr: native.basePriceInr,
+        pricingSource: "NATIVE_INVENTORY",
+        days: native.days.map((entry) => {
+          const ratio = native.basePriceInr > 0 ? entry.priceInr / native.basePriceInr : 1;
+          return {
+            date: entry.date,
+            day: Number(entry.date.slice(8)),
+            dayOfWeek: new Date(`${entry.date}T00:00:00`).getDay(),
+            priceInr: entry.priceInr,
+            tier: ratio > 1.05 ? "PEAK" : ratio < 0.95 ? "SAVER" : "STANDARD",
+            available: entry.available,
+            hasRules: Boolean(entry.scheduleLabel),
+            rulesSummary: entry.scheduleLabel || "",
+          };
+        }),
+      };
     }
 
     for (let day = 1; day <= daysInMonth; day++) {
