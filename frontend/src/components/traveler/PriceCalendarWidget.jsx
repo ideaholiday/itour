@@ -65,7 +65,9 @@ export function PriceCalendarWidget({
     const dynamicDay = dynamicDaysMap[dateStr];
     const price = dynamicDay?.priceInr || dateData.price_override_inr || basePrice;
     const isSelected = selectedDate === dateStr;
-    const isBlocked = dateData.status === "BLOCKED" || dateStr < todayStr;
+    // A native-inventory day the supplier closed is not bookable, so it reads the
+    // same as a blocked or past date rather than advertising a price.
+    const isBlocked = dateData.status === "BLOCKED" || dateStr < todayStr || dynamicDay?.available === false;
     const tier = dynamicDay?.tier || "STANDARD";
 
     days.push(

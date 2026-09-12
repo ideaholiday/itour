@@ -24,6 +24,7 @@ export default function OpsLayout({ children }) {
   const [metrics, setMetrics] = useState(null);
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [isRealtimeActive, setIsRealtimeActive] = useState(true);
+  const [openCriticalTaskCount, setOpenCriticalTaskCount] = useState(0);
 
   const fetchOpsMetrics = async () => {
     try {
@@ -39,10 +40,23 @@ export default function OpsLayout({ children }) {
     }
   };
 
+  const fetchOpenCriticalTasks = async () => {
+    try {
+      const res = await fetch("/api/ops/tasks", { headers: authHeaders() });
+      const data = await res.json();
+      if (data.success) {
+        setOpenCriticalTaskCount((data.tasks || []).filter((t) => t.status === "OPEN" && t.priority === "CRITICAL").length);
+      }
+    } catch (err) {
+      console.error("Failed to fetch ops task escalations", err);
+    }
+  };
+
   useEffect(() => {
     fetchOpsMetrics();
+    fetchOpenCriticalTasks();
     // Realtime auto-poll interval every 5s
-    const interval = setInterval(fetchOpsMetrics, 5000);
+    const interval = setInterval(() => { fetchOpsMetrics(); fetchOpenCriticalTasks(); }, 5000);
     return () => clearInterval(interval);
   }, [location.pathname]);
 
@@ -79,8 +93,8 @@ export default function OpsLayout({ children }) {
       path: "/ops/tasks",
       label: "Staff Resolution Queue",
       icon: Layers,
-      badge: null,
-      badgeColor: ""
+      badge: openCriticalTaskCount > 0 ? `${openCriticalTaskCount} CRITICAL` : null,
+      badgeColor: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse font-bold"
     }
   ];
 
@@ -118,6 +132,13 @@ export default function OpsLayout({ children }) {
               <span className="text-stone-500">SLA Alerts:</span>
               <span className={`font-bold ${metrics?.totalSlaBreaches > 0 ? "text-rose-600 animate-pulse" : "text-emerald-700"}`}>
                 {loadingMetrics ? "..." : metrics?.totalSlaBreaches || 0} BREACHES
+              </span>
+            </div>
+            <div className="h-4 w-px bg-stone-200" />
+            <div className="flex items-center gap-2">
+              <span className="text-stone-500">Open Escalations:</span>
+              <span className={`font-bold ${openCriticalTaskCount > 0 ? "text-rose-600 animate-pulse" : "text-emerald-700"}`}>
+                {openCriticalTaskCount}
               </span>
             </div>
             <div className="h-4 w-px bg-stone-200" />

@@ -1,3 +1,4 @@
+import { activityPath } from "../lib/activityUrl.js";
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -336,7 +337,7 @@ export function WishlistPage() {
                               <Plus className="w-3 h-3" /> Add to Plan
                             </button>
                           )}
-                          <Link to={`/activity/${productId}`}>
+                          <Link to={activityPath(productId, prod.title)}>
                             <Button size="sm" variant="primary" icon={ArrowRight}>
                               Book
                             </Button>

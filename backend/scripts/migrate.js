@@ -12,6 +12,7 @@ import {
   getMigrationStatus,
   runPendingMigrations,
   rollbackLastBatch,
+  findDuplicateMigrationPrefixes,
   DEFAULT_MIGRATIONS_DIR,
 } from "../src/services/migrationRunner.js";
 
@@ -38,6 +39,13 @@ try {
             "Executed At": m.executedAt ?? "-",
             "Duration (ms)": m.executionTimeMs ?? "-",
           }))
+        );
+      }
+
+      for (const duplicate of findDuplicateMigrationPrefixes(status.migrations)) {
+        console.warn(
+          `⚠️  Migration number ${duplicate.prefix} is used more than once: ${duplicate.names.join(", ")}. ` +
+          "Apply order falls back to the description text — give new migrations an unused number."
         );
       }
       break;

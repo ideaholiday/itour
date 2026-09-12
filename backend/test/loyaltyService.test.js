@@ -8,6 +8,7 @@ import {
   applyWalletCreditsToCheckout,
   deductWalletCreditsOnBooking,
   creditReferralRewardOnCompletion,
+  recordReferralSignup,
   getPublicReferralInfo,
   getLoyaltyLeaderboard,
   LOYALTY_TIERS,
@@ -268,3 +269,58 @@ test("LoyaltyService: getLoyaltyLeaderboard aggregates stats for admin dashboard
 
   db.close();
 });
+
+test("LoyaltyService: full end-to-end referral, trip completion, wallet credit and redemption", async () => {
+  const db = createTestDatabase();
+  // Referrer setup
+  db.prepare("INSERT INTO users (id, name, email, referral_code, wallet_balance_inr) VALUES ('usr_alice', 'Alice Wonder', 'alice@example.com', 'REF-ALICE', 0)").run();
+  // Referred friend signs up
+  db.prepare("INSERT INTO users (id, name, email) VALUES ('usr_bob', 'Bob Builder', 'bob@example.com')").run();
+  
+  // 1. Record referral signup
+  const signupRes = recordReferralSignup(db, { newUserId: "usr_bob", referralCode: "REF-ALICE" });
+  assert.ok(signupRes);
+
+  // 2. Bob creates a booking
+  db.prepare("INSERT INTO bookings (id, ref, amount_inr, status, user_id) VALUES ('bk_bob_1', 'BK-BOB-01', 3000.0, 'CONFIRMED', 'usr_bob')").run();
+  db.prepare("UPDATE user_referrals SET booking_id = 'bk_bob_1' WHERE referred_user_id = 'usr_bob' AND booking_id IS NULL AND status = 'PENDING'").run();
+
+  // Verify referral is now linked to booking
+  const linkedRef = db.prepare("SELECT * FROM user_referrals WHERE booking_id = 'bk_bob_1'").get();
+  assert.equal(linkedRef.referrer_user_id, "usr_alice");
+  assert.equal(linkedRef.status, "PENDING");
+
+  // 3. Bob's trip is completed -> credit referral reward
+  const creditRes = await creditReferralRewardOnCompletion(db, "bk_bob_1", { sendNotifications: false });
+  assert.ok(creditRes);
+  assert.equal(creditRes.rewardAmount, 250);
+  assert.equal(creditRes.newBalance, 250);
+
+  // Verify Alice's wallet
+  const aliceUser = db.prepare("SELECT wallet_balance_inr FROM users WHERE id = 'usr_alice'").get();
+  assert.equal(aliceUser.wallet_balance_inr, 250);
+
+  // 4. Alice now books a trip and redeems her wallet credit
+  const calc = applyWalletCreditsToCheckout(db, "usr_alice", { bookingAmountInr: 2000, requestedCreditInr: 250 });
+  assert.equal(calc.applied, true);
+  assert.equal(calc.creditDiscountInr, 250);
+  assert.equal(calc.payableAmountInr, 1750);
+
+  // Deduct credits on booking creation
+  deductWalletCreditsOnBooking(db, "usr_alice", "bk_alice_1", calc.creditDiscountInr);
+
+  // Verify Alice's new wallet balance
+  const aliceAfter = db.prepare("SELECT wallet_balance_inr FROM users WHERE id = 'usr_alice'").get();
+  assert.equal(aliceAfter.wallet_balance_inr, 0);
+
+  // Verify wallet transactions ledger has 2 entries
+  const txs = db.prepare("SELECT * FROM wallet_transactions WHERE user_id = 'usr_alice' ORDER BY created_at ASC").all();
+  assert.equal(txs.length, 2);
+  assert.equal(txs[0].type, "REFERRAL_REWARD");
+  assert.equal(txs[0].amount_inr, 250);
+  assert.equal(txs[1].type, "BOOKING_REDEMPTION");
+  assert.equal(txs[1].amount_inr, -250);
+
+  db.close();
+});
+

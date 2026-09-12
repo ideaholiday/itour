@@ -1,6 +1,7 @@
+import { smsConfiguration } from "../services/smsService.js";
 import express from "express";
 import db from "../db.js";
-import { sendWhatsAppMessage, sendWhatsAppVoucher, whatsAppProviderConfiguration } from "../services/whatsappService.js";
+import { sendWhatsAppMessage, sendWhatsAppVoucher, whatsAppProviderConfiguration, whatsAppTemplate } from "../services/whatsappService.js";
 import { emailProviderConfiguration, sendEmail } from "../services/emailService.js";
 import { withoutPickupOtpSecrets } from "../services/bookingService.js";
 import { processExpiredSupplierAssignments } from "../services/assignmentSlaService.js";
@@ -75,13 +76,15 @@ router.get("/live-trips", (req, res) => {
       const hasDriver = Boolean(b.driver_name && b.driver_name !== "Driver Pending Assignment");
       const status = (b.assignment_status || "UNASSIGNED").toUpperCase();
 
-      // SLA Alert logic: If pickup is within 60 mins (or mocked active unassigned), highlight red SLA alert
-      // We check if driver is missing
+      // SLA Alert logic: If pickup is within 60 mins and no driver is assigned, highlight red SLA alert.
       const isUnassigned = !hasDriver || status === "UNASSIGNED";
+      const isLive = !["cancelled", "completed"].includes(String(b.status || "").toLowerCase());
 
-      // Mock minutes until pickup for demo (35 mins to 120 mins)
-      const minutesToPickup = isUnassigned ? 45 : 120;
-      const slaAlert = isUnassigned && minutesToPickup <= 60;
+      // Minutes until pickup, computed from the booking's actual activity date/time (IST).
+      // A negative value means the pickup time has already passed with no driver assigned.
+      const pickupAt = b.activity_date ? Date.parse(`${b.activity_date}T${b.pickup_time || "09:00"}:00+05:30`) : NaN;
+      const minutesToPickup = Number.isFinite(pickupAt) ? Math.round((pickupAt - Date.now()) / 60000) : null;
+      const slaAlert = isLive && isUnassigned && minutesToPickup !== null && minutesToPickup <= 60;
 
       if (slaAlert) totalSlaBreaches++;
 
@@ -91,8 +94,12 @@ router.get("/live-trips", (req, res) => {
         slaAlert,
         minutesToPickup,
         slaText: slaAlert
-          ? `🚨 SLA BREACH: Trip in ${minutesToPickup} mins — No Driver Assigned!`
-          : `Pickup in ${minutesToPickup} mins`,
+          ? minutesToPickup < 0
+            ? `🚨 SLA BREACH: Pickup was ${Math.abs(minutesToPickup)} mins ago — No Driver Assigned!`
+            : `🚨 SLA BREACH: Trip in ${minutesToPickup} mins — No Driver Assigned!`
+          : minutesToPickup === null
+            ? "Pickup time not confirmed"
+            : `Pickup in ${minutesToPickup} mins`,
         mapsLink: b.pickup_lat && b.pickup_lng
           ? `https://maps.google.com/?q=${b.pickup_lat},${b.pickup_lng}`
           : `https://maps.google.com/?q=${encodeURIComponent(b.pickup_location || "Lucknow Airport")}`
@@ -281,21 +288,39 @@ router.post("/send-whatsapp", optionalAuthMiddleware, requireOpsAccess, validate
          WHERE b.id = ? OR b.ref = ?`
       )
       .get(lookup, lookup) : null;
-    const booking = savedBooking || req.body;
-    if (!booking.customerPhone && !booking.traveler_phone) return res.status(400).json({ error: "Choose a booking or enter a recipient phone number" });
+    const recipientPhone = req.body.customerPhone || req.body.phone || savedBooking?.traveler_phone;
+    if (!recipientPhone) return res.status(400).json({ error: "Choose a booking or enter a recipient phone number" });
+
+    const booking = savedBooking ? {
+      ...savedBooking,
+      customerPhone: recipientPhone,
+      customerName: req.body.customerName || savedBooking.traveler_name,
+      driverName: req.body.driverName || savedBooking.driver_name,
+      driverPhone: req.body.driverPhone || savedBooking.driver_phone,
+      vehicleModel: req.body.vehicleModel || savedBooking.vehicle_model,
+      vehicleNumber: req.body.vehicleNumber || savedBooking.vehicle_number,
+      pickupLocation: req.body.pickupLocation || savedBooking.pickup_location,
+      pickupTime: req.body.pickupTime || savedBooking.pickup_time,
+      pickupLat: req.body.pickupLat ?? savedBooking.pickup_lat,
+      pickupLng: req.body.pickupLng ?? savedBooking.pickup_lng,
+      bookingRef: savedBooking.ref || req.body.bookingRef,
+    } : {
+      ...req.body,
+      customerPhone: recipientPhone,
+    };
 
     const result = await sendWhatsAppVoucher({
-      bookingRef: booking.ref || booking.bookingRef,
-      customerName: booking.traveler_name || booking.customerName,
-      customerPhone: booking.traveler_phone || booking.customerPhone,
-      driverName: booking.driver_name || booking.driverName,
-      driverPhone: booking.driver_phone || booking.driverPhone,
-      vehicleModel: booking.vehicle_model || booking.vehicleModel,
-      vehicleNumber: booking.vehicle_number || booking.vehicleNumber,
-      pickupLocation: booking.pickup_location || booking.pickupLocation,
-      pickupTime: booking.pickup_time || booking.pickupTime,
-      pickupLat: booking.pickup_lat ?? booking.pickupLat,
-      pickupLng: booking.pickup_lng ?? booking.pickupLng,
+      bookingRef: booking.ref || booking.bookingRef || "IH-VOUCHER",
+      customerName: booking.customerName || booking.traveler_name,
+      customerPhone: booking.customerPhone,
+      driverName: booking.driverName || booking.driver_name,
+      driverPhone: booking.driverPhone || booking.driver_phone,
+      vehicleModel: booking.vehicleModel || booking.vehicle_model,
+      vehicleNumber: booking.vehicleNumber || booking.vehicle_number,
+      pickupLocation: booking.pickupLocation || booking.pickup_location,
+      pickupTime: booking.pickupTime || booking.pickup_time,
+      pickupLat: booking.pickupLat ?? booking.pickup_lat,
+      pickupLng: booking.pickupLng ?? booking.pickup_lng,
     }, { database: db });
 
     res.status(result.success ? 200 : result.skipped ? 503 : 502).json(result);
@@ -341,8 +366,9 @@ router.get("/notification-health", optionalAuthMiddleware, requireOpsAccess, (_r
   res.json({
     success: true,
     providers: {
+      sms: smsConfiguration(),
       email: { provider: email.provider, enabled: email.enabled, configured: email.configured, region: email.region, fromEmail: email.fromEmail },
-      whatsapp: { provider: whatsapp.provider, enabled: whatsapp.enabled, configured: whatsapp.configured, apiVersion: whatsapp.apiVersion },
+      whatsapp: { provider: whatsapp.provider, enabled: whatsapp.enabled, configured: whatsapp.configured, appId: whatsapp.appId, apiVersion: whatsapp.apiVersion },
     },
   });
 });
@@ -356,10 +382,16 @@ router.post("/notifications/test", optionalAuthMiddleware, requireOpsAccess, val
     eventType: "PROVIDER_TEST",
     eventKey: `PROVIDER_TEST:${channel}:${Date.now()}`,
   };
+  const testMessageText = req.body.text || "WhatsApp Cloud API is connected to Idea Holiday.";
+  const testTemplate = req.body.template
+    ? whatsAppTemplate(req.body.template, req.body.templateValues || ["TEST", testMessageText])
+    : whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_OPS_ALERT, ["TEST", testMessageText])
+      || { name: "hello_world", languageCode: "en_US" };
+
   const result = channel === "EMAIL"
     ? await sendEmail({ ...common, to: req.body.to, subject: req.body.subject || "Idea Holiday email configuration test", text: req.body.text || "Amazon SES is connected to Idea Holiday." }, { database: db })
     : channel === "WHATSAPP"
-      ? await sendWhatsAppMessage({ ...common, to: req.body.to, text: req.body.text || "WhatsApp Cloud API is connected to Idea Holiday." }, { database: db })
+      ? await sendWhatsAppMessage({ ...common, to: req.body.to, text: testMessageText, template: testTemplate }, { database: db })
       : { success: false, status: "FAILED", error: "Choose EMAIL or WHATSAPP" };
   res.status(result.success ? 200 : result.skipped ? 503 : 400).json(result);
 });

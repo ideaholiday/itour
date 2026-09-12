@@ -17,6 +17,7 @@ export function whatsAppProviderConfiguration() {
   const baseUrl = String(process.env.WHATSAPP_BASE_URL || "https://graph.facebook.com").replace(/\/$/, "");
   const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim();
   const accessToken = String(process.env.WHATSAPP_ACCESS_TOKEN || "").trim();
+  const appId = String(process.env.WHATSAPP_APP_ID || "1488217219329539").trim();
   return {
     provider: "WHATSAPP_CLOUD_API",
     enabled: enabled(),
@@ -24,15 +25,16 @@ export function whatsAppProviderConfiguration() {
     apiVersion,
     baseUrl,
     phoneNumberId,
+    appId,
     timeoutMs: Math.max(1, Number(process.env.WHATSAPP_TIMEOUT || 15)) * 1000,
   };
 }
 
-export function whatsAppTemplate(name, values = []) {
+export function whatsAppTemplate(name, values = [], languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en") {
   if (!String(name || "").trim()) return undefined;
   return {
     name: String(name).trim(),
-    languageCode: process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en",
+    languageCode: languageCode || process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en",
     components: values.length ? [{
       type: "body",
       parameters: values.map((value) => ({ type: "text", text: String(value ?? "-").slice(0, 1024) })),

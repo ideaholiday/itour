@@ -4,8 +4,8 @@ import { generateSitemapXml, generateRobotsTxt } from "../src/routes/seo.js";
 
 test("sitemap.xml returns valid XML containing public routes, destination hubs, and dynamic products", () => {
   const sampleProducts = [
-    { id: "act_goa_scuba", updated_at: "2026-08-20T10:00:00.000Z", category: "ACTIVITY", destination_name: "Goa" },
-    { id: "act_taj_sunrise", updated_at: "2026-08-19T10:00:00.000Z", category: "DAY_TOUR", destination_name: "Agra" }
+    { id: "act_goa_scuba", title: "Goa Scuba", updated_at: "2026-08-20T10:00:00.000Z", category: "ACTIVITY", destination_name: "Goa" },
+    { id: "act_taj_sunrise", title: "Taj Sunrise", updated_at: "2026-08-19T10:00:00.000Z", category: "DAY_TOUR", destination_name: "Agra" }
   ];
 
   const xml = generateSitemapXml(sampleProducts, "https://ideaholiday.in");
@@ -15,8 +15,8 @@ test("sitemap.xml returns valid XML containing public routes, destination hubs, 
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/transfers<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/search<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/search\?q=Goa<\/loc>/);
-  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/activity\/act_goa_scuba<\/loc>/);
-  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/activity\/act_taj_sunrise<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/activity\/Goa-Scuba\/act_goa_scuba<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/activity\/Taj-Sunrise\/act_taj_sunrise<\/loc>/);
   assert.match(xml, /<priority>1.0<\/priority>/);
   assert.match(xml, /<priority>0.85<\/priority>/);
 });

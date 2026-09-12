@@ -1,3 +1,4 @@
+import { attachNativeReservation, reserveNativeInventory, saveBookingUnitItems } from "../services/nativeInventoryService.js";
 import { Router } from "express";
 import { nanoid } from "nanoid";
 import db, { databaseInfo } from "../db.js";
@@ -20,6 +21,12 @@ import { guestDocumentLinks, logGuestDocumentAccess, renderGuestDocument, verify
 import { guestNotificationPreferences, notifyBookingLogisticsEvent, notifyDispatchStatusChanged, queueNotification, sendGuestBookingNotification } from "../services/notificationService.js";
 import { assertBookingLocations } from "../services/locationValidationService.js";
 import { bookingLogistics, buildLogisticsSnapshot, consumeBookingHold, createBookingHold, expireBookingHolds, getBookingQuestions, getOption, getProductOptions, persistBookingLogistics, validateOptionLogistics, validateQuestionAnswers } from "../services/logisticsService.js";
+import {
+  applyWalletCreditsToCheckout,
+  deductWalletCreditsOnBooking,
+  creditReferralRewardOnCompletion,
+} from "../services/loyaltyService.js";
+import { applyPromoCode } from "../services/promoService.js";
 
 const router = Router();
 router.use(optionalAuthMiddleware);
@@ -92,13 +99,13 @@ function validateTransferRoute(body, product) {
   }
 }
 
-router.post("/quote", validateBody(bookingQuoteSchema), (req, res) => {
+router.post("/quote", optionalAuthMiddleware, validateBody(bookingQuoteSchema), (req, res) => {
   try {
     const productId = req.body.product_id || req.body.activity_id;
     const option = validateOptionLogistics(db, productId, req.body);
     const answers = validateQuestionAnswers(db, option?.id, req.body.booking_question_answers || {}, req.body);
     assertBookingLocations(db, req.body, { requireOperationalDetails: false, deferLocationValidation: true });
-    const quote = calculateBookingQuote(db, req.body);
+    const quote = calculateBookingQuote(db, req.body, { ownerId: req.user?.id });
     res.json({ success: true, quote: { ...publicQuote(quote), option: option || null, bookingQuestions: option ? getBookingQuestions(db, option.id) : [], normalizedAnswers: answers } });
   } catch (error) {
     res.status(error.status || 500).json({
@@ -113,12 +120,23 @@ router.post("/quote", validateBody(bookingQuoteSchema), (req, res) => {
 router.post("/hold", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), validateBody(bookingQuoteSchema), (req, res) => {
   try {
     expireBookingHolds(db);
+    const requestKey = req.body.client_request_id || req.headers["idempotency-key"];
+    if (requestKey) {
+      const existing = db.prepare("SELECT id FROM native_reservations WHERE owner_id = ? AND request_key = ?").get(req.user.id, requestKey);
+      if (existing) req.body.native_hold_id = existing.id;
+    }
     const productId = req.body.product_id || req.body.activity_id;
     const option = validateOptionLogistics(db, productId, req.body);
     const answers = validateQuestionAnswers(db, option?.id, req.body.booking_question_answers || {}, req.body);
     const locationValidation = assertBookingLocations(db, req.body, { requireOperationalDetails: false });
-    const quote = calculateBookingQuote(db, req.body);
+    const quote = calculateBookingQuote(db, req.body, { ownerId: req.user?.id });
     const logistics = buildLogisticsSnapshot(req.body, option, locationValidation);
+    if (quote.nativeSlot) {
+      const nativeHold = reserveNativeInventory(db, { productId, optionId: option.id, localDate: quote.activityDate,
+        localTime: req.body.pickup_time || "09:00", adults: quote.adults, children: quote.children,
+        ownerId: req.user.id, requestKey: requestKey || `checkout_${nanoid(20)}` });
+      return res.status(201).json({ success: true, holdId: nativeHold.id, nativeHoldId: nativeHold.id, expiresAt: nativeHold.utc_expires_at, quote: publicQuote(quote), option, logistics });
+    }
     const hold = createBookingHold(db, { productId, optionId: option?.id || null, activityDate: quote.activityDate, adults: quote.adults, children: quote.children, amount: quote.totalAmount, quote: publicQuote(quote), logistics: { ...logistics, answers }, clientRequestId: req.body.client_request_id || req.headers["idempotency-key"] || null });
     res.status(201).json({ success: true, holdId: hold.id, expiresAt: hold.expires_at, quote: publicQuote(quote), option: option || null, logistics, bookingQuestions: option ? getBookingQuestions(db, option.id) : [] });
   } catch (error) {
@@ -131,6 +149,10 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     const actor = requester(req);
     if (!actor?.id && !actor?.email) return res.status(401).json({ error: "Sign in before booking" });
     validateContact(req.body);
+    if (!req.body.native_hold_id && req.body.hold_id) {
+      const nativeHold = db.prepare("SELECT id FROM native_reservations WHERE id = ?").get(req.body.hold_id);
+      if (nativeHold) req.body.native_hold_id = nativeHold.id;
+    }
     const clientRequestId = String(req.body.client_request_id || req.headers["idempotency-key"] || "").trim() || null;
     if (clientRequestId) {
       const existing = db.prepare("SELECT * FROM bookings WHERE client_request_id = ?").get(clientRequestId);
@@ -140,7 +162,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       }
     }
     const locationValidation = assertBookingLocations(db, req.body, { requireOperationalDetails: true });
-    const quote = calculateBookingQuote(db, req.body, { enforceListingSupplierAvailability: false });
+    const quote = calculateBookingQuote(db, req.body, { enforceListingSupplierAvailability: false, ownerId: actor.id });
     const selectedOption = validateOptionLogistics(db, quote.product.id, req.body);
     const normalizedAnswers = validateQuestionAnswers(db, selectedOption?.id, req.body.booking_question_answers || {}, req.body);
     const logisticsSnapshot = buildLogisticsSnapshot(req.body, selectedOption, locationValidation);
@@ -175,7 +197,26 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     const bookingId = `bk_${nanoid(12)}`;
     const ref = `IH-${nanoid(7).toUpperCase()}`;
 
+    // Travel & Earn: Calculate wallet credit discount if requested
+    const requestedWalletCredit = Number(req.body.wallet_credit_inr) || 0;
+    let appliedWalletCredit = 0;
+    if (requestedWalletCredit > 0 && userId) {
+      try {
+        const walletCalc = applyWalletCreditsToCheckout(db, userId, {
+          bookingAmountInr: quote.totalAmount,
+          requestedCreditInr: requestedWalletCredit,
+        });
+        if (walletCalc?.applied) {
+          appliedWalletCredit = walletCalc.creditDiscountInr || 0;
+        }
+      } catch (err) {
+        logger.warn("Wallet credit calculation failed", { error: err.message, userId });
+      }
+    }
+    const finalPayableAmount = Math.max(0, quote.totalAmount - appliedWalletCredit);
+
     db.transaction(() => {
+      db.prepare("UPDATE products SET id = id WHERE id = ?").run(quote.product.id);
       if (!existingUser) {
         db.prepare("INSERT INTO users (id, name, email, password, phone, role) VALUES (?, ?, ?, ?, ?, 'TRAVELER')")
           .run(userId, req.body.traveler_name.trim(), req.body.traveler_email.trim().toLowerCase(), `external_${nanoid(20)}`, req.body.traveler_phone.trim());
@@ -205,10 +246,44 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         req.body.selected_addons ? (typeof req.body.selected_addons === "string" ? req.body.selected_addons : JSON.stringify(req.body.selected_addons)) : "[]",
         quote.adults, quote.children, quote.luggage,
         quote.vehicleCategory, req.body.traveler_name.trim(), req.body.traveler_phone.trim(), req.body.traveler_email.trim().toLowerCase(),
-        quote.totalAmount, quote.tolls + quote.stateTax + quote.gstAmount, assignmentCommissionAmount, selectedSupplier.commissionRate,
+        finalPayableAmount, quote.tolls + quote.stateTax + quote.gstAmount, assignmentCommissionAmount, selectedSupplier.commissionRate,
         assignmentSupplierPayout, String(req.body.payment_method || "DEMO").toUpperCase(),
         selectedSupplier.score, selectedAssignmentReason, selectedSupplier.candidateProductId
       );
+
+      // Record the billed unit breakdown alongside the canonical seat counts.
+      saveBookingUnitItems(db, bookingId, quote.unitItems, quote.nativeSlot?.unitPrices || {});
+
+      // Deduct wallet credits from user account and record transaction ledger
+      if (appliedWalletCredit > 0 && existingUser) {
+        try {
+          deductWalletCreditsOnBooking(db, userId, bookingId, appliedWalletCredit);
+        } catch (walletDeductErr) {
+          logger.warn("Wallet deduction failed during booking creation", { error: walletDeductErr.message, userId, bookingId });
+        }
+      }
+
+      // Apply promo or referral code if specified
+      if (req.body.promo_code) {
+        try {
+          applyPromoCode(db, {
+            code: req.body.promo_code,
+            bookingId,
+            userId,
+            amountInr: quote.totalAmount,
+          });
+        } catch (promoErr) {
+          logger.warn("Promo code application failed during booking creation", { error: promoErr.message });
+        }
+      }
+
+      // Link any pending signup referral for this user to this booking
+      db.prepare(`
+        UPDATE user_referrals
+        SET booking_id = ?
+        WHERE referred_user_id = ? AND booking_id IS NULL AND status = 'PENDING'
+      `).run(bookingId, userId);
+
       db.prepare(`
         UPDATE bookings
         SET flight_departure_time = ?, location_validation_snapshot = ?, location_ops_review = ?
@@ -221,8 +296,23 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       );
       db.prepare("UPDATE bookings SET product_option_id = ?, confirmation_type = ?, confirmation_status = 'PENDING_PAYMENT', logistics_snapshot = ? WHERE id = ?").run(selectedOption?.id || null, selectedOption?.confirmationType || "INSTANT_THEN_MANUAL", JSON.stringify(logisticsSnapshot), bookingId);
       persistBookingLogistics(db, bookingId, logisticsSnapshot, normalizedAnswers, actor.id || null);
-      if (req.body.hold_id) consumeBookingHold(db, req.body.hold_id, bookingId);
+      if (quote.nativeSlot) {
+        const hold = req.body.native_hold_id ? { id: req.body.native_hold_id } : reserveNativeInventory(db, {
+          productId: quote.product.id, optionId: selectedOption.id, localDate: quote.activityDate,
+          localTime: req.body.pickup_time || "09:00", adults: quote.adults, children: quote.children,
+          ownerId: actor.id, requestKey: clientRequestId || bookingId,
+        });
+        const attached = attachNativeReservation(db, hold.id, db.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId), actor.id);
+        logisticsSnapshot.nativeCancellationHours = attached.pricing.cancellationHours ?? quote.nativeSlot.cancellationHours;
+        db.prepare("UPDATE bookings SET logistics_snapshot = ? WHERE id = ?").run(JSON.stringify(logisticsSnapshot), bookingId);
+      }
+
+      if (req.body.hold_id && !req.body.native_hold_id) consumeBookingHold(db, req.body.hold_id, bookingId);
       else createBookingHold(db, { bookingId, productId: quote.product.id, optionId: selectedOption?.id || null, activityDate: quote.activityDate, adults: quote.adults, children: quote.children, amount: quote.totalAmount, quote: publicQuote(quote), logistics: logisticsSnapshot, clientRequestId: clientRequestId ? `${clientRequestId}:hold` : null });
+      if (quote.nativeSlot) {
+        const nativeHold = db.prepare("SELECT utc_expires_at FROM native_reservations WHERE booking_id = ?").get(bookingId);
+        db.prepare("UPDATE booking_holds SET expires_at = ? WHERE booking_id = ?").run(nativeHold.utc_expires_at, bookingId);
+      }
       db.prepare(
         `INSERT INTO payouts (id, supplier_id, booking_id, gross_amount, commission_amount, net_payout, payout_status)
          VALUES (?, ?, ?, ?, ?, ?, 'PENDING_PAYMENT')`
@@ -259,7 +349,9 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       bookingId,
       ref,
       supplierId: selectedSupplier.supplierId,
-      amount_inr: quote.totalAmount,
+      amount_inr: finalPayableAmount,
+      original_amount_inr: quote.totalAmount,
+      wallet_credit_applied_inr: appliedWalletCredit,
       quote: {
         ...publicQuote(quote),
         supplierId: selectedSupplier.supplierId,
@@ -383,7 +475,7 @@ router.post("/:ref/amendment/check", authenticate, validateBody(bookingSchemas.a
     const proposed = { ...booking, ...req.body.proposed, product_id: booking.product_id, activity_date: booking.activity_date };
     const option = validateOptionLogistics(db, booking.product_id, proposed);
     const validation = assertBookingLocations(db, proposed, { requireOperationalDetails: false });
-    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false });
+    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false, ownerId: actor.id });
     const snapshot = buildLogisticsSnapshot(proposed, option, validation);
     res.json({ success: true, amendable: true, cutoffAt, quote: publicQuote(quote), proposedSnapshot: snapshot });
   } catch (error) { res.status(error.status || 500).json({ error: error.message || "Amendment cannot be applied", code: error.code }); }
@@ -395,7 +487,7 @@ router.post("/:ref/amendment/quote", authenticate, validateBody(bookingSchemas.a
     const proposed = { ...booking, ...req.body.proposed, product_id: booking.product_id, activity_date: booking.activity_date };
     const option = validateOptionLogistics(db, booking.product_id, proposed);
     const validation = assertBookingLocations(db, proposed, { requireOperationalDetails: false });
-    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false });
+    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false, ownerId: actor.id });
     res.json({ success: true, cutoffAt: amendmentCutoff(booking), deltaInr: Number(quote.totalAmount) - Number(booking.amount_inr), quote: publicQuote(quote), proposedSnapshot: buildLogisticsSnapshot(proposed, option, validation) });
   } catch (error) { res.status(error.status || 500).json({ error: error.message || "Could not quote amendment" }); }
 });
@@ -410,7 +502,7 @@ router.post("/:ref/amendment/apply", authenticate, validateBody(bookingSchemas.a
     const proposed = { ...booking, ...req.body.proposed, product_id: booking.product_id, activity_date: booking.activity_date };
     const option = validateOptionLogistics(db, booking.product_id, proposed);
     const validation = assertBookingLocations(db, proposed, { requireOperationalDetails: false });
-    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false });
+    const quote = calculateBookingQuote(db, proposed, { enforceListingSupplierAvailability: false, ownerId: actor.id });
     const snapshot = buildLogisticsSnapshot(proposed, option, validation);
     const amendmentId = `amend_${nanoid(12)}`;
     db.transaction(() => {
@@ -482,6 +574,13 @@ router.patch("/:id/status", authenticate, requireRoles("ADMIN", "STAFF"), valida
     const nextStatus = String(req.body.status || "").toLowerCase();
     if (!canTransitionBooking(booking.status, nextStatus)) return res.status(409).json({ error: `Cannot move booking from ${booking.status} to ${nextStatus}` });
     db.prepare("UPDATE bookings SET status = ? WHERE id = ?").run(nextStatus, booking.id);
+    if (nextStatus === "completed") {
+      try {
+        creditReferralRewardOnCompletion(db, booking.id);
+      } catch (rewardErr) {
+        logger.warn("Failed to credit referral reward on admin booking completion", { bookingId: booking.id, error: rewardErr.message });
+      }
+    }
     res.json({ success: true, status: nextStatus });
   } catch {
     res.status(500).json({ error: "Failed to update booking status" });

@@ -1,5 +1,7 @@
+import LiveDeparturePicker from "../components/traveler/LiveDeparturePicker.jsx";
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { activityPath } from "../lib/activityUrl.js";
 import {
   ArrowRight,
   CalendarDays,
@@ -70,18 +72,25 @@ function localDate(daysFromToday = 0) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
-function startTimeFromActivity(activity) {
-  if (activity?.itineraryItems?.length) {
-    const first = activity.itineraryItems[0];
-    if (first.time_label || first.timeLabel) return first.time_label || first.timeLabel;
-  }
-  const firstStop = Array.isArray(activity?.itinerary) ? activity.itinerary[0] : null;
-  const match = String(firstStop?.duration || firstStop?.time || "").match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-  if (!match) return "09:00";
+// Itinerary labels are free text ("Day 1", "Morning", "10:00 AM onwards"), but the
+// quote API only accepts a clock time, so pull one out or return null.
+function parseClockTime(value) {
+  const match = String(value ?? "").match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!match) return null;
   let hours = Number(match[1]);
-  if (match[3]?.toUpperCase() === "PM" && hours < 12) hours += 12;
-  if (match[3]?.toUpperCase() === "AM" && hours === 12) hours = 0;
+  const meridiem = match[3]?.toUpperCase();
+  if (meridiem === "PM" && hours < 12) hours += 12;
+  if (meridiem === "AM" && hours === 12) hours = 0;
+  if (hours > 23 || Number(match[2]) > 59) return null;
   return `${String(hours).padStart(2, "0")}:${match[2]}`;
+}
+
+function startTimeFromActivity(activity) {
+  const first = activity?.itineraryItems?.[0];
+  const fromItem = parseClockTime(first?.time_label || first?.timeLabel);
+  if (fromItem) return fromItem;
+  const firstStop = Array.isArray(activity?.itinerary) ? activity.itinerary[0] : null;
+  return parseClockTime(firstStop?.duration || firstStop?.time) || "09:00";
 }
 
 // ─── Shared UI helpers ────────────────────────────────────────
@@ -253,7 +262,7 @@ function BookingTrustFooter() {
 // ─── Booking Panel: PACKAGE ───────────────────────────────────
 
 function BookingPanelPackage({
-  activity, date, setDate, adults, setAdults, children, setChildren,
+  activity, date, setDate, nativeDeparture, adults, setAdults, children, setChildren,
   hotelTiers, selectedHotelTierId, setSelectedHotelTierId,
   serverQuote, quoteLoading, quoteError, formatPrice, addonsTotalInr, currency,
   availableAddons, selectedAddonIds, toggleAddon, headcount, onBook,
@@ -264,7 +273,7 @@ function BookingPanelPackage({
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
       <QuoteSummary serverQuote={serverQuote} quoteLoading={quoteLoading} formatPrice={formatPrice}
         addonsTotalInr={addonsTotalInr} currency={currency}
-        basePrice={activity.priceInr ?? activity.price_inr} priceUnit="per person" />
+        basePrice={nativeDeparture?.adultPrice ?? activity.priceInr ?? activity.price_inr} priceUnit="per person" />
 
       <div className="space-y-3 border-t border-stone-200 pt-4">
         <div>
@@ -340,7 +349,7 @@ function BookingPanelPackage({
 // ─── Booking Panel: TOUR ──────────────────────────────────────
 
 function BookingPanelTour({
-  activity, date, setDate, adults, setAdults, children, setChildren,
+  activity, date, setDate, nativeDeparture, adults, setAdults, children, setChildren,
   vehicleOptions, selectedVehicle, setSelectedVehicle, sicHubs,
   serverQuote, quoteLoading, quoteError, formatPrice, addonsTotalInr, currency,
   availableAddons, selectedAddonIds, toggleAddon, headcount, onBook,
@@ -353,7 +362,7 @@ function BookingPanelTour({
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
       <QuoteSummary serverQuote={serverQuote} quoteLoading={quoteLoading} formatPrice={formatPrice}
         addonsTotalInr={addonsTotalInr} currency={currency}
-        basePrice={activity.priceInr ?? activity.price_inr} priceUnit={isSIC ? "per seat" : "per vehicle"} />
+        basePrice={nativeDeparture?.adultPrice ?? activity.priceInr ?? activity.price_inr} priceUnit={isSIC ? "per seat" : "per vehicle"} />
 
       <div className="space-y-3 border-t border-stone-200 pt-4">
         <div>
@@ -422,7 +431,7 @@ function BookingPanelTour({
 // ─── Booking Panel: TRANSFER ──────────────────────────────────
 
 function BookingPanelTransfer({
-  activity, date, setDate, vehicleOptions, selectedVehicle, setSelectedVehicle,
+  activity, date, setDate, nativeDeparture, vehicleOptions, selectedVehicle, setSelectedVehicle,
   serverQuote, quoteLoading, quoteError, formatPrice, currency, onBook,
 }) {
   const subType = activity.productSubType || activity.product_sub_type || "";
@@ -433,7 +442,7 @@ function BookingPanelTransfer({
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
       <QuoteSummary serverQuote={serverQuote} quoteLoading={quoteLoading} formatPrice={formatPrice}
         addonsTotalInr={0} currency={currency}
-        basePrice={activity.priceInr ?? activity.price_inr} priceUnit="per vehicle (all-inclusive)" />
+        basePrice={nativeDeparture?.adultPrice ?? activity.priceInr ?? activity.price_inr} priceUnit="per vehicle (all-inclusive)" />
 
       <div className="space-y-3 border-t border-stone-200 pt-4">
         <div>
@@ -480,7 +489,7 @@ function BookingPanelTransfer({
 // ─── Booking Panel: ATTRACTION / EXPERIENCE ───────────────────
 
 function BookingPanelAttractionExperience({
-  activity, date, setDate,
+  activity, date, setDate, nativeDeparture,
   ticketTiers, ticketSelections, setTicketSelections,
   vehicleOptions, selectedVehicle, setSelectedVehicle, sicHubs,
   serverQuote, quoteLoading, quoteError, formatPrice, addonsTotalInr, currency,
@@ -497,7 +506,7 @@ function BookingPanelAttractionExperience({
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
       <QuoteSummary serverQuote={serverQuote} quoteLoading={quoteLoading} formatPrice={formatPrice}
         addonsTotalInr={addonsTotalInr} currency={currency}
-        basePrice={activity.priceInr ?? activity.price_inr} priceUnit="per ticket" />
+        basePrice={nativeDeparture?.adultPrice ?? activity.priceInr ?? activity.price_inr} priceUnit="per ticket" />
 
       <div className="space-y-3 border-t border-stone-200 pt-4">
         <div>
@@ -611,7 +620,13 @@ export default function ActivityDetail() {
   const { formatPrice, currency } = useCurrency();
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [activity, setActivity] = useState(null);
+  useEffect(() => {
+    if (activity?.id === id && location.pathname !== activityPath(activity)) {
+      navigate(`${activityPath(activity)}${location.search}${location.hash}`, { replace: true });
+    }
+  }, [activity, id, location.pathname, location.search, location.hash, navigate]);
   const [date, setDate] = useState(() => localDate(1));
   const [adults, setAdults] = useState(2);
   const [children, setChildren] = useState(0);
@@ -715,7 +730,20 @@ export default function ActivityDetail() {
   const itineraryItems = activity?.itineraryItems || [];
   const dayWiseDetails = activity?.packageItinerary?.dayWiseDetails || [];
   const sightseeingStops = Array.isArray(activity?.itinerary) ? activity.itinerary : [];
-  const startTime = useMemo(() => startTimeFromActivity(activity), [activity]);
+  const [nativeDeparture, setNativeDeparture] = useState(null);
+  const startTime = parseClockTime(nativeDeparture?.localTime) || startTimeFromActivity(activity);
+  const multiDayItinerary = useMemo(() => {
+    if (!itineraryItems.length) return null;
+    const isMulti = itineraryItems.some((item) => Number(item.day_number ?? item.dayNumber) > 0) || isPackage;
+    if (!isMulti) return null;
+    const grouped = {};
+    itineraryItems.forEach((item) => {
+      const day = Number(item.day_number ?? item.dayNumber ?? 1);
+      if (!grouped[day]) grouped[day] = [];
+      grouped[day].push(item);
+    });
+    return grouped;
+  }, [itineraryItems, isPackage]);
 
   // ── Live quote ──
   useEffect(() => {
@@ -730,6 +758,8 @@ export default function ActivityDetail() {
       api.getBookingQuote({
         product_id: id,
         activity_date: date,
+        pickup_time: startTime,
+        product_option_id: nativeDeparture?.optionId,
         adults: adults || 1,
         children: children || 0,
         luggage_bags: 0,
@@ -740,16 +770,21 @@ export default function ActivityDetail() {
         .then((data) => setServerQuote(data.quote))
         .catch((error) => {
           setServerQuote(null);
-          setQuoteError(error.message || "Pricing currently unavailable for this configuration.");
+          // A schema rejection is our bug, not something the traveler can act on, so
+          // never surface the raw backend wording.
+          setQuoteError(error.code === "VALIDATION_ERROR" || !error.message
+            ? "Pricing currently unavailable for this configuration."
+            : error.message);
         })
         .finally(() => setQuoteLoading(false));
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [activity, id, date, adults, children, selectedVehicle, selectedHotelTierId, ticketSelections]);
+  }, [activity, id, date, adults, children, selectedVehicle, selectedHotelTierId, ticketSelections, startTime, nativeDeparture?.optionId]);
 
   // ── Checkout nav ──
   const goToCheckout = () => {
     const params = new URLSearchParams({ date, adults: String(adults || 1), children: String(children || 0), time: startTime });
+    if (nativeDeparture?.optionId) params.set("option", nativeDeparture.optionId);
     if (isTransfer) {
       params.set("vehicle", selectedVehicle);
       params.set("variant", "Private chauffeur transfer");
@@ -757,6 +792,9 @@ export default function ActivityDetail() {
       const isSIC = productSubType === "SIC" || activity?.groupType === "SHARED" || activity?.group_type === "SHARED";
       params.set("vehicle", isSIC ? "SHARED_SEAT" : selectedVehicle);
       params.set("variant", isSIC ? "Shared SIC tour" : "Private tour");
+    } else if (productSubType === "TICKET_PRIVATE") {
+      params.set("vehicle", selectedVehicle);
+      params.set("variant", "Ticket with private transfer");
     }
     if (selectedHotelTierId) params.set("hotelTier", selectedHotelTierId);
     if (selectedAddonIds.length > 0) params.set("addons", selectedAddonIds.join(","));
@@ -777,24 +815,11 @@ export default function ActivityDetail() {
     ? activity.images.filter(Boolean)
     : [activity.heroImage || activity.hero_image].filter(Boolean);
 
-  const multiDayItinerary = useMemo(() => {
-    if (!itineraryItems.length) return null;
-    const isMulti = itineraryItems.some((i) => Number(i.day_number || i.dayNumber) > 0) || isPackage;
-    if (!isMulti) return null;
-    const grouped = {};
-    itineraryItems.forEach((item) => {
-      const d = Number(item.day_number || item.dayNumber || 1);
-      if (!grouped[d]) grouped[d] = [];
-      grouped[d].push(item);
-    });
-    return grouped;
-  }, [itineraryItems, isPackage]);
-
   const productJsonLd = {
     "@context": "https://schema.org",
     "@graph": [{
       "@type": isPackage ? "TouristTrip" : "Product",
-      "@id": `https://ideaholiday.in/activity/${activity.id}#product`,
+      "@id": `https://ideaholiday.in${activityPath(activity)}#product`,
       "name": activity.title,
       "description": activity.shortDesc || activity.short_desc || activity.title,
       "image": imagesList.length ? imagesList : ["https://ideaholiday.in/idea-holiday-social.png"],
@@ -803,7 +828,7 @@ export default function ActivityDetail() {
         "@type": "Offer", "priceCurrency": "INR",
         "price": activity.priceInr || activity.price_inr || 999,
         "availability": "https://schema.org/InStock",
-        "url": `https://ideaholiday.in/activity/${activity.id}`,
+        "url": `https://ideaholiday.in${activityPath(activity)}`,
         "seller": { "@type": "Organization", "name": "Idea Holiday" },
       },
       "aggregateRating": {
@@ -817,7 +842,7 @@ export default function ActivityDetail() {
 
   // ── Select correct booking panel ──
   const sharedProps = {
-    activity, date, setDate,
+    activity, date, setDate, nativeDeparture,
     vehicleOptions, selectedVehicle, setSelectedVehicle,
     serverQuote, quoteLoading, quoteError, formatPrice, currency,
     addonsTotalInr, availableAddons, selectedAddonIds, toggleAddon, headcount,
@@ -846,7 +871,7 @@ export default function ActivityDetail() {
       <SeoHead
         title={`${activity.title} - Book on Idea Holiday`}
         description={activity.shortDesc || activity.short_desc || `Book ${activity.title} in ${activity.city || "India"} on Idea Holiday.`}
-        canonical={`https://ideaholiday.in/activity/${activity.id}`}
+        canonical={`https://ideaholiday.in${activityPath(activity)}`}
         image={imagesList[0] || "https://ideaholiday.in/idea-holiday-social.png"}
         jsonLd={productJsonLd}
       />
@@ -1296,7 +1321,7 @@ export default function ActivityDetail() {
 
           {/* Right: Type-Specific Booking Panel */}
           <aside className="h-fit lg:sticky lg:top-[140px] space-y-4">
-            {bookingPanel}
+            <LiveDeparturePicker productId={id} date={date} selectedTime={startTime} selectedOptionId={nativeDeparture?.optionId} onSelect={setNativeDeparture} />{serverQuote?.nativeSlot && <p className="my-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900">Instant confirmation. Free cancellation until {serverQuote.nativeSlot.cancellationHours} hours before departure. Each adult and child uses one seat.</p>}{bookingPanel}
             <Link
               to={`/circuit-planner?addActivityId=${id}&destination=${encodeURIComponent(activity.destination || activity.city || "")}`}
               className="flex w-full items-center justify-center gap-1.5 rounded-2xl border border-stone-300 bg-white hover:bg-stone-50 px-4 py-3 text-xs font-bold text-stone-700 transition shadow-sm"

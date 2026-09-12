@@ -1,19 +1,29 @@
 :root {
-  /* Colors */
+  /* ── Brand Colors ─────────────────────────────────────────── */
   --color-primary: #F59E0B;        /* Amber-500 */
   --color-primary-hover: #FBBF24;  /* Amber-400 */
   --color-primary-dark: #D97706;   /* Amber-600 */
+  --color-primary-deep: #B45309;   /* Amber-700 */
   --color-surface: #FAF9F6;        /* Warm off-white */
   --color-card: #FFFFFF;
   --color-text: #1C1917;           /* Stone-900 */
   --color-text-muted: #57534E;     /* Stone-600 */
+  --color-text-subtle: #A8A29E;    /* Stone-400 */
   --color-border: #E7E5E4;         /* Stone-200 */
   --color-success: #059669;        /* Emerald-600 */
   --color-warning: #D97706;        /* Amber-600 */
   --color-error: #DC2626;          /* Red-600 */
   --color-info: #2563EB;           /* Blue-600 */
 
-  /* Spacing */
+  /* ── Gradients ────────────────────────────────────────────── */
+  --gradient-gold: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  --gradient-gold-warm: linear-gradient(135deg, #FBBF24 0%, #F59E0B 50%, #D97706 100%);
+  --gradient-hero: linear-gradient(180deg, rgba(15,10,5,0.55) 0%, rgba(15,10,5,0.25) 50%, rgba(15,10,5,0.80) 100%);
+  --gradient-card: linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.75) 100%);
+  --gradient-surface: linear-gradient(180deg, #FAF9F6 0%, #F5F0E8 100%);
+  --gradient-amber-text: linear-gradient(135deg, #FBBF24 0%, #D97706 100%);
+
+  /* ── Spacing ──────────────────────────────────────────────── */
   --space-xs: 0.25rem;
   --space-sm: 0.5rem;
   --space-md: 1rem;
@@ -21,40 +31,58 @@
   --space-xl: 2rem;
   --space-2xl: 3rem;
 
-  /* Border Radius */
+  /* ── Border Radius ────────────────────────────────────────── */
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
   --radius-lg: 1rem;
   --radius-xl: 1.5rem;
+  --radius-2xl: 2rem;
   --radius-full: 9999px;
 
-  /* Shadows */
+  /* ── Shadows ──────────────────────────────────────────────── */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
-  --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.12);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -1px rgba(0,0,0,0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.12), 0 10px 10px -5px rgba(0,0,0,0.04);
+  --shadow-card: 0 4px 24px rgba(0,0,0,0.07), 0 1px 4px rgba(0,0,0,0.05);
+  --shadow-card-hover: 0 16px 40px rgba(0,0,0,0.14), 0 4px 12px rgba(0,0,0,0.07);
+  --shadow-glow-gold: 0 0 20px rgba(245,158,11,0.35), 0 0 60px rgba(245,158,11,0.12);
+  --shadow-glow-sm: 0 0 12px rgba(245,158,11,0.25);
+  --shadow-navbar: 0 4px 24px rgba(0,0,0,0.08);
 
-  /* Typography */
-  --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* ── Typography ───────────────────────────────────────────── */
+  --font-display: 'Fraunces', serif;
+  --font-body: 'Manrope', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
 
-  /* Transitions */
+  /* ── Transitions ──────────────────────────────────────────── */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --transition-smooth: 600ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── Animation Delays ────────────────────────────────────── */
+  --delay-1: 100ms;
+  --delay-2: 200ms;
+  --delay-3: 300ms;
+  --delay-4: 400ms;
+  --delay-5: 500ms;
 }
 
-/* Dark Mode Palette */
+/* ── Dark Mode Palette ────────────────────────────────────── */
 [data-theme="dark"] {
   --color-surface: #0C0A09;        /* Stone-950 */
   --color-card: #1C1917;           /* Stone-900 */
   --color-text: #FAFAF9;           /* Stone-50 */
   --color-text-muted: #A8A29E;     /* Stone-400 */
+  --color-text-subtle: #78716C;    /* Stone-500 */
   --color-border: #292524;         /* Stone-800 */
+  --shadow-card: 0 4px 24px rgba(0,0,0,0.3), 0 1px 4px rgba(0,0,0,0.2);
+  --shadow-card-hover: 0 16px 40px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.3);
+  --shadow-navbar: 0 4px 24px rgba(0,0,0,0.4);
 }
 
-/* Dark mode body and card defaults */
 [data-theme="dark"] body {
   background-color: var(--color-surface);
   color: var(--color-text);

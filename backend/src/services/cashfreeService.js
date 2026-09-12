@@ -141,13 +141,28 @@ export function verifyCashfreeWebhookSignature(rawBody, signature, timestamp) {
  */
 export async function processCashfreeRefund({ orderId, refundId, amount, reason }) {
   const sanitizedOrderId = encodeURIComponent(orderId);
-  const refundIdGen = refundId || `rfnd_${Date.now()}`;
+
+  // Fail locally rather than posting a null or negative amount to the provider:
+  // callers pass a computed quote, and a failed quote must not reach Cashfree.
+  const refundAmount = Number(amount);
+  if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+    throw Object.assign(new Error(`Refund amount must be a positive number, received ${JSON.stringify(amount)}`),
+      { code: "INVALID_REFUND_AMOUNT" });
+  }
+  if (!orderId) {
+    throw Object.assign(new Error("Refund requires an order reference"), { code: "MISSING_ORDER_ID" });
+  }
+
+  // refund_id is the provider's idempotency key. A bare timestamp collides for
+  // two refunds raised in the same millisecond, which would silently make the
+  // second a duplicate of the first.
+  const refundIdGen = refundId || `rfnd_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
   const refund = await cashfreeRequest(`/orders/${sanitizedOrderId}/refunds`, {
     method: "POST",
     body: {
       refund_id: refundIdGen,
-      refund_amount: Math.round(Number(amount) * 100) / 100,
+      refund_amount: Math.round(refundAmount * 100) / 100,
       refund_note: (reason || "Traveler cancellation").slice(0, 100),
       refund_speed: "STANDARD",
     },

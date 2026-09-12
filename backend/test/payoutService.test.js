@@ -1,6 +1,8 @@
-import { describe, it, before, beforeEach } from "node:test";
+import { describe, it, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import db from "../src/db.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   createSettlementBatch,
   processSettlementBatch,
@@ -12,6 +14,15 @@ import {
   initiateCashfreeTransfer,
   verifyCashfreeBeneficiary,
 } from "../src/services/cashfreeService.js";
+
+const testWorkspace = mkdtempSync(path.join(tmpdir(), "idea-payout-test-"));
+const testDatabasePath = path.join(testWorkspace, "payout.sqlite");
+writeFileSync(testDatabasePath, "");
+Object.assign(process.env, { DATABASE_ENGINE: "sqlite", SQLITE_DB_PATH: testDatabasePath, NODE_ENV: "test", K_SERVICE: "" });
+const { default: db } = await import("../src/db.js");
+db.prepare("INSERT INTO users (id, name, email, password, role) VALUES ('user_traveler', 'Test Traveler', 'payout-traveler@example.test', 'test-only', 'TRAVELER')").run();
+db.prepare("INSERT INTO products (id, product_type, title, city, state, category, price_inr) VALUES ('prod_goa_tour_sic', 'DAY_TOUR', 'Test experience', 'Goa', 'Goa', 'Tours', 1000)").run();
+after(() => { db.close(); rmSync(testWorkspace, { recursive: true, force: true }); });
 
 describe("Supplier Automated Payouts & Cashfree Ledger", () => {
   const testSupplierId = "sup_payout_test_01";

@@ -1,3 +1,4 @@
+import QRCode from "qrcode";
 import crypto from "node:crypto";
 import { nanoid } from "nanoid";
 
@@ -53,6 +54,16 @@ function documentShell(title, booking, body) {
   </style></head><body><main class="page"><div class="top"><div><div class="brand"><i>idea</i>holiday.</div><div class="muted">Travel More Across India</div></div><div><span class="label">Booking reference</span><div class="ref">${escapeHtml(booking.ref)}</div></div></div>${body}<div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div></main></body></html>`;
 }
 
+function voucherQr(booking) {
+  if (booking.payment_status !== "PAID" || booking.status === "cancelled") return "";
+  // The reference opens an authenticated trip page; the QR contains no guest PII or pickup secret.
+  const qr = QRCode.create(`${resolveGuestDocumentBaseUrl()}/booking-confirmed/${encodeURIComponent(booking.ref)}`, { errorCorrectionLevel: "M" });
+  const size = qr.modules.size;
+  let path = "";
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (qr.modules.get(y, x)) path += `M${x + 4} ${y + 4}h1v1h-1z`;
+  return `<svg role="img" aria-label="Booking QR code" xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 ${size + 8} ${size + 8}"><rect width="100%" height="100%" fill="white"/><path d="${path}" fill="black"/></svg>`;
+}
+
 export function renderGuestDocument(documentType, booking) {
   const type = String(documentType || "").toUpperCase();
   if (!documentTypes.has(type)) throw Object.assign(new Error("Document type is not supported"), { status: 404 });
@@ -61,7 +72,7 @@ export function renderGuestDocument(documentType, booking) {
     try { logistics = typeof booking.logistics_snapshot === "string" ? JSON.parse(booking.logistics_snapshot || "{}") : (booking.logistics_snapshot || {}); } catch {}
     const driver = booking.driver_name ? `${escapeHtml(booking.driver_name)} · ${escapeHtml(booking.driver_phone)}<br>${escapeHtml(booking.vehicle_model)} · <strong>${escapeHtml(booking.vehicle_number)}</strong>` : "Driver details will be shared before pickup.";
     const pickupStatus = booking.confirmation_status === "PENDING_SUPPLIER" || logistics.pendingSupplier ? "Pickup details pending supplier confirmation" : `${booking.pickup_time || "Time TBC"} · ${booking.pickup_location || "See meeting point"}`;
-    const body = `<h1>Booking voucher</h1><p class="muted">Present this mobile voucher at pickup. Government-issued identification may be requested.</p><div class="grid"><div class="card"><span class="label">Experience / option</span><strong>${escapeHtml(booking.product_title || booking.product_type)}</strong><br><span class="muted">${escapeHtml(booking.confirmation_status || booking.status || "PENDING")}</span></div><div class="card"><span class="label">Traveler</span><strong>${escapeHtml(booking.traveler_name)}</strong><br>${escapeHtml(booking.traveler_phone)}</div><div class="card"><span class="label">Date and pickup window</span><strong>${escapeHtml(booking.activity_date)} · ${escapeHtml(pickupStatus)}</strong></div><div class="card"><span class="label">Operator</span><strong>${escapeHtml(booking.supplier_name || "Idea Holiday partner")}</strong><br>${escapeHtml(booking.supplier_phone || "")}</div></div><section class="section"><h2>Pickup / meeting point</h2><div class="card">${escapeHtml(booking.pickup_location || logistics.pickupLocation || "Pending confirmation")}${booking.pickup_instructions ? `<br><span class="muted">${escapeHtml(booking.pickup_instructions)}</span>` : ""}${logistics.meetingPointLabel ? `<br><span class="muted">Meeting point: ${escapeHtml(logistics.meetingPointLabel)}</span>` : ""}</div></section>${booking.drop_location ? `<section class="section"><h2>Drop-off</h2><div class="card">${escapeHtml(booking.drop_location)}</div></section>` : ""}<section class="section"><h2>Driver and vehicle</h2><div class="card">${driver}</div></section><div class="notice"><strong>Pickup security:</strong> Check the driver and vehicle plate before sharing the private pickup code shown only in My Trips. The code is intentionally excluded from this shareable voucher.</div>`;
+    const body = `<h1>Booking voucher</h1>${voucherQr(booking)}<p class="muted">Present this mobile voucher at pickup. Government-issued identification may be requested.</p><div class="grid"><div class="card"><span class="label">Experience / option</span><strong>${escapeHtml(booking.product_title || booking.product_type)}</strong><br><span class="muted">${escapeHtml(booking.confirmation_status || booking.status || "PENDING")}</span></div><div class="card"><span class="label">Traveler</span><strong>${escapeHtml(booking.traveler_name)}</strong><br>${escapeHtml(booking.traveler_phone)}</div><div class="card"><span class="label">Date and pickup window</span><strong>${escapeHtml(booking.activity_date)} · ${escapeHtml(pickupStatus)}</strong></div><div class="card"><span class="label">Operator</span><strong>${escapeHtml(booking.supplier_name || "Idea Holiday partner")}</strong><br>${escapeHtml(booking.supplier_phone || "")}</div></div><section class="section"><h2>Pickup / meeting point</h2><div class="card">${escapeHtml(booking.pickup_location || logistics.pickupLocation || "Pending confirmation")}${booking.pickup_instructions ? `<br><span class="muted">${escapeHtml(booking.pickup_instructions)}</span>` : ""}${logistics.meetingPointLabel ? `<br><span class="muted">Meeting point: ${escapeHtml(logistics.meetingPointLabel)}</span>` : ""}</div></section>${booking.drop_location ? `<section class="section"><h2>Drop-off</h2><div class="card">${escapeHtml(booking.drop_location)}</div></section>` : ""}<section class="section"><h2>Driver and vehicle</h2><div class="card">${driver}</div></section><div class="notice"><strong>Pickup security:</strong> Check the driver and vehicle plate before sharing the private pickup code shown only in My Trips. The code is intentionally excluded from this shareable voucher.</div>`;
     return documentShell(`Voucher ${booking.ref}`, booking, body);
   }
 

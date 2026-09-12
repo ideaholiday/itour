@@ -1,3 +1,4 @@
+import { demoPaymentsEnabled } from "../services/checkoutModeService.js";
 import { Router } from "express";
 import db from "../db.js";
 import logger from "../config/logger.js";
@@ -279,7 +280,7 @@ router.post("/:id/verify-payment", authenticate, requireRoles("TRAVELER", "ADMIN
 
 router.post("/:id/demo-payment", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), validateBody(circuitOrderSchemas.demoPayment), (req, res) => {
   try {
-    const demoPaymentEnabled = process.env.DEMO_PAYMENT_ONLY !== "false" || process.env.ENABLE_DEMO_PAYMENT !== "false";
+    const demoPaymentEnabled = demoPaymentsEnabled();
     if (!demoPaymentEnabled) {
       return res.status(403).json({ error: "Demo payment is disabled in this environment", code: "DEMO_PAYMENT_DISABLED" });
     }

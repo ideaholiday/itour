@@ -165,12 +165,30 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
     db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashPassword(password), user.id);
   }
 
-  const supplier = user.role === "SUPPLIER" ? db.prepare("SELECT id FROM suppliers WHERE LOWER(email) = ?").get(user.email.toLowerCase()) : null;
+  const portal = String(req.body.portal || req.headers["x-portal-type"] || req.query.portal || "").trim().toLowerCase();
+
+  // Enforce portal-specific role access when specified
+  if (portal === "admin" && user.role !== "ADMIN" && user.role !== "STAFF") {
+    return res.status(403).json({ error: "Access denied. Admin portal is restricted to platform administrators." });
+  }
+
+  if (portal === "supplier" && user.role !== "SUPPLIER") {
+    return res.status(403).json({ error: "Access restricted to registered suppliers. Please sign in with your supplier credentials or register on supply.ideaholiday.in." });
+  }
+
+  const supplier = user.role === "SUPPLIER" ? db.prepare("SELECT id, company_name, kyb_status, is_verified FROM suppliers WHERE LOWER(email) = ?").get(user.email.toLowerCase()) : null;
   const token = jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role, supplier_id: supplier?.id || null },
     SECRET,
     { expiresIn: "30d" }
   );
+
+  let portalRedirect = "/";
+  if (user.role === "SUPPLIER") {
+    portalRedirect = "/supplier";
+  } else if (user.role === "ADMIN" || user.role === "STAFF") {
+    portalRedirect = "/admin";
+  }
 
   res.json({
     token,
@@ -181,7 +199,9 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
       phone: user.phone,
       role: user.role,
       supplier_id: supplier?.id || null
-    }
+    },
+    supplier: supplier || null,
+    portalRedirect
   });
 });
 

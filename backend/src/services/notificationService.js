@@ -1,3 +1,4 @@
+import { sendSupplierSms, smsConfiguration } from "./smsService.js";
 import { sendEmail, sendSupplierNotification } from "./emailService.js";
 import { normalizeWhatsAppPhone, sendWhatsAppMessage, whatsAppTemplate } from "./whatsappService.js";
 import { guestDocumentLinks } from "./guestDocumentService.js";
@@ -91,10 +92,10 @@ export async function notifyBookingConfirmed(database, bookingId) {
     let subject = `Booking ${booking.ref} confirmed`;
     let message = `Hello ${recipient.name || "there"},\n\n${common}\n\nView the latest details in Idea Holiday.`;
     if (recipient.role === "TRAVELER") {
-      message = `Hello ${recipient.name || "Traveler"},\n\nYour payment is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}\n\nYour supplier is confirming the booking. Your private pickup OTP is available only in My Trips.`;
+      message = `Hello ${recipient.name || "Traveler"},\n\nYour payment is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}\n\n${booking.confirmation_type === "INSTANT" ? "Your booking is confirmed. Show your voucher when you arrive." : "Your supplier is confirming the booking."} Your private pickup OTP is available only in My Trips.`;
     } else if (recipient.role === "SUPPLIER") {
-      subject = `Action required: accept booking ${booking.ref}`;
-      message = `Hello ${recipient.name || "Partner"},\n\nA paid booking has been assigned to you. ${common}\nPickup: ${booking.pickup_location}\nRespond before ${booking.supplier_response_deadline || "the supplier SLA deadline"}.`;
+      subject = booking.confirmation_type === "INSTANT" ? `Confirmed booking ${booking.ref}` : `Action required: accept booking ${booking.ref}`;
+      message = `Hello ${recipient.name || "Partner"},\n\nA paid booking has been assigned to you. ${common}\nPickup: ${booking.pickup_location}\n${booking.confirmation_type === "INSTANT" ? "This booking is automatically confirmed against your seat inventory. No acceptance is required." : `Respond before ${booking.supplier_response_deadline || "the supplier SLA deadline"}.`}`;
     } else {
       subject = `New paid booking ${booking.ref}`;
       message = `${common}\nSupplier: ${booking.supplier_name || "Pending"}\nTraveler: ${booking.traveler_name}\nMonitor supplier acceptance and dispatch in Operations.`;
@@ -102,7 +103,9 @@ export async function notifyBookingConfirmed(database, bookingId) {
     const template = recipient.role === "TRAVELER"
       ? whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, booking.product_title || booking.product_type, booking.activity_date, booking.pickup_time, booking.pickup_location, documents.voucherUrl, documents.invoiceUrl])
       : recipient.role === "SUPPLIER"
-        ? whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_SUPPLIER_ASSIGNMENT, [booking.ref, booking.product_title || booking.product_type, booking.activity_date, booking.pickup_location, booking.supplier_response_deadline])
+        ? booking.confirmation_type === "INSTANT"
+          ? whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_OPS_ALERT, [booking.ref, "Booking automatically confirmed. View guests in your supplier portal."])
+          : whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_SUPPLIER_ASSIGNMENT, [booking.ref, booking.product_title || booking.product_type, booking.activity_date, booking.pickup_location, booking.supplier_response_deadline])
         : whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_OPS_ALERT, [booking.ref, "New paid booking"]);
     results.push(...await sendRecipientChannels({
       database,
@@ -115,6 +118,11 @@ export async function notifyBookingConfirmed(database, bookingId) {
       whatsappTemplate: template,
       metadata: { bookingId: booking.id, bookingRef: booking.ref },
     }));
+  }
+  if (supplier.phone && smsConfiguration().enabled) {
+    results.push(await sendSupplierSms({ to: supplier.phone, supplierId: supplier.id,
+      text: `${common} ${booking.confirmation_type === "INSTANT" ? "Automatically confirmed. View guests in your supplier portal." : "Please review the assignment in your supplier portal."}`,
+      eventKey: `${booking.id}:BOOKING_CONFIRMED:SUPPLIER:SMS`, metadata: { bookingId: booking.id, bookingRef: booking.ref } }, { database }));
   }
   return { eventType, bookingId, attempted: results.length, results };
 }

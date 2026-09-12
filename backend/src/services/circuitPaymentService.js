@@ -1,10 +1,11 @@
+import { confirmNativeReservation } from "./nativeInventoryService.js";
 import { nanoid } from "nanoid";
 import { activatePickupOtp } from "./bookingService.js";
 import { beginSupplierAcceptance } from "./assignmentSlaService.js";
 import { recordPaymentCapture } from "./financeService.js";
 import { expireCircuitOrderHolds, getCircuitOrder } from "./circuitOrderService.js";
 
-const PAYMENT_WINDOW_MS = 15 * 60 * 1000;
+const PAYMENT_WINDOW_MS = 10 * 60 * 1000;
 const PAYMENT_SETUP_LOCK_MS = 2 * 60 * 1000;
 const LIVE_PROVIDERS = new Set(["CASHFREE", "RAZORPAY"]);
 const ALL_PROVIDERS = new Set([...LIVE_PROVIDERS, "DEMO"]);
@@ -117,7 +118,7 @@ export function claimCircuitPaymentOrder(database, {
     throw paymentError("A payment order is already being created", 409, "PAYMENT_ORDER_IN_PROGRESS");
   }
 
-  const expiresAt = new Date(now.getTime() + PAYMENT_WINDOW_MS).toISOString();
+  const expiresAt = new Date(order.hold_expires_at).toISOString();
   const claim = database.transaction(() => {
     const updated = database.prepare(`
       UPDATE circuit_orders
@@ -400,6 +401,7 @@ export function confirmCircuitOrderPayment(database, {
     }
 
     for (const booking of bookings) {
+      confirmNativeReservation(database, booking);
       const otp = activatePickupOtp(booking);
       const updated = database.prepare(`
         UPDATE bookings
@@ -433,7 +435,10 @@ export function confirmCircuitOrderPayment(database, {
       if (payout.changes !== 1) {
         throw paymentError("A circuit child payout could not be secured", 409, "CIRCUIT_ORDER_INTEGRITY_ERROR");
       }
-      const supplierResponseDeadline = beginSupplierAcceptance(database, booking.id, now);
+      let supplierResponseDeadline = null;
+      if (booking.confirmation_type === "INSTANT") {
+        database.prepare("UPDATE bookings SET confirmation_status = 'CONFIRMED', supplier_assignment_status = 'SUPPLIER_ACCEPTED', supplier_response_status = 'ACCEPTED', supplier_response_deadline = NULL WHERE id = ?").run(booking.id);
+      } else supplierResponseDeadline = beginSupplierAcceptance(database, booking.id, now);
       recordPaymentCapture(database, { ...booking, payment_method: normalizedProvider }, providerPaymentId || providerOrderId);
       confirmedBookings.push({
         bookingId: booking.id,

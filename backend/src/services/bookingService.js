@@ -1,3 +1,4 @@
+import { checkNativeInventory, normalizeUnitItems, priceUnitItems } from "./nativeInventoryService.js";
 import crypto from "crypto";
 import { computeTransferQuote, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
@@ -150,7 +151,7 @@ function validateCapacity(vehicleCategory, passengers, luggage) {
   }
 }
 
-export function calculateBookingQuote(db, input, { enforceListingSupplierAvailability = true } = {}) {
+export function calculateBookingQuote(db, input, { enforceListingSupplierAvailability = true, ownerId } = {}) {
   const productId = input.product_id || input.productId || input.activity_id || input.activityId;
   const product = db.prepare(
     `SELECT p.*, s.kyb_status, s.commission_rate, s.supplier_code, s.company_name AS supplier_name
@@ -179,6 +180,10 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     throw error;
   }
 
+  let unitBreakdown = normalizeUnitItems(input.unit_items || input.unitItems, { adults, children });
+  const nativeSlot = checkNativeInventory(db, input, { ownerId });
+  // A held reservation already froze its breakdown; keep the booking identical to it.
+  if (nativeSlot?.unitItems?.length) unitBreakdown = normalizeUnitItems(nativeSlot.unitItems);
   const vehicleCategory = String(input.vehicle_category || input.selectedVehicle || (product.group_type === "SHARED" ? "SHARED_SEAT" : "SEDAN")).toUpperCase();
   if (enforceListingSupplierAvailability) {
     const availability = evaluateSupplierAvailability(db, {
@@ -197,7 +202,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
   // Vehicle capacity is a transport constraint, not a package-room or ticket constraint.
   const isNonVehicleProduct = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(product.product_type) ||
     ["TICKET_ONLY", "SIC", "TICKET_SIC"].includes(product.product_sub_type);
-  if (!isNonVehicleProduct) validateCapacity(vehicleCategory, passengers, luggage);
+  if (!nativeSlot && !isNonVehicleProduct) validateCapacity(vehicleCategory, passengers, luggage);
   const commissionRate = resolveCommissionRate(db, product.supplier_id, product.product_type);
   let baseAmount;
   let tolls = 0;
@@ -297,12 +302,26 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     totalAmount = baseAmount + tolls + stateTax + gstAmount;
   }
 
+  if (nativeSlot) {
+    // A held reservation carries its own frozen total; otherwise price the
+    // requested unit breakdown against the rate resolved for this date.
+    if (nativeSlot.unitTotal != null) {
+      baseAmount = Number(nativeSlot.unitTotal);
+    } else {
+      baseAmount = priceUnitItems(unitBreakdown.items, nativeSlot.unitPrices || { ADULT: nativeSlot.adultPrice, CHILD: nativeSlot.childPrice });
+    }
+    tolls = 0; stateTax = 0; gstAmount = roundMoney(baseAmount * 0.05);
+    totalAmount = baseAmount + gstAmount;
+    pricingModel = "PER_PERSON";
+  }
   const commissionAmount = roundMoney(totalAmount * commissionRate / 100);
   return {
     product,
+    nativeSlot,
     activityDate,
     adults,
     children,
+    unitItems: unitBreakdown.items,
     luggage,
     vehicleCategory,
     variantName,
@@ -321,6 +340,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
 
 export function publicQuote(quote) {
   return {
+    nativeSlot: quote.nativeSlot || null,
     productId: quote.product.id,
     productTitle: quote.product.title,
     productType: quote.product.product_type,

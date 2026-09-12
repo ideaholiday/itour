@@ -9,7 +9,8 @@ import {
   loadMigrationFiles,
   getMigrationStatus,
   runPendingMigrations,
-  rollbackLastBatch
+  rollbackLastBatch,
+  findDuplicateMigrationPrefixes
 } from "../src/services/migrationRunner.js";
 
 test("migration runner tracks, executes and rolls back batches", () => {
@@ -131,4 +132,32 @@ test("migration runner blocks edited migrations and ledger-only rollbacks", () =
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+
+test("migration runner reports migrations that reuse the same number", () => {
+  const duplicates = findDuplicateMigrationPrefixes([
+    { name: "016_booking_logistics_stops.sql" },
+    { name: "017_five_product_types.sql" },
+    { name: "017_native_reservations.sql" },
+    { name: "018_native_reservation_delivery.sql" },
+    { name: "not_numbered.sql" }
+  ]);
+
+  assert.equal(duplicates.length, 1);
+  assert.equal(duplicates[0].prefix, "017");
+  assert.deepEqual(duplicates[0].names, [
+    "017_five_product_types.sql",
+    "017_native_reservations.sql"
+  ]);
+});
+
+test("migration runner reports no duplicates for uniquely numbered migrations", () => {
+  assert.deepEqual(
+    findDuplicateMigrationPrefixes([
+      { name: "001_initial_schema.sql" },
+      { name: "002_performance_and_security_indices.sql" }
+    ]),
+    []
+  );
 });

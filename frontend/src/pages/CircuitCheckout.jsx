@@ -98,6 +98,8 @@ export default function CircuitCheckout() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  useEffect(() => { fetch("/api/checkout/config").then(response => response.json()).then(config => setDemoEnabled(Boolean(config.demoEnabled))).catch(() => {}); }, []);
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -276,7 +278,7 @@ export default function CircuitCheckout() {
             <section className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-2xl bg-emerald-100 text-emerald-800"><LockKeyhole className="h-5 w-5" /></span><div><h2 className="font-serif text-xl font-bold">Choose one payment method</h2><p className="text-xs text-stone-500">The selected gateway receives only the parent circuit total.</p></div></div>
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                {PAYMENT_OPTIONS.map((option) => {
+                {PAYMENT_OPTIONS.filter(option => option.id !== "DEMO" || demoEnabled).map((option) => {
                   const Icon = option.icon;
                   const selected = paymentMethod === option.id;
                   const disabled = Boolean(providerLocked && providerLocked !== option.id);

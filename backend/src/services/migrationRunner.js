@@ -116,7 +116,11 @@ function splitSqlStatements(sql) {
   return statements;
 }
 
-function executeMigrationSql(db, sql) {
+/**
+ * Applies one migration's SQL, translating `ADD COLUMN IF NOT EXISTS` for SQLite.
+ * Exported so tests can build fixtures through the same path production uses.
+ */
+export function executeMigrationSql(db, sql) {
   if (databaseDialect(db) !== "sqlite") {
     db.exec(sql);
     return;
@@ -137,6 +141,32 @@ function executeMigrationSql(db, sql) {
       db.exec(`ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${definition}`);
     }
   }
+}
+
+/**
+ * Finds migration files that share the same numeric prefix.
+ *
+ * Migrations are applied in lexicographic filename order and tracked by full
+ * filename, so duplicates are not fatal — but they make the apply order depend
+ * on the description text rather than the number, which is easy to get wrong.
+ * Reported by `npm run migrate:status` so the next author picks a free number.
+ *
+ * @param {Array<{ name: string }>} files
+ * @returns {Array<{ prefix: string, names: string[] }>}
+ */
+export function findDuplicateMigrationPrefixes(files) {
+  const byPrefix = new Map();
+
+  for (const file of files) {
+    const prefix = String(file.name).match(/^(\d+)/)?.[1];
+    if (!prefix) continue;
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+    byPrefix.get(prefix).push(file.name);
+  }
+
+  return [...byPrefix.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([prefix, names]) => ({ prefix, names }));
 }
 
 /**

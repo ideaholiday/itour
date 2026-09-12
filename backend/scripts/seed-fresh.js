@@ -15,6 +15,7 @@
 
 import { randomUUID } from "crypto";
 import db from "../src/db.js";
+import { hashPassword } from "../src/lib/passwords.js";
 
 // ─── tiny helpers ─────────────────────────────────────────────────────────────
 const uid = (prefix) => `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -147,6 +148,19 @@ db.prepare(`
   4.9, 1, "Tour Operator", 8
 );
 console.log(`  ✓  Supplier: ${SUPPLIER_ID}\n`);
+
+const DEMO_SUPPLIER_EMAIL = "supplier@multitour.in";
+const DEMO_SUPPLIER_PASSWORD = process.env.DEMO_SUPPLIER_PASSWORD || "Supplier@2026";
+db.prepare(`
+  INSERT INTO users (id, name, email, password, phone, role)
+  VALUES ('user_multitour_universal', 'Ravi Sharma', ?, ?, '+91-9876543210', 'SUPPLIER')
+  ON CONFLICT(email) DO UPDATE SET
+    name = excluded.name,
+    password = excluded.password,
+    phone = excluded.phone,
+    role = 'SUPPLIER'
+`).run(DEMO_SUPPLIER_EMAIL, hashPassword(DEMO_SUPPLIER_PASSWORD));
+console.log(`  ✓  Supplier login: ${DEMO_SUPPLIER_EMAIL}\n`);
 
 // ─── STEP 4 — HELPER: INSERT PRODUCT ─────────────────────────────────────────
 const insertProduct = db.prepare(`

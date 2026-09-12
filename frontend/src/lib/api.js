@@ -70,7 +70,7 @@ export const api = {
   getActivities: (params = {}) => {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))).toString();
     const url = `${BASE}/search?${qs}`;
-    return fetch(url, { headers: authHeaders() }).then(handle);
+    return cachedFetch(url, { headers: authHeaders() }, 30000);
   },
   getActivity: (id) => cachedFetch(`${BASE}/activities/${id}`, {}, 60000),
   getActivityOptions: (id) => fetch(`${BASE}/activities/${encodeURIComponent(id)}/options`).then(handle),

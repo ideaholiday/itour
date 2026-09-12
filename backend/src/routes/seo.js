@@ -1,9 +1,22 @@
 import { Router } from "express";
 import db from "../db.js";
 import logger from "../config/logger.js";
+import { activityPath } from "../../../shared/activityUrl.js";
 
 const router = Router();
 const BASE_URL = process.env.PUBLIC_ORIGIN || "https://ideaholiday.in";
+
+// Product identity remains stable when a title changes; old links redirect permanently.
+router.get(["/activity/:id", "/activity/:slug/:id"], (req, res, next) => {
+  try {
+    const product = db.prepare("SELECT id, title FROM products WHERE id = ?").get(req.params.id);
+    if (!product) return next();
+    const canonical = activityPath(product);
+    if (req.path === canonical) return next();
+    const query = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+    return res.redirect(301, `${canonical}${query}`);
+  } catch (error) { next(error); }
+});
 
 export function generateSitemapXml(products = [], baseUrl = BASE_URL) {
   const staticUrls = [
@@ -27,7 +40,7 @@ export function generateSitemapXml(products = [], baseUrl = BASE_URL) {
   const productUrls = (products || []).map((p) => {
     const lastMod = p.updated_at ? new Date(p.updated_at).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
     return {
-      loc: `${baseUrl}/activity/${encodeURIComponent(p.id)}`,
+      loc: `${baseUrl}${activityPath(p)}`,
       lastmod: lastMod,
       priority: "0.85",
       changefreq: "weekly",
@@ -80,7 +93,7 @@ router.get("/sitemap.xml", (req, res) => {
     let products = [];
     try {
       products = db
-        .prepare("SELECT id, created_at as updated_at, category, city as destination_name FROM products WHERE is_published = 1 ORDER BY id DESC")
+        .prepare("SELECT id, title, created_at as updated_at, category, city as destination_name FROM products WHERE is_published = 1 ORDER BY id DESC")
         .all() || [];
     } catch (dbErr) {
       logger.warn("Sitemap database fallback failed", { requestId: req.requestId, error: dbErr });
