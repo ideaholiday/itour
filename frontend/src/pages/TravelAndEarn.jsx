@@ -64,19 +64,28 @@ export default function TravelAndEarn() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
   const [friendCount, setFriendCount] = useState(5);
   const [showQr, setShowQr] = useState(false);
   const [openFaq, setOpenFaq] = useState(null);
 
+  const loadProfile = () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    api.getLoyaltyProfile()
+      .then((data) => setProfile(data))
+      .catch((err) => {
+        console.error("Failed to load loyalty profile:", err);
+        setError(err?.message || "Could not load your rewards. Please try again.");
+      })
+      .finally(() => setLoading(false));
+  };
+
   useEffect(() => {
-    if (user) {
-      setLoading(true);
-      api.getLoyaltyProfile()
-        .then((data) => setProfile(data))
-        .catch((err) => console.error("Failed to load loyalty profile:", err))
-        .finally(() => setLoading(false));
-    }
+    loadProfile();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const referralCode = profile?.referralCode || (user ? `REF-${(user.name || "TRVL").slice(0, 4).toUpperCase()}` : "REF-TRAVEL250");
@@ -241,6 +250,28 @@ export default function TravelAndEarn() {
                     </div>
                   )}
                 </div>
+
+                {user && loading && (
+                  <div className="flex items-center justify-center gap-2 py-3 text-xs text-stone-500">
+                    <svg className="h-4 w-4 animate-spin text-amber-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                    <span>Loading your rewards…</span>
+                  </div>
+                )}
+
+                {user && error && (
+                  <div className="mt-3 rounded-xl bg-red-50 border border-red-200 p-3 text-center">
+                    <p className="text-xs text-red-700 font-medium">{error}</p>
+                    <button
+                      onClick={loadProfile}
+                      className="mt-2 text-xs font-bold text-red-800 underline cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
 
                 {!user && (
                   <p className="text-xs text-stone-500 text-center mt-4 pt-3 border-t border-stone-100">
@@ -441,15 +472,15 @@ export default function TravelAndEarn() {
                             {tx.description}
                           </span>
                           <span className="text-[10px] text-stone-400 mt-0.5 block">
-                            {new Date(tx.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
+                            {new Date(tx.createdAt).toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
                           </span>
                         </div>
                         <div className="text-right shrink-0">
-                          <span className={`font-mono font-bold text-xs ${tx.amount_inr >= 0 ? "text-emerald-700" : "text-stone-800"}`}>
-                            {tx.amount_inr >= 0 ? `+₹${tx.amount_inr}` : `-₹${Math.abs(tx.amount_inr)}`}
+                          <span className={`font-mono font-bold text-xs ${tx.amountInr >= 0 ? "text-emerald-700" : "text-stone-800"}`}>
+                            {tx.amountInr >= 0 ? `+₹${tx.amountInr}` : `-₹${Math.abs(tx.amountInr)}`}
                           </span>
                           <span className="text-[10px] text-stone-400 block font-mono">
-                            Bal: ₹{Number(tx.balance_after_inr || 0).toLocaleString("en-IN")}
+                            Bal: ₹{Number(tx.balanceAfterInr || 0).toLocaleString("en-IN")}
                           </span>
                         </div>
                       </div>
@@ -628,10 +659,9 @@ export default function TravelAndEarn() {
         <div className="rounded-3xl bg-stone-100/80 border border-stone-200/80 p-6 sm:p-8">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
-              <h3 className="font-bold text-stone-900 text-sm uppercase tracking-wider">Live Traveler Rewards Feed</h3>
+              <h3 className="font-bold text-stone-900 text-sm uppercase tracking-wider">Recent Rewards Activity</h3>
+              <span className="text-[11px] font-medium text-stone-400 bg-stone-200 px-2 py-0.5 rounded-full">Examples</span>
             </div>
-            <span className="text-xs text-stone-500">Updated real-time</span>
           </div>
 
           <div className="divide-y divide-stone-200">

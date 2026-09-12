@@ -130,3 +130,23 @@ the same major, and the full unit and HTTP integration suites pass against it.
 **Remove this override** once Express ships a release that depends on
 `qs@^6.16.0` or later. Re-run `cd backend && npm audit --omit=dev` after any
 dependency change and confirm it still reports zero vulnerabilities.
+
+---
+
+## 10. Payment Boundary Guards
+
+The Cashfree wrapper (`cashfreeService.js`) refuses to reach the provider with
+invalid money:
+
+- A refund amount that is missing, non-numeric, zero or negative throws
+  `INVALID_REFUND_AMOUNT` **locally**. Callers pass a computed quote, and a
+  failed quote must never be posted to the gateway.
+- A refund without an order reference throws `MISSING_ORDER_ID`.
+- `refund_id` is the provider's idempotency key. A generated id carries a random
+  suffix (`rfnd_<ms>_<8 hex>`) because a bare timestamp collides for two refunds
+  raised in the same millisecond, which would make the second silently duplicate
+  the first.
+- An unrecognised `CASHFREE_ENV` falls back to **sandbox**, never live.
+- Supplier channel credentials are stored in `supplier_channel_connections.credentials_json`
+  and are **never** selected by `listSupplierChannels`, which feeds the API
+  directly. A test asserts the serialized list contains no credential material.

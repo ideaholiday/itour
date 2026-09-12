@@ -217,3 +217,149 @@ test("Channel Manager: connects supplier to Bókun, fetches products, and import
   assert.equal(disconnectResult.success, true);
   assert.equal(listSupplierChannels(db, "sup_channel_01").length, 0);
 });
+
+// --- Error paths on the channel boundary ---
+// Every connector reaches a third party we do not control, so these cover what
+// happens when that party refuses, breaks, or returns nothing.
+
+/** Swaps one adapter's methods for the duration of a test. */
+function stubAdapter(t, channelName, overrides) {
+  const adapter = getChannelAdapter(channelName);
+  const originals = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    originals[key] = adapter[key];
+    adapter[key] = value;
+  }
+  t.after(() => { for (const [key, value] of Object.entries(originals)) adapter[key] = value; });
+  return adapter;
+}
+
+test("Channel Manager: an unsupported channel is refused before any database write", async t => {
+  const db = setupChannelTestDb();
+  t.after(() => db.close());
+
+  await assert.rejects(
+    () => connectSupplierChannel(db, { supplierId: "sup_test_1", channelName: "NOT_A_CHANNEL", credentials: {} }),
+    (error) => error.code === "UNSUPPORTED_CHANNEL" && error.status === 400
+  );
+  assert.equal(listSupplierChannels(db, "sup_test_1").length, 0, "nothing may be stored for a channel we cannot talk to");
+});
+
+test("Channel Manager: a refused or broken remote connection stores nothing", async t => {
+  const db = setupChannelTestDb();
+  t.after(() => db.close());
+
+  // The provider answers, but rejects the credentials.
+  stubAdapter(t, "BOKUN", { testConnection: async () => ({ success: false, error: "Invalid API key" }) });
+  await assert.rejects(
+    () => connectSupplierChannel(db, { supplierId: "sup_test_1", channelName: "BOKUN", credentials: { accessKey: "bad" } }),
+    /Invalid API key/,
+    "the provider's own reason must reach the supplier"
+  );
+  assert.equal(listSupplierChannels(db, "sup_test_1").length, 0);
+
+  // The provider returns something unusable rather than a clear failure.
+  stubAdapter(t, "BOKUN", { testConnection: async () => null });
+  await assert.rejects(
+    () => connectSupplierChannel(db, { supplierId: "sup_test_1", channelName: "BOKUN", credentials: {} }),
+    /Remote connection failed/
+  );
+
+  // The provider is simply down.
+  stubAdapter(t, "BOKUN", { testConnection: async () => { throw new Error("ECONNREFUSED"); } });
+  await assert.rejects(
+    () => connectSupplierChannel(db, { supplierId: "sup_test_1", channelName: "BOKUN", credentials: {} }),
+    /ECONNREFUSED/
+  );
+  assert.equal(listSupplierChannels(db, "sup_test_1").length, 0, "a failed handshake must never leave a connection behind");
+});
+
+test("Channel Manager: reconnecting the same channel updates instead of duplicating", async t => {
+  const db = setupChannelTestDb();
+  t.after(() => db.close());
+  stubAdapter(t, "BOKUN", { testConnection: async () => ({ success: true }) });
+
+  const first = await connectSupplierChannel(db, {
+    supplierId: "sup_test_1", channelName: "bokun", channelTitle: "Bókun", endpointUrl: "https://a.example", credentials: { accessKey: "k1" },
+  });
+  const second = await connectSupplierChannel(db, {
+    supplierId: "sup_test_1", channelName: "BOKUN", channelTitle: "Bókun Live", endpointUrl: "https://b.example", credentials: { accessKey: "k2" },
+  });
+
+  assert.equal(first.id, second.id, "the same channel reuses its connection id");
+  const channels = listSupplierChannels(db, "sup_test_1");
+  assert.equal(channels.length, 1, "a supplier must not accumulate duplicate rows for one channel");
+  assert.equal(channels[0].channel_title, "Bókun Live", "the newest details win");
+  assert.equal(channels[0].endpoint_url, "https://b.example");
+  assert.equal(channels[0].channel_name, "BOKUN", "the channel name is normalised to upper case");
+});
+
+test("Channel Manager: stored credentials are never returned to the client", async t => {
+  const db = setupChannelTestDb();
+  t.after(() => db.close());
+  stubAdapter(t, "BOKUN", { testConnection: async () => ({ success: true }) });
+
+  await connectSupplierChannel(db, {
+    supplierId: "sup_test_1", channelName: "BOKUN", credentials: { accessKey: "SUPER_SECRET", secretKey: "ALSO_SECRET" },
+  });
+
+  // This list feeds GET /api/supplier-channels directly, so a future SELECT *
+  // here would leak every supplier's provider API keys.
+  const serialized = JSON.stringify(listSupplierChannels(db, "sup_test_1"));
+  assert.doesNotMatch(serialized, /SUPER_SECRET/);
+  assert.doesNotMatch(serialized, /ALSO_SECRET/);
+  assert.doesNotMatch(serialized, /credentials/i);
+});
+
+test("Channel Manager: a failed product fetch is recorded against the connection and rethrown", async t => {
+  const db = setupChannelTestDb();
+  t.after(() => db.close());
+  stubAdapter(t, "BOKUN", { testConnection: async () => ({ success: true }) });
+  const connection = await connectSupplierChannel(db, { supplierId: "sup_test_1", channelName: "BOKUN", credentials: {} });
+
+  stubAdapter(t, "BOKUN", { fetchProducts: async () => { throw new Error("Rate limit exceeded"); } });
+  await assert.rejects(
+    () => fetchRemoteChannelProducts(db, { supplierId: "sup_test_1", connectionId: connection.id }),
+    /Rate limit exceeded/
+  );
+
+  const [stored] = listSupplierChannels(db, "sup_test_1");
+  assert.equal(stored.last_sync_status, "ERROR", "the supplier can see the channel is unhealthy");
+  assert.equal(stored.last_error, "Rate limit exceeded");
+});
+
+test("Channel Manager: another supplier cannot reach or delete a connection", async t => {
+  const db = setupChannelTestDb();
+  t.after(() => db.close());
+  db.prepare("INSERT INTO suppliers (id, company_name) VALUES ('sup_other', 'Other Co')").run();
+  stubAdapter(t, "BOKUN", { testConnection: async () => ({ success: true }) });
+  const connection = await connectSupplierChannel(db, { supplierId: "sup_test_1", channelName: "BOKUN", credentials: {} });
+
+  await assert.rejects(
+    () => fetchRemoteChannelProducts(db, { supplierId: "sup_other", connectionId: connection.id }),
+    (error) => error.status === 404,
+    "a connection must be invisible to any other supplier"
+  );
+  assert.throws(
+    () => disconnectSupplierChannel(db, { supplierId: "sup_other", connectionId: connection.id }),
+    (error) => error.status === 404
+  );
+  assert.equal(listSupplierChannels(db, "sup_test_1").length, 1, "the owner still has their connection");
+
+  // Unknown ids are 404s, not silent successes.
+  assert.throws(() => disconnectSupplierChannel(db, { supplierId: "sup_test_1", connectionId: "ch_missing" }),
+    (error) => error.status === 404);
+  assert.deepEqual(disconnectSupplierChannel(db, { supplierId: "sup_test_1", connectionId: connection.id }),
+    { success: true, message: "Channel disconnected" });
+});
+
+test("Channel Manager: an empty remote catalog is not an error", async t => {
+  const db = setupChannelTestDb();
+  t.after(() => db.close());
+  stubAdapter(t, "BOKUN", { testConnection: async () => ({ success: true }), fetchProducts: async () => [] });
+  const connection = await connectSupplierChannel(db, { supplierId: "sup_test_1", channelName: "BOKUN", credentials: {} });
+
+  const products = await fetchRemoteChannelProducts(db, { supplierId: "sup_test_1", connectionId: connection.id });
+  assert.deepEqual(products, [], "a supplier with no remote products sees an empty list, not a failure");
+  assert.notEqual(listSupplierChannels(db, "sup_test_1")[0].last_sync_status, "ERROR");
+});

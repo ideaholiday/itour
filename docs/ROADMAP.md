@@ -41,15 +41,17 @@ Standing obligations that apply to every change:
 
 - Keep `npm audit --omit=dev` at **0 vulnerabilities**.
 - Keep coverage above the **70%** gate.
-- Keep all suites green: 313 unit, 17 integration, 12 e2e.
+- Keep all suites green: 338 unit, 17 integration, 12 e2e.
 
 ---
 
 ## NEXT — ready to start, highest value first
 
-**1. Branch coverage on error paths**
-Line coverage is ~88% but branch coverage is ~63%. The gap is error handling —
-where undiscovered bugs live. Target the payment, refund and dispatch services.
+**1. Branch coverage on error paths** *(in progress)*
+Branch coverage is ~65% against ~88% line. The payment, channel and SLA services
+have had a first pass (Cashfree 21→63%, channel manager 31→57%, SLA 36→62%),
+which surfaced two real refund bugs. Still thin: `bookingService`,
+`cashfreeSecureIdService`, `driverDispatchService`, `analyticsService`.
 
 **2. Real external provider adapter**
 The channel manager imports products, but `reservationProviders.js` still runs
