@@ -201,17 +201,22 @@ export function resolvePricing(db, rules, localDate) {
      ORDER BY priority DESC, created_at DESC, id DESC`
   ).all(rules.option_id, localDate, localDate)) || [];
 
+  const baseUnitPrices = buildUnitPrices(rules.adult_price, rules.child_price, rules.unit_prices);
+
   for (const row of rows) {
     if (!parse(row.weekdays).includes(weekday)) continue;
     return {
       adultPrice: Number(row.adult_price), childPrice: Number(row.child_price),
-      unitPrices: buildUnitPrices(row.adult_price, row.child_price, row.unit_prices),
+      // A seasonal rate overlays the base map rather than replacing it, so a unit
+      // type the supplier priced once on the schedule keeps selling in season
+      // unless the rate deliberately overrides it.
+      unitPrices: { ...baseUnitPrices, ...buildUnitPrices(row.adult_price, row.child_price, row.unit_prices) },
       priceScheduleId: row.id, priceScheduleLabel: row.label || null,
     };
   }
   return {
     adultPrice: Number(rules.adult_price), childPrice: Number(rules.child_price),
-    unitPrices: buildUnitPrices(rules.adult_price, rules.child_price, rules.unit_prices),
+    unitPrices: baseUnitPrices,
     priceScheduleId: null, priceScheduleLabel: null,
   };
 }

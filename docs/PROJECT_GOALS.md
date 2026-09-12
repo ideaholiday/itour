@@ -50,7 +50,7 @@ Build and operate a digital **Supplier Portal (Extranet) & Automated Reservation
 
 ### 3. Technical & Reliability Goals
 - **Dual-Engine Persistence**: Maintain SQLite WAL mode for fast local development and CI test execution, with Supabase PostgreSQL for cloud production.
-- **Strict Testing Gates**: Enforce >70% line and function test coverage (currently ~87% lines) across 285 unit tests in 9 suites plus 16 HTTP integration tests.
+- **Strict Testing Gates**: Enforce >70% line and function test coverage (currently ~87% lines) across 286 unit tests in 9 suites plus 16 HTTP integration tests.
 - **Security & PII Hygiene**: Redact sensitive data from logs, isolate pickup OTPs using SHA-256 verification hashes and AES-GCM encryption.
 
 ---

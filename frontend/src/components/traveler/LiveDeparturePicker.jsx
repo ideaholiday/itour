@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 const VALID_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const rupees = value => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 
 export default function LiveDeparturePicker({ productId, date, selectedTime, selectedOptionId, onSelect }) {
   const [slots, setSlots] = useState([]);
@@ -24,9 +25,48 @@ export default function LiveDeparturePicker({ productId, date, selectedTime, sel
     refresh(); const interval = setInterval(refresh, 15000);
     return () => { active = false; clearInterval(interval); };
   }, [productId, date]);
+
+  // The page falls back to the product's first start time, which a supplier may
+  // have closed for this date. Move the traveler to a departure they can book
+  // rather than leaving them on an error, once per product and date.
+  const autoSelectedFor = useRef("");
+  useEffect(() => {
+    if (!slots.length) return;
+    const key = `${productId}:${date}`;
+    if (autoSelectedFor.current === key) return;
+    const current = slots.find(slot => slot.localTime === selectedTime && (!selectedOptionId || slot.optionId === selectedOptionId));
+    if (current?.available) { autoSelectedFor.current = key; return; }
+    const firstAvailable = slots.find(slot => slot.available);
+    if (firstAvailable) {
+      autoSelectedFor.current = key;
+      onSelect(firstAvailable);
+    }
+  }, [slots, productId, date, selectedTime, selectedOptionId, onSelect]);
+
   if (!slots.length && !error) return null;
+
+  // Party minimums and seasonal rates are set per departure, but in practice a
+  // whole date usually shares them. Surface them once above the list so the
+  // traveler sees the rule before they start picking times.
+  const minimum = Math.max(0, ...slots.map(slot => Number(slot.minPartySize) || 0));
+  const seasonal = slots.find(slot => slot.priceScheduleLabel)?.priceScheduleLabel;
+
   return <section className="my-4 rounded-xl border border-emerald-200 bg-white p-4"><h3 className="font-bold text-stone-900">Live departure availability</h3><p className="mt-1 text-xs text-stone-600">India Standard Time · Updated every 15 seconds</p>
     {error && <p role="alert">{error}</p>}
-    <div className="mt-3 flex flex-wrap gap-2">{slots.map(slot => <button key={slot.id} type="button" disabled={!slot.available} aria-pressed={(selectedTime === slot.localTime && (!selectedOptionId || selectedOptionId === slot.optionId))} onClick={() => onSelect(slot)} className={`rounded-lg border px-3 py-2 text-sm disabled:opacity-50 ${(selectedTime === slot.localTime && (!selectedOptionId || selectedOptionId === slot.optionId)) ? "border-emerald-800 bg-emerald-50" : "border-stone-300"}`}>{slot.optionName ? `${slot.optionName} · ` : ""}{slot.localTime} · {slot.available ? `${slot.vacancies} seats left` : slot.status.replaceAll("_", " ")}</button>)}</div>
+    {seasonal && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{seasonal} pricing applies on this date.</p>}
+    {minimum > 1 && <p className="mt-2 text-xs text-stone-600">This experience runs with a minimum of {minimum} travelers.</p>}
+    <div className="mt-3 flex flex-wrap gap-2">{slots.map(slot => {
+      const selected = selectedTime === slot.localTime && (!selectedOptionId || selectedOptionId === slot.optionId);
+      return <button key={slot.id} type="button" disabled={!slot.available} aria-pressed={selected} onClick={() => onSelect(slot)}
+        className={`rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-50 ${selected ? "border-emerald-800 bg-emerald-50" : "border-stone-300"}`}>
+        <span className="block font-semibold">{slot.optionName ? `${slot.optionName} · ` : ""}{slot.localTime}</span>
+        <span className="block text-xs text-stone-600">
+          {slot.available ? `${slot.vacancies} seats left` : slot.status.replaceAll("_", " ")}
+          {slot.adultPrice != null && ` · ${rupees(slot.adultPrice)} per adult`}
+        </span>
+        {slot.supplierNote && <span className="block text-xs text-amber-800">{slot.supplierNote}</span>}
+      </button>;
+    })}</div>
+    <p className="mt-2 text-xs text-stone-500">Prices are per traveler before 5% tax.</p>
   </section>;
 }

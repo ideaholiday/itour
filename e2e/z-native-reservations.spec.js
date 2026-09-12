@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { E2E_ACCOUNTS, loginThroughUi } from "./helpers/marketplace.js";
 
+// KNOWN FAILING (pre-existing): the supplier and hold legs pass, but the closing
+// demo-payment leg hangs before /booking-confirmed and a 150s budget does not
+// help, so it is a hang rather than slowness. The inventory selectors this test
+// used were also stale and have been repaired, so it now exercises the whole
+// journey instead of stopping at the schedule form.
+
 test("supplier sets seat inventory and traveler sees a live ten-minute checkout hold", async ({ page, request, browser }) => {
   const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
   const account = await login.json(); expect(login.status()).toBe(200);
@@ -23,12 +29,15 @@ test("supplier sets seat inventory and traveler sees a live ten-minute checkout 
   const editor = page.getByRole("dialog", { name: "Seats and schedule" });
   await expect(editor).toBeVisible();
   await editor.getByLabel("Seats per departure").fill("3");
-  await editor.getByLabel("Departure times").fill("09:00,14:00");
+  // 09:00 is present by default; departures are added one at a time as tags.
+  await editor.getByLabel("Add a time").fill("14:00");
+  await editor.getByRole("button", { name: "Add time" }).click();
   await editor.getByLabel("Adult price").fill("1000");
   await editor.getByLabel("Child price").fill("400");
   await editor.getByRole("button", { name: "Save schedule" }).click();
   await expect(editor.getByRole("status")).toContainText("Saved.");
   await page.screenshot({ path: "test-results/native-supplier-inventory.png" });
+
   const signup = await request.post("/api/auth/signup", { data: { name: "Native Seat Traveler", email: "native.browser@example.test", password: "BrowserNative@2026", phone: "+919876543210" } });
   expect(signup.status()).toBe(200);
   const context = await browser.newContext();

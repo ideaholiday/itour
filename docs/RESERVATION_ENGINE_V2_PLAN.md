@@ -1,7 +1,7 @@
 # Backend Improvement Plan: Reservation Engine v2
 
 > **Status**: P0 implemented (migration `021`). P1 implemented (migration `022`).
-> P2–P3 sequenced, not started.
+> Supplier and traveler UI implemented. P2–P3 sequenced, not started.
 > **Context**: [`docs/PROJECT_GOALS.md`](PROJECT_GOALS.md) — two products, one backend:
 > `ideaholiday.in` (marketplace, Viator-like) and `supply.ideaholiday.in`
 > (supplier reservation system, Bókun-like).
@@ -117,6 +117,43 @@ capacity arithmetic is unchanged — only the money moved.
 consumes no capacity. Every unit occupies a seat today. Adding it means a
 per-unit-type `occupies_seat` flag and a capacity path that counts seats rather
 than travelers.
+
+## UI — Delivered
+
+The backend work above is reachable from the product, not just the API.
+
+**Supplier extranet** — the *Seats and schedule* editor is now tabbed:
+- *Seats & schedule* also carries party-size bounds and prices for senior, youth
+  and infant travelers.
+- *Seasonal rates* adds, lists and removes date-ranged rates.
+- *Calendar* closes or resizes one date, or one departure on a date.
+
+Rates and calendar stay locked until the option has a saved schedule, since both
+adjust a base the option does not otherwise have. Saving a schedule reloads the
+options so the tabs unlock immediately.
+
+**Traveler** — the live departure picker shows the per-adult price for each
+departure, the seasonal rate's name when one applies, the minimum party size when
+above one, and the supplier's reason on a closed departure. It also moves the
+traveler to the first bookable departure when the product's default start time
+has been closed for that date, instead of landing them on an error.
+
+Covered end to end by `e2e/z-supplier-rates-calendar.spec.js`.
+
+### Known inconsistency, not yet addressed
+
+Two older surfaces on the activity page still price from the product's static
+`price_inr` and do not know about seasonal rates, so they can disagree with the
+departure picker on the same screen:
+
+- the **"From ₹…" headline** in the booking sidebar, and
+- the **"Seasonal & Demand Price Calendar"** widget, which renders its own
+  weekend/peak pricing unrelated to `native_price_schedules`.
+
+Reconciling them means teaching both to read native availability. Worth doing
+before this goes in front of real travelers.
+
+---
 
 ## P2 — Shared resource capacity (next)
 

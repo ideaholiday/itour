@@ -343,3 +343,19 @@ test("a maximum party size below the minimum is rejected", t => {
   saveInventoryRules(db, "p", "o", { ...rules, minPartySize: 6 });
   assert.throws(() => saveInventoryRules(db, "p", "o", { ...rules, maxPartySize: 2 }), /at least the minimum/);
 });
+
+test("a seasonal rate inherits base unit prices it does not override", t => {
+  const db = fixture(t);
+  saveInventoryRules(db, "p", "o", { ...rules, unitPrices: { SENIOR: 700, YOUTH: 500 } });
+  // A peak rate that only raises adult and child must not stop senior sales.
+  savePriceSchedule(db, "p", "o", { startsOn: future, endsOn: future, adultPrice: 2000, childPrice: 800, unitPrices: { YOUTH: 900 }, priority: 5 });
+
+  const slot = listNativeAvailability(db, "p", "o", future)[0];
+  assert.equal(slot.unitPrices.ADULT, 2000, "the seasonal adult rate applies");
+  assert.equal(slot.unitPrices.YOUTH, 900, "an explicitly overridden unit uses the seasonal rate");
+  assert.equal(slot.unitPrices.SENIOR, 700, "an unspecified unit keeps its base rate rather than becoming unsellable");
+
+  // And it remains reservable in season.
+  const hold = reserveNativeInventory(db, { productId: "p", optionId: "o", localDate: future, localTime: "09:00", unitItems: [{ unitType: "SENIOR", quantity: 1 }], ownerId: "u", requestKey: "senior-peak" });
+  assert.equal(JSON.parse(hold.pricing_snapshot).unitTotal, 700);
+});
