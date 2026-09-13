@@ -1,5 +1,8 @@
 # Environment Configuration: Idea Holiday
 
+> **Summary:** Every environment variable, by tier, with placeholders only.
+> **Read when:** a feature needs configuration or a secret. Never put real values in docs.
+
 ## Overview & Guidelines
 Idea Holiday utilizes environment-specific `.env` files locally and Google Secret Manager for cloud deployments.
 - **NEVER** store real production credentials, tokens, or private keys inside Markdown documentation or git repositories.

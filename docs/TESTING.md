@@ -1,5 +1,8 @@
 # Testing Strategy & Quality Gates: Idea Holiday
 
+> **Summary:** Test levels, where tests live, quality gates and conventions.
+> **Read when:** writing or fixing tests. Verify with `npm run check`.
+
 ## Testing Philosophy
 Idea Holiday follows a strict pyramid of automated testing to ensure zero regression across booking calculations, financial reconciliation, payment webhooks, pickup OTP security, multi-day circuit planning, and real-time seat inventory reservation under concurrency.
 
@@ -8,7 +11,7 @@ Idea Holiday follows a strict pyramid of automated testing to ensure zero regres
 ## 1. Test Levels & Commands
 
 ### 1.1 Backend Unit & Functional Tests (`node:test`)
-- **Location**: `backend/test/*.test.js` (347 test cases across 9 suites).
+- **Location**: `backend/test/*.test.js` (run `npm run check -- unit`).
 - **Execution Command**:
   ```bash
   cd backend && npm test
@@ -74,7 +77,7 @@ Idea Holiday follows a strict pyramid of automated testing to ensure zero regres
 ## 2. Pre-Deployment Verification Checklist
 
 Before pushing code to `main` or initiating a deployment to Cloud Run, agents and developers **MUST verify**:
-1. All 347 backend unit tests pass: `cd backend && npm test`.
+1. All backend unit and integration tests pass and the frontend builds: `npm run check`.
 2. All 19 HTTP integration tests pass: `cd backend && npm run test:integration`.
 3. Coverage gate passes: `cd backend && npm run test:coverage`.
 4. Frontend builds without errors: `cd frontend && npm run build`.

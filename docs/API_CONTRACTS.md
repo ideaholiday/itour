@@ -1,5 +1,8 @@
 # API Contracts: Idea Holiday
 
+> **Summary:** Every HTTP endpoint: path, auth role, request and response shape.
+> **Read when:** adding or changing an endpoint, or calling one from the frontend. Large: `grep -n '^##' docs/API_CONTRACTS.md` and read one section.
+
 ## Overview & Standards
 All API endpoints follow RESTful design principles and are served under the `/api` prefix.
 - **Request Format**: JSON (`Content-Type: application/json`).
@@ -56,7 +59,7 @@ All API endpoints follow RESTful design principles and are served under the `/ap
 ### 1.2 Product Details, Pickup Suggestions & Live Availability
 - **`GET /api/activities/:id`**: Returns published tour/transfer listing with 5-product-type models (`product_type`, `product_sub_type`, ticket tiers, vehicle options, SIC hubs, hotel tiers, itinerary items) and location rules.
 - **`GET /api/activities/:id/pickup-suggestions?q=Airport`**: Returns product-scoped anchor points matching `canonical_locations`.
-- **`POST /api/activities/:id/validate-pickup`**: Validates whether coordinates or address fall within the tour's pickup bounds.
+- **`POST /api/activities/:id/validate-pickup`**: Validates whether coordinates or address fall within the tour's pickup bounds. An invalid point returns `valid: false` with `code` `INVALID_PICKUP_POINT` or `INVALID_DROP_POINT` and `detail.allowed_area`, `detail.allowed_state`, `detail.suggestion` (`locationValidationService.js`).
 - **`GET /api/availability/native/:productId?date=YYYY-MM-DD&optionId=...`**:
   - Uncached live departure availability for a product and option.
   - **Response (200 OK)**:
@@ -207,6 +210,7 @@ verified review — see BUSINESS_RULES §9.3.
 - **`POST /api/circuit-orders`**: Consumes an active quote to create one parent circuit order and child bookings.
 - **`POST /api/circuit-orders/:id/payment-order`**: Generates a single payment order covering the parent circuit.
 - **`POST /api/circuit-orders/:id/verify-payment`**: Verifies parent payment and atomically confirms all child bookings.
+- **`POST /api/circuit-orders/:id/demo-payment`**: Demo charge through the same `confirmCircuitOrderPayment` path; returns `403 DEMO_PAYMENT_DISABLED` unless demo payments are enabled.
 
 ---
 
@@ -418,6 +422,15 @@ verified review — see BUSINESS_RULES §9.3.
 ### 4.3 Notification Health & Testing
 - **`GET /api/ops/notification-health`**: Reports operational status of WhatsApp, SES, and SMS without leaking secrets.
 - **`POST /api/ops/notifications/test`**: Dispatches an authenticated provider test message.
+
+### 4.4 Support Cases (`/api/support`, requires authentication)
+Cancellations, complaints, safety concerns and refund disputes. Travelers see their own cases; `ADMIN`/`STAFF` decide refunds before the payment provider and finance ledger are updated.
+- **`GET /cases`**, **`POST /cases`**, **`GET /cases/:ref`**, **`PATCH /cases/:ref`**
+- **`POST /cases/:ref/messages`**, **`POST /cases/:ref/evidence`**
+- **`POST /cases/:ref/refund-decision`**
+
+### 4.5 Executive Analytics (`/api/analytics`, requires `ADMIN`)
+Backs `/admin/analytics`: **`GET /overview`**, **`/trends`**, **`/cohorts`**, **`/suppliers`**, **`/revenue`**, **`/funnel`**, **`/alerts`** (anomaly alerts).
 
 ---
 

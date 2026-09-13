@@ -1,5 +1,8 @@
 # Architecture & Product Decision Records (ADR): Idea Holiday
 
+> **Summary:** Architecture and owner decisions (ADRs) with their reasons. Do not overturn without an explicit request.
+> **Read when:** you wonder why something is built this way, or the owner makes a new decision (add an ADR, rule R8).
+
 This document records significant technical and product architectural decisions.
 **Rule for AI Agents**: Do NOT repeatedly revisit or overturn established decisions without an explicit user requirement.
 
@@ -87,3 +90,27 @@ This document records significant technical and product architectural decisions.
 - **Decision Made**: Adopted Option 2.
 - **Reason**: Allows specialized booking widgets per product type while maintaining 100% backward compatibility for all existing transfer and tour listings without data migrations or downtime.
 - **Consequences**: Frontend renders type-aware booking panels; backend quote calculators query respective tier/option tables.
+
+---
+
+## ADR 008: Supplier Profiles Are Free to Index; the Verified Badge Is Never Sold
+- **Date**: 2026-09-13
+- **Context**: Every registered supplier needs Google discoverability, while travelers must be able to trust the Verified badge and bookings must stay on-platform.
+- **Decision Made**:
+  - Profiles are public for all registered suppliers and become indexable once the **free KYB is `APPROVED`** (noindex before). Indexing is never gated on payment.
+  - Profiles show no phone or WhatsApp; travelers use the on-platform **Enquire** flow.
+  - Payment restricts the **profile only**: a supplier's products are hidden on its profile unless paid (Spotlight). Marketplace search and booking are unchanged for KYB-approved suppliers.
+  - The Verified badge is **never sold**. Payment buys a yearly check; the badge is granted only if checks pass, with a full refund if rejected.
+  - Planned prices (all + GST): Free; Verified ₹999/yr; Spotlight ₹2,999 one-time **per product** (locked to the product, 1 swap/yr); Verified Plus ₹3,499 first year including 1 Spotlight, renewing at ₹999. Optional: 3-pack ₹6,999, founding offer ₹499. Razorpay one-time orders with renewal reminders. The GST invoice SAC code needs CA confirmation.
+- **Consequences**: Profiles, SEO, the admin-granted badge and enquiries have shipped (rules in `BUSINESS_RULES.md` §12). The share kit, then paid plans, follow per `ROADMAP.md`. Do not re-litigate these choices.
+
+---
+
+## ADR 009: KYB Gates Bookability; Cashfree-Verified GSTIN + PAN Auto-Approves
+- **Date**: 2026-09-13
+- **Context**: Verified suppliers should sell immediately without waiting for manual review, but admins must never approve on placeholder or missing data.
+- **Decision Made**:
+  - A product is bookable only when its supplier's KYB is `APPROVED` **and** the product is `PUBLISHED`. Approving KYB makes all of that supplier's published products bookable; suspending or rejecting KYB takes them all off sale.
+  - When Cashfree SecureID has verified **both** GSTIN and PAN, the supplier is set to KYB `APPROVED` (and `is_verified`) automatically, with no admin click.
+  - Admins see the real KYB: no placeholder documents or numbers, every uploaded document is viewable, and manual approval is blocked while required documents (transport license, PAN) are missing. KYB files are never publicly reachable.
+- **Consequences**: KYB approval is separate from the yearly Verified badge (ADR 008). Auto-approval must never grant the badge.

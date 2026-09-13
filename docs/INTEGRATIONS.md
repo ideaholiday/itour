@@ -1,5 +1,8 @@
 # External Integrations: Idea Holiday
 
+> **Summary:** WhatsApp, Cashfree, Razorpay, email, SMS, maps and channel-manager providers.
+> **Read when:** code talks to an external provider.
+
 ## 1. Meta WhatsApp Cloud API
 
 ### Overview & Purpose
@@ -20,10 +23,39 @@ Provides automated, high-deliverability transactional messaging to travelers, to
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN`| Secret string | Token for Meta webhook registration verification. |
 
 ### Message Templates
-- `idea_holiday_booking_confirmed`: 7 parameters (booking reference, product, date, time, pickup, voucher link, invoice link).
-- `idea_holiday_driver_details`: 8 parameters (booking reference, driver name, driver phone, vehicle model, vehicle number, pickup time, pickup location, voucher URL).
-- `idea_holiday_ops_alert`: 2 parameters (booking reference, alert message).
-- `idea_holiday_trip_status`: 3 parameters (booking reference, trip status, details).
+
+Meta templates are **positional**: send variables in exactly this order. Each
+template name is set by the `WHATSAPP_TEMPLATE_<KEY>` variable in `.env.example`.
+Source of truth: the `whatsAppTemplate(...)` calls in `notificationService.js`
+and `whatsappService.js`.
+
+| Key | Variables, in order |
+| :--- | :--- |
+| `BOOKING_CONFIRMED` | booking ref, product, date, pickup time, pickup, voucher URL, invoice URL |
+| `BOOKING_DOCUMENTS` | booking ref, voucher URL, invoice URL |
+| `SUPPLIER_ASSIGNMENT` | booking ref, product, date, pickup, response deadline |
+| `SUPPLIER_ACCEPTED` | booking ref, supplier name |
+| `DRIVER_ASSIGNED` | booking ref, driver name, driver phone, vehicle model, vehicle number, pickup time, pickup, voucher URL |
+| `DRIVER_TRIP` | booking ref, traveler name, traveler phone, date + time, pickup, drop, vehicle number |
+| `SUPPLIER_STATUS` | status/action, reason |
+| `OPS_ALERT` | booking ref, alert message |
+| `TRIP_STATUS` | booking ref, status, message |
+| `REFUND_STATUS` | booking ref, refund amount, refund percentage, gateway refund ID |
+| `PAYOUT_STATUS` | batch ref, net amount, payout count, provider batch ID |
+| `SUPPORT_CASE` | case ref, booking ref, status, resolution |
+| `PRODUCT_PUBLISHED` | listing title |
+| `TRIP_REMINDER` | booking ref, experience name, date, pickup |
+| `REVIEW_REQUEST` | booking ref, experience name |
+| `CIRCUIT_RESCHEDULE` | circuit order ref, reschedule state, reconfirmation deadline |
+
+**Known mismatch (UNKNOWN which is intended):** some call sites send
+`BOOKING_CONFIRMED` with 5 variables (no voucher or invoice URL) and
+`DRIVER_ASSIGNED` with 7 (no voucher URL). Meta rejects a variable count that
+differs from the approved template.
+
+**Driver dispatch** uses its own `WHATSAPP_TEMPLATE_DISPATCH_*` templates. Their
+names, variables, example values and approved body text are defined in
+`DISPATCH_WHATSAPP_TEMPLATES` in `backend/src/services/dispatchNotificationService.js`.
 
 ### Important Limitations & Policies
 - **24-Hour Customer Window**: Meta strictly prohibits sending free-form text outside the 24-hour customer care window. Proactive transactional messages **must use pre-approved templates**.

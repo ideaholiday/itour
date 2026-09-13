@@ -1,4 +1,11 @@
 -- ====================================================================
+-- LEGACY — NOT USED. Nothing executes or imports this file.
+-- An early UUID-based design; the live schema differs (TEXT ids, 100+ tables).
+-- Schema source of truth: backend/migrations/ (see docs/DATA_MODEL.md).
+-- Do not edit or copy from it.
+-- ====================================================================
+
+-- ====================================================================
 -- IDEA HOLIDAY SUPABASE / POSTGRESQL MASTER DATABASE SCHEMA
 -- Tailored for Transfers, Sightseeing, Multi-Day Packages & 4 Role Ecosystem
 -- ====================================================================

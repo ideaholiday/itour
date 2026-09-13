@@ -79,6 +79,9 @@ databaseInfo = Object.freeze({
   persistent: !isCloudRun || hasPersistentCloudRunVolume,
 });
 
+// SQLite-only bootstrap of the original tables (local dev, CI, tests). PostgreSQL skips it.
+// Do NOT add tables or columns here: every schema change is a new file in
+// backend/migrations/, which runPendingMigrations() applies to both engines at startup.
 db.exec(`
 -- 1. DESTINATIONS
 CREATE TABLE IF NOT EXISTS destinations (

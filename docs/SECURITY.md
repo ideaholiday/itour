@@ -1,5 +1,8 @@
 # Security Architecture & Policies: Idea Holiday
 
+> **Summary:** Authentication, RBAC, pickup OTP vault, input validation, webhooks, PII redaction and dependency policy.
+> **Read when:** adding an endpoint, handling PII, secrets or payments, or bumping dependencies.
+
 ## 1. Authentication & Authorization
 
 ### Dual Authentication Mechanism
@@ -68,6 +71,8 @@ Winston logging (`backend/src/config/logger.js`) enforces automated, recursive r
 - **Redacted Keys**: `password`, `password_hash`, `token`, `access_token`, `refresh_token`, `otp`, `pickup_otp`, `bank_account`, `pan_number`, `gstin`, `credit_card`, `secret`.
 - **Masked Data**: Phone numbers and email addresses are partially masked in standard operational logs.
 - **Request Bodies**: HTTP request bodies are excluded from production logging unless `LOG_REQUEST_BODY=true` is explicitly configured for targeted debugging.
+- **Audit Log**: Successful authenticated mutations and authorization denials are written to `audit_logs` (`auditService.js`). Raw request payloads, secrets, full PII and raw IP addresses are never stored.
+- **Web Vitals Telemetry**: `POST /api/telemetry/web-vitals` accepts only bounded metric name/value/rating, normalized route, app and navigation type. No identifiers, query strings, emails or other PII.
 
 ---
 
@@ -102,6 +107,7 @@ Agents and developers must adhere to the following rules:
    - The `public.spatial_ref_sys` table is an internal system catalog created automatically by the PostGIS geospatial extension and owned by `supabase_admin`.
    - It contains strictly public coordinate reference definitions (EPSG codes) and no user data.
    - Its appearance in Supabase Security Advisor as `rls_disabled_in_public` is an acknowledged system-level false positive that can safely be dismissed in the Supabase Dashboard.
+5. **RLS disabled on `marketplace` tables**: the Security Advisor also flags every `marketplace` table. RLS is not the boundary here. `anon` and `authenticated` have no `USAGE` on the schema (verified 2026-09-13), so PostgREST cannot reach it. The backend connects as a privileged role. Keep it that way: never grant `USAGE` on `marketplace` to client roles or add it to the exposed API schemas without first enabling RLS with policies.
 
 ---
 

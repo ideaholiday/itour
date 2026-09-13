@@ -1,5 +1,8 @@
 # Technical Architecture: Idea Holiday
 
+> **Summary:** How the clients, Express API, dual database, workers and providers fit together, with request flows.
+> **Read when:** a change crosses layers or you need the big picture. For file locations use CODEMAP.md.
+
 ## High-Level Architecture Overview
 
 Idea Holiday is constructed as a modern, decoupled web application featuring a dual-client setup, an Express REST API backend, a dual-engine persistence layer, and integrated third-party communication and payment providers.

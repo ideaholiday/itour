@@ -1,5 +1,8 @@
 # Glossary: Idea Holiday
 
+> **Summary:** Project terms and role names.
+> **Read when:** you meet a term you don't recognise.
+
 This glossary defines project-specific domain and technical terminology to ensure AI agents and engineers interpret concepts accurately.
 
 ---

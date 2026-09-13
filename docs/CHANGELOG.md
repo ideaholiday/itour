@@ -1,5 +1,8 @@
 # Changelog: Idea Holiday
 
+> **Summary:** Human release notes, newest first.
+> **Read when:** almost never. Agents: use `git log` instead; current rules live in the other docs.
+
 All notable technical and architectural changes to this project are documented in this file.
 
 ---

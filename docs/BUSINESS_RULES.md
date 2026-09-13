@@ -1,5 +1,8 @@
 # Business Rules: Idea Holiday Real-Time Reservation Platform
 
+> **Summary:** Pricing, commission, holds, refunds, booking state machine, KYB, supplier profiles and the Verified badge.
+> **Read when:** touching money, booking status, cancellation or supplier eligibility. Large: `grep -n '^##' docs/BUSINESS_RULES.md` and read one section.
+
 ## 1. Native Inventory & Real-Time Seat Allocation Rules
 
 ### 1.1 Dynamic Seat Vacancy Formula

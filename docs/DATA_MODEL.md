@@ -1,11 +1,16 @@
 # Data Model: Idea Holiday
 
+> **Summary:** Tables, key columns and relationships.
+> **Read when:** adding or changing schema or queries. Large: `grep -n '^##\|^###' docs/DATA_MODEL.md` and read one section.
+
 ## Database Engine Architecture
 The marketplace supports a **dual-engine data architecture**:
 1. **SQLite (WAL Mode)**: Primary for local development, integration testing, and single-container deployments (`backend/wanderindia.db`).
 2. **PostgreSQL + PostGIS**: Primary for production cloud deployments (Supabase `marketplace` schema).
 
-The schema is defined in `backend/src/db.js` and mirrored in `backend/src/supabase_schema.sql` with versioned migrations tracked in `_schema_migrations`.
+**Schema source of truth: `backend/migrations/`.** `runPendingMigrations()` applies them at startup on both engines and records each file in `_schema_migrations`.
+- `backend/src/db.js` also bootstraps the original tables on SQLite only. Don't add schema there.
+- `backend/src/supabase_schema.sql` and `supabase/migrations/` are legacy and never executed (see `supabase/README.md`).
 
 ---
 

@@ -43,7 +43,7 @@ Standing obligations that apply to every change:
 
 - Keep `npm audit --omit=dev` at **0 vulnerabilities**.
 - Keep coverage above the **70%** gate.
-- Keep all suites green: 347 unit, 19 integration, 12 e2e.
+- Keep all suites green: `npm run check` and `npx playwright test`.
 
 ---
 

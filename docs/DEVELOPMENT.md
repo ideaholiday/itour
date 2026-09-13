@@ -1,5 +1,8 @@
 # Developer Guide: Idea Holiday
 
+> **Summary:** Local setup, seeding, migrations, optional services, deploy commands and troubleshooting.
+> **Read when:** running the project or a tool for the first time.
+
 ## Prerequisites
 - **Node.js**: v20.x or later.
 - **npm**: v10.x or later.
@@ -84,7 +87,7 @@ npm run migrate:postgres
 ```
 
 Migration files live under `backend/migrations/` and use standard versioned filenames:
-- `001_initial_schema.sql` ... `024_native_promotions.sql`.
+- `NNN_description.sql`, applied in filename order (`npm run migrate:status` lists them). `017` is used twice for historical reasons; do not rename either file.
 - Migration state is recorded in the `_schema_migrations` table.
 
 **Numbering rule:** give every new migration a number no existing file uses.
@@ -101,7 +104,7 @@ renamed file as new and run it a second time.
 Execute test suites from the respective package roots:
 
 ```bash
-# Backend unit test suite (347 tests across 9 suites using node:test)
+# Backend unit test suite (node:test)
 cd backend && npm test
 
 # Backend coverage test (enforces 70% line & function coverage gate)
@@ -140,7 +143,25 @@ npm run build
 
 ---
 
-## 5. Common Troubleshooting & Gotchas
+## 5. Optional Services
+
+### Next.js Supabase-auth app (root)
+Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `.env.local`, then `npm install && npm run dev` (:3000).
+For Google sign-up, enable the Google provider in Supabase and allow `http://localhost:3000/auth/callback` (plus the production URL) as a redirect.
+
+### Supabase PostgreSQL seeding
+Set `DATABASE_URL` in `backend/.env`, then `cd backend && npm run migrate:up && node seed-supabase.js`.
+
+### Local Prometheus + Grafana
+`docker-compose.observability.yml` starts a localhost-only stack with alert rules and dashboards. Follow `observability/README.md`.
+
+### Deploying
+CI/CD runs from `.github/workflows/deploy.yml` (staging on `staging`, blue-green production on `main`, with smoke tests and rollback).
+Manual deploy: `./deploy.sh`. Smoke-test a URL: `bash scripts/smoke-tests.sh <service-url>`. Roll back: `bash scripts/rollback.sh [SERVICE_NAME] [REGION] [PROJECT_ID]`.
+
+---
+
+## 6. Common Troubleshooting & Gotchas
 
 1. **SQLite Database Locked (`SQLITE_BUSY`)**:
    - The backend sets `db.pragma("busy_timeout = 5000")` and uses `WAL` mode.
