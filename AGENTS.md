@@ -135,7 +135,7 @@ npm run dev                              # Next.js auth app on :3000
 
 # Check it — prefer `npm run check`: it prints one line per step, and only the failures
 npm run check                            # agent docs + unit + integration + frontend build
-npm run check -- unit                    # one step: docs | unit | integration | frontend | next
+npm run check -- unit                    # one step: docs | test-db | unit | integration | frontend | next
 cd backend && npm run test:coverage      # 70% line/function gate (CI)
 cd backend && npm audit --omit=dev       # must stay at 0
 npx playwright test                      # browser journeys in e2e/

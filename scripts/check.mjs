@@ -3,7 +3,7 @@
 // Prints one line per passing step; on failure prints only the useful tail.
 //
 //   npm run check                 # docs + unit + integration + frontend build
-//   npm run check -- unit         # only the named steps (docs, unit, integration, frontend, next)
+//   npm run check -- unit         # only the named steps (docs, test-db, unit, integration, frontend, next)
 
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const steps = {
   docs: { cwd: ".", cmd: "node", args: ["scripts/check-agent-docs.mjs"] },
+  "test-db": { cwd: "backend", cmd: "node", args: ["scripts/prepare-test-db.js"] },
   unit: { cwd: "backend", cmd: "node", args: ["--test", "--test-reporter=dot", "test/**/*.test.js"] },
   integration: { cwd: "backend", cmd: "node", args: ["--test", "--test-reporter=dot", "integration/**/*.test.js"] },
   frontend: { cwd: "frontend", cmd: "npm", args: ["run", "build"] },

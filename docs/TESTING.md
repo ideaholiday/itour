@@ -12,6 +12,7 @@ Idea Holiday follows a strict pyramid of automated testing to ensure zero regres
 
 ### 1.1 Backend Unit & Functional Tests (`node:test`)
 - **Location**: `backend/test/*.test.js` (run `npm run check -- unit`).
+- **Database**: unit tests share the local SQLite file. `backend/scripts/prepare-test-db.js` runs before `npm test` and `npm run test:coverage` (and as the `test-db` step of `npm run check`). It applies migrations, seeds the Goa demo catalog and adds the `user_traveler` / `user_admin` fixtures, so tests pass on a fresh clone and in CI. Tests must not depend on anything else a developer database happens to contain.
 - **Execution Command**:
   ```bash
   cd backend && npm test

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
+import { generateKeyPairSync } from "node:crypto";
 import {
   calculateNameMatchScore,
   getSecureIdPublicKey,
@@ -12,7 +13,17 @@ import {
   runComprehensiveSupplierKyb,
 } from "../src/services/cashfreeSecureIdService.js";
 
-test("generate2faSignature creates valid base64 RSA OAEP encrypted signature", () => {
+test("generate2faSignature creates valid base64 RSA OAEP encrypted signature", (t) => {
+  // The real Cashfree key file is git-ignored, so use a generated key: the test
+  // must pass on a fresh clone and in CI.
+  const previousKey = process.env.CASHFREE_SECUREID_PUBLIC_KEY;
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.CASHFREE_SECUREID_PUBLIC_KEY;
+    else process.env.CASHFREE_SECUREID_PUBLIC_KEY = previousKey;
+  });
+  const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  process.env.CASHFREE_SECUREID_PUBLIC_KEY = publicKey.export({ type: "spki", format: "pem" });
+
   const sampleKey = getSecureIdPublicKey();
   assert.ok(sampleKey, "Public key should be resolved");
   assert.match(sampleKey, /BEGIN PUBLIC KEY/);

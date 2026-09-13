@@ -6,8 +6,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "pretest": "node scripts/prepare-test-db.js",
     "test": "node --test 'test/**/*.test.js'",
     "test:integration": "node --test 'integration/**/*.test.js'",
+    "pretest:coverage": "node scripts/prepare-test-db.js",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=70 --test-coverage-functions=70 'test/**/*.test.js'",
     "seed:demo": "node src/scripts/seedGoaSupplierProducts.js",
     "migrate:status": "node scripts/migrate.js status",
