@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { confirmDriverByPhone, dispatchReadiness, effectiveDispatchSettings, listDispatchExceptions, processDispatchSchedule, TRIP_ISSUE_TASK_TYPES } from "../services/dispatchWorkflowService.js";
+import { dispatchTransaction } from "../services/dispatchStateService.js";
 import {
   getInventoryRules, saveInventoryRules,
   listPriceSchedules, savePriceSchedule, deletePriceSchedule,
@@ -49,7 +52,7 @@ import { bookingSchemas, supplierSchemas } from "../validators/apiSchemas.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { backfillProductOptions } from "../services/logisticsService.js";
 import { backfillProductLocationRules } from "../data/canonicalLocations.js";
-import { creditReferralRewardOnCompletion } from "../services/loyaltyService.js";
+import { onReferralBookingCancelled, onReferralTripCompleted } from "../services/referralService.js";
 
 const router = express.Router();
 router.use(authenticate);
@@ -103,7 +106,7 @@ router.get("/:id", (req, res) => {
     const bookings = db.prepare(`
       SELECT b.*, p.title as product_title, p.hero_image, p.city, p.is_instant_booking, p.cancellation_policy,
              da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number, da.assignment_status,
-             da.supplier_driver_id, da.assignment_source, da.assigned_at, da.last_status_at,
+             da.supplier_driver_id, da.acknowledgement, da.response_deadline, da.driver_email, da.assignment_source, da.assigned_at, da.last_status_at,
              da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at
       FROM bookings b
       LEFT JOIN products p ON b.product_id = p.id
@@ -1102,23 +1105,52 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
   }
 });
 
+const dispatchSettingsSchema = z.object({ automaticEnabled: z.boolean(), leadHours: z.number().int().min(24).max(168).default(48), responseMinutes: z.number().int().min(5).max(120).default(30), maxAttempts: z.number().int().min(1).max(10).default(3), bufferMinutes: z.number().int().min(0).max(240).default(30) }).strict();
+router.get("/:id/dispatch", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  const settings = effectiveDispatchSettings(db, req.params.id);
+  const readiness = dispatchReadiness(db, req.params.id);
+  const tasks = listDispatchExceptions(db, { supplierId: req.params.id });
+  const tripIssues = listDispatchExceptions(db, { supplierId: req.params.id, taskTypes: TRIP_ISSUE_TASK_TYPES });
+  const deliveries = db.prepare("SELECT o.booking_id, o.event_type, o.status, o.last_error, o.attempts FROM dispatch_outbox o JOIN bookings b ON b.id = o.booking_id WHERE b.supplier_id = ? ORDER BY o.available_at DESC LIMIT 100").all(req.params.id);
+  res.json({ success: true, settings, readiness, tasks, tripIssues, deliveries });
+});
+router.put("/:id/dispatch", optionalAuthMiddleware, requireSupplierAccess, validateBody(dispatchSettingsSchema), (req, res) => {
+  const v = req.body;
+  dispatchTransaction(db, () => {
+    db.prepare(`INSERT INTO dispatch_settings (supplier_id, automatic_enabled, lead_hours, response_minutes, max_attempts, buffer_minutes) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (supplier_id) DO UPDATE SET automatic_enabled = excluded.automatic_enabled, lead_hours = excluded.lead_hours, response_minutes = excluded.response_minutes, max_attempts = excluded.max_attempts, buffer_minutes = excluded.buffer_minutes`)
+      .run(req.params.id, v.automaticEnabled ? 1 : 0, v.leadHours, v.responseMinutes, v.maxAttempts, v.bufferMinutes);
+  });
+  res.json({ success: true });
+});
+router.patch("/:id/drivers/:driverId/contact", optionalAuthMiddleware, requireSupplierAccess, validateBody(z.object({ driverEmail: z.string().email(), seatCapacity: z.number().int().min(1).max(100), dispatchPriority: z.number().int().min(0).max(100).default(0) }).strict()), (req, res) => {
+  const result = dispatchTransaction(db, () => db.prepare("UPDATE supplier_drivers SET driver_email = ?, seat_capacity = ?, dispatch_priority = ? WHERE id = ? AND supplier_id = ?")
+    .run(req.body.driverEmail, req.body.seatCapacity, req.body.dispatchPriority, req.params.driverId, req.params.id));
+  res.status(result.changes ? 200 : 404).json({ success: Boolean(result.changes) });
+});
+
 // POST /api/suppliers/:id/assign-driver - Dispatch driver and vehicle to booking
 router.post("/:id/assign-driver", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.assignment), (req, res) => {
   try {
     const { id } = req.params;
-    const { bookingId, supplierDriverId, driverName, driverPhone, vehicleModel, vehicleNumber } = req.body;
+    const { bookingId, supplierDriverId, driverName, driverPhone, driverEmail, seatCapacity, vehicleModel, vehicleNumber, confirmedByPhone, note } = req.body;
     if (!bookingId) return res.status(400).json({ error: "Booking is required" });
+    const phoneConfirmed = confirmedByPhone === true || confirmedByPhone === "true" || confirmedByPhone === 1;
+    if (phoneConfirmed && String(note || "").trim().length < 3) return res.status(400).json({ error: "Add a note about the phone confirmation (who you spoke to and when)" });
     const assignment = assignDriverToBooking(db, {
       supplierId: id,
       bookingId,
       supplierDriverId,
-      manualDriver: { driverName, driverPhone, vehicleModel, vehicleNumber },
+      manualDriver: { driverName, driverPhone, driverEmail, seatCapacity, vehicleModel, vehicleNumber },
       actorId: req.user?.id,
     });
 
-    queueNotification(notifyDriverAssigned(db, bookingId), "Driver assignment notification");
-
-    res.json({ success: true, assignment, assignmentId: assignment.id, message: `Driver ${assignment.driver_name} assigned successfully.` });
+    // Assignment transaction writes the durable driver request; traveler details follow acknowledgement.
+    if (phoneConfirmed) {
+      const confirmed = confirmDriverByPhone(db, { bookingId, supplierId: id, actorId: req.user?.id, note });
+      return res.json({ success: true, assignment: confirmed, assignmentId: confirmed.id, message: `Driver ${confirmed.driver_name} assigned and confirmed by phone. The traveler has been notified.` });
+    }
+    res.json({ success: true, assignment, assignmentId: assignment.id, message: `Driver ${assignment.driver_name} assigned. Waiting for the driver to accept.` });
   } catch (err) {
     logger.error("Driver assignment failed", { requestId: req.requestId, error: err });
     res.status(err.status || 500).json({ error: err.message || "Failed to assign driver" });
@@ -1192,6 +1224,23 @@ router.post("/:id/bookings/:bookingId/notifications/resend", optionalAuthMiddlew
     return res.json({ success: true, ...result });
   } catch (error) {
     return res.status(error.status || 500).json({ error: error.message || "Guest notification could not be sent" });
+  }
+});
+
+// GET /api/suppliers/:id/bookings/:bookingId/dispatch-timeline - Assignment and trip history for one booking
+router.get("/:id/bookings/:bookingId/dispatch-timeline", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  const booking = db.prepare("SELECT id FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
+  if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
+  res.json({ success: true, timeline: getDispatchTimeline(db, booking.id) });
+});
+
+// POST /api/suppliers/:id/bookings/:bookingId/confirm-driver - Record a driver's acceptance taken by phone
+router.post("/:id/bookings/:bookingId/confirm-driver", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.confirmDriver), (req, res) => {
+  try {
+    const assignment = confirmDriverByPhone(db, { bookingId: req.params.bookingId, supplierId: req.params.id, actorId: req.user?.id, note: req.body.note });
+    res.json({ success: true, assignment, message: `${assignment.driver_name} confirmed by phone. The traveler has been notified.` });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : "Driver confirmation failed" });
   }
 });
 
@@ -1274,7 +1323,7 @@ router.get("/:id/drivers/availability", optionalAuthMiddleware, requireSupplierA
 router.post("/:id/drivers", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.driver), (req, res) => {
   try {
     const { id } = req.params;
-    const { driverName, driverPhone, vehicleModel, vehicleNumber, licenseNumber } = req.body;
+    const { driverName, driverPhone, driverEmail, seatCapacity, dispatchPriority, vehicleModel, vehicleNumber, licenseNumber } = req.body;
     if (!driverName?.trim() || !driverPhone || !vehicleNumber) {
       return res.status(400).json({ error: "Driver Name, Phone and Vehicle Number are required." });
     }
@@ -1290,6 +1339,7 @@ router.post("/:id/drivers", optionalAuthMiddleware, requireSupplierAccess, valid
        VALUES (?, ?, ?, ?, ?, ?, ?, 4.9, 'AVAILABLE')`
     ).run(driverId, id, driverName.trim(), phone, vehicleModel || "Commercial Cab", plate, licenseNumber?.trim() || null);
 
+    db.prepare("UPDATE supplier_drivers SET driver_email = ?, seat_capacity = ?, dispatch_priority = ? WHERE id = ?").run(driverEmail || null, seatCapacity || 0, dispatchPriority || 0, driverId);
     res.json({ success: true, driverId, message: `Driver ${driverName} added to fleet.` });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || "Failed to add driver to fleet" });
@@ -1321,7 +1371,7 @@ router.patch("/:id/bookings/:bookingId/dispatch-status", optionalAuthMiddleware,
       note: req.body?.note,
       actorId: req.user?.id,
     });
-    queueNotification(notifyDispatchStatusChanged(db, req.params.bookingId), "Dispatch status notification");
+    // Status notifications are delivered from the transaction-owned dispatch outbox.
     res.json({ success: true, assignment: result.assignment, timeline: getDispatchTimeline(db, req.params.bookingId), message: `Dispatch updated to ${result.assignment.assignment_status.replaceAll("_", " ").toLowerCase()}.` });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || "Failed to update dispatch" });
@@ -1461,6 +1511,7 @@ router.post("/:id/bookings/:bookingId/cancel", optionalAuthMiddleware, requireSu
         db.prepare("UPDATE driver_assignments SET assignment_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
       })();
     }
+    onReferralBookingCancelled(db, booking.id, { reason: "Cancelled by supplier" });
 
     try {
       if (refundRecord?.id) {
@@ -1490,6 +1541,13 @@ router.patch("/:id/bookings/:bookingId/status", optionalAuthMiddleware, requireS
     const booking = db.prepare("SELECT * FROM bookings WHERE id = ? AND supplier_id = ?").get(bookingId, id);
     if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
     if (nextStatus === "in_progress") return res.status(409).json({ error: "Verify the traveler's pickup OTP to start this trip" });
+    // A dispatched trip completes through the dispatch workflow, so the traveler, audit trail,
+    // payout and open trip tasks all see it.
+    const dispatched = db.prepare("SELECT id FROM driver_assignments WHERE booking_id = ? AND assignment_status <> 'CANCELLED'").get(bookingId);
+    if (nextStatus === "completed" && dispatched) {
+      const result = updateDispatchStatus(db, { supplierId: id, bookingId, nextStatus: "COMPLETED", actorId: req.user?.id, note: req.body.reason || "Marked complete by supplier" });
+      return res.json({ success: true, status: "completed", assignment: result.assignment, message: "Booking status updated to completed" });
+    }
     if (!canTransitionBooking(booking.status, nextStatus)) return res.status(409).json({ error: `Cannot move booking from ${booking.status} to ${nextStatus}` });
     db.transaction(() => {
       db.prepare("UPDATE bookings SET status = ? WHERE id = ? AND supplier_id = ?").run(nextStatus, bookingId, id);
@@ -1499,16 +1557,11 @@ router.patch("/:id/bookings/:bookingId/status", optionalAuthMiddleware, requireS
       }
       if (nextStatus === "cancelled") db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(bookingId);
     })();
-    if (nextStatus === "completed") {
-      try {
-        creditReferralRewardOnCompletion(db, bookingId);
-      } catch (rewardErr) {
-        logger.warn("Referral reward credit on supplier completion failed", { bookingId, error: rewardErr.message });
-      }
-    }
+    if (nextStatus === "completed") onReferralTripCompleted(db, bookingId);
+    if (nextStatus === "cancelled") onReferralBookingCancelled(db, bookingId, { reason: "Cancelled by supplier" });
     res.json({ success: true, status: nextStatus, message: `Booking status updated to ${nextStatus}` });
   } catch (err) {
-    res.status(500).json({ error: "Failed to update booking status" });
+    res.status(err.status && err.status < 500 ? err.status : 500).json({ error: err.status && err.status < 500 ? err.message : "Failed to update booking status" });
   }
 });
 
@@ -1540,8 +1593,10 @@ router.get("/:id/dashboard-stats", optionalAuthMiddleware, requireSupplierAccess
       WHERE supplier_id = ? AND activity_date >= ? AND status != 'cancelled'
     `).get(id, monthStart);
 
-    // Supplier rating & completion
+    // Supplier rating & completion. Both numbers come from verified reviews:
+    // a supplier with none sees no rating, not a flattering placeholder.
     const supplier = db.prepare("SELECT rating FROM suppliers WHERE id = ?").get(id);
+    const supplierQuality = db.prepare("SELECT review_count, average_rating FROM quality_scores WHERE entity_type = 'SUPPLIER' AND entity_id = ?").get(id);
     const bookingCounts = db.prepare(`
       SELECT 
         COUNT(*) as total_all,
@@ -1591,8 +1646,8 @@ router.get("/:id/dashboard-stats", optionalAuthMiddleware, requireSupplierAccess
         growth_pct: 14.8,
       },
       ratings: {
-        avg: supplier?.rating || 4.8,
-        total_reviews: 42,
+        avg: supplierQuality?.review_count ? supplierQuality.average_rating : (supplier?.rating ?? null),
+        total_reviews: Number(supplierQuality?.review_count || 0),
         completion_rate: completionRate,
         cancellation_rate: cancellationRate,
       },

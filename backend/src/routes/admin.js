@@ -35,6 +35,8 @@ import {
   reconcileSettlementBatch,
 } from "../services/financeService.js";
 import { validateBody } from "../middleware/validation.js";
+import { assignDriverToBooking } from "../services/driverDispatchService.js";
+import { dispatchTransaction, revokeAssignment } from "../services/dispatchStateService.js";
 import { adminSchemas, checkoutSchemas } from "../validators/apiSchemas.js";
 
 const router = express.Router();
@@ -90,6 +92,14 @@ router.get("/metrics", optionalAuthMiddleware, requireAdminAccess, (req, res) =>
 
     const totalPayoutsProcessed = db.prepare("SELECT SUM(net_payout) as sum FROM payouts WHERE payout_status = 'PROCESSED'").get().sum || 0;
 
+    // Creator commission waiting on a transfer, for the Creators & Payouts badge.
+    let pendingAffiliatePayouts = 0;
+    try {
+      pendingAffiliatePayouts = db.prepare(
+        "SELECT COUNT(*) AS count FROM affiliate_payouts WHERE status IN ('REQUESTED', 'PROCESSING')"
+      ).get()?.count || 0;
+    } catch { /* Table arrives with migration 027; the badge simply stays empty until then. */ }
+
     res.json({
       success: true,
       metrics: {
@@ -109,7 +119,8 @@ router.get("/metrics", optionalAuthMiddleware, requireAdminAccess, (req, res) =>
         grossRevenue,
         totalCommission,
         pendingPayouts,
-        totalPayoutsProcessed
+        totalPayoutsProcessed,
+        pendingAffiliatePayouts
       }
     });
   } catch (err) {
@@ -470,7 +481,7 @@ router.post("/products/:id/toggle-published", optionalAuthMiddleware, requireAdm
 router.get("/finance/overview", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
   try {
     const reconciliation = getReconciliationReport(db);
-    const pendingPayouts = db.prepare("SELECT COALESCE(SUM(net_payout), 0) AS amount FROM payouts WHERE payout_status IN ('SCHEDULED', 'BATCHED')").get().amount;
+    const pendingPayouts = db.prepare("SELECT COALESCE(SUM(net_payout), 0) AS amount FROM payouts WHERE payout_status IN ('SCHEDULED', 'BATCHED', 'ISSUE_HOLD')").get().amount;
 
     res.json({
       success: true,
@@ -726,15 +737,20 @@ router.get("/bookings/:id/assignment", optionalAuthMiddleware, requireAdminAcces
 router.post("/bookings/:id/override-status", optionalAuthMiddleware, requireAdminAccess, validateBody(adminSchemas.override), (req, res) => {
   try {
     const { id } = req.params;
-    const { action, newSupplierId, driverName, driverPhone, vehicleNumber, refundReason } = req.body;
+    const { action, newSupplierId, driverName, driverPhone, driverEmail, seatCapacity, vehicleModel, vehicleNumber } = req.body;
     // action: 'FORCE_CANCEL' | 'REFUND' | 'REASSIGN_SUPPLIER' | 'REASSIGN_DRIVER'
 
     const booking = db.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(id, id);
     if (!booking) return res.status(404).json({ error: "Booking not found" });
 
     if (action === "FORCE_CANCEL") {
-      db.prepare("UPDATE bookings SET status = 'CANCELLED' WHERE id = ?").run(booking.id);
-      db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
+      // Lowercase status is what dispatch and inventory read; the driver is told immediately.
+      dispatchTransaction(db, () => {
+        db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").run(booking.id);
+        db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
+        const assignment = db.prepare("SELECT * FROM driver_assignments WHERE booking_id = ?").get(booking.id);
+        if (assignment) revokeAssignment(db, booking, assignment, "Booking cancelled by Idea Holiday");
+      });
       res.json({ success: true, message: `Booking ${booking.ref} FORCE CANCELLED by Admin.` });
     } else if (action === "REFUND") {
       res.status(409).json({ error: "Use the verified finance refund action so the gateway reference and ledger are recorded" });
@@ -747,23 +763,19 @@ router.post("/bookings/:id/override-status", optionalAuthMiddleware, requireAdmi
       db.prepare("UPDATE payouts SET supplier_id = ? WHERE booking_id = ?").run(newSupplierId, booking.id);
       res.json({ success: true, message: `Booking ${booking.ref} manually re-assigned to supplier "${sup?.company_name || newSupplierId}".` });
     } else if (action === "REASSIGN_DRIVER") {
-      db.prepare("DELETE FROM driver_assignments WHERE booking_id = ?").run(booking.id);
-      db.prepare(
-        `INSERT INTO driver_assignments (id, booking_id, supplier_id, driver_name, driver_phone, vehicle_model, vehicle_number, assignment_status)
-         VALUES (?, ?, ?, ?, ?, 'Commercial Cab', ?, 'ASSIGNED')`
-      ).run(
-        `drv_re_${Date.now()}`,
-        booking.id,
-        booking.supplier_id || "sup_lucknow_cabs",
-        driverName || "Admin Reassigned Driver",
-        driverPhone || "+919876543210",
-        vehicleNumber || "UP-32-ADMIN-01"
-      );
-      res.json({ success: true, message: `Driver "${driverName}" manually assigned to booking ${booking.ref}.` });
+      // Same validation, audit trail and driver request as supplier dispatch.
+      const assignment = assignDriverToBooking(db, {
+        supplierId: booking.supplier_id,
+        bookingId: booking.id,
+        actorId: req.user?.id,
+        manualDriver: { driverName, driverPhone, driverEmail, seatCapacity, vehicleModel, vehicleNumber },
+      });
+      res.json({ success: true, assignment, message: `Driver "${assignment.driver_name}" assigned to booking ${booking.ref}. They must accept from the trip link.` });
     } else {
       res.status(400).json({ error: "Invalid action type" });
     }
   } catch (err) {
+    if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message });
     logger.error("Booking status override failed", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to execute booking status override" });
   }

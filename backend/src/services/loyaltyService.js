@@ -1,71 +1,73 @@
 import { nanoid } from "nanoid";
 import db from "../db.js";
-import { sendEmail } from "./emailService.js";
-import { sendWhatsAppMessage } from "./whatsappService.js";
-import logger from "../config/logger.js";
+import {
+  REFERRAL_POLICY,
+  buildReferralLink,
+  findReferrerByCode,
+  getReferralSummary,
+  redeemWalletCredit,
+} from "./referralService.js";
 
+/**
+ * Recognition tiers. Every referrer earns the same share of commission — tiers
+ * are a badge for how many friends have actually travelled, not a different
+ * rate, because a rate that grows with volume is a cost that grows with volume.
+ */
 export const LOYALTY_TIERS = {
   EXPLORER: {
     name: "Explorer",
     minReferrals: 0,
     maxReferrals: 2,
-    rewardPerFriendInr: 250,
-    friendWelcomeDiscountInr: 250,
-    checkoutBonusDiscountPct: 0,
     badgeColor: "bg-amber-100 text-amber-800 border-amber-300",
-    description: "Start earning by introducing friends to Idea Holiday.",
+    description: "Invite friends and earn on every trip they take.",
   },
   VOYAGER: {
     name: "Voyager",
     minReferrals: 3,
     maxReferrals: 9,
-    rewardPerFriendInr: 350,
-    friendWelcomeDiscountInr: 250,
-    checkoutBonusDiscountPct: 5,
     badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-300",
-    description: "Earn 40% more per referral + 5% checkout booster discount.",
+    description: "Three friends have travelled with Idea Holiday because of you.",
   },
   GLOBE_TROTTER: {
     name: "Globe Trotter",
     minReferrals: 10,
     maxReferrals: 999999,
-    rewardPerFriendInr: 500,
-    friendWelcomeDiscountInr: 350,
-    checkoutBonusDiscountPct: 10,
     badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-300",
-    description: "Double reward rate (₹500/friend) + VIP Priority Concierge + 10% booster.",
+    description: "Ten or more friends have travelled with Idea Holiday because of you.",
   },
 };
 
-/**
- * Determine loyalty tier by count of successful/rewarded referrals.
- */
-export function determineLoyaltyTier(rewardedCount = 0) {
-  const count = Number(rewardedCount) || 0;
+/** Tier by the number of referred friends with at least one paid trip. */
+export function determineLoyaltyTier(travelledFriends = 0) {
+  const count = Number(travelledFriends) || 0;
   if (count >= 10) return { tierKey: "GLOBE_TROTTER", ...LOYALTY_TIERS.GLOBE_TROTTER };
   if (count >= 3) return { tierKey: "VOYAGER", ...LOYALTY_TIERS.VOYAGER };
   return { tierKey: "EXPLORER", ...LOYALTY_TIERS.EXPLORER };
 }
 
 /**
- * Ensures user has a unique referral code.
+ * Ensures the user has a referral code. Codes are looked up by exact match, so a
+ * collision between two people with the same name prefix gets a random suffix.
  */
 export function ensureUserReferralCode(database, user) {
   if (user.referral_code) return user.referral_code;
 
   const cleanName = (user.name || "TRAVEL").replace(/[^A-Za-z0-9]/g, "").slice(0, 5).toUpperCase();
   const cleanId = String(user.id).replace(/[^A-Za-z0-9]/g, "").slice(-4).toUpperCase();
-  const referralCode = `REF-${cleanName || "IH"}${cleanId || nanoid(4).toUpperCase()}`;
+  let referralCode = `REF-${cleanName || "IH"}${cleanId || nanoid(4).toUpperCase()}`;
+  for (let attempt = 0; attempt < 5 && findReferrerByCode(database, referralCode); attempt += 1) {
+    referralCode = `REF-${cleanName || "IH"}${nanoid(4).toUpperCase().replace(/[^A-Z0-9]/g, "X")}`;
+  }
 
   try {
-    database.prepare("UPDATE users SET referral_code = ? WHERE id = ?").run(referralCode, user.id);
+    database.prepare("UPDATE users SET referral_code = ? WHERE id = ? AND referral_code IS NULL").run(referralCode, user.id);
   } catch {}
 
-  return referralCode;
+  return database.prepare("SELECT referral_code FROM users WHERE id = ?").get(user.id)?.referral_code || referralCode;
 }
 
 /**
- * Retrieve comprehensive loyalty profile for a traveler.
+ * Everything the Travel & Earn page shows a signed-in traveler.
  */
 export function getTravelerLoyaltyProfile(database = db, userId) {
   if (!userId) throw new Error("User ID is required");
@@ -74,40 +76,21 @@ export function getTravelerLoyaltyProfile(database = db, userId) {
   if (!user) throw new Error("User not found");
 
   const referralCode = ensureUserReferralCode(database, user);
+  const summary = getReferralSummary(database, userId);
 
-  const referrals = database.prepare(`
-    SELECT ur.*, b.ref as booking_ref, b.activity_date, b.amount_inr, u.name as referred_name
-    FROM user_referrals ur
-    LEFT JOIN bookings b ON ur.booking_id = b.id
-    LEFT JOIN users u ON ur.referred_user_id = u.id
-    WHERE ur.referrer_user_id = ?
-    ORDER BY ur.created_at DESC
-  `).all(userId) || [];
-
-  const rewardedReferrals = referrals.filter((r) => r.status === "REWARDED");
-  const pendingReferrals = referrals.filter((r) => r.status === "PENDING");
-
-  const totalCreditsEarned = rewardedReferrals.reduce((sum, r) => sum + Number(r.reward_inr || 0), 0);
-  const pendingCredits = pendingReferrals.reduce((sum, r) => sum + Number(r.reward_inr || 0), 0);
-
-  // Compute current wallet balance from ledger if available or user column
-  const currentWalletBalance = Number(user.wallet_balance_inr || 0);
-
-  const tier = determineLoyaltyTier(rewardedReferrals.length);
-
-  // Calculate progress to next tier
+  const travelledFriends = summary.friends.filter((friend) => friend.paidTrips > 0).length;
+  const tier = determineLoyaltyTier(travelledFriends);
   let nextTier = null;
   let referralsToNextTier = 0;
   let progressPct = 100;
-
   if (tier.tierKey === "EXPLORER") {
     nextTier = LOYALTY_TIERS.VOYAGER;
-    referralsToNextTier = 3 - rewardedReferrals.length;
-    progressPct = Math.round((rewardedReferrals.length / 3) * 100);
+    referralsToNextTier = 3 - travelledFriends;
+    progressPct = Math.round((travelledFriends / 3) * 100);
   } else if (tier.tierKey === "VOYAGER") {
     nextTier = LOYALTY_TIERS.GLOBE_TROTTER;
-    referralsToNextTier = 10 - rewardedReferrals.length;
-    progressPct = Math.round(((rewardedReferrals.length - 3) / 7) * 100);
+    referralsToNextTier = 10 - travelledFriends;
+    progressPct = Math.round(((travelledFriends - 3) / 7) * 100);
   }
 
   const transactions = database.prepare(`
@@ -117,48 +100,48 @@ export function getTravelerLoyaltyProfile(database = db, userId) {
     LIMIT 20
   `).all(userId) || [];
 
-  const baseUrl = process.env.APP_BASE_URL || process.env.PUBLIC_APP_URL || "https://ideaholiday.com";
-  const referralLink = `${baseUrl}/signup?ref=${referralCode}`;
-
   return {
     userId: user.id,
     userName: user.name,
     userEmail: user.email,
     referralCode,
-    referralLink,
-    walletBalanceInr: currentWalletBalance,
-    totalCreditsEarned,
-    pendingCredits,
-    friendsInvitedCount: referrals.length,
-    successfulReferralsCount: rewardedReferrals.length,
+    referralLink: buildReferralLink(referralCode),
+    walletBalanceInr: summary.wallet.balanceInr,
+    expiringSoonInr: summary.wallet.expiringSoonInr,
+    nextExpiryAt: summary.wallet.nextExpiryAt,
+    clawbackPendingInr: summary.wallet.clawbackPendingInr,
+    totalCreditsEarned: summary.totals.creditedInr,
+    clearingCredits: summary.totals.clearingInr,
+    upcomingCredits: summary.totals.upcomingInr,
+    inReviewCredits: summary.totals.inReviewInr,
+    // Kept for older clients: everything earned but not yet in the wallet.
+    pendingCredits: summary.totals.clearingInr + summary.totals.upcomingInr + summary.totals.inReviewInr,
+    friendsInvitedCount: summary.friends.length,
+    successfulReferralsCount: travelledFriends,
     tier,
     nextTier,
     referralsToNextTier,
     progressPct,
-    referrals: referrals.map((r) => ({
-      id: r.id,
-      referredName: r.referred_name || "Invited Traveler",
-      bookingRef: r.booking_ref || "Signup",
-      rewardInr: r.reward_inr,
-      status: r.status,
-      createdAt: r.created_at,
-      rewardedAt: r.rewarded_at,
-    })),
+    policy: summary.policy,
+    referredBy: summary.referredBy,
+    friends: summary.friends,
+    rewards: summary.rewards,
     transactions: transactions.map((t) => ({
       id: t.id,
-      type: t.type,
+      type: t.entry_type || t.type,
       amountInr: t.amount_inr,
       balanceAfterInr: t.balance_after_inr,
       referenceId: t.reference_id,
       description: t.description,
+      expiresAt: t.expires_at || null,
       createdAt: t.created_at,
     })),
   };
 }
 
 /**
- * Calculates wallet discount applicability for a booking cart.
- * Maximum allowable discount is 50% of the booking total (or max ₹2,000).
+ * How much wallet credit a booking may use: up to 50% of what is left after
+ * other discounts, at most ₹2,000, and never more than the balance.
  */
 export function applyWalletCreditsToCheckout(database = db, userId, { bookingAmountInr, requestedCreditInr }) {
   if (!userId) throw new Error("User ID is required");
@@ -180,14 +163,13 @@ export function applyWalletCreditsToCheckout(database = db, userId, { bookingAmo
     };
   }
 
-  // Max 50% of order total, capped at ₹2,000 per order
-  const maxAllowedDiscount = Math.min(amount * 0.5, 2000, availableBalance);
+  const maxAllowedDiscount = Math.floor(Math.min(amount * 0.5, 2000, availableBalance));
 
   let creditToApply = requestedCreditInr !== undefined
     ? Math.min(Number(requestedCreditInr) || 0, maxAllowedDiscount)
     : maxAllowedDiscount;
 
-  creditToApply = Math.max(0, Math.round(creditToApply));
+  creditToApply = Math.max(0, Math.floor(creditToApply));
 
   const payableAmountInr = Math.max(0, amount - creditToApply);
 
@@ -203,163 +185,34 @@ export function applyWalletCreditsToCheckout(database = db, userId, { bookingAmo
 }
 
 /**
- * Deducts wallet credits upon booking creation/confirmation.
+ * Spends wallet credit on a booking through the ledger. Throws when the balance
+ * is short, so the caller's booking transaction rolls back instead of keeping a
+ * discount nobody paid for.
  */
 export function deductWalletCreditsOnBooking(database = db, userId, bookingId, creditAmount) {
   const amountToDeduct = Number(creditAmount) || 0;
   if (amountToDeduct <= 0) return null;
 
-  const user = database.prepare("SELECT id, wallet_balance_inr FROM users WHERE id = ?").get(userId);
-  if (!user) throw new Error("User not found for wallet deduction");
-
-  const currentBalance = Number(user.wallet_balance_inr || 0);
-  if (currentBalance < amountToDeduct) {
-    throw new Error("Insufficient wallet balance");
-  }
-
-  const newBalance = currentBalance - amountToDeduct;
-
+  let posted = null;
   database.transaction(() => {
-    database.prepare("UPDATE users SET wallet_balance_inr = ? WHERE id = ?").run(newBalance, userId);
-
-    database.prepare(`
-      INSERT INTO wallet_transactions (
-        id, user_id, type, amount_inr, balance_after_inr, reference_id, description, created_at
-      ) VALUES (?, ?, 'BOOKING_REDEMPTION', ?, ?, ?, ?, datetime('now'))
-    `).run(
-      `wtx_${nanoid(12)}`,
-      userId,
-      -amountToDeduct,
-      newBalance,
-      bookingId,
-      `Redeemed ₹${amountToDeduct} credits on booking #${bookingId}`,
-    );
+    posted = redeemWalletCredit(database, { userId, bookingId, amountInr: amountToDeduct });
   })();
 
   return {
     deducted: true,
     amountDeducted: amountToDeduct,
-    newBalance,
+    newBalance: posted.balanceAfterInr,
   };
 }
 
 /**
- * Records a pending referral when a new user signs up using a valid referral code.
- */
-export function recordReferralSignup(database = db, { newUserId, referralCode }) {
-  if (!newUserId || !referralCode) return null;
-  const cleanCode = String(referralCode).trim().toUpperCase();
-  const referrer = database.prepare("SELECT id, name, referral_code FROM users WHERE referral_code = ?").get(cleanCode);
-  if (!referrer || referrer.id === newUserId) return null;
-
-  const existing = database.prepare("SELECT id FROM user_referrals WHERE referred_user_id = ?").get(newUserId);
-  if (existing) return existing;
-
-  const referralId = `ref_${nanoid(12)}`;
-  database.prepare(`
-    INSERT INTO user_referrals (
-      id, referrer_user_id, referred_user_id, referral_code, reward_inr, status, created_at
-    ) VALUES (?, ?, ?, ?, 250.0, 'PENDING', datetime('now'))
-  `).run(referralId, referrer.id, newUserId, cleanCode);
-
-  return { referralId, referrerId: referrer.id };
-}
-
-/**
- * Credits referral reward when the referred traveler completes their trip.
- */
-export async function creditReferralRewardOnCompletion(database = db, bookingId, { sendNotifications = true } = {}) {
-  const referral = database.prepare("SELECT * FROM user_referrals WHERE booking_id = ? AND status = 'PENDING'").get(bookingId);
-  if (!referral) return null;
-
-  const referrer = database.prepare("SELECT id, name, email, phone, wallet_balance_inr FROM users WHERE id = ?").get(referral.referrer_user_id);
-  if (!referrer) return null;
-
-  // Compute referrer's tier rate at the time of completion
-  const previousRewardedCount = database.prepare("SELECT COUNT(*) as count FROM user_referrals WHERE referrer_user_id = ? AND status = 'REWARDED'").get(referrer.id)?.count || 0;
-  const tier = determineLoyaltyTier(previousRewardedCount);
-  const rewardAmount = tier.rewardPerFriendInr || 250;
-
-  const currentBalance = Number(referrer.wallet_balance_inr || 0);
-  const newBalance = currentBalance + rewardAmount;
-
-  database.transaction(() => {
-    // 1. Update referral status
-    database.prepare(`
-      UPDATE user_referrals
-      SET status = 'REWARDED',
-          reward_inr = ?,
-          rewarded_at = datetime('now')
-      WHERE id = ?
-    `).run(rewardAmount, referral.id);
-
-    // 2. Increment referrer wallet
-    database.prepare("UPDATE users SET wallet_balance_inr = ? WHERE id = ?").run(newBalance, referrer.id);
-
-    // 3. Log transaction
-    database.prepare(`
-      INSERT INTO wallet_transactions (
-        id, user_id, type, amount_inr, balance_after_inr, reference_id, description, created_at
-      ) VALUES (?, ?, 'REFERRAL_REWARD', ?, ?, ?, ?, datetime('now'))
-    `).run(
-      `wtx_${nanoid(12)}`,
-      referrer.id,
-      rewardAmount,
-      newBalance,
-      referral.id,
-      `Earned ₹${rewardAmount} for successful friend referral (#${bookingId})`,
-    );
-  })();
-
-  // 4. Send notifications
-  if (sendNotifications) {
-    const subject = `Congratulations! You earned ₹${rewardAmount} in Idea Holiday travel credits! 🎉`;
-    const message = `Hello ${referrer.name || "Traveler"},\n\nYour friend just completed their experience with Idea Holiday! We have credited ₹${rewardAmount} directly to your Idea Holiday wallet.\n\nYour current wallet balance is: ₹${newBalance}.\n\nYou can use these credits immediately toward your next tour, sightseeing booking, or airport cab at https://ideaholiday.com.\n\nKeep sharing and keep earning!`;
-
-    try {
-      if (referrer.email) {
-        await sendEmail({
-          to: referrer.email,
-          recipientName: referrer.name || "Traveler",
-          recipientRole: "TRAVELER",
-          eventType: "REFERRAL_REWARD_CREDITED",
-          eventKey: `referral:reward:${referral.id}`,
-          subject,
-          text: message,
-        }, { database });
-      }
-
-      if (referrer.phone) {
-        await sendWhatsAppMessage({
-          to: referrer.phone,
-          recipientName: referrer.name || "Traveler",
-          recipientRole: "TRAVELER",
-          eventType: "REFERRAL_REWARD_CREDITED",
-          eventKey: `referral:reward:wa:${referral.id}`,
-          text: `🎉 *₹${rewardAmount} Travel Credits Earned!*\n\nHi ${referrer.name || "Traveler"}, your friend completed their trip! Your Idea Holiday wallet balance is now ₹${newBalance}.\n\nBook your next adventure: https://ideaholiday.com`,
-        }, { database });
-      }
-    } catch (notifErr) {
-      logger.warn("Referral reward notification failed", { error: notifErr.message, referrerId: referrer.id });
-    }
-  }
-
-  return {
-    referralId: referral.id,
-    rewardAmount,
-    newBalance,
-  };
-}
-
-/**
- * Public referral code info lookup.
+ * What a shared referral link says about itself. Only the referrer's first name
+ * is shown: the link is public, and nothing else about them should be.
  */
 export function getPublicReferralInfo(database = db, referralCode) {
   if (!referralCode) throw new Error("Referral code is required");
 
-  const cleanCode = String(referralCode).trim().toUpperCase();
-  const referrer = database.prepare("SELECT id, name, referral_code FROM users WHERE referral_code = ?").get(cleanCode);
-
+  const referrer = findReferrerByCode(database, referralCode);
   if (!referrer) {
     return {
       valid: false,
@@ -367,41 +220,41 @@ export function getPublicReferralInfo(database = db, referralCode) {
     };
   }
 
-  const rewardedCount = database.prepare("SELECT COUNT(*) as count FROM user_referrals WHERE referrer_user_id = ? AND status = 'REWARDED'").get(referrer.id)?.count || 0;
-  const tier = determineLoyaltyTier(rewardedCount);
-
+  const name = referrer.name ? referrer.name.split(" ")[0] : "A friend";
+  const discountPct = Math.round(REFERRAL_POLICY.friendDiscountRate * 100);
   return {
     valid: true,
-    referralCode: cleanCode,
-    referrerName: referrer.name ? referrer.name.split(" ")[0] : "A friend",
-    welcomeDiscountInr: tier.friendWelcomeDiscountInr || 250,
-    message: `${referrer.name ? referrer.name.split(" ")[0] : "Your friend"} has gifted you ₹${tier.friendWelcomeDiscountInr || 250} off your first Idea Holiday adventure!`,
+    referralCode: referrer.referral_code,
+    referrerName: name,
+    friendDiscountPct: discountPct,
+    message: `${name} invited you to Idea Holiday. Your first trip comes with a friend discount, shown at checkout before you pay.`,
   };
 }
 
 /**
- * Leaderboard of top referrers for Admin/Ops.
+ * Top referrers by friends who have travelled, for admin and operations.
  */
 export function getLoyaltyLeaderboard(database = db) {
   const topReferrers = database.prepare(`
     SELECT u.id, u.name, u.email, u.referral_code, u.wallet_balance_inr,
-           COUNT(ur.id) as total_invites,
-           SUM(CASE WHEN ur.status = 'REWARDED' THEN 1 ELSE 0 END) as successful_referrals,
-           SUM(CASE WHEN ur.status = 'REWARDED' THEN ur.reward_inr ELSE 0 END) as total_earned_inr
+      COUNT(DISTINCT rel.id) AS total_invites,
+      COUNT(DISTINCT CASE WHEN rr.status IN ('ACCRUED', 'HELD_FOR_REVIEW', 'CLEARED') AND b.payment_status = 'PAID' THEN rel.id END) AS successful_referrals,
+      COALESCE(SUM(CASE WHEN rr.status = 'CLEARED' THEN rr.referrer_amount_inr ELSE 0 END), 0) AS total_earned_inr
     FROM users u
-    INNER JOIN user_referrals ur ON u.id = ur.referrer_user_id
-    GROUP BY u.id
+    INNER JOIN referral_relationships rel ON rel.referrer_user_id = u.id AND rel.status != 'BLOCKED'
+    LEFT JOIN referral_rewards rr ON rr.relationship_id = rel.id
+    LEFT JOIN bookings b ON b.id = rr.booking_id
+    GROUP BY u.id, u.name, u.email, u.referral_code, u.wallet_balance_inr
     ORDER BY successful_referrals DESC, total_earned_inr DESC
     LIMIT 20
   `).all() || [];
 
   const summary = database.prepare(`
     SELECT
-      COUNT(DISTINCT referrer_user_id) as total_referrers,
-      COUNT(id) as total_referral_cases,
-      SUM(CASE WHEN status = 'REWARDED' THEN 1 ELSE 0 END) as total_rewarded_trips,
-      SUM(CASE WHEN status = 'REWARDED' THEN reward_inr ELSE 0 END) as total_payout_inr
-    FROM user_referrals
+      (SELECT COUNT(DISTINCT referrer_user_id) FROM referral_relationships WHERE status != 'BLOCKED') AS total_referrers,
+      (SELECT COUNT(*) FROM referral_relationships WHERE status != 'BLOCKED') AS total_referral_cases,
+      (SELECT COUNT(*) FROM referral_rewards WHERE status = 'CLEARED') AS total_rewarded_trips,
+      (SELECT COALESCE(SUM(referrer_amount_inr), 0) FROM referral_rewards WHERE status = 'CLEARED') AS total_payout_inr
   `).get() || {};
 
   return {

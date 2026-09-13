@@ -37,6 +37,9 @@ export default function FinanceOverviewView() {
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
   const [vehicleNumber, setVehicleNumber] = useState("");
+  const [driverEmail, setDriverEmail] = useState("");
+  const [seatCapacity, setSeatCapacity] = useState("");
+  const [vehicleModel, setVehicleModel] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
   const [message, setMessage] = useState(null);
@@ -98,6 +101,9 @@ export default function FinanceOverviewView() {
           newSupplierId: selectedSupplierId,
           driverName,
           driverPhone,
+          driverEmail: driverEmail || undefined,
+          seatCapacity: seatCapacity ? Number(seatCapacity) : undefined,
+          vehicleModel: vehicleModel || undefined,
           vehicleNumber,
           refundReason
         })
@@ -558,6 +564,40 @@ export default function FinanceOverviewView() {
                       className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
                     />
                   </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-stone-700 block">Driver Email (for trip link)</label>
+                    <input
+                      type="email"
+                      placeholder="driver@example.com"
+                      value={driverEmail}
+                      onChange={(e) => setDriverEmail(e.target.value)}
+                      className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-stone-700 block">Seat Capacity</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      placeholder="e.g. 4"
+                      value={seatCapacity}
+                      onChange={(e) => setSeatCapacity(e.target.value)}
+                      className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-stone-700 block">Vehicle Model</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Swift Dzire Sedan"
+                    value={vehicleModel}
+                    onChange={(e) => setVehicleModel(e.target.value)}
+                    className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                  />
                 </div>
                 <div>
                   <label className="text-stone-700 block">Vehicle Number</label>

@@ -64,7 +64,7 @@ export function plainTextToHtml(text) {
     </div>
     <div class="footer">
       <p>© ${new Date().getFullYear()} Idea Holiday Private Limited. All rights reserved.</p>
-      <p>For 24/7 travel concierge assistance, reach out at info@ideaholiday.in or +91 9219999214</p>
+      <p>For 24/7 travel concierge assistance, reach out at info@ideaholiday.in / support@ideaholiday.in or call +91 9696777391, +91 9336757106</p>
     </div>
   </div>
 </body>

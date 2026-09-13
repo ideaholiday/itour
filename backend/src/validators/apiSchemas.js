@@ -24,7 +24,7 @@ const object = (shape) => z.object(shape).passthrough();
 export const identifierParams = object({ id: id.optional(), ref: id.optional(), zoneId: id.optional(), productId: id.optional(), bookingId: id.optional(), driverId: id.optional(), fenceId: id.optional(), dateId: id.optional() });
 
 export const authSchemas = {
-  signup: object({ name: text(2, 120), email, password: z.string().min(6).max(128), phone: phone.optional(), referralCode: optionalText(60) }),
+  signup: object({ name: text(2, 120), email, password: z.string().min(6).max(128), phone: phone.optional(), referralCode: optionalText(60), visitorId: optionalText(120) }),
   supplierSignup: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100), password: z.string().min(6).max(128) }),
   login: object({ email, password: z.string().min(1).max(128) }),
 };
@@ -44,6 +44,7 @@ const bookingQuoteFields = {
   drop_lat: optionalCoordinate(-90, 90), drop_lng: optionalCoordinate(-180, 180),
   vehicle_category: optionalText(80), variant_name: optionalText(160),
   flight_number: optionalText(40), flight_arrival_time: time.optional().nullable(), flight_departure_time: time.optional().nullable(), terminal_gate: optionalText(80),
+  referral_code: optionalText(60), visitor_id: optionalText(120),
   package_hotels: z.array(object({ day: z.coerce.number().int().min(1).max(60), name: optionalText(240), city: optionalText(100), lat: optionalCoordinate(-90, 90), lng: optionalCoordinate(-180, 180) })).max(60).optional(),
 };
 
@@ -60,6 +61,17 @@ export const bookingCreateSchema = object({
   special_requests: optionalText(2_000), promo_code: optionalText(80), client_request_id: optionalText(160),
   payment_method: optionalText(40),
 }).superRefine(requireBookingProduct);
+
+export const referralSchemas = {
+  trackClick: object({
+    referralCode: text(4, 60),
+    visitorId: text(8, 120),
+    channel: z.enum(["WHATSAPP", "QR", "REVIEW", "VOUCHER", "COPY", "CODE", "OTHER", "whatsapp", "qr", "review", "voucher", "copy", "code", "other"]).optional().nullable(),
+    landingPath: optionalText(300),
+  }),
+  review: object({ decision: z.enum(["APPROVE", "REJECT"]), note: optionalText(1_000) }),
+  relationship: object({ status: z.enum(["ACTIVE", "BLOCKED"]), reason: optionalText(500) }),
+};
 
 export const bookingSchemas = {
   notificationPreferences: object({ emailEnabled: booleanValue.optional(), whatsappEnabled: booleanValue.optional(), email_enabled: booleanValue.optional(), whatsapp_enabled: booleanValue.optional() }),
@@ -215,8 +227,9 @@ export const supplierSchemas = {
     }).optional(),
   }),
   publication: object({ isPublished: booleanValue.optional(), status: optionalText(40) }),
-  assignment: object({ bookingId: id.optional(), driverId: id.optional(), action: optionalText(80), reason: optionalText(1_000), note: optionalText(1_000) }),
-  driver: object({ driverName: text(2, 120), driverPhone: phone, vehicleNumber: text(3, 40), vehicleModel: optionalText(120), vehicleCategory: optionalText(80), licenseNumber: optionalText(80) }),
+  confirmDriver: object({ note: text(3, 500) }),
+  assignment: object({ confirmedByPhone: booleanValue.optional(), supplierDriverId: id.optional(), driverName: optionalText(120), driverPhone: phone.optional(), driverEmail: email.optional(), seatCapacity: z.coerce.number().int().min(1).max(100).optional(), vehicleModel: optionalText(120), vehicleNumber: optionalText(40), bookingId: id.optional(), driverId: id.optional(), action: optionalText(80), reason: optionalText(1_000), note: optionalText(1_000) }),
+  driver: object({ driverEmail: email.optional(), seatCapacity: z.coerce.number().int().min(1).max(100).optional(), dispatchPriority: z.coerce.number().int().min(0).max(100).optional(), driverName: text(2, 120), driverPhone: phone, vehicleNumber: text(3, 40), vehicleModel: optionalText(120), vehicleCategory: optionalText(80), licenseNumber: optionalText(80) }),
   dispatch: object({ bookingId: id, pickup: object({ address: text(2, 500), instructions: optionalText(1_000), lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180) }), drop: object({ address: text(2, 500), instructions: optionalText(1_000), lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180) }), flight: z.object({ number: optionalText(40), scheduledArrival: optionalText(80), terminalGate: optionalText(80) }).passthrough().optional().nullable() }),
   status: object({ status: text(2, 80), reason: optionalText(1_000) }),
   blockDates: object({ dates: z.array(date).min(1).max(366).optional(), startDate: date.optional(), endDate: date.optional(), reason: optionalText(500), capacity: count.optional() }),
@@ -283,7 +296,7 @@ export const adminSchemas = {
   publication: object({ isPublished: booleanValue.optional(), status: optionalText(40), notifySupplier: booleanValue.optional() }),
   settlement: object({ supplierId: id.optional(), payoutIds: z.array(id).max(1_000).optional(), bookingIds: z.array(id).max(1_000).optional(), provider: optionalText(100), providerReference: optionalText(240), notes: optionalText(2_000), note: optionalText(2_000) }),
   financeAction: object({ action: optionalText(80), status: optionalText(80), reason: optionalText(1_000), providerReference: optionalText(240) }),
-  override: object({ action: text(2, 80), newSupplierId: id.optional(), driverName: optionalText(120), driverPhone: phone.optional(), vehicleNumber: optionalText(40), refundReason: optionalText(1_000) }),
+  override: object({ action: text(2, 80), newSupplierId: id.optional(), driverName: optionalText(120), driverPhone: phone.optional(), driverEmail: z.string().trim().email().max(254).optional(), seatCapacity: z.coerce.number().int().min(1).max(100).optional(), vehicleModel: optionalText(120), vehicleNumber: optionalText(40), refundReason: optionalText(1_000) }),
   payout: object({ payoutId: id, providerReference: text(2, 240), provider: text(2, 100) }),
 };
 
@@ -322,11 +335,29 @@ export const reviewSchemas = {
   }),
   response: object({ response: text(2, 2_000) }),
   moderate: object({ action: text(2, 40), reason: optionalText(1_000) }),
+  // Share-link claim: the booking reference from the confirmation, plus the
+  // last four digits of the phone number on that booking.
+  claim: object({ bookingRef: text(3, 40), phoneLast4: text(4, 4) }),
+  // Open review through a share link: a signed-in traveler, no booking. The
+  // product is required only when the link covers all of a supplier's listings.
+  shareReview: object({
+    productId: id.optional(),
+    experienceRating: rating,
+    supplierRating: rating,
+    title: optionalText(160),
+    comment: text(10, 2_000),
+    tags: z.array(text(1, 80)).max(20).optional(),
+    wouldRecommend: booleanValue.optional(),
+  }),
+  shareLink: object({ productId: id.optional(), label: optionalText(120) }),
+  shareLinkUpdate: object({ isActive: booleanValue.optional() }),
 };
 
 export const opsSchemas = {
   scheduler: object({ limit: z.coerce.number().int().min(1).max(500).optional() }),
-  fallback: object({ bookingId: id, fallbackDriverName: optionalText(120), fallbackDriverPhone: phone.optional(), fallbackVehicleModel: optionalText(120), fallbackVehicleNumber: optionalText(40), notes: optionalText(2_000) }),
+  confirmDriver: object({ note: text(3, 500) }),
+  tripOverride: object({ action: z.enum(["START", "COMPLETE"]), note: text(3, 500) }),
+  fallback: object({ supplierDriverId: id.optional(), confirmedByPhone: booleanValue.optional(), fallbackDriverEmail: email.optional(), seatCapacity: z.coerce.number().int().min(1).max(100).optional(), bookingId: id, fallbackDriverName: optionalText(120), fallbackDriverPhone: phone.optional(), fallbackVehicleModel: optionalText(120), fallbackVehicleNumber: optionalText(40), notes: optionalText(2_000) }),
   reallocate: object({ bookingId: id, radiusKm: z.coerce.number().positive().max(500).optional() }),
   whatsapp: object({
     bookingId: id.optional(),

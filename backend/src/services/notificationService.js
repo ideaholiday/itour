@@ -3,6 +3,7 @@ import { sendEmail, sendSupplierNotification } from "./emailService.js";
 import { normalizeWhatsAppPhone, sendWhatsAppMessage, whatsAppTemplate } from "./whatsappService.js";
 import { guestDocumentLinks } from "./guestDocumentService.js";
 import logger from "../config/logger.js";
+import { issueBookingInvite } from "./reviewInviteService.js";
 
 const clean = (value) => String(value || "").trim();
 
@@ -26,7 +27,7 @@ export function guestNotificationPreferences(database, userId) {
   }
 }
 
-async function sendRecipientChannels({ database, eventType, eventKeyPrefix, recipient, subject, emailText, whatsappText, whatsappTemplate, metadata }) {
+export async function sendRecipientChannels({ database, eventType, eventKeyPrefix, recipient, subject, emailText, emailHtml, whatsappText, whatsappTemplate, metadata }) {
   const tasks = [];
   const preferences = recipient.role === "TRAVELER" ? guestNotificationPreferences(database, recipient.id) : { emailEnabled: true, whatsappEnabled: true };
   if (recipient.email && preferences.emailEnabled) {
@@ -39,8 +40,9 @@ async function sendRecipientChannels({ database, eventType, eventKeyPrefix, reci
       eventKey: `${eventKeyPrefix}:EMAIL:${clean(recipient.email).toLowerCase()}`,
       subject,
       text: emailText,
+      html: emailHtml,
       metadata,
-    }, { database }));
+    }, { database }).then((result) => ({ channel: "EMAIL", recipientRole: recipient.role, ...result })));
   }
   if (recipient.phone && preferences.whatsappEnabled) {
     tasks.push(sendWhatsAppMessage({
@@ -53,7 +55,7 @@ async function sendRecipientChannels({ database, eventType, eventKeyPrefix, reci
       text: whatsappText || emailText,
       template: whatsappTemplate,
       metadata,
-    }, { database }));
+    }, { database }).then((result) => ({ channel: "WHATSAPP", recipientRole: recipient.role, ...result })));
   }
   return Promise.all(tasks);
 }
@@ -176,7 +178,7 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     },
     PRE_TRIP_REMINDER: {
       subject: `Trip Reminder: Your ${experienceName} is tomorrow (${booking.ref})`,
-      message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour upcoming experience is tomorrow!\n\nBooking: ${booking.ref}\nExperience: ${experienceName}\nTravel Date: ${booking.activity_date}\nPickup Time: ${booking.pickup_time || "09:00 AM"}\nPickup Location: ${booking.pickup_location}\n\n${driverInfo}\n\nNeed assistance? 24/7 Helpline: +91 9336757106 / support@ideaholiday.in\n\nHave a memorable journey!\nIdea Holiday Team`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour upcoming experience is tomorrow!\n\nBooking: ${booking.ref}\nExperience: ${experienceName}\nTravel Date: ${booking.activity_date}\nPickup Time: ${booking.pickup_time || "09:00 AM"}\nPickup Location: ${booking.pickup_location}\n\n${driverInfo}\n\nNeed assistance? 24/7 Helpline: +91 9696777391 / +91 9336757106 / support@ideaholiday.in\n\nHave a memorable journey!\nIdea Holiday Team`,
       template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_REMINDER, [booking.ref, experienceName, booking.activity_date, booking.pickup_location]),
     },
     POST_TRIP_REVIEW_INVITE: {
@@ -537,59 +539,14 @@ export async function notifyProductPublished(database, productId) {
 }
 
 export async function notifyUpcomingTripReminder(database, bookingId) {
-  const booking = database.prepare(`
-    SELECT b.*, p.title AS product_title, s.company_name AS supplier_name,
-      s.contact_name AS supplier_contact_name, s.phone AS supplier_phone,
-      da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number
-    FROM bookings b
-    LEFT JOIN products p ON p.id = b.product_id
-    LEFT JOIN suppliers s ON s.id = b.supplier_id
-    LEFT JOIN driver_assignments da ON da.booking_id = b.id AND da.assignment_status != 'CANCELLED'
-    WHERE b.id = ? OR b.ref = ?
-  `).get(bookingId, bookingId);
-  if (!booking) throw new Error("Booking not found for trip reminder");
-
-  const traveler = {
-    id: booking.user_id,
-    role: "TRAVELER",
-    name: booking.traveler_name,
-    email: booking.traveler_email,
-    phone: booking.traveler_phone,
-  };
-
-  const experienceName = booking.product_title || booking.product_type;
-  const driverInfo = booking.driver_name
-    ? `Driver: ${booking.driver_name} (${booking.driver_phone || "Contact via App"})\nVehicle: ${booking.vehicle_model || "Assigned Vehicle"} [${booking.vehicle_number || "Verified"}]`
-    : "Driver and vehicle details will be shared on departure morning.";
-
-  const emailText = `Hello ${booking.traveler_name || "Traveler"},\n\nYour upcoming experience is tomorrow!\n\nBooking: ${booking.ref}\nExperience: ${experienceName}\nTravel Date: ${booking.activity_date}\nPickup Time: ${booking.pickup_time || "09:00 AM"}\nPickup Location: ${booking.pickup_location}\n\n${driverInfo}\n\nNeed assistance? 24/7 Helpline: +91 9336757106 / support@ideaholiday.in\n\nHave a memorable journey!\nIdea Holiday Team`;
-
-  const whatsappText = `Hello ${booking.traveler_name || "Traveler"} 👋\n\n⏰ Reminder: Your trip is coming up tomorrow!\n\n📋 *Booking:* ${booking.ref}\n🌴 *Tour:* ${experienceName}\n📅 *Date:* ${booking.activity_date} at ${booking.pickup_time || "09:00 AM"}\n📍 *Pickup:* ${booking.pickup_location}\n\n🚗 *Assigned Vehicle / Driver:*\n${driverInfo}\n\nHave a wonderful trip with Idea Holiday!`;
-
-  const results = await sendRecipientChannels({
-    database,
-    eventType: "PRE_TRIP_REMINDER",
-    eventKeyPrefix: `${booking.id}:PRE_TRIP_REMINDER:24H`,
-    recipient: traveler,
-    subject: `Trip Reminder: Your ${experienceName} is tomorrow (${booking.ref})`,
-    emailText,
-    whatsappText,
-    whatsappTemplate: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_REMINDER, [
-      booking.ref,
-      experienceName,
-      booking.activity_date,
-      booking.pickup_location,
-    ]),
-    metadata: { bookingId: booking.id, bookingRef: booking.ref, activityDate: booking.activity_date },
-  });
-
-  return {
-    eventType: "PRE_TRIP_REMINDER",
-    bookingId: booking.id,
-    bookingRef: booking.ref,
-    recipient: traveler.email || traveler.phone,
-    results,
-  };
+  const { scheduleKey } = await import('./dispatchStateService.js');
+  const { deliverDispatchNotification } = await import('./dispatchNotificationService.js');
+  const booking = database.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
+  if (!booking || booking.payment_status !== 'PAID' || !['confirmed','driver_assigned'].includes(booking.status)) throw Object.assign(new Error('Booking is not available for a trip reminder'), { status: 409 });
+  const assignment = database.prepare("SELECT * FROM driver_assignments WHERE booking_id = ? AND acknowledgement = 'ACCEPTED' AND assignment_status <> 'CANCELLED'").get(booking.id);
+  const revision = assignment?.revision || 'unassigned';
+  const result = await deliverDispatchNotification(database, { id: `${booking.id}:${scheduleKey(booking)}:${revision}:PRE_TRIP_REMINDER`, booking_id: booking.id, revision, event_type: 'PRE_TRIP_REMINDER', payload: '{}' });
+  return { eventType: 'PRE_TRIP_REMINDER', bookingId: booking.id, bookingRef: booking.ref, recipient: booking.traveler_email || booking.traveler_phone, results: result.results };
 }
 
 export async function notifyPostTripReviewRequest(database, bookingId) {
@@ -611,11 +568,24 @@ export async function notifyPostTripReviewRequest(database, bookingId) {
   };
 
   const experienceName = booking.product_title || booking.product_type;
-  const reviewUrl = `https://ideaholiday.in/my-reviews?bookingRef=${encodeURIComponent(booking.ref)}`;
 
-  const emailText = `Hello ${booking.traveler_name || "Traveler"},\n\nWe hope you had a wonderful journey with ${experienceName}!\n\nYour feedback helps fellow travelers and local operators in India.\n\nRate your trip and share photos here:\n${reviewUrl}\n\nThank you for choosing Idea Holiday!`;
+  // A single-use token, so the traveler reviews in one tap without signing in.
+  // If one was already issued (a resend, say) its plaintext is gone, so fall
+  // back to the signed-in route rather than inventing a second live link.
+  let reviewUrl = `${String(process.env.PUBLIC_APP_URL || "https://ideaholiday.in").replace(/\/+$/, "")}/my-reviews?bookingRef=${encodeURIComponent(booking.ref)}`;
+  try {
+    const issued = issueBookingInvite(database, { bookingId: booking.id, channel: "EMAIL" });
+    if (issued.url) reviewUrl = issued.url;
+  } catch (error) {
+    logger.warn("Review invite token could not be issued; falling back to the signed-in review page", {
+      bookingId: booking.id, error: error.message,
+    });
+  }
 
-  const whatsappText = `Hello ${booking.traveler_name || "Traveler"} ⭐\n\nHow was your recent ${experienceName} trip?\n\nHelp other travelers by sharing your honest review and vacation photos:\n👉 ${reviewUrl}\n\nThank you for traveling with Idea Holiday!`;
+  const reportUrl = `${String(process.env.PUBLIC_APP_URL || "https://ideaholiday.in").replace(/\/+$/, "")}/bookings?report=${encodeURIComponent(booking.ref)}`;
+  const emailText = `Hello ${booking.traveler_name || "Traveler"},\n\nWe hope you had a wonderful journey with ${experienceName}!\n\nYour feedback helps fellow travelers and local operators in India.\n\nRate your trip and share photos here:\n${reviewUrl}\n\nSomething went wrong on this trip? Tell us here and we will look into it before the operator is paid:\n${reportUrl}\n\nThank you for choosing Idea Holiday!`;
+
+  const whatsappText = `Hello ${booking.traveler_name || "Traveler"} ⭐\n\nHow was your recent ${experienceName} trip?\n\nHelp other travelers by sharing your honest review and vacation photos:\n👉 ${reviewUrl}\n\nHad a problem? Report it here:\n${reportUrl}\n\nThank you for traveling with Idea Holiday!`;
 
   const results = await sendRecipientChannels({
     database,
@@ -643,33 +613,34 @@ export async function notifyPostTripReviewRequest(database, bookingId) {
 }
 
 export async function runAutomatedTripReminders(database) {
-  const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
-  const dayAfterTomorrow = new Date(Date.now() + 48 * 3600 * 1000).toISOString().slice(0, 10);
-
-  const upcomingBookings = database.prepare(`
-    SELECT b.id, b.ref, b.activity_date
-    FROM bookings b
-    WHERE b.status IN ('confirmed', 'CONFIRMED', 'paid', 'PAID')
-      AND b.activity_date BETWEEN ? AND ?
-      AND NOT EXISTS (
-        SELECT 1 FROM notification_deliveries nd 
-        WHERE nd.event_type = 'PRE_TRIP_REMINDER' 
-          AND nd.event_key LIKE b.id || ':PRE_TRIP_REMINDER%'
-      )
-  `).all(tomorrow, dayAfterTomorrow);
-
+  const { processDispatchSchedule, processDispatchOutbox } = await import('./dispatchWorkflowService.js');
+  const { deliverDispatchNotification } = await import('./dispatchNotificationService.js');
+  processDispatchSchedule(database);
   const preTripResults = [];
-  for (const b of upcomingBookings) {
-    try {
-      const res = await notifyUpcomingTripReminder(database, b.id);
-      preTripResults.push(res);
-    } catch (err) {
-      logger.error("Pre-trip reminder failed for booking", { bookingId: b.id, error: err.message });
+  await processDispatchOutbox(database, async (db, job) => {
+    const result = await deliverDispatchNotification(db, job);
+    if (job.event_type === 'PRE_TRIP_REMINDER' && result.results.every(r => r.success)) {
+      const booking = db.prepare('SELECT ref FROM bookings WHERE id = ?').get(job.booking_id);
+      preTripResults.push({ bookingRef: booking.ref });
     }
-  }
+    return result;
+  });
 
-  const pastSevenDays = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const post = await sendPendingPostTripReviewInvites(database);
+  return {
+    scannedAt: new Date().toISOString(),
+    preTripRemindersSent: preTripResults.length,
+    postTripReviewInvitesSent: post.sent.length,
+    preTripBookings: preTripResults.map((r) => r.bookingRef),
+    postTripBookings: post.sent.map((r) => r.bookingRef),
+  };
+}
+
+// Review and "report a problem" invites for trips completed in the last 7 days, once each.
+// Runs from Cloud Scheduler as well as the admin button.
+export async function sendPendingPostTripReviewInvites(database, { now = new Date() } = {}) {
+  const pastSevenDays = new Date(now.getTime() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const yesterday = new Date(now.getTime() - 1 * 24 * 3600 * 1000).toISOString().slice(0, 10);
 
   const completedBookings = database.prepare(`
     SELECT b.id, b.ref, b.activity_date
@@ -693,13 +664,7 @@ export async function runAutomatedTripReminders(database) {
     }
   }
 
-  return {
-    scannedAt: new Date().toISOString(),
-    preTripRemindersSent: preTripResults.length,
-    postTripReviewInvitesSent: postTripResults.length,
-    preTripBookings: preTripResults.map((r) => r.bookingRef),
-    postTripBookings: postTripResults.map((r) => r.bookingRef),
-  };
+  return { checked: completedBookings.length, sent: postTripResults };
 }
 
 export async function notifyCircuitReschedule(database, orderId, requestedState = "REQUESTED") {

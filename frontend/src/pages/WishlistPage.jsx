@@ -297,8 +297,10 @@ export function WishlistPage() {
                     <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                       <div>
                         <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 font-bold mb-1">
-                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                          <span>{prod.rating || 4.9}</span>
+                          {prod.rating ? <>
+                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                            <span>{Number(prod.rating).toFixed(1)}</span>
+                          </> : <span className="text-stone-500">New</span>}
                           {prod.duration_hours && (
                             <span className="text-stone-400 font-normal">
                               &bull; {prod.duration_hours}h duration

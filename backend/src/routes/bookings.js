@@ -21,12 +21,18 @@ import { guestDocumentLinks, logGuestDocumentAccess, renderGuestDocument, verify
 import { guestNotificationPreferences, notifyBookingLogisticsEvent, notifyDispatchStatusChanged, queueNotification, sendGuestBookingNotification } from "../services/notificationService.js";
 import { assertBookingLocations } from "../services/locationValidationService.js";
 import { bookingLogistics, buildLogisticsSnapshot, consumeBookingHold, createBookingHold, expireBookingHolds, getBookingQuestions, getOption, getProductOptions, persistBookingLogistics, validateOptionLogistics, validateQuestionAnswers } from "../services/logisticsService.js";
+import { applyWalletCreditsToCheckout, ensureUserReferralCode } from "../services/loyaltyService.js";
+import { applyPromoCode, validatePromoCode } from "../services/promoService.js";
+import { recordAffiliateBooking, resolveAttribution } from "../services/affiliateService.js";
 import {
-  applyWalletCreditsToCheckout,
-  deductWalletCreditsOnBooking,
-  creditReferralRewardOnCompletion,
-} from "../services/loyaltyService.js";
-import { applyPromoCode } from "../services/promoService.js";
+  applyReferralToBooking,
+  buildReferralLink,
+  isTravelerReferralCode,
+  onReferralBookingCancelled,
+  onReferralTripCompleted,
+  previewReferralBenefit,
+  redeemWalletCredit,
+} from "../services/referralService.js";
 
 const router = Router();
 router.use(optionalAuthMiddleware);
@@ -99,6 +105,54 @@ function validateTransferRoute(body, product) {
   }
 }
 
+/** The traveler referral code a request carries, typed into either field. */
+function requestReferralCode(body) {
+  if (isTravelerReferralCode(body.referral_code)) return body.referral_code;
+  if (isTravelerReferralCode(body.promo_code)) return body.promo_code;
+  return null;
+}
+
+/**
+ * A booking is credited to one referrer at most. When a creator's coupon or
+ * link already brought it in, the traveler referral steps aside, so the two
+ * programs never both spend the same booking's margin.
+ */
+function hasAffiliateAttribution(body, userId) {
+  // Mirrors the booking route: a promo code decides alone, and only without
+  // one is the visitor's creator link consulted.
+  if (body.promo_code) {
+    if (isTravelerReferralCode(body.promo_code)) return false;
+    try {
+      const promo = validatePromoCode(db, { code: body.promo_code, amountInr: 10_000_000, userId });
+      return promo?.type === "AFFILIATE" || Boolean(promo?.affiliateCode);
+    } catch {
+      return false;
+    }
+  }
+  try {
+    return Boolean(body.visitor_id && resolveAttribution(db, { visitorId: body.visitor_id, userId }));
+  } catch {
+    return false;
+  }
+}
+
+function referralPreview(req, quote) {
+  if (hasAffiliateAttribution(req.body, req.user?.id)) return { eligible: false, discountInr: 0, reason: "AFFILIATE_REFERRAL", referrerFirstName: null };
+  try {
+    return previewReferralBenefit(db, {
+      userId: req.user?.id || null,
+      referralCode: requestReferralCode(req.body),
+      visitorId: req.body.visitor_id || null,
+      commissionInr: quote.commissionAmount,
+      travelerPhone: req.body.traveler_phone || null,
+      travelerEmail: req.body.traveler_email || null,
+    });
+  } catch (error) {
+    logger.warn("Referral preview failed", { error: error.message });
+    return { eligible: false, discountInr: 0, reason: "UNAVAILABLE", referrerFirstName: null };
+  }
+}
+
 router.post("/quote", optionalAuthMiddleware, validateBody(bookingQuoteSchema), (req, res) => {
   try {
     const productId = req.body.product_id || req.body.activity_id;
@@ -106,7 +160,7 @@ router.post("/quote", optionalAuthMiddleware, validateBody(bookingQuoteSchema), 
     const answers = validateQuestionAnswers(db, option?.id, req.body.booking_question_answers || {}, req.body);
     assertBookingLocations(db, req.body, { requireOperationalDetails: false, deferLocationValidation: true });
     const quote = calculateBookingQuote(db, req.body, { ownerId: req.user?.id });
-    res.json({ success: true, quote: { ...publicQuote(quote), option: option || null, bookingQuestions: option ? getBookingQuestions(db, option.id) : [], normalizedAnswers: answers } });
+    res.json({ success: true, quote: { ...publicQuote(quote), referral: referralPreview(req, quote), option: option || null, bookingQuestions: option ? getBookingQuestions(db, option.id) : [], normalizedAnswers: answers } });
   } catch (error) {
     res.status(error.status || 500).json({
       error: error.message || "Could not price this booking",
@@ -197,23 +251,33 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     const bookingId = `bk_${nanoid(12)}`;
     const ref = `IH-${nanoid(7).toUpperCase()}`;
 
-    // Travel & Earn: Calculate wallet credit discount if requested
+    // Travel & Earn. The friend discount is priced from the quote the traveler
+    // saw and confirmed against the real booking below; wallet credit is capped
+    // on what is left after it. Both come out of our commission, never the
+    // supplier's payout, so amount + credit + discount = commission + payout.
+    const affiliateAttributed = hasAffiliateAttribution(req.body, existingUser?.id || null);
+    const referralCode = requestReferralCode(req.body);
+    const expectedReferral = existingUser && !affiliateAttributed
+      ? previewReferralBenefit(db, {
+        userId,
+        referralCode,
+        visitorId: req.body.visitor_id || null,
+        commissionInr: quote.commissionAmount,
+        travelerPhone: req.body.traveler_phone,
+        travelerEmail: req.body.traveler_email,
+      })
+      : { discountInr: 0 };
     const requestedWalletCredit = Number(req.body.wallet_credit_inr) || 0;
     let appliedWalletCredit = 0;
-    if (requestedWalletCredit > 0 && userId) {
-      try {
-        const walletCalc = applyWalletCreditsToCheckout(db, userId, {
-          bookingAmountInr: quote.totalAmount,
-          requestedCreditInr: requestedWalletCredit,
-        });
-        if (walletCalc?.applied) {
-          appliedWalletCredit = walletCalc.creditDiscountInr || 0;
-        }
-      } catch (err) {
-        logger.warn("Wallet credit calculation failed", { error: err.message, userId });
-      }
+    if (requestedWalletCredit > 0 && existingUser) {
+      const walletCalc = applyWalletCreditsToCheckout(db, userId, {
+        bookingAmountInr: quote.totalAmount - (expectedReferral.discountInr || 0),
+        requestedCreditInr: requestedWalletCredit,
+      });
+      if (walletCalc?.applied) appliedWalletCredit = walletCalc.creditDiscountInr || 0;
     }
-    const finalPayableAmount = Math.max(0, quote.totalAmount - appliedWalletCredit);
+    let referralDiscount = 0;
+    let finalPayableAmount = Math.max(0, quote.totalAmount - appliedWalletCredit);
 
     db.transaction(() => {
       db.prepare("UPDATE products SET id = id WHERE id = ?").run(quote.product.id);
@@ -254,12 +318,27 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       // Record the billed unit breakdown alongside the canonical seat counts.
       saveBookingUnitItems(db, bookingId, quote.unitItems, quote.nativeSlot?.unitPrices || {});
 
-      // Deduct wallet credits from user account and record transaction ledger
-      if (appliedWalletCredit > 0 && existingUser) {
-        try {
-          deductWalletCreditsOnBooking(db, userId, bookingId, appliedWalletCredit);
-        } catch (walletDeductErr) {
-          logger.warn("Wallet deduction failed during booking creation", { error: walletDeductErr.message, userId, bookingId });
+      // A booking that cannot pay for its wallet discount is not created at all.
+      if (appliedWalletCredit > 0) {
+        redeemWalletCredit(db, { userId, bookingId, amountInr: appliedWalletCredit });
+        db.prepare("UPDATE bookings SET wallet_credit_applied_inr = ? WHERE id = ?").run(appliedWalletCredit, bookingId);
+      }
+
+      if (!affiliateAttributed) {
+        const referral = applyReferralToBooking(db, {
+          bookingId,
+          userId,
+          referralCode,
+          visitorId: req.body.visitor_id || null,
+          quoteCommissionInr: quote.commissionAmount,
+          bookingCommissionInr: assignmentCommissionAmount,
+          travelerPhone: req.body.traveler_phone,
+          travelerEmail: req.body.traveler_email,
+        });
+        referralDiscount = referral.discountInr || 0;
+        if (referralDiscount > 0) {
+          finalPayableAmount = Math.max(0, finalPayableAmount - referralDiscount);
+          db.prepare("UPDATE bookings SET referral_discount_inr = ?, amount_inr = ? WHERE id = ?").run(referralDiscount, finalPayableAmount, bookingId);
         }
       }
 
@@ -275,14 +354,24 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         } catch (promoErr) {
           logger.warn("Promo code application failed during booking creation", { error: promoErr.message });
         }
+      } else if (req.body.visitor_id || req.body.affiliate_code) {
+        // Link attribution is resolved from the server-side click record for
+        // this visitor, not from the code the browser sends: the code alone is
+        // a claim anyone could make.
+        try {
+          recordAffiliateBooking(db, {
+            bookingId,
+            affiliateCode: req.body.affiliate_code,
+            amountInr: quote.totalAmount,
+            attributionType: "REFERRAL_LINK",
+            visitorId: req.body.visitor_id || null,
+            userId,
+            subId: req.body.affiliate_sub_id || null,
+          });
+        } catch (affErr) {
+          logger.warn("Affiliate link attribution failed during booking", { error: affErr.message });
+        }
       }
-
-      // Link any pending signup referral for this user to this booking
-      db.prepare(`
-        UPDATE user_referrals
-        SET booking_id = ?
-        WHERE referred_user_id = ? AND booking_id IS NULL AND status = 'PENDING'
-      `).run(bookingId, userId);
 
       db.prepare(`
         UPDATE bookings
@@ -352,6 +441,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       amount_inr: finalPayableAmount,
       original_amount_inr: quote.totalAmount,
       wallet_credit_applied_inr: appliedWalletCredit,
+      referral_discount_inr: referralDiscount,
       quote: {
         ...publicQuote(quote),
         supplierId: selectedSupplier.supplierId,
@@ -574,13 +664,8 @@ router.patch("/:id/status", authenticate, requireRoles("ADMIN", "STAFF"), valida
     const nextStatus = String(req.body.status || "").toLowerCase();
     if (!canTransitionBooking(booking.status, nextStatus)) return res.status(409).json({ error: `Cannot move booking from ${booking.status} to ${nextStatus}` });
     db.prepare("UPDATE bookings SET status = ? WHERE id = ?").run(nextStatus, booking.id);
-    if (nextStatus === "completed") {
-      try {
-        creditReferralRewardOnCompletion(db, booking.id);
-      } catch (rewardErr) {
-        logger.warn("Failed to credit referral reward on admin booking completion", { bookingId: booking.id, error: rewardErr.message });
-      }
-    }
+    if (nextStatus === "completed") onReferralTripCompleted(db, booking.id);
+    if (nextStatus === "cancelled") onReferralBookingCancelled(db, booking.id, { reason: "Cancelled by operations" });
     res.json({ success: true, status: nextStatus });
   } catch {
     res.status(500).json({ error: "Failed to update booking status" });
@@ -626,6 +711,16 @@ router.get("/:ref/documents/:type", (req, res) => {
     const accountAccess = ownsBooking(actor, booking);
     const linkAccess = verifyGuestDocumentToken(req.query.token, { bookingId: booking.id, bookingRef: booking.ref, documentType });
     if (!accountAccess && !linkAccess) return res.status(403).send("This secure document link is invalid or has expired");
+    // The voucher gets forwarded to everyone on the trip, so it carries the
+    // traveler's invite link. A missing code never blocks the document.
+    if (documentType === "VOUCHER" && booking.user_id) {
+      try {
+        const owner = db.prepare("SELECT id, name, referral_code, role FROM users WHERE id = ?").get(booking.user_id);
+        if (owner && String(owner.role || "TRAVELER").toUpperCase() === "TRAVELER") {
+          booking.traveler_invite_link = buildReferralLink(ensureUserReferralCode(db, owner), "VOUCHER");
+        }
+      } catch {}
+    }
     const html = renderGuestDocument(documentType, booking);
     logGuestDocumentAccess(db, {
       bookingId: booking.id,

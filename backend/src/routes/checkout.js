@@ -39,6 +39,7 @@ import {
   findCircuitOrderByPaymentOrderId,
 } from "../services/circuitPaymentService.js";
 import { reconcileCircuitRefund } from "../services/circuitOrchestrationService.js";
+import { onReferralBookingCancelled } from "../services/referralService.js";
 
 const router = express.Router();
 router.use(optionalAuthMiddleware);
@@ -713,6 +714,7 @@ router.post("/cancel-booking", authenticate, requireBookingOwner(), validateBody
           WHERE booking_id = ?
         `).run(booking.id);
       })();
+      onReferralBookingCancelled(db, booking.id, { reason: cancellationReason });
     }
 
     res.json({

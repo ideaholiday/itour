@@ -10,6 +10,7 @@ import {
   getMigrationStatus,
   runPendingMigrations,
   rollbackLastBatch,
+  executeMigrationSql,
   findDuplicateMigrationPrefixes
 } from "../src/services/migrationRunner.js";
 
@@ -160,4 +161,18 @@ test("migration runner reports no duplicates for uniquely numbered migrations", 
     ]),
     []
   );
+});
+
+test("postgres migrations run one statement at a time so SQLite syntax mid-file is translated", async () => {
+  const { translateSqliteSql } = await import("../src/postgresSyncDb.js");
+  const executed = [];
+  const postgres = { pragma: () => "postgres", exec: (sql) => executed.push(translateSqliteSql(sql)) };
+  executeMigrationSql(postgres, `-- Driver workflow
+CREATE TABLE IF NOT EXISTS dispatch_lock (id TEXT PRIMARY KEY, note TEXT DEFAULT 'a;b');
+-- seed the lock row
+INSERT OR IGNORE INTO dispatch_lock (id) VALUES ('dispatch');
+/* trailing comment only */`);
+  assert.equal(executed.length, 2);
+  assert.match(executed[0], /^CREATE TABLE IF NOT EXISTS dispatch_lock .*'a;b'\)$/);
+  assert.equal(executed[1], "INSERT INTO dispatch_lock (id) VALUES ('dispatch') ON CONFLICT DO NOTHING");
 });

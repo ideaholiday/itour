@@ -9,7 +9,10 @@ import MobileBottomNav from "./components/MobileBottomNav.jsx";
 import { ToastProvider } from "./components/ui/ToastProvider.jsx";
 import { CurrencyProvider } from "./lib/currency.jsx";
 import { analytics } from "./lib/analytics.js";
+import { api } from "./lib/api.js";
+import { parseReferralParams, captureReferral, parseTravelerReferralParams, captureTravelerReferral } from "./lib/affiliateAttribution.js";
 
+const DriverTrip = React.lazy(() => import("./pages/DriverTrip.jsx"));
 const Home = React.lazy(() => import("./pages/Home.jsx"));
 const Search = React.lazy(() => import("./pages/Search.jsx"));
 const TransferSearch = React.lazy(() => import("./pages/TransferSearch.jsx"));
@@ -18,6 +21,7 @@ const Checkout = React.lazy(() => import("./pages/Checkout.jsx"));
 const BookingConfirmed = React.lazy(() => import("./pages/BookingConfirmed.jsx"));
 const MyBookings = React.lazy(() => import("./pages/MyBookings.jsx"));
 const MyReviews = React.lazy(() => import("./pages/MyReviews.jsx"));
+const ReviewInvite = React.lazy(() => import("./pages/ReviewInvite.jsx"));
 const Login = React.lazy(() => import("./pages/Login.jsx"));
 const HowItWorks = React.lazy(() => import("./pages/HowItWorks.jsx"));
 const TermsPage = React.lazy(() => import("./pages/TermsPage.jsx"));
@@ -44,6 +48,8 @@ const WishlistPage = React.lazy(() => import("./pages/WishlistPage.jsx"));
 const TravelerMessages = React.lazy(() => import("./pages/TravelerMessages.jsx"));
 const TripSummary = React.lazy(() => import("./pages/TripSummary.jsx"));
 const TravelAndEarn = React.lazy(() => import("./pages/TravelAndEarn.jsx"));
+const AffiliateLandingPage = React.lazy(() => import("./pages/AffiliateLandingPage.jsx"));
+const AffiliateDashboardPage = React.lazy(() => import("./pages/AffiliateDashboardPage.jsx"));
 const CircuitPlanner = React.lazy(() => import("./pages/CircuitPlanner.jsx"));
 const CircuitCheckout = React.lazy(() => import("./pages/CircuitCheckout.jsx"));
 const CircuitConfirmed = React.lazy(() => import("./pages/CircuitConfirmed.jsx"));
@@ -55,10 +61,25 @@ function AppContent() {
   const { user } = useAuth();
   const domain = getDomainInfo();
   const portalUrls = getPortalUrls();
-  const isWorkspace = ["/supplier", "/admin", "/ops"].some((prefix) => location.pathname.startsWith(prefix)) || domain.isSupplier || domain.isAdmin;
+  const isWorkspace = ["/supplier", "/admin", "/ops", "/driver"].some((prefix) => location.pathname.startsWith(prefix)) || domain.isSupplier || domain.isAdmin;
 
   React.useEffect(() => {
     analytics.trackPageView(location.pathname + location.search);
+
+    const referral = parseReferralParams(location.search);
+    if (referral) {
+      captureReferral(api, {
+        code: referral.code,
+        subId: referral.subId,
+        path: location.pathname,
+        referrer: document.referrer || "",
+      });
+    }
+
+    const travelerReferral = parseTravelerReferralParams(location.search);
+    if (travelerReferral) {
+      captureTravelerReferral(api, { code: travelerReferral.code, channel: travelerReferral.channel, path: location.pathname });
+    }
   }, [location.pathname, location.search]);
 
   const userRole = String(user?.role || user?.user_metadata?.role || "").toUpperCase();
@@ -92,6 +113,7 @@ function AppContent() {
           </div>
         }>
           <Routes>
+            <Route path="/driver/trip" element={<DriverTrip />} />
             {/* Root Route Handled According to Domain */}
             <Route
               path="/"
@@ -105,6 +127,9 @@ function AppContent() {
                 )
               }
             />
+            {/* Public review collection: a mailed invite token, or a supplier's shared link / QR. */}
+            <Route path="/review/:token" element={<ReviewInvite mode="token" />} />
+            <Route path="/r/:slug" element={<ReviewInvite mode="share" />} />
             <Route path="/search" element={<Search />} />
             <Route path="/transfers" element={<TransferSearch />} />
             <Route path="/profile" element={<UserProfile />} />
@@ -129,6 +154,8 @@ function AppContent() {
             <Route path="/admin/products" element={<AdminPanel view="products" />} />
             <Route path="/admin/finance" element={<AdminPanel view="finance" />} />
             <Route path="/admin/quality" element={<AdminPanel view="quality" />} />
+            <Route path="/admin/creators" element={<AdminPanel view="creators" />} />
+            <Route path="/admin/referrals" element={<AdminPanel view="referrals" />} />
             <Route path="/ops" element={<OpsPanel view="live" />} />
             <Route path="/ops/live" element={<OpsPanel view="live" />} />
             <Route path="/ops/notifications" element={<OpsPanel view="notifications" />} />
@@ -147,6 +174,9 @@ function AppContent() {
             <Route path="/trip/:id" element={<TripSummary />} />
             <Route path="/travel-and-earn" element={<TravelAndEarn />} />
             <Route path="/referrals" element={<TravelAndEarn />} />
+            <Route path="/affiliate" element={<AffiliateLandingPage />} />
+            <Route path="/influencer" element={<AffiliateLandingPage />} />
+            <Route path="/affiliate/dashboard" element={<AffiliateDashboardPage />} />
             <Route path="/circuit-planner" element={<CircuitPlanner />} />
             <Route path="/plan-trip" element={<CircuitPlanner />} />
             <Route path="/circuit-checkout/:id" element={<CircuitCheckout />} />

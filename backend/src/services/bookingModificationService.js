@@ -1,4 +1,6 @@
 import { moveNativeReservation } from "./nativeInventoryService.js";
+import { onBookingCancelled } from "./affiliateService.js";
+import { onReferralBookingCancelled } from "./referralService.js";
 import crypto from "crypto";
 
 export class BookingModificationService {
@@ -235,6 +237,11 @@ export class BookingModificationService {
         database.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
       } catch {}
 
+      // Void any pending affiliate referral earning
+      try {
+        onBookingCancelled(database, booking.id);
+      } catch {}
+
       // Log in booking_modifications
       database.prepare(`
         INSERT INTO booking_modifications (
@@ -251,6 +258,7 @@ export class BookingModificationService {
         reason || "Traveler self-service cancellation"
       );
     })();
+    onReferralBookingCancelled(database, booking.id, { reason: reason || "Traveler cancelled" });
 
     return {
       success: true,

@@ -54,14 +54,16 @@ test("verifyGstin validates and parses GSTIN verification response", async () =>
       ok: true,
       status: 200,
       json: async () => ({
-        status: "VALID",
+        reference_id: 12345,
         GSTIN: "29AAACB8781B1ZO",
-        legal_name: "Idea Holiday Travels Private Limited",
-        trade_name: "Idea Holiday",
+        valid: true,
+        message: "GSTIN Exists",
+        legal_name_of_business: "Idea Holiday Travels Private Limited",
+        trade_name_of_business: "Idea Holiday",
         taxpayer_type: "Regular",
-        gstin_status: "Active",
-        registration_date: "2022-01-10",
-        registered_address: {
+        gst_in_status: "Active",
+        date_of_registration: "2022-01-10",
+        principal_place_split_address: {
           city: "Bengaluru",
           state: "Karnataka",
           pincode: "560001",
@@ -82,6 +84,9 @@ test("verifyGstin validates and parses GSTIN verification response", async () =>
     assert.equal(result.legalName, "Idea Holiday Travels Private Limited");
     assert.equal(result.status, "Active");
     assert.equal(result.taxpayerType, "Regular");
+    assert.equal(result.tradeName, "Idea Holiday");
+    assert.equal(result.registrationDate, "2022-01-10");
+    assert.equal(result.address.city, "Bengaluru");
   } finally {
     global.fetch = originalFetch;
   }
@@ -104,11 +109,13 @@ test("verifyPan validates PAN and calculates name match score", async () => {
       ok: true,
       status: 200,
       json: async () => ({
-        status: "VALID",
+        reference_id: 999,
         pan: "AAACB8781B",
+        valid: true,
         registered_name: "Idea Holiday Travels Private Limited",
         type: "Company",
-        name_match_score: 95,
+        name_match_score: "95.00",
+        name_match_result: "GOOD_PARTIAL_MATCH",
       }),
     };
   };
@@ -125,6 +132,7 @@ test("verifyPan validates PAN and calculates name match score", async () => {
     assert.equal(result.registeredName, "Idea Holiday Travels Private Limited");
     assert.equal(result.type, "Company");
     assert.equal(result.nameMatchScore, 95);
+    assert.equal(result.nameMatchResult, "GOOD_PARTIAL_MATCH");
   } finally {
     global.fetch = originalFetch;
   }
@@ -146,11 +154,14 @@ test("verifyBankAccount verifies bank account via penny-drop sync", async () => 
       ok: true,
       status: 200,
       json: async () => ({
-        status: "VALID",
-        account_status: "ACTIVE",
+        reference_id: 34,
+        name_at_bank: "Idea Holiday Partner",
         bank_name: "HDFC Bank",
-        account_holder_name: "Idea Holiday Partner",
-        name_match_score: 98,
+        name_match_score: "98.00",
+        name_match_result: "DIRECT_MATCH",
+        account_status: "VALID",
+        account_status_code: "ACCOUNT_IS_VALID",
+        utr: "1697548170718",
       }),
     };
   };
@@ -169,6 +180,7 @@ test("verifyBankAccount verifies bank account via penny-drop sync", async () => 
     assert.equal(result.bankName, "HDFC Bank");
     assert.equal(result.accountHolderName, "Idea Holiday Partner");
     assert.equal(result.nameMatchScore, 98);
+    assert.equal(result.accountStatusCode, "ACCOUNT_IS_VALID");
   } finally {
     global.fetch = originalFetch;
   }
@@ -242,10 +254,10 @@ test("runComprehensiveSupplierKyb performs full multi-point audit and persists r
         ok: true,
         status: 200,
         json: async () => ({
-          status: "VALID",
           GSTIN: "30AAACB8781B1ZO",
-          legal_name: "Goa Royal Chauffeurs Pvt Ltd",
-          gstin_status: "Active",
+          valid: true,
+          legal_name_of_business: "Goa Royal Chauffeurs Pvt Ltd",
+          gst_in_status: "Active",
           taxpayer_type: "Regular",
         }),
       };
@@ -255,11 +267,11 @@ test("runComprehensiveSupplierKyb performs full multi-point audit and persists r
         ok: true,
         status: 200,
         json: async () => ({
-          status: "VALID",
           pan: "AAACB8781B",
+          valid: true,
           registered_name: "Goa Royal Chauffeurs Pvt Ltd",
           type: "Company",
-          name_match_score: 95,
+          name_match_score: "95.00",
         }),
       };
     }
@@ -268,15 +280,15 @@ test("runComprehensiveSupplierKyb performs full multi-point audit and persists r
         ok: true,
         status: 200,
         json: async () => ({
-          status: "VALID",
-          account_status: "ACTIVE",
+          account_status: "VALID",
+          account_status_code: "ACCOUNT_IS_VALID",
           bank_name: "HDFC Bank",
-          account_holder_name: "Goa Royal Chauffeurs",
-          name_match_score: 100,
+          name_at_bank: "Goa Royal Chauffeurs",
+          name_match_score: "100.00",
         }),
       };
     }
-    return { ok: true, status: 200, json: async () => ({ status: "VALID" }) };
+    return { ok: true, status: 200, json: async () => ({ valid: true }) };
   };
 
   try {
@@ -307,13 +319,16 @@ test("runComprehensiveSupplierKyb performs full multi-point audit and persists r
 
 test("verifyPanToGstin resolves GSTINs registered under PAN", async () => {
   const originalFetch = global.fetch;
-  global.fetch = async (url) => {
+  global.fetch = async (url, options) => {
     assert.match(url, /verification\/pan-gstin/);
+    const body = JSON.parse(options.body);
+    assert.equal(body.pan, "AAACB8781B");
+    assert.match(body.verification_id, /^[A-Za-z0-9._-]{1,50}$/, "Cashfree requires verification_id");
     return {
       ok: true,
       status: 200,
       json: async () => ({
-        status: "VALID",
+        status: "SUCCESS",
         pan: "AAACB8781B",
         gstin_list: [
           { gstin: "29AAACB8781B1ZO", state: "Karnataka", status: "Active" },
@@ -327,6 +342,7 @@ test("verifyPanToGstin resolves GSTINs registered under PAN", async () => {
     const result = await verifyPanToGstin({ pan: "AAACB8781B" });
     assert.equal(result.success, true);
     assert.equal(result.gstinList.length, 2);
+    assert.equal(result.found, true);
   } finally {
     global.fetch = originalFetch;
   }
@@ -361,5 +377,100 @@ test("verifyGstin and verifyPan handle API error status safely", async () => {
   } finally {
     global.fetch = originalFetch;
     process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK = "true";
+  }
+});
+
+function mockFetchOnce(payload, { ok = true, status = 200 } = {}) {
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok, status, json: async () => payload });
+  return () => { global.fetch = originalFetch; };
+}
+
+test("verifyBankAccount reports INVALID when Cashfree says account_status INVALID", async () => {
+  const restore = mockFetchOnce({
+    reference_id: 35,
+    name_at_bank: "",
+    account_status: "INVALID",
+    account_status_code: "ACCOUNT_BLOCKED",
+  });
+  try {
+    const result = await verifyBankAccount({ accountNumber: "50200012345678", ifsc: "HDFC0000123" });
+    assert.equal(result.valid, false);
+    assert.equal(result.status, "INVALID");
+    assert.equal(result.accountStatusCode, "ACCOUNT_BLOCKED");
+    assert.equal(result.bankName, null, "no placeholder bank name that would overwrite a stored one");
+  } finally {
+    restore();
+  }
+});
+
+test("verifyGstin does not pass a cancelled GSTIN even though it exists", async () => {
+  const restore = mockFetchOnce({
+    GSTIN: "29AAACB8781B1ZO",
+    valid: true,
+    message: "GSTIN Exists",
+    legal_name_of_business: "Old Travels Pvt Ltd",
+    gst_in_status: "Cancelled",
+  });
+  try {
+    const result = await verifyGstin({ gstin: "29AAACB8781B1ZO" });
+    assert.equal(result.valid, false);
+    assert.equal(result.status, "Cancelled");
+    assert.equal(result.legalName, "Old Travels Pvt Ltd");
+  } finally {
+    restore();
+  }
+});
+
+test("an empty name_match_score falls back to local matching instead of scoring 0", async () => {
+  const restore = mockFetchOnce({
+    pan: "AAACB8781B",
+    valid: true,
+    registered_name: "Idea Holiday Travels Private Limited",
+    name_match_score: "",
+  });
+  try {
+    const result = await verifyPan({ pan: "AAACB8781B", name: "Idea Holiday Travels Pvt Ltd" });
+    assert.equal(result.nameMatchScore > 70, true);
+  } finally {
+    restore();
+  }
+});
+
+test("API errors keep Cashfree's status and code so callers can tell them apart", async () => {
+  process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK = "false";
+  const restore = mockFetchOnce(
+    { type: "validation_error", code: "insufficient_balance", message: "Insufficient balance to process this request." },
+    { ok: false, status: 422 }
+  );
+  try {
+    await assert.rejects(
+      () => verifyBankAccount({ accountNumber: "50200012345678", ifsc: "HDFC0000123" }),
+      (err) => err.status === 422 && err.code === "insufficient_balance" && err.retryable === true
+    );
+  } finally {
+    restore();
+    process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK = "true";
+  }
+});
+
+test("simulation fallback never fakes a result in production", async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK = "true";
+  const restore = mockFetchOnce(
+    { type: "authentication_error", code: "ip_validation_failed", message: "IP not whitelisted: 1.2.3.4" },
+    { ok: false, status: 403 }
+  );
+  const originalFetch = global.fetch;
+  try {
+    await assert.rejects(() => verifyBankAccount({ accountNumber: "50200012345678", ifsc: "HDFC0000123" }), /IP Whitelist Required/);
+
+    global.fetch = async () => { throw new TypeError("fetch failed"); };
+    await assert.rejects(() => verifyPan({ pan: "AAACB8781B" }), /fetch failed/);
+  } finally {
+    global.fetch = originalFetch;
+    restore();
+    process.env.NODE_ENV = originalNodeEnv;
   }
 });

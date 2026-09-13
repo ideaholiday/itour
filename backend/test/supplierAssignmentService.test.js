@@ -123,6 +123,10 @@ test("assigns the purchased transfer variant instead of the route's default vehi
       commission_rate REAL, commission_override_rate REAL
     );
     CREATE TABLE category_commissions (category_code TEXT, default_commission_rate REAL);
+    CREATE TABLE quality_scores (
+      entity_type TEXT, entity_id TEXT, review_count INTEGER DEFAULT 0, average_rating REAL,
+      smoothed_rating REAL, PRIMARY KEY (entity_type, entity_id)
+    );
     CREATE TABLE transfer_routes (
       product_id TEXT, route_type TEXT, vehicle_category TEXT,
       max_passengers INTEGER, max_luggage INTEGER

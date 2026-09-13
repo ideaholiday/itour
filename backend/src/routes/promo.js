@@ -1,6 +1,7 @@
 import express from "express";
 import db from "../db.js";
-import { validatePromoCode, getUserReferralInfo } from "../services/promoService.js";
+import { validatePromoCode } from "../services/promoService.js";
+import { getTravelerLoyaltyProfile } from "../services/loyaltyService.js";
 import { authenticate, optionalAuthMiddleware } from "../middleware/auth.js";
 
 const router = express.Router();
@@ -43,7 +44,7 @@ router.post("/validate", optionalAuthMiddleware, (req, res) => {
 router.get("/user/referral", authenticate, (req, res) => {
   try {
     if (!req.user?.id) return res.status(401).json({ error: "Authentication required" });
-    const stats = getUserReferralInfo(db, req.user.id);
+    const stats = getTravelerLoyaltyProfile(db, req.user.id);
     res.json({ success: true, referral: stats });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || "Failed to load referral statistics" });

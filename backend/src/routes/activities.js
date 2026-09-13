@@ -5,6 +5,7 @@ import { getPickupSuggestions, getProductLocationContext, validatePickupPoint } 
 import { validateBody } from "../middleware/validation.js";
 import { locationSchemas } from "../validators/apiSchemas.js";
 import { ensureDefaultProductOption, getBookingQuestions, getProductOptions } from "../services/logisticsService.js";
+import { priorMeanRating } from "../services/reviewService.js";
 
 const router = Router();
 
@@ -98,7 +99,7 @@ function parseProductRows(rows = []) {
   if (productIds.length > 0) {
     try {
       const placeholders = productIds.map(() => "?").join(",");
-      const allQuality = db.prepare(`SELECT entity_id, review_count, average_rating, score_100, tier FROM quality_scores WHERE entity_type = 'PRODUCT' AND entity_id IN (${placeholders})`).all(...productIds);
+      const allQuality = db.prepare(`SELECT entity_id, review_count, average_rating, smoothed_rating, score_100, tier FROM quality_scores WHERE entity_type = 'PRODUCT' AND entity_id IN (${placeholders})`).all(...productIds);
       for (const q of allQuality) {
         qualityMap.set(q.entity_id, q);
       }
@@ -173,9 +174,14 @@ function parseProductRows(rows = []) {
       durationHours: row.duration_hours,
       priceInr: row.price_inr,
       strikePriceInr: row.strike_price_inr,
-      rating: verifiedQuality?.review_count ? verifiedQuality.average_rating : (row.rating || 4.8),
-      review_count: verifiedQuality?.review_count ?? row.review_count ?? 12,
-      reviewCount: verifiedQuality?.review_count ?? row.review_count ?? 12,
+      // A listing shows the rating its verified reviews earned, or none at all:
+      // `rating: null` with `isNewListing` is how an unreviewed product reads.
+      rating: verifiedQuality?.review_count ? verifiedQuality.average_rating : (row.review_count ? row.rating : null),
+      review_count: verifiedQuality?.review_count ?? row.review_count ?? 0,
+      reviewCount: verifiedQuality?.review_count ?? row.review_count ?? 0,
+      // Ranking input, not a display value — see RATING_PRIOR_WEIGHT.
+      smoothedRating: verifiedQuality?.smoothed_rating ?? null,
+      isNewListing: !(verifiedQuality?.review_count || row.review_count),
       qualityScore: verifiedQuality?.score_100 || null,
       qualityTier: verifiedQuality?.tier || "NEW",
       bestseller: Boolean(row.bestseller),
@@ -187,7 +193,7 @@ function parseProductRows(rows = []) {
       exclusions: safeJsonParse(row.exclusions, []),
       itinerary: safeJsonParse(row.itinerary, []),
       supplierName: supplier ? supplier.company_name : "Idea Holiday Verified Supplier",
-      supplierRating: supplier ? supplier.rating : 4.8,
+      supplierRating: supplier?.rating ?? null,
       pricingVariants: pricing,
       transferRoute,
       transferMeta: transferRoute ? {
@@ -304,7 +310,9 @@ router.get("/activities", (req, res) => {
   }
 
   try {
-    let sql = `SELECT p.* FROM products p WHERE p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1`;
+    let sql = `SELECT p.*, qs.smoothed_rating FROM products p
+      LEFT JOIN quality_scores qs ON qs.entity_type = 'PRODUCT' AND qs.entity_id = p.id
+      WHERE p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1`;
     const params = [];
 
     if (destination) {
@@ -370,10 +378,21 @@ router.get("/activities", (req, res) => {
       params.push(`%${qTrim}%`, `%${qTrim}%`, `%${qTrim}%`, `%${qTrim}%`, `%${qTrim}%`);
     }
 
+    // Rank on the smoothed rating, so a listing with no reviews sits at the
+    // category mean rather than below every rated one. Display still shows the
+    // real average, or nothing at all.
+    const priorMean = priorMeanRating(db, "PRODUCT");
+    const rankRating = "COALESCE(qs.smoothed_rating, ?)";
+
     if (sort === "price_asc") sql += " ORDER BY p.price_inr ASC";
     else if (sort === "price_desc") sql += " ORDER BY p.price_inr DESC";
-    else if (sort === "rating") sql += " ORDER BY p.rating DESC";
-    else sql += " ORDER BY p.bestseller DESC, p.rating DESC";
+    else if (sort === "rating") {
+      sql += ` ORDER BY ${rankRating} DESC, COALESCE(p.review_count, 0) DESC`;
+      params.push(priorMean);
+    } else {
+      sql += ` ORDER BY p.bestseller DESC, ${rankRating} DESC`;
+      params.push(priorMean);
+    }
 
     const rows = db.prepare(sql).all(...params);
     const result = parseProductRows(rows);

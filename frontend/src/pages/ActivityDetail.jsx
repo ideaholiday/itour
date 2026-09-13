@@ -831,12 +831,16 @@ export default function ActivityDetail() {
         "url": `https://ideaholiday.in${activityPath(activity)}`,
         "seller": { "@type": "Organization", "name": "Idea Holiday" },
       },
-      "aggregateRating": {
-        "@type": "AggregateRating",
-        "ratingValue": activity.rating || 4.8,
-        "reviewCount": activity.reviewCount || activity.review_count || 12,
-        "bestRating": "5", "worstRating": "1",
-      },
+      // Emitted only when verified reviews exist. A rating in structured data
+      // that no traveler gave is a search-engine policy breach, not a default.
+      ...(Number(activity.reviewCount || activity.review_count || 0) > 0 && activity.rating ? {
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": activity.rating,
+          "reviewCount": Number(activity.reviewCount || activity.review_count),
+          "bestRating": "5", "worstRating": "1",
+        },
+      } : {}),
     }],
   };
 
@@ -915,7 +919,7 @@ export default function ActivityDetail() {
             {reviewData.quality?.review_count > 0 ? (
               <StarRating rating={Number(reviewData.quality.average_rating)} count={reviewData.quality.review_count} size="md" />
             ) : (
-              <span className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-bold text-stone-500">&#9733; 4.8 &#xb7; Verified Operator</span>
+              <span className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-bold text-stone-500">New listing &#xb7; Verified Operator</span>
             )}
             <span className="text-emerald-800 font-semibold text-xs">Supplied by {activity.supplierName || "Idea Holiday Verified Partner"}</span>
             {activity.bestseller && <span className="rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-black uppercase text-stone-950">Bestseller</span>}

@@ -74,8 +74,13 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
   const fulfillment = bookings.length ? Math.round((completed.length / (bookings.filter((booking) => booking.status !== "cancelled").length || 1)) * 100) : 100;
   const instantProducts = products.filter((product) => product.is_instant_booking !== 0).length;
   const listingAverage = products.length ? Math.round(products.reduce((sum, product) => sum + productScore(product), 0) / products.length) : 0;
+  // A partner without reviews is scored at a neutral assumption rather than
+  // penalised, and rather than shown a rating nobody gave. NEUTRAL_RATING is a
+  // scoring input only — every display below says "no reviews yet" instead.
+  const NEUTRAL_RATING = 4.5;
+  const ratingValue = Number(supplier.rating) || null;
   const performanceScore = Math.round(
-    (Number(supplier.rating || 4.8) / 5) * 35 +
+    ((ratingValue ?? NEUTRAL_RATING) / 5) * 35 +
     Math.min(1, fulfillment / 95) * 25 +
     (products.length ? instantProducts / products.length : 0) * 20 +
     (listingAverage / 100) * 20
@@ -201,7 +206,7 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
       trend: [4, 6, 8, 5, 9, 7, activeBookings.length || 5],
     },
     ratings: {
-      avg: Number(supplier.rating || 4.8),
+      avg: ratingValue,
       completion_rate: fulfillment,
       cancellation_rate: 100 - fulfillment,
     },
@@ -352,7 +357,7 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
           [CircleDollarSign, "Net revenue", money(revenue), `${money(paid)} paid out`, "text-emerald-600"],
           [CalendarCheck, "Active bookings", activeBookings.length, `${pendingBookings.length} awaiting confirmation`, "text-amber-600"],
           [TrendingUp, "Fulfillment rate", `${fulfillment}%`, `${completed.length} completed trips`, "text-amber-800"],
-          [Star, "Partner score", performanceScore, `${supplier.rating || 4.9} traveler rating`, "text-amber-600"]
+          [Star, "Partner score", performanceScore, ratingValue ? `${ratingValue.toFixed(1)} traveler rating` : "No verified reviews yet", "text-amber-600"]
         ].map(([Icon, label, value, note, color]) => (
           <article key={label} className="group rounded-3xl border border-stone-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-400">
             <div className="flex items-center justify-between">
@@ -651,15 +656,15 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
               <Star className="h-5 w-5 fill-amber-500 text-amber-500" />
             </span>
             <div>
-              <strong className="text-2xl font-bold text-stone-900">{supplier.rating || 4.9}</strong>
-              <span className="ml-2 text-xs text-stone-500">traveler rating</span>
+              <strong className="text-2xl font-bold text-stone-900">{ratingValue ? ratingValue.toFixed(1) : "—"}</strong>
+              <span className="ml-2 text-xs text-stone-500">{ratingValue ? "traveler rating" : "no verified reviews yet"}</span>
             </div>
           </div>
           <h2 className="mt-6 font-display text-2xl font-bold text-stone-900">Quality signals</h2>
           <p className="mt-2 text-xs text-stone-500">Calculated from your current bookings and published listings.</p>
           <div className="mt-5 space-y-4">
             {[
-              ["Traveler rating", Math.round((Number(supplier.rating || 4.9) / 5) * 100)],
+              ["Traveler rating", ratingValue ? Math.round((ratingValue / 5) * 100) : 0],
               ["Trip fulfillment", fulfillment],
               ["Listing completeness", listingAverage],
               ["Instant bookability", products.length ? Math.round((instantProducts / products.length) * 100) : 0]

@@ -1,4 +1,5 @@
-import { nanoid } from "nanoid";
+import { recordAffiliateBooking } from "./affiliateService.js";
+import { REFERRAL_POLICY, findReferrerByCode } from "./referralService.js";
 
 function promoError(message, status = 400) {
   const error = new Error(message);
@@ -53,10 +54,18 @@ export function validatePromoCode(database, { code, amountInr = 0, userId = null
 
     discountAmount = Math.max(0, Math.min(discountAmount, orderAmount));
 
+    let affiliate = null;
+    try {
+      affiliate = database.prepare("SELECT * FROM affiliates WHERE affiliate_code = ? AND status = 'ACTIVE'").get(normalized);
+    } catch {}
+
     return {
       valid: true,
-      type: "PROMO",
+      type: affiliate ? "AFFILIATE" : "PROMO",
       code: promo.code,
+      affiliateId: affiliate?.id || null,
+      affiliateCode: affiliate?.affiliate_code || null,
+      channelName: affiliate?.channel_name || null,
       discountType: promo.discount_type,
       discountValue: promo.discount_value,
       discountAmount,
@@ -66,47 +75,30 @@ export function validatePromoCode(database, { code, amountInr = 0, userId = null
     };
   }
 
-  // 2. Check user referral code (e.g. REF-JOHN1234 or direct user referral matches)
-  if (normalized.startsWith("REF-") || normalized.length >= 6) {
-    let matchingUser = database.prepare("SELECT id, name, email, referral_code FROM users WHERE UPPER(referral_code) = ?").get(normalized);
-
-    if (!matchingUser) {
-      // Fallback check matching user IDs or clean names
-      const allUsers = database.prepare("SELECT id, name, email, referral_code FROM users").all();
-      matchingUser = allUsers.find((u) => {
-        const cleanName = (u.name || "TRVL").replace(/[^A-Za-z0-9]/g, "").slice(0, 5).toUpperCase();
-        const cleanId = String(u.id).replace(/[^A-Za-z0-9]/g, "").slice(-4).toUpperCase();
-        const expectedCode = `REF-${cleanName}${cleanId}`;
-        return expectedCode === normalized || u.referral_code === normalized;
-      });
+  // 2. A traveler referral code (REF-…). Codes are matched exactly, never
+  // reconstructed from user names, so only issued codes validate.
+  const referrer = findReferrerByCode(database, normalized);
+  if (referrer) {
+    if (userId && referrer.id === userId) {
+      throw promoError("You cannot use your own referral code", 400);
     }
+    const discountPct = Math.round(REFERRAL_POLICY.friendDiscountRate * 100);
 
-    if (matchingUser) {
-      if (userId && matchingUser.id === userId) {
-        throw promoError("You cannot use your own referral code", 400);
-      }
-
-      const minSpend = 1000;
-      if (orderAmount < minSpend) {
-        throw promoError(`Referral codes require a minimum booking amount of ₹${minSpend.toLocaleString("en-IN")}`, 400);
-      }
-
-      const discountAmount = Math.min(250, orderAmount);
-
-      return {
-        valid: true,
-        type: "REFERRAL",
-        code: normalized,
-        referrerUserId: matchingUser.id,
-        referrerName: matchingUser.name,
-        discountType: "FIXED",
-        discountValue: 250,
-        discountAmount,
-        originalAmount: orderAmount,
-        finalAmount: Math.max(0, orderAmount - discountAmount),
-        description: `Friend Referral Voucher: ₹250 instant discount`,
-      };
-    }
+    // The rupee amount depends on the trip, so it is priced with the booking
+    // quote rather than here. Nothing is taken off the order at this step.
+    return {
+      valid: true,
+      type: "REFERRAL",
+      code: referrer.referral_code,
+      referrerUserId: referrer.id,
+      referrerName: referrer.name ? referrer.name.split(" ")[0] : null,
+      discountType: "REFERRAL",
+      discountValue: discountPct,
+      discountAmount: 0,
+      originalAmount: orderAmount,
+      finalAmount: orderAmount,
+      description: `Friend referral from ${referrer.name ? referrer.name.split(" ")[0] : "a friend"}: your first-trip discount appears in the price summary`,
+    };
   }
 
   throw promoError(`Invalid promo code "${normalized}". Please check spelling and try again.`, 404);
@@ -122,116 +114,24 @@ export function applyPromoCode(database, { code, bookingId, userId = null, amoun
     const validated = validatePromoCode(database, { code, amountInr: amountInr || 2000, userId });
 
     database.transaction(() => {
-      if (validated.type === "PROMO") {
+      if (validated.type === "PROMO" || validated.type === "AFFILIATE") {
         database.prepare("UPDATE promo_codes SET times_used = times_used + 1 WHERE code = ?").run(validated.code);
-      } else if (validated.type === "REFERRAL" && validated.referrerUserId) {
-        const referralId = `ref_${nanoid(12)}`;
-        database.prepare(`
-          INSERT INTO user_referrals (id, referrer_user_id, referred_user_id, referral_code, reward_inr, status, booking_id)
-          VALUES (?, ?, ?, ?, 250.0, 'PENDING', ?)
-        `).run(referralId, validated.referrerUserId, userId || null, validated.code, bookingId);
+        if (validated.type === "AFFILIATE" || validated.affiliateCode) {
+          recordAffiliateBooking(database, {
+            bookingId,
+            affiliateCode: validated.affiliateCode || validated.code,
+            amountInr: validated.originalAmount || amountInr,
+            attributionType: "COUPON_CODE",
+            userId,
+          });
+        }
       }
+      // Traveler referral codes are attached by applyReferralToBooking in the
+      // booking route, which is the only place a referral reward is created.
     })();
 
     return validated;
   } catch (err) {
     return null;
   }
-}
-
-/**
- * Retrieves referral statistics, link, and reward balance for a registered user
- */
-export function getUserReferralInfo(database, userId) {
-  if (!userId) throw promoError("User ID is required", 400);
-
-  const user = database.prepare("SELECT id, name, email, referral_code FROM users WHERE id = ?").get(userId);
-  if (!user) throw promoError("User not found", 404);
-
-  let referralCode = user.referral_code;
-  if (!referralCode) {
-    const cleanName = (user.name || "TRVL").replace(/[^A-Za-z0-9]/g, "").slice(0, 5).toUpperCase();
-    const cleanId = String(user.id).replace(/[^A-Za-z0-9]/g, "").slice(-4).toUpperCase();
-    referralCode = `REF-${cleanName}${cleanId}`;
-    try {
-      database.prepare("UPDATE users SET referral_code = ? WHERE id = ?").run(referralCode, user.id);
-    } catch {}
-  }
-
-  const referrals = database.prepare(`
-    SELECT ur.*, b.ref as booking_ref, b.activity_date, b.amount_inr, u.name as referred_name
-    FROM user_referrals ur
-    LEFT JOIN bookings b ON ur.booking_id = b.id
-    LEFT JOIN users u ON ur.referred_user_id = u.id
-    WHERE ur.referrer_user_id = ?
-    ORDER BY ur.created_at DESC
-  `).all(userId);
-
-  const totalCreditsEarned = referrals
-    .filter((r) => r.status === "REWARDED")
-    .reduce((sum, r) => sum + Number(r.reward_inr || 0), 0);
-
-  const pendingCredits = referrals
-    .filter((r) => r.status === "PENDING")
-    .reduce((sum, r) => sum + Number(r.reward_inr || 0), 0);
-
-  return {
-    userId: user.id,
-    userName: user.name,
-    referralCode,
-    referralLink: `https://ideaholiday.com/signup?ref=${referralCode}`,
-    rewardPerFriendInr: 250,
-    friendWelcomeDiscountInr: 250,
-    totalCreditsEarned,
-    pendingCredits,
-    friendsInvitedCount: referrals.length,
-    referrals: referrals.map((r) => ({
-      id: r.id,
-      referredName: r.referred_name || "Invited Traveler",
-      bookingRef: r.booking_ref || "Direct Signup",
-      rewardInr: r.reward_inr,
-      status: r.status,
-      createdAt: r.created_at,
-      rewardedAt: r.rewarded_at,
-    })),
-  };
-}
-
-/**
- * Triggers reward release when referred booking completes
- */
-export function processReferralRewardOnCompletion(database, bookingId) {
-  const referral = database.prepare("SELECT * FROM user_referrals WHERE booking_id = ? AND status = 'PENDING'").get(bookingId);
-  if (!referral) return null;
-
-  const referrer = database.prepare("SELECT id, name, email, phone, wallet_balance_inr FROM users WHERE id = ?").get(referral.referrer_user_id);
-  const rewardAmount = Number(referral.reward_inr) || 250;
-  const currentBalance = Number(referrer?.wallet_balance_inr || 0);
-  const newBalance = currentBalance + rewardAmount;
-
-  database.transaction(() => {
-    database.prepare(`
-      UPDATE user_referrals
-      SET status = 'REWARDED', rewarded_at = datetime('now')
-      WHERE id = ?
-    `).run(referral.id);
-
-    if (referrer) {
-      database.prepare("UPDATE users SET wallet_balance_inr = ? WHERE id = ?").run(newBalance, referrer.id);
-      database.prepare(`
-        INSERT INTO wallet_transactions (
-          id, user_id, type, amount_inr, balance_after_inr, reference_id, description, created_at
-        ) VALUES (?, ?, 'REFERRAL_REWARD', ?, ?, ?, ?, datetime('now'))
-      `).run(
-        `wtx_${nanoid(12)}`,
-        referrer.id,
-        rewardAmount,
-        newBalance,
-        referral.id,
-        `Earned ₹${rewardAmount} for successful friend referral (#${bookingId})`
-      );
-    }
-  })();
-
-  return { referralId: referral.id, rewarded: true, rewardAmount, newBalance };
 }

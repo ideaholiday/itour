@@ -2,6 +2,7 @@ import db from "./db.js";
 import logger from "./config/logger.js";
 import { INDIA_CITIES } from "./data/indiaCities.js";
 import { ADMIN_LOGIN, hashPassword, requireAdminInitialPassword } from "./lib/passwords.js";
+import { seedDemoReviews } from "./lib/demoReviews.js";
 
 if (process.env.ALLOW_DESTRUCTIVE_SEED !== "true") {
   logger.error("Refusing destructive seed because ALLOW_DESTRUCTIVE_SEED is not enabled");
@@ -14,6 +15,10 @@ db.pragma("foreign_keys = OFF");
 
 // Clear existing tables in safe order
 db.exec(`
+  DELETE FROM review_helpfulness;
+  DELETE FROM review_photos;
+  DELETE FROM reviews;
+  DELETE FROM quality_scores;
   DELETE FROM driver_assignments;
   DELETE FROM payouts;
   DELETE FROM staff_tasks;
@@ -75,12 +80,12 @@ const insertSupplier = db.prepare(`
 `);
 
 const suppliers = [
-  ["sup_lucknow_cabs", "Awadh Express Airport Cabs", "Rajesh Verma", "rajesh@awadhcabs.in", "+919876543210", "Lucknow", "Uttar Pradesh", "09AAACA1234A1Z5", "AAACA1234A", "APPROVED", 1, 18.0, '{"account_number":"91827364512","ifsc":"HDFC0000123","bank_name":"HDFC Bank","upi_id":"awadhcabs@hdfcbank"}', 4.9],
-  ["sup_capital_tours", "Capital Travels & DMC", "Priya Sharma", "priya@capitaltravels.in", "+919811223344", "Delhi", "Delhi", "07BBBCA9988B1Z2", "BBBCA9988B", "APPROVED", 1, 15.0, '{"account_number":"501002233441","ifsc":"ICIC0000456","bank_name":"ICICI Bank","upi_id":"priya@icici"}', 4.8],
-  ["sup_goa_transfers", "Goa Coastal Cabs & Excursions", "Francis Dsouza", "francis@goacoast.in", "+919822334455", "Panaji", "Goa", "30CCCCA5566C1Z9", "CCCCA5566C", "APPROVED", 1, 20.0, '{"account_number":"40998877665","ifsc":"SBIN0001234","bank_name":"State Bank of India","upi_id":"goacoast@sbi"}', 4.7],
-  ["sup_royal_rajasthan", "Royal Rajputana Fleet & Luxury Cabs", "Vikram Singh Rathore", "vikram@royalrajputana.in", "+919414012345", "Jaipur", "Rajasthan", "08DDDD1122D1Z4", "DDDD1122D", "PENDING", 0, 15.0, '{"account_number":"30991122334","ifsc":"BARB0JAIPUR","bank_name":"Bank of Baroda","upi_id":"rajputana@barodampay"}', 4.5],
-  ["sup_himalayan_riders", "Himalayan Cabs & Tempo Express", "Suresh Negi", "suresh@himalayanrides.in", "+919736098765", "Shimla", "Himachal Pradesh", "02EEEE3344E1Z7", "EEEE3344E", "PENDING", 0, 15.0, '{"account_number":"60123456789","ifsc":"PUNB0123400","bank_name":"Punjab National Bank","upi_id":"himalayan@pnb"}', 4.6],
-  ["sup_kerala_cruises", "Backwater Trails & Luxury Transfers", "Anand Kurup", "anand@keralatrails.com", "+919847055443", "Kochi", "Kerala", "32FFFF5566F1Z1", "FFFF5566F", "SUSPENDED", 0, 15.0, '{"account_number":"10293847561","ifsc":"FDRL0001402","bank_name":"Federal Bank","upi_id":"keralatrails@federal"}', 4.2]
+  ["sup_lucknow_cabs", "Awadh Express Airport Cabs", "Rajesh Verma", "rajesh@awadhcabs.in", "+919876543210", "Lucknow", "Uttar Pradesh", "09AAACA1234A1Z5", "AAACA1234A", "APPROVED", 1, 18.0, '{"account_number":"91827364512","ifsc":"HDFC0000123","bank_name":"HDFC Bank","upi_id":"awadhcabs@hdfcbank"}', null],
+  ["sup_capital_tours", "Capital Travels & DMC", "Priya Sharma", "priya@capitaltravels.in", "+919811223344", "Delhi", "Delhi", "07BBBCA9988B1Z2", "BBBCA9988B", "APPROVED", 1, 15.0, '{"account_number":"501002233441","ifsc":"ICIC0000456","bank_name":"ICICI Bank","upi_id":"priya@icici"}', null],
+  ["sup_goa_transfers", "Goa Coastal Cabs & Excursions", "Francis Dsouza", "francis@goacoast.in", "+919822334455", "Panaji", "Goa", "30CCCCA5566C1Z9", "CCCCA5566C", "APPROVED", 1, 20.0, '{"account_number":"40998877665","ifsc":"SBIN0001234","bank_name":"State Bank of India","upi_id":"goacoast@sbi"}', null],
+  ["sup_royal_rajasthan", "Royal Rajputana Fleet & Luxury Cabs", "Vikram Singh Rathore", "vikram@royalrajputana.in", "+919414012345", "Jaipur", "Rajasthan", "08DDDD1122D1Z4", "DDDD1122D", "PENDING", 0, 15.0, '{"account_number":"30991122334","ifsc":"BARB0JAIPUR","bank_name":"Bank of Baroda","upi_id":"rajputana@barodampay"}', null],
+  ["sup_himalayan_riders", "Himalayan Cabs & Tempo Express", "Suresh Negi", "suresh@himalayanrides.in", "+919736098765", "Shimla", "Himachal Pradesh", "02EEEE3344E1Z7", "EEEE3344E", "PENDING", 0, 15.0, '{"account_number":"60123456789","ifsc":"PUNB0123400","bank_name":"Punjab National Bank","upi_id":"himalayan@pnb"}', null],
+  ["sup_kerala_cruises", "Backwater Trails & Luxury Transfers", "Anand Kurup", "anand@keralatrails.com", "+919847055443", "Kochi", "Kerala", "32FFFF5566F1Z1", "FFFF5566F", "SUSPENDED", 0, 15.0, '{"account_number":"10293847561","ifsc":"FDRL0001402","bank_name":"Federal Bank","upi_id":"keralatrails@federal"}', null]
 ];
 
 for (const s of suppliers) insertSupplier.run(...s);
@@ -191,8 +196,8 @@ insertProduct.run(
   0.75,
   899,
   1200,
-  4.9,
-  48,
+  null, // rating — earned from reviews, never seeded literally
+  0,
   1,
   1,
   1,
@@ -246,8 +251,8 @@ insertProduct.run(
   8.0,
   2499,
   3200,
-  4.9,
-  52,
+  null, // rating — earned from reviews, never seeded literally
+  0,
   1,
   1,
   1,
@@ -278,8 +283,8 @@ insertProduct.run(
   6.0,
   699,
   999,
-  4.8,
-  38,
+  null, // rating — earned from reviews, never seeded literally
+  0,
   1,
   1,
   1,
@@ -314,7 +319,7 @@ insertProduct.run(
   2.0,
   1499,
   1999,
-  4.5,
+  null, // rating — earned from reviews, never seeded literally
   0,
   0,
   1,
@@ -368,8 +373,8 @@ insertProduct.run(
   8.0,
   2499,
   3200,
-  4.8,
-  86,
+  null, // rating — earned from reviews, never seeded literally
+  0,
   1,
   1,
   1,
@@ -409,8 +414,8 @@ insertProduct.run(
   96.0,
   9999,
   13500,
-  4.9,
-  112,
+  null, // rating — earned from reviews, never seeded literally
+  0,
   1,
   1,
   1,
@@ -467,8 +472,8 @@ insertProduct.run(
   3.5,
   2899,
   3500,
-  4.9,
-  64,
+  null, // rating — earned from reviews, never seeded literally
+  0,
   1,
   1,
   1,
@@ -567,11 +572,11 @@ const insertSupplierDriver = db.prepare(`
 `);
 
 const fleetDrivers = [
-  ["drv_sup_1", "sup_lucknow_cabs", "Ramesh Kumar Yadav", "+919839011223", "Swift Dzire VXI (Sedan)", "UP-32-DN-4821", "UP3220190048210", 4.9, "ASSIGNED"],
-  ["drv_sup_2", "sup_lucknow_cabs", "Suresh Chandra", "+919839022334", "Maruti Ertiga ZXI (SUV)", "UP-32-EV-8821", "UP3220180099120", 4.8, "AVAILABLE"],
-  ["drv_sup_3", "sup_lucknow_cabs", "Mohd. Irfan Khan", "+919839033445", "Toyota Innova Crysta VIP", "UP-32-VIP-0007", "UP3220200012345", 5.0, "AVAILABLE"],
-  ["drv_sup_4", "sup_lucknow_cabs", "Vikram Singh", "+919839044556", "Force Tempo Traveller 12S", "UP-32-TT-1100", "UP3220170055443", 4.7, "AVAILABLE"],
-  ["drv_sup_5", "sup_capital_tours", "Rajesh Sharma", "+919811009988", "Innova Crysta AC", "DL-1Y-AB-9900", "DL0420190088776", 4.9, "AVAILABLE"]
+  ["drv_sup_1", "sup_lucknow_cabs", "Ramesh Kumar Yadav", "+919839011223", "Swift Dzire VXI (Sedan)", "UP-32-DN-4821", "UP3220190048210", null, "ASSIGNED"],
+  ["drv_sup_2", "sup_lucknow_cabs", "Suresh Chandra", "+919839022334", "Maruti Ertiga ZXI (SUV)", "UP-32-EV-8821", "UP3220180099120", null, "AVAILABLE"],
+  ["drv_sup_3", "sup_lucknow_cabs", "Mohd. Irfan Khan", "+919839033445", "Toyota Innova Crysta VIP", "UP-32-VIP-0007", "UP3220200012345", null, "AVAILABLE"],
+  ["drv_sup_4", "sup_lucknow_cabs", "Vikram Singh", "+919839044556", "Force Tempo Traveller 12S", "UP-32-TT-1100", "UP3220170055443", null, "AVAILABLE"],
+  ["drv_sup_5", "sup_capital_tours", "Rajesh Sharma", "+919811009988", "Innova Crysta AC", "DL-1Y-AB-9900", "DL0420190088776", null, "AVAILABLE"]
 ];
 
 for (const d of fleetDrivers) insertSupplierDriver.run(...d);
@@ -754,4 +759,13 @@ const insertTask = db.prepare(`
 insertTask.run("task_1", "CONTENT_MODERATION", null, "prod_pkg_goa_1", "Pooja Singh", "MEDIUM", "RESOLVED", "Verified day-wise itinerary and beach resort photographs.");
 insertTask.run("task_2", "FALLBACK_DISPATCH", "bk_demo_1", "prod_tr_lko_1", "Pooja Singh", "LOW", "RESOLVED", "Driver Ramesh assigned on schedule.");
 
-logger.info("Marketplace demo data seeded", { destinations: 10, suppliers: 3, products: 4 });
+// 11. Demo reviews — opt-in, and impossible in production. Without this the
+// demo marketplace shows empty review sections; with it, every listing has a
+// plausible review history that is marked `source = 'SEED'` throughout.
+let demoReviews = { products: 0, reviews: 0 };
+if (process.env.ALLOW_DEMO_REVIEWS === "true") {
+  demoReviews = seedDemoReviews(db, { userId: "user_traveler" });
+  logger.info("Demo reviews seeded", demoReviews);
+}
+
+logger.info("Marketplace demo data seeded", { destinations: 10, suppliers: 3, products: 4, reviews: demoReviews.reviews });

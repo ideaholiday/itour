@@ -52,6 +52,7 @@ const footerGroups = [
       ["Things to do", "/search"],
       ["Plan Circuit 🗺️", "/circuit-planner"],
       ["Travel & Earn ✨", "/travel-and-earn"],
+      ["Influencer Program 🌟", "/affiliate"],
     ],
   },
   {
@@ -61,6 +62,7 @@ const footerGroups = [
       ["Contact us", "/contact-us"],
       ["My bookings", "/bookings"],
       ["Rewards & Referrals", "/travel-and-earn"],
+      ["Creator & Affiliate Hub", "/affiliate"],
       ["Help & support", "/contact-us"],
     ],
   },
@@ -154,16 +156,31 @@ export default function Footer() {
           </div>
 
           {/* Contact */}
-          <div className="mt-7 space-y-2.5 text-xs border-t border-stone-800 pt-6">
-            <a href="mailto:info@ideaholiday.in" className="flex items-center gap-2 text-stone-400 hover:text-amber-400 transition-colors">
-              <Mail className="h-3.5 w-3.5 text-amber-500 shrink-0" /> info@ideaholiday.in
-            </a>
-            <a href="tel:+911800433200" className="flex items-center gap-2 text-stone-400 hover:text-amber-400 transition-colors">
-              <Phone className="h-3.5 w-3.5 text-amber-500 shrink-0" /> +91 1800-IDEA
-            </a>
-            <span className="flex items-center gap-2">
-              <MapPin className="h-3.5 w-3.5 text-amber-500 shrink-0" /> India
-            </span>
+          <div className="mt-7 space-y-2 text-xs border-t border-stone-800 pt-6">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <Mail className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              <a href="mailto:info@ideaholiday.in" className="text-stone-400 hover:text-amber-400 transition-colors">
+                info@ideaholiday.in
+              </a>
+              <span className="text-stone-700">·</span>
+              <a href="mailto:support@ideaholiday.in" className="text-stone-400 hover:text-amber-400 transition-colors">
+                support@ideaholiday.in
+              </a>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <Phone className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              <a href="tel:+919696777391" className="text-stone-400 hover:text-amber-400 transition-colors">
+                +91 9696777391
+              </a>
+              <span className="text-stone-700">·</span>
+              <a href="tel:+919336757106" className="text-stone-400 hover:text-amber-400 transition-colors">
+                +91 9336757106
+              </a>
+            </div>
+            <div className="flex items-start gap-2 text-stone-400">
+              <MapPin className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+              <span>Mumbai · Vapi · Lucknow · Moradabad</span>
+            </div>
           </div>
         </div>
 

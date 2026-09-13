@@ -1,3 +1,6 @@
+import driverTripsRouter from "./routes/driverTrips.js";
+import { processDispatchSchedule, processDispatchOutbox } from "./services/dispatchWorkflowService.js";
+import { deliverDispatchNotification } from "./services/dispatchNotificationService.js";
 import { processReservationOutbox } from "./services/reservationOutboxService.js";
 import express from "express";
 import path from "path";
@@ -31,6 +34,7 @@ import { configureSecurity } from "./middleware/security.js";
 import { apiNotFound, errorHandler, requestContext, requestLogger, stableErrorResponses } from "./middleware/observability.js";
 import { auditMutations } from "./services/auditService.js";
 import { requestBoundary } from "./middleware/validation.js";
+import { backfillLegacyReferrals, findWalletDiscrepancies, processReferralLifecycle, sendReferralNotifications } from "./services/referralService.js";
 
 // Run pending migrations on startup
 try {
@@ -41,6 +45,16 @@ try {
 } catch (err) {
   logger.error("Database migration failed", { error: err.message, code: err.code });
   if (process.env.NODE_ENV === "production") throw err;
+}
+
+// Carry v1 referrals into the v3 tables and open the wallet ledger (idempotent).
+try {
+  const carried = backfillLegacyReferrals(db);
+  if (carried.relationships || carried.rewards || carried.adjustments) {
+    logger.info("Carried legacy referrals into Travel & Earn v3", carried);
+  }
+} catch (err) {
+  logger.warn("Referral backfill failed", { error: err.message });
 }
 
 // Backfill canonical location rules and product options on startup (safe, idempotent)
@@ -89,6 +103,9 @@ import exportsRouter from "./routes/exports.js";
 import eventsRouter from "./routes/events.js";
 import currencyRouter from "./routes/currency.js";
 import promoRouter from "./routes/promo.js";
+import affiliateRouter from "./routes/affiliate.js";
+import referralRouter from "./routes/referral.js";
+import adminAffiliatesRouter from "./routes/adminAffiliates.js";
 import addonsRouter from "./routes/addons.js";
 import circuitOrdersRouter from "./routes/circuitOrders.js";
 import availabilityRouter from "./routes/availability.js";
@@ -157,6 +174,7 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/octo`, octoRouter);
   app.use(`${prefix}/admin`, adminRouter);
   app.use(`${prefix}/analytics`, analyticsRouter);
+  app.use(`${prefix}/driver-trips`, driverTripsRouter);
   app.use(`${prefix}/ops`, opsRouter);
   app.use(`${prefix}/checkout`, checkoutRouter);
   app.use(`${prefix}/support`, supportRouter);
@@ -170,6 +188,9 @@ const mountApiRoutes = (prefix) => {
   app.use(prefix, eventsRouter);
   app.use(`${prefix}/currency`, currencyRouter);
   app.use(`${prefix}/promo`, promoRouter);
+  app.use(`${prefix}/affiliate`, affiliateRouter);
+  app.use(`${prefix}/referral`, referralRouter);
+  app.use(`${prefix}/admin/affiliates`, adminAffiliatesRouter);
   app.use(prefix, addonsRouter);
   app.use(`${prefix}/circuit-orders`, circuitOrdersRouter);
   app.use(`${prefix}/availability`, availabilityRouter);
@@ -214,6 +235,16 @@ app.use(apiNotFound);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 8080;
+let dispatchRunning = false;
+async function dispatchTick() {
+  if (dispatchRunning) return;
+  dispatchRunning = true;
+  try { processDispatchSchedule(db); await processDispatchOutbox(db, deliverDispatchNotification); }
+  catch (error) { logger.error("Driver dispatch worker failed", { error }); }
+  finally { dispatchRunning = false; }
+}
+const dispatchTimer = setInterval(dispatchTick, 30000);
+dispatchTimer.unref();
 const reservationDeliveryTimer = setInterval(() => {
   queueNotification(processReservationOutbox(db, notifyBookingConfirmed), "Reservation confirmation outbox");
 }, 5000);
@@ -230,6 +261,27 @@ const assignmentSlaTimer = setInterval(() => {
   } catch (error) { logger.error("Circuit reconfirmation SLA worker failed", { error }); }
 }, 30_000);
 assignmentSlaTimer.unref();
+// Travel & Earn: clear matured rewards, reverse refunded ones, return credit from
+// abandoned checkouts, expire lapsed credit, and check the ledger still adds up.
+let referralRunning = false;
+async function referralTick() {
+  if (referralRunning) return;
+  referralRunning = true;
+  try {
+    const result = processReferralLifecycle(db);
+    const { notifications, ...counts } = result;
+    if (Object.values(counts).some(Boolean)) logger.info("Referral lifecycle pass", counts);
+    const drift = findWalletDiscrepancies(db);
+    if (drift.length) logger.error("Wallet ledger does not match cached balances", { users: drift.slice(0, 20), count: drift.length });
+    await sendReferralNotifications(db, notifications);
+  } catch (error) {
+    logger.error("Referral lifecycle worker failed", { error });
+  } finally {
+    referralRunning = false;
+  }
+}
+const referralTimer = setInterval(referralTick, 5 * 60_000);
+referralTimer.unref();
 const server = app.listen(PORT, "0.0.0.0", () => {
   logger.info("Idea Holiday API started", { port: Number(PORT) });
   if (databaseInfo.engine === "postgres") {
@@ -241,8 +293,10 @@ const server = app.listen(PORT, "0.0.0.0", () => {
 
 const shutdown = (signal) => {
   logger.info("Shutdown signal received", { signal });
+  clearInterval(dispatchTimer);
   clearInterval(reservationDeliveryTimer);
   clearInterval(assignmentSlaTimer);
+  clearInterval(referralTimer);
   server.close(() => {
     try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (error) { logger.warn("SQLite checkpoint failed", { error }); }
     try { db.close(); } catch (error) { logger.warn("SQLite close failed", { error }); }

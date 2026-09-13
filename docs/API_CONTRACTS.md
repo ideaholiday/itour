@@ -121,6 +121,17 @@ All API endpoints follow RESTful design principles and are served under the `/ap
   - Products without seat inventory keep demand-rule pricing over `price_inr`
     and omit `pricingSource`.
 
+### 1.3 Review Collection Links
+
+Unauthenticated by design: a single-use token, or a claimed share link, is the
+traveler's proof that the booking is theirs. Both routes produce an ordinary
+verified review — see BUSINESS_RULES §9.3.
+
+- **`GET /api/reviews/invite/:token`**: What the review form should show — booking reference, listing, operator, activity date, and whether a driver rating is expected. `404` unknown, `409` already used or already reviewed, `410` expired.
+- **`POST /api/reviews/invite/:token`**: Submits the review and spends the token. Body matches `POST /api/reviews`, minus the booking fields (the token carries them).
+- **`GET /api/reviews/share/:slug`**: Public view of a supplier's share link — operator name, and the listing when the link is scoped to one. Reveals nothing about any booking.
+- **`POST /api/reviews/share/:slug/claim`**: `{ bookingRef, phoneLast4 }` → `{ token, booking }`. Every mismatch returns the same `404` message. Rate-limited per IP (10 per 15 minutes).
+
 ---
 
 ## 2. Traveler Endpoints (Requires `TRAVELER`, `ADMIN`, or `STAFF`)
@@ -345,18 +356,27 @@ All API endpoints follow RESTful design principles and are served under the `/ap
   returns `CAPACITY_BELOW_RESERVED`; linking an option owned by another supplier
   returns `OPTION_NOT_FOUND`.
 
+### 3.1.4 Review Share Links
+
+- **`GET /api/reviews/share-links`**: The supplier's links, each with its funnel (`view_count`, `claim_count`, `invites_issued`, `reviews_submitted`), plus an aggregate `stats` block (`issued`, `opened`, `submitted`, `conversionPct`).
+- **`POST /api/reviews/share-links`**: `{ productId?, label? }` → a new link. Omitting `productId` accepts a booking for any of the supplier's listings; supplying one restricts claims to that listing. A listing belonging to another supplier is rejected with `403`.
+- **`PATCH /api/reviews/share-links/:id`**: `{ isActive }` deactivates or reactivates a link. A deactivated slug returns `410` to travelers. Another supplier's link is `403`.
+
 ### 3.2 Driver Assignment & Roster Dispatch
-- **Endpoint**: `POST /api/suppliers/bookings/:id/assign-driver`
-- **Request Body**:
+- **`GET /api/suppliers/:id/drivers/availability?bookingId=`**: Every fleet driver with `available` and, when not available, a `reason` (status, vehicle category, seats, missing email, or a clashing booking ref).
+- **`POST /api/suppliers/:id/assign-driver`**: Assigns a fleet driver (`supplierDriverId`) or an outside driver. The driver receives a trip request and must accept from the private link, unless `confirmedByPhone` is set.
   ```json
   {
-    "driverName": "Ramesh Kumar",
-    "driverPhone": "+919839011223",
-    "vehicleModel": "Toyota Innova Crysta",
-    "vehicleNumber": "UP-32-DN-4821"
+    "bookingId": "bk_123",
+    "supplierDriverId": "drv_sup_1",
+    "confirmedByPhone": true,
+    "note": "Called Ravi at 18:05, he accepted"
   }
   ```
-- **Response (200 OK)**: Dispatches automated WhatsApp template with trip details to driver and alerts traveler of assignment.
+  Outside driver instead of `supplierDriverId`: `driverName`, `driverPhone`, `driverEmail`, `seatCapacity`, `vehicleModel`, `vehicleNumber`. `note` (3+ characters) is required with `confirmedByPhone`.
+- **`GET /api/suppliers/:id/bookings/:bookingId/dispatch-timeline`**: The booking's driver and trip events (`event_type`, `new_status`, `actor_id`, `note`, `details`, `created_at`). `404` for another supplier's booking.
+- **`POST /api/suppliers/:id/bookings/:bookingId/confirm-driver`** `{ "note": "Called Ravi at 18:05" }`: Records a pending driver's acceptance taken by phone. Allowed after the response deadline while the assignment is still pending; `409` once the driver was removed or the schedule changed. Idempotent for an already accepted driver. Queues the driver-confirmed notifications, closes the assignment task, and writes an `ACCEPT_BY_PHONE` audit event with the note.
+- **`GET /api/suppliers/:id/dispatch`**: Effective dispatch settings (`automatic_enabled`, `lead_hours`, `response_minutes`, `max_attempts`, `buffer_minutes`, and `source` of `DEFAULT` or `SUPPLIER`), fleet `readiness` (`total`, `ready`, and each driver's `missing` fields), open "assign manually" tasks (most urgent pickup first, with `minutes_to_pickup`, `priority`, `driver_state` of `NO_DRIVER` or `AWAITING_DRIVER`), and recent notification jobs.
 
 ### 3.3 Verify Pickup OTP & Commence Journey
 - **Endpoint**: `POST /api/bookings/:id/verify-pickup-otp`
@@ -382,7 +402,13 @@ All API endpoints follow RESTful design principles and are served under the `/ap
 
 ### 4.1 Live Trip Board & Fallbacks
 - **`GET /api/ops/live-dispatch`**: Returns active trips, unassigned bookings, and telemetry status.
-- **`POST /api/ops/fallback-override`**: Manually overrides a stalled booking with a fallback driver.
+- **`GET /api/ops/dispatch-queue`**: All open "assign manually" `tasks` across suppliers, most urgent pickup first, with supplier contact and driver state; `tripIssues` (`PICKUP_NOT_STARTED`, `TRIP_COMPLETION_OVERDUE`); and recent notification jobs. The supplier `GET /api/suppliers/:id/dispatch` returns the same `tripIssues` for its bookings.
+- **`GET /api/ops/bookings/:bookingId/dispatch-timeline`**: Timeline for any booking.
+- **`POST /api/ops/bookings/:bookingId/trip-override`** `{ "action": "START" | "COMPLETE", "note": "..." }`: Start an accepted trip without the pickup OTP, or complete a started trip. `409` for any other state.
+- **`GET /api/ops/bookings/:bookingId/fleet-availability`**: The booking supplier's fleet with availability reasons, available drivers first.
+- **`POST /api/ops/fallback-override`**: Operations take over assignment. Body: `bookingId`, `notes` (required reason), and either `supplierDriverId` or an outside driver (`fallbackDriverName`, `fallbackDriverPhone`, `fallbackDriverEmail`, `seatCapacity`, `fallbackVehicleModel`, `fallbackVehicleNumber`). With `confirmedByPhone: true` the driver is accepted immediately and `notes` is recorded as the phone confirmation.
+- **`POST /api/ops/bookings/:bookingId/confirm-driver`** `{ "note": "..." }`: Same as the supplier phone confirmation, for any supplier's booking.
+- **Scheduler endpoints** (`X-Scheduler-Token` or `ADMIN`/`STAFF`): `POST /api/ops/process-driver-dispatch`, `POST /api/ops/process-assignment-timeouts`, `POST /api/ops/process-reservation-outbox`, `POST /api/ops/process-post-trip-invites`.
 - **`POST /api/ops/reset-pickup-otp`**: Resets an OTP lock for a stranded traveler after telephone verification.
 
 ### 4.2 Circuit Management Queue
@@ -437,3 +463,132 @@ Used on `supply.ideaholiday.in` for multi-channel ResTech integration (Bókun, F
 - **`GET /api/supplier-channels/:channelId/fetch-products`**: Fetches remote product catalog from the external channel.
 - **`POST /api/supplier-channels/:channelId/import`**: Imports selected remote products into Idea Holiday catalog and maps identifiers in `reservation_external_references`.
 
+
+---
+
+## 8. Creator & Affiliate Endpoints (`/api/affiliate`)
+
+Commission rules behind these endpoints are in BUSINESS_RULES §10.
+
+### 8.1 Attribution (public)
+- **`POST /api/affiliate/track-click`**: Records a referral click and opens the
+  attribution window. Called by the browser whenever a `?ref=` link is opened.
+  - **Body**: `{ "affiliateCode": "TRAVELPRO10", "visitorId": "…", "subId": "reels-march", "destinationPath": "/activity/goa-scuba", "referrerUrl": "…" }`
+  - **Response**: `{ "success": true, "attributionExpiresAt": "2026-10-12 09:00:00", "windowDays": 30 }`
+  - `visitorId` is an anonymous, browser-generated token (`lib/affiliateAttribution.js`).
+    Without it the click is logged but no attribution window opens, and a link
+    referral will not be credited.
+
+Booking creation (`POST /api/bookings`) accepts `visitor_id`, and optionally
+`affiliate_code` and `affiliate_sub_id`. **The code alone earns nothing** — the
+server credits a link referral only when an unexpired attribution exists for
+that `visitor_id`. A coupon code applied through `promo_code` follows the normal
+promo path and is credited on the code itself.
+
+### 8.2 Profile (Requires authentication)
+- **`GET /api/affiliate/me`**: `{ registered, affiliate }` for the signed-in user.
+- **`POST /api/affiliate/register`**: Creates the creator profile and provisions
+  the matching traveler-facing promo code.
+  - **Body**: `{ "channelName": "...", "channelType": "YOUTUBE", "channelUrl": "...", "customCode": "TRAVELPRO10", "bio": "..." }`
+- **`PUT /api/affiliate/profile`**: Updates channel name, type, URL, bio.
+- **`POST /api/affiliate/kyc`**: Submits PAN (and optionally bank/UPI, which are
+  routed through the payout-account flow below).
+  - **Body**: `{ "panNumber": "ABCDE1234F", "panHolderName": "...", "bankAccountNumber": "...", "bankIfsc": "...", "bankAccountHolder": "...", "upiId": "...", "gstin": "..." }`
+- **`GET /api/affiliate/dashboard`**: Full creator dashboard — tier and progress,
+  balance breakdown (pending / on hold / withdrawable / reserved / paid), payout
+  policy, payout accounts, referrals, campaign totals, payouts and ledger.
+- **`GET /api/affiliate/share-link?path=/activity/x&subId=reels-march`**: Builds
+  a trackable deep link.
+
+### 8.3 Payout accounts (Requires authentication)
+- **`GET /api/affiliate/payout-accounts`**: Accounts on file. Account numbers are
+  **masked** to the last four digits.
+- **`POST /api/affiliate/payout-accounts`**: Adds a bank account (verified by
+  penny drop) or a UPI ID.
+  - **Body (bank)**: `{ "method": "BANK_TRANSFER", "accountNumber": "...", "ifsc": "HDFC0001234", "accountHolder": "...", "accountType": "SAVINGS", "makePrimary": true }`
+  - **Body (UPI)**: `{ "method": "UPI", "upiId": "name@okhdfcbank" }`
+  - A *second* or later account is verified immediately but cannot receive a
+    payout for 24 hours (`usableFrom`); the first account is exempt.
+  - **Errors**: `400` malformed details, `409` already on file.
+- **`PATCH /api/affiliate/payout-accounts/:id/primary`**: Points future payouts at
+  this account.
+- **`DELETE /api/affiliate/payout-accounts/:id`**: Archives it. `409` while a
+  payout to it is in flight.
+
+### 8.4 Payouts (Requires authentication)
+- **`GET /api/affiliate/payout-preview?amountInr=5000`**: Balances plus the
+  gross / TDS / net split for this amount, before committing to it.
+- **`POST /api/affiliate/payout/request`**: Requests a withdrawal.
+  - **Body**: `{ "amountInr": 5000, "paymentMethod": "BANK_TRANSFER", "payoutAccountId": "affacc_..." }`
+  - **Errors**: `403` KYC incomplete, account unverified, or account still
+    cooling off; `400` below the ₹1,000 minimum or above the withdrawable
+    balance (the message names how much is still clearing).
+
+### 8.5 Admin (`/api/admin/affiliates`, requires `ADMIN`)
+- **`GET /api/admin/affiliates`**: Lists creators. Filters: `status`,
+  `kyc_status`, `search`.
+- **`PATCH /api/admin/affiliates/:id/status`**: `ACTIVE`, `SUSPENDED`, `REJECTED`, `PENDING`.
+- **`PATCH /api/admin/affiliates/:id/kyc`**: Manual PAN decision. **Cannot** mark
+  a bank account verified — only the bank can.
+- **`POST /api/admin/affiliates/:id/refresh-tier`**: Recomputes the tier.
+- **`GET /api/admin/affiliates/:id/payout-accounts`**: Accounts (including
+  archived) plus derived balances.
+- **`GET /api/admin/affiliates/payouts?status=REQUESTED`**: The payout queue.
+  Destinations are **masked**; each row carries gross, TDS and net.
+- **`GET /api/admin/affiliates/payouts/:id/instrument`**: The full bank details
+  and the exact net amount to transfer. **This disclosure is audit-logged with
+  the acting admin.**
+- **`POST /api/admin/affiliates/payouts/:id/settle`**: `{ "utrReference": "..." }`.
+  Marks the funding commissions `PAID`.
+- **`POST /api/admin/affiliates/payouts/:id/reject`**: `{ "reason": "..." }`.
+  Returns the balance to the creator.
+
+## 9. Travel & Earn Endpoints (`/api/referral`, `/api/loyalty`)
+
+See BUSINESS_RULES §11.
+
+### 9.1 Public
+- **`POST /api/referral/track-click`**: `{ "referralCode": "REF-…", "visitorId": "…", "channel": "WHATSAPP|QR|REVIEW|VOUCHER|COPY|CODE|OTHER", "landingPath": "/signup" }`.
+  Records a referral link click for 30 days. Returns `{ tracked, attributionExpiresAt, referrerFirstName }`
+  or `{ tracked: false, reason: "UNKNOWN_CODE" | "SELF" }`. Rate limited to 60/minute.
+- **`GET /api/referral/qr/:code.svg?ch=QR`**: SVG QR code for the invite link,
+  rendered server-side.
+- **`GET /api/loyalty/public-ref/:code`**: `{ valid, referrerName, friendDiscountPct, message }`.
+  Only the referrer's first name is returned.
+- **`POST /api/auth/signup`** accepts `referralCode` and `visitorId`. Response
+  includes `referral: { referred: true }` when a relationship was created, else `null`.
+
+### 9.2 Checkout
+- **`POST /api/bookings/quote`** accepts `referral_code` and `visitor_id` and returns
+  `quote.referral: { eligible, discountInr, referrerFirstName, reason }`. `reason`
+  is one of `FIRST_TRIP_USED`, `BLOCKED`, `EXPIRED`, `SELF_REFERRAL`,
+  `SAME_PHONE`, `EMAIL_ALIAS`, `SAME_DEVICE`, `NOT_NEW_TRAVELER`, `UNKNOWN_CODE`,
+  `NO_REFERRAL`, `AFFILIATE_REFERRAL`. Commission is never returned.
+- **`POST /api/bookings`** accepts `referral_code` and `wallet_credit_inr`, and
+  returns `referral_discount_inr` and `wallet_credit_applied_inr` alongside
+  `amount_inr` (what the payment gateway charges) and `original_amount_inr`.
+- **`POST /api/promo/validate`** with a `REF-` code returns `type: "REFERRAL"`,
+  `discountAmount: 0`: the rupee discount is priced by the quote, not here.
+
+### 9.3 Traveler (requires authentication)
+- **`GET /api/loyalty/profile`**: Code, link, wallet (`walletBalanceInr`,
+  `expiringSoonInr`, `nextExpiryAt`, `clawbackPendingInr`), totals by stage
+  (`totalCreditsEarned`, `clearingCredits`, `upcomingCredits`, `inReviewCredits`),
+  `friends`, `rewards` (each with `stage`: `UPCOMING_TRIP`, `CLEARING`,
+  `IN_REVIEW`, `CREDITED`, `REVERSED`), tier, `policy`, `referredBy`, and the
+  last 20 wallet transactions.
+- **`GET /api/referral/me`**: The referral part of the above on its own.
+- **`GET /api/promo/user/referral`**: The profile, wrapped as `{ referral }`, for
+  older clients.
+
+### 9.4 Operations (requires `ADMIN` or `STAFF`)
+- **`GET /api/referral/admin/metrics?days=90`**: Clicks, friends joined,
+  referred first trips and bookings, GMV and margin from referred bookings,
+  friend discounts, referrer credit cleared, `costPctOfMargin`,
+  `clickToFirstTripPct`, `viralCoefficient`, reversals, wallet issued / redeemed /
+  expired / `breakagePct`, `walletDiscrepancies`, and abuse signals by type.
+- **`GET /api/referral/admin/review`**: `{ rewards, blockedRelationships, signals }`.
+- **`POST /api/referral/admin/rewards/:id/review`**: `{ "decision": "APPROVE" | "REJECT", "note": "…" }`.
+  Approve clears on the next lifecycle run.
+- **`PATCH /api/referral/admin/relationships/:id`**: `{ "status": "ACTIVE" | "BLOCKED", "reason": "…" }`.
+  Reopening also clears the review flag.

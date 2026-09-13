@@ -2,6 +2,7 @@ import { isCoordinateInGeoFence, isPointInPolygon, VEHICLE_TAXONOMY } from "../e
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
 import { fleetSupportsVehicle, vehicleModelSupportsCategory } from "../lib/vehicleInventory.js";
+import { priorMeanRating } from "./reviewService.js";
 
 const ACTIVE_BOOKING_STATUSES = ["pending_payment", "confirmed", "driver_assigned", "in_progress"];
 
@@ -102,7 +103,10 @@ export function rankSupplierCandidates(rawCandidates, request) {
     const vehicleScore = 25;
     const availabilityScore = Math.max(3, 15 - Number(candidate.activeBookings || 0) * 3);
     const priceScore = lowestPrice ? Math.round((lowestPrice / candidate.candidatePrice) * 15 * 10) / 10 : 0;
-    const ratingScore = Math.round(Math.min(5, Math.max(0, Number(candidate.rating) || 0)) * 2 * 10) / 10;
+    // Smoothed rating where the caller supplied one, so a supplier with no
+    // reviews yet is scored at the prior mean rather than as a zero-star one.
+    const qualityRating = Number(candidate.qualityRating ?? candidate.rating) || 0;
+    const ratingScore = Math.round(Math.min(5, Math.max(0, qualityRating)) * 2 * 10) / 10;
     const scoreBreakdown = {
       coverage: candidate.coverage.score,
       vehicle: vehicleScore,
@@ -136,10 +140,12 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
     ? `
       SELECT p.id AS candidate_product_id, p.supplier_id, p.city AS product_city, p.price_inr,
              p.status AS product_status, p.is_published, s.company_name, s.kyb_status, s.rating, s.commission_rate,
+             qs.smoothed_rating,
              tr.route_type, tr.vehicle_category AS route_vehicle_category, tr.max_passengers, tr.max_luggage,
              pi.vehicle_category AS package_vehicle_category
       FROM products p
       JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN quality_scores qs ON qs.entity_type = 'SUPPLIER' AND qs.entity_id = s.id
       LEFT JOIN transfer_routes tr ON tr.product_id = p.id
       LEFT JOIN package_itineraries pi ON pi.product_id = p.id
       WHERE p.product_type = 'TRANSFER'
@@ -147,16 +153,19 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
     : `
       SELECT p.id AS candidate_product_id, p.supplier_id, p.city AS product_city, p.price_inr,
              p.status AS product_status, p.is_published, s.company_name, s.kyb_status, s.rating, s.commission_rate,
+             qs.smoothed_rating,
              tr.route_type, tr.vehicle_category AS route_vehicle_category, tr.max_passengers, tr.max_luggage,
              pi.vehicle_category AS package_vehicle_category
       FROM products p
       JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN quality_scores qs ON qs.entity_type = 'SUPPLIER' AND qs.entity_id = s.id
       LEFT JOIN transfer_routes tr ON tr.product_id = p.id
       LEFT JOIN package_itineraries pi ON pi.product_id = p.id
       WHERE p.id = ?
     `;
 
   const rows = isTransfer ? db.prepare(sql).all() : db.prepare(sql).all(requestedProduct.id);
+  const supplierPrior = priorMeanRating(db, "SUPPLIER");
 
   const activePlaceholders = ACTIVE_BOOKING_STATUSES.map(() => "?").join(", ");
   const candidates = rows.map((row) => {
@@ -202,6 +211,7 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
       isPublished: row.product_status === "PUBLISHED" && Number(row.is_published ?? 1) === 1,
       kybStatus: row.kyb_status,
       rating: row.rating,
+      qualityRating: row.smoothed_rating ?? supplierPrior,
       commissionRate: resolveCommissionRate(db, row.supplier_id, requestedProduct.product_type),
       routeType: row.route_type,
       vehicleCategory: candidateVehicleCategory,

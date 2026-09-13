@@ -41,7 +41,7 @@ const CATEGORY_BAR = [
 const PROMO_MESSAGES = [
   "🔥 Weekend sale — up to 20% off selected tours",
   "✨ New experiences added in Goa, Jaipur & Kerala",
-  "🎉 Refer & earn ₹500 — invite your friends today",
+  "🎉 Invite friends and earn on every trip they take",
 ];
 
 export default function Navbar() {

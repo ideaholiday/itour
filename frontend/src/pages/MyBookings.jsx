@@ -109,6 +109,21 @@ export default function MyBookings() {
     fetchBookings();
   }, [user]);
 
+  // Links in the completion message and review invite (?report=IH-REF) open the problem report form.
+  const [reportRef, setReportRef] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("report") || ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    if (!reportRef || !bookings.length) return;
+    const match = bookings.find((item) => item.ref === reportRef || item.id === reportRef);
+    if (match) {
+      setSupportInitialType("COMPLAINT");
+      setCancelModalBooking(match);
+    }
+    setReportRef("");
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [reportRef, bookings]);
+
   async function changePreference(key, enabled) {
     const previous = preferences;
     const next = { ...preferences, [key]: enabled };

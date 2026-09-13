@@ -28,6 +28,16 @@ cd backend
 npm run seed:demo
 ```
 
+To give the demo marketplace a review history as well (20 reviews per published
+product, written as `source = 'SEED'`):
+
+```bash
+ALLOW_DESTRUCTIVE_SEED=true ALLOW_DEMO_REVIEWS=true node src/seed.js
+```
+
+Both flags are refused in production, where a rating only ever comes from a
+verified traveler — see BUSINESS_RULES §9.
+
 ### Step 3: Run Development Servers
 Open two separate terminal tabs:
 

@@ -30,6 +30,13 @@ export function whatsAppProviderConfiguration() {
   };
 }
 
+// Meta rejects template variables containing new lines or tabs, more than four
+// consecutive spaces, or an empty value (error 131008), so values are flattened.
+export function templateParameterText(value) {
+  const text = String(value ?? "").replace(/\s*[\r\n\t]+\s*/g, " · ").replace(/ {5,}/g, "    ").trim();
+  return (text || "-").slice(0, 1024);
+}
+
 export function whatsAppTemplate(name, values = [], languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en") {
   if (!String(name || "").trim()) return undefined;
   return {
@@ -37,7 +44,7 @@ export function whatsAppTemplate(name, values = [], languageCode = process.env.W
     languageCode: languageCode || process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en",
     components: values.length ? [{
       type: "body",
-      parameters: values.map((value) => ({ type: "text", text: String(value ?? "-").slice(0, 1024) })),
+      parameters: values.map((value) => ({ type: "text", text: templateParameterText(value) })),
     }] : [],
   };
 }

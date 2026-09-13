@@ -55,7 +55,7 @@ erDiagram
 | `name` | TEXT | NOT NULL | Full name of the user. |
 | `phone` | TEXT | | Normalized mobile number (E.164 without leading `+`). |
 | `role` | TEXT | DEFAULT 'TRAVELER' | `TRAVELER`, `SUPPLIER`, `STAFF`, `ADMIN`. |
-| `supplier_id` | TEXT | REFERENCES suppliers(id) | Associated supplier ID if user is a supplier operator. |
+| _(no `supplier_id`)_ | — | — | A `SUPPLIER` login is linked to its supplier row by matching `users.email` to `suppliers.email` (`middleware/auth.js`), not by a column on `users`. |
 | `created_at` | TIMESTAMP | DEFAULT NOW | Record creation timestamp. |
 
 ### 2.2 Suppliers & KYB (`suppliers`, `kyb_documents`)
@@ -68,7 +68,7 @@ erDiagram
   - `kyb_status`: `PENDING`, `APPROVED`, `REJECTED`. Only `APPROVED` vendors can publish listings.
   - `commission_rate`: Real percentage (default 18.0%).
   - `payout_bank_details`: JSON object with `{ account_number, ifsc, bank_name, beneficiary_name, upi_id }`.
-  - `rating`: Float (default 4.8).
+  - `rating`: Float, `NULL` until a verified review exists (see BUSINESS_RULES §9).
 - **`kyb_documents`**:
   - `id`: Primary key (`kyb_...`).
   - `supplier_id`: Foreign key to `suppliers(id)`.
@@ -310,9 +310,94 @@ erDiagram
 - **`refund_records`**:
   - Tracks refund amount, calculation rule, payment gateway refund ID, and approval status.
 
+### 2.8b Reviews & Quality Scores (`reviews`, `quality_scores`)
+- **`reviews`**: One row per booking (`booking_id` is `UNIQUE`), carrying `experience_rating`, `supplier_rating`, optional `driver_rating`, moderation `status`, and the supplier's public response.
+  - `source`: `VERIFIED` (a completed booking), `SEED` (demo databases only), `IMPORTED` (external, shown with attribution). Only `VERIFIED` and `SEED` count towards a rating.
+- **`quality_scores`**: One row per `(entity_type, entity_id)` for `PRODUCT`, `SUPPLIER` and `DRIVER`.
+  - `review_count` / `verified_review_count`, `average_rating`: literal, displayed values.
+  - `smoothed_rating`: the Bayesian average used for ranking and dispatch scoring — never displayed (see BUSINESS_RULES §9.2).
+  - `score_100`, `tier`: composite quality score and band (`NEW` until reviews exist).
+
+- **`review_invites`**: Single-use review links. `token_hash` (HMAC-SHA256 — the plaintext exists only in the link sent to the traveler), `booking_id`, `channel`, `expires_at`, `opened_at`, `used_at`, `review_id`, and `share_link_id` when the invite came from a supplier link claim.
+- **`review_share_links`**: A supplier's durable link/QR. `slug` (public), optional `product_id` scope, `is_active`, and the `view_count` / `claim_count` funnel counters.
+
 ### 2.9 Operations & Notifications (`staff_tasks`, `notification_deliveries`, `whatsapp_logs`)
 - **`staff_tasks`**: Operational tasks generated for SLA timeouts, unassigned trips, OTP lockouts, and review moderation.
 - **`notification_deliveries`**: Unified audit ledger for email, SMS, and WhatsApp messages with idempotency keys (`event_key`).
+
+### 2.13 Creator & Affiliate Program (`affiliates`, `affiliate_*`)
+Influencer and affiliate commission. See BUSINESS_RULES §10 for the rules these
+tables enforce.
+
+- **`affiliates`**: One row per creator, keyed to a `users` row.
+  - `affiliate_code`: The creator's coupon code, also provisioned into `promo_codes`
+    so travelers get an immediate discount at checkout.
+  - `tier_code` → `affiliate_tiers`, with `commission_rate` mirrored from it.
+  - `payout_hold_days` (default 14): the clearing hold before earned commission
+    can be withdrawn. `attribution_window_days` (default 30): how long a click
+    keeps earning.
+  - `pan_number`, `pan_verified`, `gstin`: tax identity, which sets the TDS rate.
+  - `bank_*` / `upi_id`: **legacy mirrors** of the primary payout account, kept
+    in step by `syncLegacyBankColumns` for screens written before v2. New code
+    reads `affiliate_payout_accounts`.
+  - `available_balance_inr`, `lifetime_earnings_inr`, `paid_earnings_inr`: cached
+    running totals. Authoritative balances are derived by `computeBalances()`.
+- **`affiliate_tiers`**: Commission bands — `min_completed_bookings`,
+  `min_lifetime_gmv_inr`, `commission_rate`. Seeded Starter / Rising / Elite.
+- **`affiliate_payout_accounts`**: A creator's bank accounts and UPI handles.
+  `verification_status` is set by a Cashfree penny drop, with `name_match_score`
+  recording how closely the bank's name matched. `usable_from` enforces the
+  cooling period on a changed destination; `is_primary` is unique per creator
+  among `ACTIVE` rows; removed accounts become `ARCHIVED`, never deleted.
+- **`affiliate_attributions`**: Server-side referral clicks. `visitor_id` is an
+  anonymous browser token, `expires_at` closes the window, and
+  `consumed_booking_id` spends the attribution on exactly one booking. `sub_id`
+  carries the creator's campaign label.
+- **`affiliate_referrals`**: One row per attributed booking (`booking_id` UNIQUE).
+  `commission_rate` and `tier_code` are frozen at accrual; `payable_at` is when
+  the commission leaves the clearing hold. Status: `PENDING` → `ELIGIBLE` →
+  `PAID`, or `CANCELLED`.
+- **`affiliate_payouts`**: Withdrawals. `gross_amount_inr`, `tds_rate`,
+  `tds_amount_inr`, `net_amount_inr` — the net is what is actually transferred.
+  `payout_account_id` names the destination; `utr_reference` is the bank's proof.
+- **`affiliate_ledger`**: Append-only record of every rupee that moves, signed
+  (positive credits the creator). Exists so a balance can be reconstructed
+  rather than trusted.
+- **`affiliate_clicks`**: Raw click log for conversion analytics, with the
+  visitor IP stored only as a truncated SHA-256 hash.
+
+### 2.14 Travel & Earn (`referral_*`, `wallet_transactions`)
+Traveler-to-traveler referrals and the wallet they pay into. Migration 030. See
+BUSINESS_RULES §11.
+
+- **`referral_relationships`**: One row per referred traveler
+  (`referred_user_id` UNIQUE). `earns_until` is signup + 24 months. `status`:
+  `ACTIVE`, `EXPIRED`, `BLOCKED` (with `blocked_reason`). `requires_review` holds
+  its rewards for an operator. `source`: `SIGNUP_LINK`, `CHECKOUT_CODE`, `LEGACY`.
+- **`referral_attributions`**: Server-side invite link clicks against a
+  `visitor_id`, with `channel`, a 30-day `expires_at`, and `consumed_user_id` once
+  a signup uses it.
+- **`referral_rewards`**: One row per rewarded booking (`booking_id` UNIQUE).
+  `booking_margin_inr`, `referee_rate`, `referrer_rate` and both amounts are
+  frozen at accrual. `sequence` 1 is the friend's first paid trip. Status
+  `ACCRUED` → `CLEARED`, or `HELD_FOR_REVIEW`, `VOID`, `REVERSED`; `completed_at`,
+  `payable_at`, `cleared_at`, `reversed_at` record the transitions.
+- **`referral_fraud_signals`**: Every refused or held pairing — signal, detail,
+  and `action` (`BLOCKED`, `HELD_FOR_REVIEW`, `LOGGED`).
+- **`wallet_transactions`**: The wallet ledger. `entry_type`:
+  `REFERRAL_CLEARED`, `REFERRAL_REVERSED`, `REDEMPTION`, `REDEMPTION_RESTORED`,
+  `CLAWBACK_SETTLED`, `EXPIRY`, `ADJUSTMENT` (legacy rows carry only `type`).
+  Credits have `expires_at` and an unspent `remaining_inr`; `expiry_reminded_at`
+  records the reminder. `UNIQUE (booking_id, entry_type)`.
+- **`users`**: `wallet_balance_inr` is a cache of the ledger sum;
+  `wallet_clawback_pending_inr` is reversed credit still owed;
+  `signup_visitor_id` is the browser the account signed up from; `referral_code`
+  is the traveler's `REF-` code.
+- **`bookings`**: `referral_discount_inr` and `wallet_credit_applied_inr`. With
+  them, `amount_inr + wallet_credit_applied_inr + referral_discount_inr =
+  commission_amount + supplier_payout_amount`.
+- **`user_referrals`**: v1 table, no longer written. Carried into the tables
+  above at startup.
 
 ---
 
@@ -323,3 +408,5 @@ erDiagram
    - Decrypted only by `withoutPickupOtpSecrets` filter when requested by the owning traveler.
 2. **Passwords**: Salted and hashed using strong cryptographic hashes before insertion into `users`.
 3. **Financial Data**: Bank account details in `suppliers.payout_bank_details` are redacted in standard API outputs.
+4. **Creator payout accounts**: `affiliate_payout_accounts.account_number` never leaves the server in full through a creator- or list-facing endpoint — `listPayoutAccounts` and the affiliate dashboard mask it to the last four digits, and the admin payout queue shows only a masked destination. The complete number is served by one endpoint, `GET /api/admin/affiliates/payouts/:id/instrument`, which logs the disclosure with the acting admin.
+5. **Creator PAN**: masked to `ABC••••4F` in every dashboard response.

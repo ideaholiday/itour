@@ -34,10 +34,12 @@ export function SupplierProfileCard({
 
         <div className="text-right">
           <div className="flex items-center gap-1 text-amber-500 justify-end">
-            <Star className="w-4 h-4 fill-amber-500" />
-            <span className="text-sm font-bold font-mono text-stone-900 dark:text-stone-100">
-              {supplier.rating || 4.9}
-            </span>
+            {supplier.rating ? <>
+              <Star className="w-4 h-4 fill-amber-500" />
+              <span className="text-sm font-bold font-mono text-stone-900 dark:text-stone-100">
+                {Number(supplier.rating).toFixed(1)}
+              </span>
+            </> : <span className="text-sm font-bold text-stone-500">New partner</span>}
           </div>
           <span className="text-[10px] text-stone-400">100+ Trips</span>
         </div>

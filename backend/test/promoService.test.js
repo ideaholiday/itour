@@ -1,12 +1,10 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import db from "../src/db.js";
-import {
-  validatePromoCode,
-  applyPromoCode,
-  getUserReferralInfo,
-  processReferralRewardOnCompletion
-} from "../src/services/promoService.js";
+import { validatePromoCode, applyPromoCode } from "../src/services/promoService.js";
+import { ensureUserReferralCode } from "../src/services/loyaltyService.js";
+
+const referralCodeFor = (userId) => ensureUserReferralCode(db, db.prepare("SELECT id, name, referral_code FROM users WHERE id = ?").get(userId));
 
 describe("Traveler Promo Codes & Referral Engine", () => {
   const user1Id = "usr_test_promo_referrer";
@@ -113,28 +111,31 @@ describe("Traveler Promo Codes & Referral Engine", () => {
     );
   });
 
-  it("generates user referral code and provides referral discount to friends", () => {
-    const refInfo = getUserReferralInfo(db, user1Id);
-    assert.ok(refInfo.referralCode);
-    assert.ok(refInfo.referralLink.includes(refInfo.referralCode));
-    assert.equal(refInfo.friendsInvitedCount, 0);
+  it("recognises an issued traveler referral code without pricing it early", () => {
+    const code = referralCodeFor(user1Id);
+    assert.match(code, /^REF-/);
 
-    // Friend using Aarav's referral code
-    const res = validatePromoCode(db, {
-      code: refInfo.referralCode,
-      amountInr: 2000,
-      userId: user2Id
-    });
+    const res = validatePromoCode(db, { code: code.toLowerCase(), amountInr: 2000, userId: user2Id });
     assert.equal(res.valid, true);
     assert.equal(res.type, "REFERRAL");
-    assert.equal(res.discountAmount, 250);
-    assert.equal(res.finalAmount, 1750);
+    assert.equal(res.referrerUserId, user1Id);
+    assert.equal(res.discountValue, 10);
+    // The rupee amount is 10% of the trip's commission, priced by the booking quote.
+    assert.equal(res.discountAmount, 0);
+    assert.equal(res.finalAmount, 2000);
+  });
+
+  it("does not reconstruct referral codes that were never issued", () => {
+    const user = db.prepare("SELECT id, name FROM users WHERE id = ?").get(user2Id);
+    const guessed = `REF-${user.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 5).toUpperCase()}${user.id.replace(/[^A-Za-z0-9]/g, "").slice(-4).toUpperCase()}`;
+    db.prepare("UPDATE users SET referral_code = NULL WHERE id = ?").run(user2Id);
+    assert.throws(() => validatePromoCode(db, { code: guessed, amountInr: 2000, userId: user1Id }), /Invalid promo code/);
   });
 
   it("prevents users from redeeming their own referral code", () => {
-    const refInfo = getUserReferralInfo(db, user1Id);
+    const code = referralCodeFor(user1Id);
     assert.throws(
-      () => validatePromoCode(db, { code: refInfo.referralCode, amountInr: 2000, userId: user1Id }),
+      () => validatePromoCode(db, { code, amountInr: 2000, userId: user1Id }),
       /cannot use your own referral code/
     );
   });
@@ -149,26 +150,11 @@ describe("Traveler Promo Codes & Referral Engine", () => {
     assert.equal(updated.times_used, initial.times_used + 1);
   });
 
-  it("processes referral rewards upon booking completion", () => {
-    const refInfo = getUserReferralInfo(db, user1Id);
-    applyPromoCode(db, {
-      code: refInfo.referralCode,
-      bookingId,
-      userId: user2Id,
-      amountInr: 2000
-    });
-
-    const pendingStats = getUserReferralInfo(db, user1Id);
-    assert.equal(pendingStats.pendingCredits, 250);
-    assert.equal(pendingStats.totalCreditsEarned, 0);
-
-    // Complete booking
-    const rewardRes = processReferralRewardOnCompletion(db, bookingId);
-    assert.ok(rewardRes);
-    assert.equal(rewardRes.rewarded, true);
-
-    const completedStats = getUserReferralInfo(db, user1Id);
-    assert.equal(completedStats.pendingCredits, 0);
-    assert.equal(completedStats.totalCreditsEarned, 250);
+  it("leaves traveler referral codes to the booking route", () => {
+    const code = referralCodeFor(user1Id);
+    const before = db.prepare("SELECT COUNT(*) AS n FROM user_referrals").get().n;
+    const result = applyPromoCode(db, { code, bookingId, userId: user2Id, amountInr: 2000 });
+    assert.equal(result.type, "REFERRAL");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM user_referrals").get().n, before, "no v1 referral row is written");
   });
 });

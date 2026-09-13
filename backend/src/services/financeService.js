@@ -1,4 +1,5 @@
 import { nanoid } from "nanoid";
+import { onReferralBookingCancelled } from "./referralService.js";
 
 function financeError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -179,6 +180,7 @@ export function finalizeRefund(database, { booking, refund, providerResult }) {
       metadata: { retainedAmount, retainedCommission, retainedSupplierShare },
     });
   })();
+  onReferralBookingCancelled(database, booking.id, { reason: refundAmount > 0 ? "Booking refunded" : "Booking cancelled" });
   return { refundAmount, retainedAmount, retainedCommission, retainedSupplierShare, paymentStatus };
 }
 
@@ -336,7 +338,7 @@ export function getSupplierPayoutLedger(database, supplierId) {
       acc.totalEarned += t.net_payout;
       if (t.payout_status === "PROCESSED" || t.payout_status === "RECONCILED") {
         acc.totalSettled += t.net_payout;
-      } else if (t.payout_status === "SCHEDULED" || t.payout_status === "BATCHED") {
+      } else if (["SCHEDULED", "BATCHED", "ISSUE_HOLD"].includes(t.payout_status)) {
         acc.pendingScheduled += t.net_payout;
       }
     }

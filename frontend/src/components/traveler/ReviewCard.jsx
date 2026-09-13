@@ -11,7 +11,9 @@ export function ReviewCard({ review, onVoteHelpful }) {
   const [voting, setVoting] = useState(false);
   const [activePhoto, setActivePhoto] = useState(null);
 
-  const travelerName = review.traveler_name || review.author || "Verified Traveler";
+  // Reviews through a supplier's link carry no booking; everything else is a verified trip.
+  const isVerifiedTrip = review.source !== "SHARE_LINK";
+  const travelerName = review.traveler_name || review.author || (isVerifiedTrip ? "Verified Traveler" : "Traveler");
   const experienceRating = Number(review.experience_rating ?? review.rating ?? 5);
   const comment = review.comment || review.review_text || "";
   const title = review.title || "";
@@ -52,10 +54,17 @@ export function ReviewCard({ review, onVoteHelpful }) {
               <span className="text-xs font-bold text-stone-900 dark:text-stone-100">
                 {travelerName}
               </span>
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/60">
-                <CheckCircle className="w-2.5 h-2.5" />
-                Verified Trip
-              </span>
+              {isVerifiedTrip ? (
+                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200/60 dark:border-emerald-800/60">
+                  <CheckCircle className="w-2.5 h-2.5" />
+                  Verified Trip
+                </span>
+              ) : (
+                <span title="Written through the operator's review link. The booking was not verified on Idea Holiday, so this review does not count towards the rating."
+                  className="inline-flex items-center text-[10px] font-bold text-stone-600 dark:text-stone-400 bg-stone-100 dark:bg-stone-800 px-2 py-0.5 rounded-full border border-stone-200 dark:border-stone-700">
+                  Traveler review
+                </span>
+              )}
               {review.would_recommend !== false && review.wouldRecommend !== false && (
                 <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-full border border-amber-200/50">
                   Recommends

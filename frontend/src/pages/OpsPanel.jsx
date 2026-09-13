@@ -1,3 +1,4 @@
+import DispatchQueue from "../components/supplier/DispatchQueue.jsx";
 import React from "react";
 import { useLocation } from "react-router-dom";
 import OpsLayout from "../components/ops/OpsLayout.jsx";
@@ -22,6 +23,7 @@ function OpsTaskQueueView() {
 
   return (
     <div className="space-y-6">
+      <DispatchQueue />
       <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm">
         <h2 className="text-xl font-serif font-bold text-stone-900 mb-4">
           Operations Task Queue & Resolution Audit Log

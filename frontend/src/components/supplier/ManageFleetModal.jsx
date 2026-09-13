@@ -4,6 +4,9 @@ import { authHeaders } from "../../lib/api.js";
 
 export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers = [], onRefresh }) {
   const [activeTab, setActiveTab] = useState("LIST"); // 'LIST' or 'ADD'
+  const [driverEmail, setDriverEmail] = useState("");
+  const [seatCapacity, setSeatCapacity] = useState(4);
+  const [editingContact, setEditingContact] = useState(null);
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
   const [vehicleModel, setVehicleModel] = useState("Swift Dzire VXI (Sedan)");
@@ -33,6 +36,8 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
+          driverEmail,
+          seatCapacity: Number(seatCapacity),
           driverName,
           driverPhone,
           vehicleModel,
@@ -150,6 +155,16 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
         </div>
 
         {/* Modal Body */}
+        <div className="px-6 pt-4">
+          <label className="text-xs">Update dispatch contact and seats<select className="ml-2 rounded border p-2" value={editingContact?.id || ''} onChange={e => { const d = drivers.find(d => d.id === e.target.value); setEditingContact(d ? { ...d } : null); }}><option value="">Choose existing driver</option>{drivers.map(d => <option key={d.id} value={d.id}>{d.driver_name}</option>)}</select></label>
+          {editingContact && <form className="mt-3 flex flex-wrap gap-2" onSubmit={async e => {
+            e.preventDefault();
+            try {
+              const r = await fetch(`/api/suppliers/${supplierId}/drivers/${editingContact.id}/contact`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ driverEmail: editingContact.driver_email, seatCapacity: Number(editingContact.seat_capacity), dispatchPriority: Number(editingContact.dispatch_priority || 0) }) });
+              const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not update driver'); setSuccessMsg('Driver dispatch details saved'); setEditingContact(null); onRefresh?.();
+            } catch (e) { setError(e.message); }
+          }}><label className="text-xs">Email<input aria-label="Existing driver email" type="email" required value={editingContact.driver_email || ''} onChange={e => setEditingContact({ ...editingContact, driver_email: e.target.value })} className="block rounded border p-2" /></label><label className="text-xs">Seats<input aria-label="Existing vehicle seats" type="number" min="1" max="100" required value={editingContact.seat_capacity || ''} onChange={e => setEditingContact({ ...editingContact, seat_capacity: e.target.value })} className="block rounded border p-2" /></label><button type="submit" className="rounded border px-3">Save dispatch details</button></form>}
+        </div>
         <div className="p-6 space-y-4 overflow-y-auto">
           {error && (
             <div className="bg-rose-50 border border-rose-300 text-rose-800 text-xs p-3 rounded-2xl flex items-center gap-2">
@@ -196,10 +211,14 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                           <div>
                             <h4 className="text-sm font-bold text-stone-900 flex items-center gap-2">
                               {d.driver_name}
-                              <span className="flex items-center gap-1 text-[11px] text-amber-700 font-bold">
-                                <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
-                                {d.rating || 4.9}
-                              </span>
+                              {d.rating ? (
+                                <span className="flex items-center gap-1 text-[11px] text-amber-700 font-bold">
+                                  <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                                  {Number(d.rating).toFixed(1)}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-bold text-stone-400">Unrated</span>
+                              )}
                             </h4>
                             <p className="text-xs text-stone-500 flex items-center gap-1">
                               <Phone className="w-3 h-3 text-amber-600" />
@@ -281,6 +300,8 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                   />
                 </div>
 
+                <label className="block text-xs">Driver email<input type="email" required className="w-full rounded border p-2" value={driverEmail} onChange={e => setDriverEmail(e.target.value)} /></label>
+                <label className="block text-xs">Vehicle seats<input type="number" min="1" max="100" required className="w-full rounded border p-2" value={seatCapacity} onChange={e => setSeatCapacity(e.target.value)} /></label>
                 <div>
                   <label className="block text-xs font-bold text-stone-700 mb-1">Vehicle Category / Model *</label>
                   <select

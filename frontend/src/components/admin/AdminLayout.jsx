@@ -19,7 +19,9 @@ import {
   AlertTriangle,
   LayoutDashboard,
   MapPinned,
-  Star
+  Star,
+  Wallet,
+  Gift
 } from "lucide-react";
 
 export default function AdminLayout({ children }) {
@@ -89,6 +91,20 @@ export default function AdminLayout({ children }) {
       label: "Quality & Reviews",
       icon: Star,
       badge: metrics?.pendingReviews > 0 ? `${metrics.pendingReviews} New` : null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/creators",
+      label: "Creators & Payouts",
+      icon: Wallet,
+      badge: metrics?.pendingAffiliatePayouts > 0 ? `${metrics.pendingAffiliatePayouts} To Pay` : null,
+      badgeColor: "bg-emerald-500/20 text-emerald-600 border-emerald-500/30"
+    },
+    {
+      path: "/admin/referrals",
+      label: "Travel & Earn",
+      icon: Gift,
+      badge: null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     }
   ];

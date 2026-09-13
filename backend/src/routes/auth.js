@@ -7,7 +7,7 @@ import { authenticate } from "../middleware/auth.js";
 import logger from "../config/logger.js";
 import { validateBody } from "../middleware/validation.js";
 import { authSchemas } from "../validators/apiSchemas.js";
-import { recordReferralSignup } from "../services/loyaltyService.js";
+import { establishReferralRelationship } from "../services/referralService.js";
 
 const router = Router();
 const SECRET = process.env.JWT_SECRET
@@ -29,6 +29,7 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   const password = String(req.body.password || "");
   const phone = normalizeText(req.body.phone) || null;
   const referralCode = normalizeText(req.body.referralCode || req.body.ref);
+  const visitorId = normalizeText(req.body.visitorId) || null;
 
   if (!name || !email || !password) return res.status(400).json({ error: "name, email, password required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -45,16 +46,20 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   db.prepare("INSERT INTO users (id,name,email,password,phone) VALUES (?,?,?,?,?)")
     .run(id, name, email, hashPassword(password), phone);
 
-  if (referralCode) {
-    try {
-      recordReferralSignup(db, { newUserId: id, referralCode });
-    } catch (refErr) {
-      logger.warn("Referral tracking error on signup", { error: refErr.message, referralCode });
+  let referral = null;
+  try {
+    if (visitorId) db.prepare("UPDATE users SET signup_visitor_id = ? WHERE id = ?").run(visitorId.slice(0, 120), id);
+    // A typed code wins; with none, the referral link this browser opened is used.
+    if (referralCode || visitorId) {
+      const result = establishReferralRelationship(db, { referredUserId: id, referralCode: referralCode || null, visitorId, source: "SIGNUP_LINK" });
+      referral = result.established ? { referred: true } : null;
     }
+  } catch (refErr) {
+    logger.warn("Referral tracking error on signup", { error: refErr.message, referralCode });
   }
 
   const token = jwt.sign({ id, email, name, role: "TRAVELER" }, SECRET, { expiresIn: "30d" });
-  res.json({ token, user: { id, name, email, phone, role: "TRAVELER" } });
+  res.json({ token, user: { id, name, email, phone, role: "TRAVELER" }, referral });
 });
 
 router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, res) => {

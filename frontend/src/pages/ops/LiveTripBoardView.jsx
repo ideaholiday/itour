@@ -44,10 +44,13 @@ export default function LiveTripBoardView() {
   const [message, setMessage] = useState(null);
 
   // Fallback Dispatch Modal State
-  const [fallbackDriverName, setFallbackDriverName] = useState("Vikram Singh (On-Call Ground Ops)");
-  const [fallbackDriverPhone, setFallbackDriverPhone] = useState("+919811009988");
-  const [fallbackVehicleModel, setFallbackVehicleModel] = useState("Toyota Innova Crysta");
-  const [fallbackVehicleNumber, setFallbackVehicleNumber] = useState("UP-32-T-9999");
+  // No defaults: a prefilled phone number would send a real trip link to a stranger.
+  const [fallbackDriverName, setFallbackDriverName] = useState("");
+  const [fallbackDriverPhone, setFallbackDriverPhone] = useState("");
+  const [fallbackDriverEmail, setFallbackDriverEmail] = useState("");
+  const [fallbackSeatCapacity, setFallbackSeatCapacity] = useState(4);
+  const [fallbackVehicleModel, setFallbackVehicleModel] = useState("");
+  const [fallbackVehicleNumber, setFallbackVehicleNumber] = useState("");
   const [dispatchLoading, setDispatchLoading] = useState(false);
 
   const fetchLiveBoard = async () => {
@@ -88,6 +91,8 @@ export default function LiveTripBoardView() {
           bookingId: fallbackModalBooking.id || fallbackModalBooking.ref,
           fallbackDriverName,
           fallbackDriverPhone,
+          fallbackDriverEmail,
+          seatCapacity: Number(fallbackSeatCapacity),
           fallbackVehicleModel,
           fallbackVehicleNumber,
           notes: `Emergency fallback driver ${fallbackDriverName} dispatched for booking ${fallbackModalBooking.ref}`
@@ -436,6 +441,29 @@ export default function LiveTripBoardView() {
                   onChange={(e) => setFallbackDriverPhone(e.target.value)}
                   className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-stone-700 block mb-1 font-bold">Driver Email (trip link)</label>
+                  <input
+                    type="email"
+                    value={fallbackDriverEmail}
+                    onChange={(e) => setFallbackDriverEmail(e.target.value)}
+                    className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-stone-700 block mb-1 font-bold">Vehicle Seats</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={fallbackSeatCapacity}
+                    onChange={(e) => setFallbackSeatCapacity(e.target.value)}
+                    className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                  />
+                </div>
               </div>
 
               <div>

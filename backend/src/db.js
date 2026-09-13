@@ -104,7 +104,8 @@ CREATE TABLE IF NOT EXISTS suppliers (
   kyb_status TEXT DEFAULT 'APPROVED',
   commission_rate REAL DEFAULT 18.0,
   payout_bank_details TEXT DEFAULT '{}',
-  rating REAL DEFAULT 4.8,
+  -- NULL until a verified review exists. Never a placeholder rating.
+  rating REAL,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -156,8 +157,9 @@ CREATE TABLE IF NOT EXISTS products (
   duration_hours REAL,
   price_inr INTEGER NOT NULL,
   strike_price_inr INTEGER,
-  rating REAL DEFAULT 4.8,
-  review_count INTEGER DEFAULT 12,
+  -- NULL/0 until a verified review exists. Never a placeholder rating.
+  rating REAL,
+  review_count INTEGER DEFAULT 0,
   bestseller INTEGER DEFAULT 0,
   free_cancellation INTEGER DEFAULT 1,
   cancellation_policy TEXT DEFAULT 'FLEXIBLE_24H',
@@ -432,7 +434,8 @@ CREATE TABLE IF NOT EXISTS supplier_drivers (
   vehicle_model TEXT NOT NULL,
   vehicle_number TEXT NOT NULL,
   license_number TEXT,
-  rating REAL DEFAULT 4.9,
+  -- NULL until a verified review exists. Never a placeholder rating.
+  rating REAL,
   status TEXT DEFAULT 'AVAILABLE',
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -649,6 +652,9 @@ CREATE TABLE IF NOT EXISTS reviews (
   moderated_at TEXT,
   supplier_response TEXT,
   supplier_responded_at TEXT,
+  source TEXT NOT NULL DEFAULT 'VERIFIED',
+  invite_id TEXT,
+  verification_method TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -657,7 +663,9 @@ CREATE TABLE IF NOT EXISTS quality_scores (
   entity_type TEXT NOT NULL,
   entity_id TEXT NOT NULL,
   review_count INTEGER NOT NULL DEFAULT 0,
+  verified_review_count INTEGER NOT NULL DEFAULT 0,
   average_rating REAL,
+  smoothed_rating REAL,
   completion_rate REAL,
   complaint_rate REAL,
   score_100 REAL NOT NULL DEFAULT 0,
@@ -933,6 +941,38 @@ CREATE TABLE IF NOT EXISTS review_photos (
   caption TEXT,
   sort_order INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- 36B. SUPPLIER REVIEW SHARE LINKS AND SINGLE-USE INVITES
+-- Both routes end at the same verified review: one completed booking, one
+-- review. See migrations/028 and BUSINESS_RULES §9.4.
+CREATE TABLE IF NOT EXISTS review_share_links (
+  id TEXT PRIMARY KEY,
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  product_id TEXT REFERENCES products(id),
+  slug TEXT NOT NULL UNIQUE,
+  label TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  view_count INTEGER NOT NULL DEFAULT 0,
+  claim_count INTEGER NOT NULL DEFAULT 0,
+  created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS review_invites (
+  id TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  booking_id TEXT NOT NULL REFERENCES bookings(id),
+  product_id TEXT NOT NULL REFERENCES products(id),
+  supplier_id TEXT NOT NULL REFERENCES suppliers(id),
+  channel TEXT NOT NULL DEFAULT 'EMAIL',
+  share_link_id TEXT REFERENCES review_share_links(id),
+  created_by TEXT,
+  expires_at TEXT NOT NULL,
+  opened_at TEXT,
+  used_at TEXT,
+  review_id TEXT REFERENCES reviews(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 37. REVIEW HELPFULNESS VOTES
@@ -1505,6 +1545,9 @@ try {
   db.exec("CREATE INDEX IF NOT EXISTS idx_support_cases_booking ON support_cases(booking_id, created_at)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_support_cases_status ON support_cases(status, priority, created_at)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_support_messages_case ON support_case_messages(case_id, created_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_review_invites_booking ON review_invites(booking_id, used_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_review_invites_supplier ON review_invites(supplier_id, created_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_review_share_links_supplier ON review_share_links(supplier_id, is_active)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_reviews_product_status ON reviews(product_id, status, created_at)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_reviews_supplier_status ON reviews(supplier_id, status, created_at)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_reviews_driver_status ON reviews(supplier_driver_id, status, created_at)");

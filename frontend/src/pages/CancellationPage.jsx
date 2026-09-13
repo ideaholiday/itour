@@ -232,8 +232,20 @@ export default function CancellationPage() {
         <ArticleSection number={4} title="Dispute Escalation & Assistance">
           <p>
             If you encounter any discrepancy in your refund settlement or have special compassionate circumstances (e.g. verified medical emergencies), our 24/7 Operations Desk is available to review your case at{" "}
+            <a href="mailto:support@ideaholiday.in" className="font-bold text-amber-800 underline">
+              support@ideaholiday.in
+            </a>
+            {" "}or{" "}
             <a href="mailto:info@ideaholiday.in" className="font-bold text-amber-800 underline">
               info@ideaholiday.in
+            </a>
+            , or call our 24/7 helpline at{" "}
+            <a href="tel:+919696777391" className="font-bold text-amber-800 underline">
+              +91 9696777391
+            </a>
+            {" / "}
+            <a href="tel:+919336757106" className="font-bold text-amber-800 underline">
+              +91 9336757106
             </a>
             .
           </p>

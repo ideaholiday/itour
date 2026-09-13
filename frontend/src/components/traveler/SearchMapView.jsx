@@ -161,8 +161,10 @@ export default function SearchMapView({
               </h4>
               <div className="flex items-center gap-2 text-[11px] text-stone-500">
                 <div className="flex items-center gap-0.5 text-amber-600 font-bold">
-                  <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
-                  <span>{Number(selectedProduct.rating || 4.8).toFixed(1)}</span>
+                  {selectedProduct.rating ? <>
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                    <span>{Number(selectedProduct.rating).toFixed(1)}</span>
+                  </> : <span className="text-stone-500">New</span>}
                 </div>
                 <span>·</span>
                 <span className="font-mono font-black text-stone-900 dark:text-stone-100">

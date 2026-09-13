@@ -8,6 +8,8 @@ import FinanceOverviewView from "./admin/FinanceOverviewView.jsx";
 import AdminOverviewView from "./admin/AdminOverviewView.jsx";
 import QualityReviewsView from "./admin/QualityReviewsView.jsx";
 import AnalyticsDashboardView from "./admin/AnalyticsDashboardView.jsx";
+import AffiliatePayoutsView from "./admin/AffiliatePayoutsView.jsx";
+import ReferralProgramView from "./admin/ReferralProgramView.jsx";
 
 export default function AdminPanel({ view }) {
   const location = useLocation();
@@ -19,6 +21,8 @@ export default function AdminPanel({ view }) {
     else if (location.pathname.includes("/products")) activeView = "products";
     else if (location.pathname.includes("/finance")) activeView = "finance";
     else if (location.pathname.includes("/quality")) activeView = "quality";
+    else if (location.pathname.includes("/creators")) activeView = "creators";
+    else if (location.pathname.includes("/referrals")) activeView = "referrals";
     else activeView = "overview";
   }
 
@@ -31,6 +35,8 @@ export default function AdminPanel({ view }) {
         {activeView === "products" && <ProductModerationView />}
         {activeView === "finance" && <FinanceOverviewView />}
         {activeView === "quality" && <QualityReviewsView />}
+        {activeView === "creators" && <AffiliatePayoutsView />}
+        {activeView === "referrals" && <ReferralProgramView />}
       </AdminLayout>
     </AdminGuard>
   );

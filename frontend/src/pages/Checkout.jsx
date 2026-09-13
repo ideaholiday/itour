@@ -7,6 +7,7 @@ import {
   UserRound, Users, Wallet
 } from "lucide-react";
 import { api, authHeaders } from "../lib/api.js";
+import { getBookingAttributionFields, getStoredAffiliateCode, getStoredTravelerReferralCode } from "../lib/affiliateAttribution.js";
 import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 import { useCurrency } from "../lib/currency.jsx";
@@ -127,6 +128,9 @@ export default function Checkout() {
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
+
+  // A traveler referral code is priced by the server quote, never in the browser.
+  const referralCodeForQuote = appliedPromo?.type === "REFERRAL" ? appliedPromo.code : null;
 
   const [walletBalance, setWalletBalance] = useState(0);
   const [useWalletCredits, setUseWalletCredits] = useState(false);
@@ -316,8 +320,10 @@ export default function Checkout() {
     ticketTiersParsed.map(({ tierId, count }) => [tierId, count])
   ), [ticketTiersParam]);
 
-  const discountAmount = appliedPromo ? Number(appliedPromo.discountAmount || 0) : 0;
-  const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount);
+  const discountAmount = appliedPromo && appliedPromo.type !== "REFERRAL" ? Number(appliedPromo.discountAmount || 0) : 0;
+  const referralDiscountAmount = Number(quote?.referral?.discountInr || 0);
+  const referralUnavailable = appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
+  const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount - referralDiscountAmount);
   const maxAllowedWalletCredit = Math.min(walletBalance, remainingBeforeWallet * 0.5, 2000);
   const walletDiscountAmount = useWalletCredits ? Math.round(maxAllowedWalletCredit) : 0;
   const payableTotal = Math.max(0, remainingBeforeWallet - walletDiscountAmount);
@@ -352,7 +358,7 @@ export default function Checkout() {
 
   // Auto-validate promo code if passed in URL
   useEffect(() => {
-    const initialCode = params.get("promo") || params.get("ref");
+    const initialCode = params.get("promo") || params.get("ref") || getStoredAffiliateCode() || getStoredTravelerReferralCode();
     if (initialCode && totalAmount > 0 && !appliedPromo) {
       handleApplyPromo(initialCode);
     }
@@ -403,7 +409,9 @@ export default function Checkout() {
         hotel_tier_id: hotelTierId,
         ticket_selections: Object.keys(ticketSelections).length ? ticketSelections : undefined,
         origin_state: params.get("originState"),
-        dest_state: params.get("destState")
+        dest_state: params.get("destState"),
+        referral_code: referralCodeForQuote,
+        ...getBookingAttributionFields(),
       }).then((data) => {
         setQuote(data.quote);
         if (data.quote && activity) {
@@ -415,7 +423,7 @@ export default function Checkout() {
       }).finally(() => setQuoteLoading(false));
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, requiresFlight, packageHotels, params, ticketSelections, pickupTime, nativeHold?.holdId]);
+  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, requiresFlight, packageHotels, params, ticketSelections, pickupTime, nativeHold?.holdId, referralCodeForQuote]);
 
   const progress = useMemo(() => [
     { label: "Traveler", ready: travelerReady, icon: UserRound },
@@ -489,7 +497,11 @@ export default function Checkout() {
         package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
         origin_state: params.get("originState"),
         special_requests: specialRequests.trim(),
-        promo_code: appliedPromo?.code || null,
+        promo_code: appliedPromo && appliedPromo.type !== "REFERRAL" ? appliedPromo.code : null,
+        referral_code: referralCodeForQuote,
+        // Lets the server match this booking to the referral click that brought
+        // the traveler here, so the creator is actually paid for the link.
+        ...getBookingAttributionFields(),
         wallet_credit_inr: useWalletCredits ? walletDiscountAmount : 0,
         selected_addons: addonCalculation.addons,
         hotel_tier_id: hotelTierId,
@@ -1111,6 +1123,15 @@ export default function Checkout() {
                     </div>
                   )}
 
+                  {referralDiscountAmount > 0 && (
+                    <div className="flex justify-between items-center text-emerald-700 font-bold bg-emerald-50 p-2 rounded-xl border border-emerald-200">
+                      <span className="flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5" /> Friend discount{quote.referral.referrerFirstName ? ` from ${quote.referral.referrerFirstName}` : ""}
+                      </span>
+                      <span>−{formatPrice(referralDiscountAmount)}</span>
+                    </div>
+                  )}
+
                     {/* Promo Code Input Box */}
                   <div className="pt-2 border-t border-stone-100 space-y-2">
                     {appliedPromo ? (
@@ -1145,6 +1166,13 @@ export default function Checkout() {
                     )}
                     {promoError && (
                       <p className="text-[10px] font-mono text-rose-600">{promoError}</p>
+                    )}
+                    {referralUnavailable && (
+                      <p className="text-[10px] font-mono text-stone-500">
+                        {quote.referral.reason === "FIRST_TRIP_USED"
+                          ? "The friend discount applies to your first trip only."
+                          : "This referral can't be used on this account. You can still book at the regular price."}
+                      </p>
                     )}
                   </div>
 

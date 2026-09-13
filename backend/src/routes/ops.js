@@ -1,3 +1,6 @@
+import { assignDriverToBooking, getFleetAvailability } from "../services/driverDispatchService.js";
+import { confirmDriverByPhone, listDispatchExceptions, operationsTripOverride, processDispatchSchedule, processDispatchOutbox, TRIP_ISSUE_TASK_TYPES } from "../services/dispatchWorkflowService.js";
+import { deliverDispatchNotification } from "../services/dispatchNotificationService.js";
 import { smsConfiguration } from "../services/smsService.js";
 import express from "express";
 import db from "../db.js";
@@ -6,7 +9,8 @@ import { emailProviderConfiguration, sendEmail } from "../services/emailService.
 import { withoutPickupOtpSecrets } from "../services/bookingService.js";
 import { processExpiredSupplierAssignments } from "../services/assignmentSlaService.js";
 import { processExpiredCircuitReconfirmations } from "../services/circuitOrchestrationService.js";
-import { notifyCircuitReschedule, queueNotification, sendGuestBookingNotification } from "../services/notificationService.js";
+import { notifyBookingConfirmed, notifyCircuitReschedule, queueNotification, sendGuestBookingNotification, sendPendingPostTripReviewInvites } from "../services/notificationService.js";
+import { processReservationOutbox } from "../services/reservationOutboxService.js";
 import {
   getLiveDispatchTelemetry,
   updateDriverCoordinates,
@@ -23,7 +27,7 @@ const router = express.Router();
 const opsAccess = requireRoles("ADMIN", "STAFF");
 
 router.use((req, res, next) => {
-  if (req.path === "/process-assignment-timeouts") return next();
+  if (["/process-assignment-timeouts", "/process-driver-dispatch", "/process-reservation-outbox", "/process-post-trip-invites"].includes(req.path)) return next();
   return authenticate(req, res, (error) => error ? next(error) : opsAccess(req, res, next));
 });
 
@@ -159,46 +163,83 @@ router.post("/process-assignment-timeouts", optionalAuthMiddleware, requireSched
   }
 });
 
-// POST /api/ops/fallback-override - Manual Driver Dispatch / Ground Ops Fallback
+router.post("/process-driver-dispatch", optionalAuthMiddleware, requireSchedulerOrRoles("ADMIN", "STAFF"), validateBody(opsSchemas.scheduler), async (req, res) => {
+  try { const schedule = processDispatchSchedule(db); const delivery = await processDispatchOutbox(db, deliverDispatchNotification); res.json({ success: true, schedule, delivery }); }
+  catch (err) { res.status(500).json({ error: "Driver dispatch processing failed" }); }
+});
+// Cloud Scheduler drains booking confirmations here, because Cloud Run throttles the in-process timer between requests.
+router.post("/process-reservation-outbox", optionalAuthMiddleware, requireSchedulerOrRoles("ADMIN", "STAFF"), validateBody(opsSchemas.scheduler), async (req, res) => {
+  try { res.json({ success: true, delivery: await processReservationOutbox(db, notifyBookingConfirmed, { limit: req.body?.limit || 50 }) }); }
+  catch (err) {
+    logger.error("Reservation outbox processing failed", { error: err });
+    res.status(500).json({ error: "Reservation outbox processing failed" });
+  }
+});
+router.post("/process-post-trip-invites", optionalAuthMiddleware, requireSchedulerOrRoles("ADMIN", "STAFF"), validateBody(opsSchemas.scheduler), async (req, res) => {
+  try {
+    const result = await sendPendingPostTripReviewInvites(db);
+    res.json({ success: true, checked: result.checked, sent: result.sent.map((item) => item.bookingRef) });
+  } catch (err) {
+    logger.error("Post-trip invite processing failed", { error: err });
+    res.status(500).json({ error: "Post-trip invite processing failed" });
+  }
+});
+router.get("/dispatch-queue", (req, res) => {
+  const tasks = listDispatchExceptions(db);
+  const tripIssues = listDispatchExceptions(db, { taskTypes: TRIP_ISSUE_TASK_TYPES });
+  const deliveries = db.prepare("SELECT booking_id, event_type, status, attempts, last_error FROM dispatch_outbox ORDER BY available_at DESC LIMIT 100").all();
+  res.json({ success: true, tasks, tripIssues, deliveries });
+});
+// Operations can see the booking supplier's fleet with availability reasons before taking over.
+router.get("/bookings/:bookingId/fleet-availability", (req, res) => {
+  try {
+    const b = db.prepare("SELECT id, supplier_id FROM bookings WHERE id = ? OR ref = ?").get(req.params.bookingId, req.params.bookingId);
+    if (!b?.supplier_id) return res.status(404).json({ error: "Booking or its supplier was not found" });
+    const drivers = getFleetAvailability(db, { supplierId: b.supplier_id, bookingId: b.id })
+      .sort((x, y) => Number(y.available) - Number(x.available) || String(x.driver_name).localeCompare(String(y.driver_name)));
+    res.json({ success: true, drivers });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : "Fleet availability failed" }); }
+});
+
+router.get("/bookings/:bookingId/dispatch-timeline", (req, res) => {
+  const b = db.prepare("SELECT id FROM bookings WHERE id = ? OR ref = ?").get(req.params.bookingId, req.params.bookingId);
+  if (!b) return res.status(404).json({ error: "Booking not found" });
+  res.json({ success: true, timeline: getDispatchTimeline(db, b.id) });
+});
+
+router.post("/bookings/:bookingId/trip-override", validateBody(opsSchemas.tripOverride), (req, res) => {
+  try {
+    const assignment = operationsTripOverride(db, { bookingId: req.params.bookingId, action: req.body.action, actorId: req.user.id, note: req.body.note });
+    res.json({ success: true, assignment, message: req.body.action === "START" ? "Trip started without the pickup OTP. The traveler and supplier have been notified." : "Trip marked complete. The supplier payout is scheduled." });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : "Trip update failed" }); }
+});
+
+router.post("/bookings/:bookingId/confirm-driver", validateBody(opsSchemas.confirmDriver), (req, res) => {
+  try {
+    const assignment = confirmDriverByPhone(db, { bookingId: req.params.bookingId, actorId: req.user.id, note: req.body.note });
+    res.json({ success: true, assignment, message: `${assignment.driver_name} confirmed by phone. The traveler has been notified.` });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : "Driver confirmation failed" }); }
+});
+
+// Emergency assignments use the same validation and audit history as supplier dispatch:
+// a driver from the booking supplier's fleet, or an outside driver, optionally confirmed by phone.
 router.post("/fallback-override", validateBody(opsSchemas.fallback), (req, res) => {
   try {
-    const { bookingId, fallbackDriverName, fallbackDriverPhone, fallbackVehicleModel, fallbackVehicleNumber, notes } = req.body;
-
-    const booking = db.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
-    if (!booking) return res.status(404).json({ error: "Booking not found" });
-
-    // Delete existing driver assignment if any
-    db.prepare("DELETE FROM driver_assignments WHERE booking_id = ?").run(booking.id);
-
-    const assignmentId = `drv_fallback_${Date.now()}`;
-    db.prepare(
-      `INSERT INTO driver_assignments (id, booking_id, supplier_id, driver_name, driver_phone, vehicle_model, vehicle_number, assignment_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'FALLBACK_TRIGGERED')`
-    ).run(
-      assignmentId,
-      booking.id,
-      booking.supplier_id || "sup_lucknow_cabs",
-      fallbackDriverName || "Ground Ops Fallback Driver",
-      fallbackDriverPhone || "+919811009988",
-      fallbackVehicleModel || "Backup Commercial Cab",
-      fallbackVehicleNumber || "UP-32-T-9999"
-    );
-
-    // Log staff task
-    db.prepare(
-      `INSERT INTO staff_tasks (id, task_type, booking_id, assigned_staff_name, priority, status, notes)
-       VALUES (?, 'FALLBACK_DISPATCH', ?, 'Ground Operations Staff', 'CRITICAL', 'RESOLVED', ?)`
-    ).run(`task_${Date.now()}`, booking.id, notes || `Fallback driver ${fallbackDriverName} (${fallbackVehicleNumber}) dispatched.`);
-
-    res.json({
-      success: true,
-      message: `Emergency fallback driver ${fallbackDriverName} assigned to trip #${booking.ref}!`,
-      assignmentId
-    });
-  } catch (err) {
-    logger.error("Fallback dispatch override failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: "Failed to execute fallback dispatch" });
-  }
+    const v = req.body;
+    if (!v.notes?.trim()) return res.status(400).json({ error: "An override reason is required" });
+    const b = db.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(v.bookingId, v.bookingId);
+    if (!b) return res.status(404).json({ error: "Booking not found" });
+    const phoneConfirmed = v.confirmedByPhone === true || v.confirmedByPhone === "true" || v.confirmedByPhone === 1;
+    const assignment = assignDriverToBooking(db, { supplierId: b.supplier_id, bookingId: b.id, actorId: req.user.id,
+      supplierDriverId: v.supplierDriverId,
+      manualDriver: { driverName: v.fallbackDriverName, driverPhone: v.fallbackDriverPhone, driverEmail: v.fallbackDriverEmail, seatCapacity: v.seatCapacity, vehicleModel: v.fallbackVehicleModel, vehicleNumber: v.fallbackVehicleNumber } });
+    db.prepare("UPDATE driver_assignment_events SET note = ? WHERE assignment_id = ? AND event_type IN ('ASSIGNED','REASSIGNED') AND new_status = 'ASSIGNED'").run(v.notes, assignment.id);
+    if (phoneConfirmed) {
+      const confirmed = confirmDriverByPhone(db, { bookingId: b.id, actorId: req.user.id, note: v.notes });
+      return res.json({ success: true, assignment: confirmed, message: `${confirmed.driver_name} assigned to ${b.ref} and confirmed by phone. The traveler has been notified.` });
+    }
+    res.json({ success: true, assignment, message: `${assignment.driver_name} assigned to ${b.ref}. Waiting for the driver to accept from the trip link.` });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : "Driver assignment failed" }); }
 });
 
 // POST /api/ops/emergency-reallocate - 15 km Radius Emergency Vendor Ping & Auto-Reallocation

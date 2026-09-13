@@ -4,6 +4,7 @@ import { ArrowRight, CalendarDays, Check, Clock3, FileText, KeyRound, MapPin, Pr
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import SeoHead from "../components/SeoHead.jsx";
+import ShareTripInvite from "../components/traveler/ShareTripInvite.jsx";
 
 export default function BookingConfirmed() {
   const { ref } = useParams();
@@ -228,6 +229,8 @@ export default function BookingConfirmed() {
               </div>
               {notice && <p className="mt-2 text-xs text-amber-800 font-semibold">{notice}</p>}
             </div>
+
+            <ShareTripInvite productTitle={booking?.product_title || null} channel="WHATSAPP" heading="Know someone who'd enjoy this trip?" className="mt-6" />
 
             {/* Bottom Actions */}
             <div className="mt-6 flex flex-col gap-3 sm:flex-row print:hidden">

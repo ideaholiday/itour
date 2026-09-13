@@ -1,6 +1,7 @@
 import db from "../db.js";
 import crypto from "crypto";
 import { cacheService } from "./cacheService.js";
+import { priorMeanRating } from "./reviewService.js";
 
 const CITY_COORDINATES = {
   "delhi": { lat: 28.6139, lng: 77.2090 },
@@ -227,7 +228,12 @@ export class SearchService {
     }
 
     if (minRating !== null && !isNaN(minRating)) {
-      whereConditions.push("p.rating >= ?");
+      // A rating filter matches what travelers actually rated. A listing with
+      // no verified review has no rating and cannot satisfy a rating floor.
+      whereConditions.push(`EXISTS (
+        SELECT 1 FROM quality_scores qs WHERE qs.entity_type = 'PRODUCT' AND qs.entity_id = p.id
+          AND qs.review_count > 0 AND qs.average_rating >= ?
+      )`);
       params.push(Number(minRating));
     }
 
@@ -255,16 +261,26 @@ export class SearchService {
 
     const whereClause = whereConditions.join(" AND ");
 
-    // Sorting
-    let orderByClause = "p.bestseller DESC, p.rating DESC";
+    // Sorting. Rating order runs on the smoothed rating so an unreviewed
+    // listing ranks at the prior mean instead of below every rated one; the
+    // rating shown to the traveler is still the real average, or none.
+    const priorMean = priorMeanRating(db, "PRODUCT");
+    const rankRating = "COALESCE(qs_rank.smoothed_rating, ?)";
+    const orderParams = [];
+
+    let orderByClause = `p.bestseller DESC, ${rankRating} DESC`;
+    orderParams.push(priorMean);
     if (sort === "price_asc" || (sort === "price" && order === "asc")) {
       orderByClause = "p.price_inr ASC";
+      orderParams.length = 0;
     } else if (sort === "price_desc" || (sort === "price" && order === "desc")) {
       orderByClause = "p.price_inr DESC";
+      orderParams.length = 0;
     } else if (sort === "rating") {
-      orderByClause = "p.rating DESC, p.review_count DESC";
+      orderByClause = `${rankRating} DESC, COALESCE(p.review_count, 0) DESC`;
     } else if (sort === "newest") {
       orderByClause = "p.created_at DESC";
+      orderParams.length = 0;
     }
 
     // Count total matches
@@ -275,17 +291,19 @@ export class SearchService {
     const dataSql = `
       SELECT p.*, s.company_name as supplier_company_name, s.rating as supplier_rating,
         tr.origin_lat, tr.origin_lng, tr.dest_lat, tr.dest_lng, tr.vehicle_category as transfer_vehicle,
-        pi.total_days as package_days
+        pi.total_days as package_days,
+        qs_rank.smoothed_rating, qs_rank.average_rating as verified_rating, qs_rank.review_count as verified_review_count
       FROM products p
       LEFT JOIN suppliers s ON s.id = p.supplier_id
       LEFT JOIN transfer_routes tr ON tr.product_id = p.id
       LEFT JOIN package_itineraries pi ON pi.product_id = p.id
+      LEFT JOIN quality_scores qs_rank ON qs_rank.entity_type = 'PRODUCT' AND qs_rank.entity_id = p.id
       WHERE ${whereClause}
       ORDER BY ${orderByClause}
       LIMIT ? OFFSET ?
     `;
 
-    const rawProducts = db.prepare(dataSql).all(...params, limit, offset);
+    const rawProducts = db.prepare(dataSql).all(...params, ...orderParams, limit, offset);
 
     // Coordinate enrichment
     const products = rawProducts.map((prod, index) => {
@@ -296,10 +314,15 @@ export class SearchService {
       const jitterLng = (((index + 1) % 5) - 2) * 0.008;
       const lat = prod.origin_lat || Number((cityCoord.lat + jitterLat).toFixed(4));
       const lng = prod.origin_lng || Number((cityCoord.lng + jitterLng).toFixed(4));
+      const reviewCount = Number(prod.verified_review_count || prod.review_count || 0);
       return {
         ...prod,
         lat,
         lng,
+        // No verified review, no rating — `isNewListing` is what the card shows.
+        rating: reviewCount ? (prod.verified_rating ?? prod.rating) : null,
+        review_count: reviewCount,
+        isNewListing: reviewCount === 0,
         inclusions: typeof prod.inclusions === "string" ? JSON.parse(prod.inclusions || "[]") : (prod.inclusions || []),
         exclusions: typeof prod.exclusions === "string" ? JSON.parse(prod.exclusions || "[]") : (prod.exclusions || []),
       };
@@ -340,10 +363,12 @@ export class SearchService {
         COALESCE(SUM(CASE WHEN p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 1 ELSE 0 END), 0) as half_day_count,
         COALESCE(SUM(CASE WHEN (p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type IN ('TOUR', 'DAY_TOUR')) THEN 1 ELSE 0 END), 0) as full_day_count,
         COALESCE(SUM(CASE WHEN p.product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') OR p.duration_hours > 24 THEN 1 ELSE 0 END), 0) as multi_day_count,
-        COALESCE(SUM(CASE WHEN p.rating >= 4.5 THEN 1 ELSE 0 END), 0) as r45,
-        COALESCE(SUM(CASE WHEN p.rating >= 4.0 THEN 1 ELSE 0 END), 0) as r40,
-        COALESCE(SUM(CASE WHEN p.rating >= 3.5 THEN 1 ELSE 0 END), 0) as r35
-      FROM products p ${baseWhere}
+        COALESCE(SUM(CASE WHEN qs.review_count > 0 AND qs.average_rating >= 4.5 THEN 1 ELSE 0 END), 0) as r45,
+        COALESCE(SUM(CASE WHEN qs.review_count > 0 AND qs.average_rating >= 4.0 THEN 1 ELSE 0 END), 0) as r40,
+        COALESCE(SUM(CASE WHEN qs.review_count > 0 AND qs.average_rating >= 3.5 THEN 1 ELSE 0 END), 0) as r35
+      FROM products p
+      LEFT JOIN quality_scores qs ON qs.entity_type = 'PRODUCT' AND qs.entity_id = p.id
+      ${baseWhere}
     `).get(...baseParams) || {};
 
     const priceStats = {

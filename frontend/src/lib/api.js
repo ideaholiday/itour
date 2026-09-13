@@ -123,6 +123,17 @@ export const api = {
   getSupplierReviews: (id) => fetch(`${BASE}/reviews/supplier/${encodeURIComponent(id)}`, { headers: authHeaders() }).then(handle),
   respondToReview: (id, response) => fetch(`${BASE}/reviews/${encodeURIComponent(id)}/response`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ response }) }).then(handle),
   voteReviewHelpfulness: (id, isHelpful = true) => fetch(`${BASE}/reviews/${encodeURIComponent(id)}/helpfulness`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ isHelpful }) }).then(handle),
+  // Review collection links — the invite endpoints are public by design: the
+  // token (or a claimed share link) is the traveler's proof, not a session.
+  getReviewInvite: (token) => fetch(`${BASE}/reviews/invite/${encodeURIComponent(token)}`).then(handle),
+  submitInviteReview: (token, payload) => fetch(`${BASE}/reviews/invite/${encodeURIComponent(token)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
+  getReviewShareLink: (slug) => fetch(`${BASE}/reviews/share/${encodeURIComponent(slug)}`).then(handle),
+  claimReviewShareLink: (slug, payload) => fetch(`${BASE}/reviews/share/${encodeURIComponent(slug)}/claim`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).then(handle),
+  // Signed-in traveler reviewing from a share link without a booking — shown on the listing, not counted in ratings.
+  submitShareLinkReview: (slug, payload) => fetch(`${BASE}/reviews/share/${encodeURIComponent(slug)}/review`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getSupplierShareLinks: () => fetch(`${BASE}/reviews/share-links`, { headers: authHeaders() }).then(handle),
+  createSupplierShareLink: (payload) => fetch(`${BASE}/reviews/share-links`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  updateSupplierShareLink: (id, payload) => fetch(`${BASE}/reviews/share-links/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   uploadReviewPhoto: (id, payload) => fetch(`${BASE}/reviews/${encodeURIComponent(id)}/photos`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   uploadFile: (payload) => fetch(`${BASE}/uploads`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   updateSupplierProductPrice: (supplierId, productId, payload) =>
@@ -253,6 +264,44 @@ export const api = {
     fetch(`/api/loyalty/public-ref/${encodeURIComponent(code)}`).then(handle),
   getLoyaltyLeaderboard: () =>
     fetch("/api/loyalty/leaderboard", { headers: authHeaders() }).then(handle),
+  trackReferralClick: (payload) =>
+    fetch("/api/referral/track-click", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getReferralSummary: () =>
+    fetch("/api/referral/me", { headers: authHeaders() }).then(handle),
+  getReferralMetrics: (days = 90) =>
+    fetch(`/api/referral/admin/metrics?days=${encodeURIComponent(days)}`, { headers: authHeaders() }).then(handle),
+  getReferralReviewQueue: () =>
+    fetch("/api/referral/admin/review", { headers: authHeaders() }).then(handle),
+  reviewReferralReward: (rewardId, payload) =>
+    fetch(`/api/referral/admin/rewards/${encodeURIComponent(rewardId)}/review`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  setReferralRelationshipStatus: (relationshipId, payload) =>
+    fetch(`/api/referral/admin/relationships/${encodeURIComponent(relationshipId)}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getAffiliateMe: () =>
+    fetch("/api/affiliate/me", { headers: authHeaders() }).then(handle),
+  registerAffiliate: (payload) =>
+    fetch("/api/affiliate/register", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getAffiliateDashboard: () =>
+    fetch("/api/affiliate/dashboard", { headers: authHeaders() }).then(handle),
+  updateAffiliateProfile: (payload) =>
+    fetch("/api/affiliate/profile", { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  updateAffiliateKyc: (payload) =>
+    fetch("/api/affiliate/kyc", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  requestAffiliatePayout: (payload) =>
+    fetch("/api/affiliate/payout/request", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  trackAffiliateClick: (payload) =>
+    fetch("/api/affiliate/track-click", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getAffiliatePayoutAccounts: () =>
+    fetch("/api/affiliate/payout-accounts", { headers: authHeaders() }).then(handle),
+  addAffiliatePayoutAccount: (payload) =>
+    fetch("/api/affiliate/payout-accounts", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  setPrimaryAffiliatePayoutAccount: (accountId) =>
+    fetch(`/api/affiliate/payout-accounts/${encodeURIComponent(accountId)}/primary`, { method: "PATCH", headers: authHeaders() }).then(handle),
+  removeAffiliatePayoutAccount: (accountId) =>
+    fetch(`/api/affiliate/payout-accounts/${encodeURIComponent(accountId)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
+  getAffiliatePayoutPreview: (amountInr) =>
+    fetch(`/api/affiliate/payout-preview?amountInr=${encodeURIComponent(amountInr ?? "")}`, { headers: authHeaders() }).then(handle),
+  getAffiliateShareLink: ({ path = "/", subId = "" } = {}) =>
+    fetch(`/api/affiliate/share-link?path=${encodeURIComponent(path)}&subId=${encodeURIComponent(subId)}`, { headers: authHeaders() }).then(handle),
   get: (path) => fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { headers: authHeaders() }).then(handle),
   post: (path, payload) =>
     fetch(path.startsWith("/api") ? path : `${BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: payload ? JSON.stringify(payload) : undefined }).then(handle),
