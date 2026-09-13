@@ -48,10 +48,11 @@ and `whatsappService.js`.
 | `REVIEW_REQUEST` | booking ref, experience name |
 | `CIRCUIT_RESCHEDULE` | circuit order ref, reschedule state, reconfirmation deadline |
 
-**Known mismatch (UNKNOWN which is intended):** some call sites send
-`BOOKING_CONFIRMED` with 5 variables (no voucher or invoice URL) and
-`DRIVER_ASSIGNED` with 7 (no voucher URL). Meta rejects a variable count that
-differs from the approved template.
+`TRIP_STATUS` also carries the traveler logistics updates (supplier confirmation
+pending, pickup details updated, driver arriving, amendment recorded), so it
+must be approved and configured in production. Every call site for a key must
+pass the same number of variables; `backend/test/whatsappTemplateArity.test.js`
+fails when they differ.
 
 **Driver dispatch** uses its own `WHATSAPP_TEMPLATE_DISPATCH_*` templates. Their
 names, variables, example values and approved body text are defined in

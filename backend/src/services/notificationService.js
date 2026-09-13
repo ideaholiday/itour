@@ -189,22 +189,24 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     SUPPLIER_CONFIRMATION_PENDING: {
       subject: `Supplier confirmation pending for ${booking.ref}`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nPayment is received for ${experienceName}, but the supplier is still confirming availability. We will update you before ${booking.supplier_response_deadline || "the service"}.\nPickup requested: ${booking.pickup_location || "Pending"}.`,
-      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+      // Status updates use the generic TRIP_STATUS template: reusing BOOKING_CONFIRMED sent the wrong
+      // variable count (Meta rejects it) and told the traveler the booking was confirmed.
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Supplier confirmation pending", `Payment received for ${experienceName}. The supplier is confirming availability; we will update you before ${booking.supplier_response_deadline || "your trip"}.`]),
     },
     PICKUP_DETAILS_UPDATED: {
       subject: `Pickup details updated for ${booking.ref}`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour pickup details for ${experienceName} have been updated.\nPickup: ${booking.pickup_time || "Time TBC"}, ${booking.pickup_location || "See your voucher"}.\nDrop-off: ${booking.drop_location || "See your voucher"}.`,
-      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Pickup details updated", `Pickup: ${booking.pickup_time || "Time TBC"}, ${booking.pickup_location || "see your voucher"}. Drop-off: ${booking.drop_location || "see your voucher"}.`]),
     },
     DRIVER_ARRIVING: {
       subject: `Your driver is arriving (${booking.ref})`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour driver is on the way to ${booking.pickup_location || "your pickup point"}. Please keep your phone reachable.`,
-      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_DRIVER_ASSIGNED, [booking.ref, booking.driver_name, booking.driver_phone, booking.vehicle_model, booking.vehicle_number, booking.pickup_time, booking.pickup_location]),
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Driver arriving", `Your driver is on the way to ${booking.pickup_location || "your pickup point"}. Please keep your phone reachable.`]),
     },
     AMENDMENT_RESULT: {
       subject: `Booking logistics amendment ${booking.ref}`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour requested pickup/drop amendment has been recorded. Check My Trips for the latest voucher and logistics status.`,
-      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Amendment recorded", "Check My Trips for the latest voucher and logistics status."]),
     },
   }[eventType];
   const results = await sendRecipientChannels({
