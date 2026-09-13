@@ -4,6 +4,20 @@ All notable technical and architectural changes to this project are documented i
 
 ---
 
+## [2026-09-13] - Supplier Profiles: Public Pages, Google Visibility, Verified Badge, Enquiries
+- **Change**:
+  1. Every supplier has a public profile at `/suppliers/<slug>` (tagline, about, logo, cover, languages, service cities, reviews, rating from booking-verified reviews). Contact, tax and bank details are never public, and products are not listed on a profile.
+  2. Supplier directory at `/suppliers` and city pages at `/suppliers/in/<city>`, with text, city and Verified filters. Footer links to it; activity pages link "Supplied by" to the profile.
+  3. The server writes each profile's title, description, canonical, robots, Open Graph and JSON-LD (`TravelAgency`, `BreadcrumbList`, rating with 3+ counted reviews) into `index.html`, so link previews and crawlers see them. Profiles are `noindex` until KYB approval. New `sitemap-suppliers.xml`, listed in `robots.txt`. Renamed slugs 301.
+  4. Verified badge: granted by an admin for 365 days after four required checks, only for KYB-approved suppliers; lapses automatically, removed on KYB suspension or revoke. Activity pages no longer claim "Verified Operator" for every supplier.
+  5. Enquiries: signed-in travelers ask a supplier from the profile; suppliers reply from a new Enquiries tab and are notified in the portal. Messages with phone numbers, emails, links or WhatsApp are refused. `/messages` now shows real enquiry threads (it was a mock).
+  6. Supplier portal "Public profile" tab: editor, share link, WhatsApp share, visibility and Google status, completeness, review links. Admin supplier drawer: grant or revoke the badge, suspend or restore the profile.
+  7. Fixed `/suppliers` paths being treated as the supplier workspace (`startsWith("/supplier")`) in `App.jsx` and `domainContext.js`.
+- **Affected Components**: `backend/migrations/033_supplier_profiles.sql`, `backend/src/services/supplierProfileService.js`, `backend/src/services/supplierEnquiryService.js`, `backend/src/routes/publicSuppliers.js`, `backend/src/routes/enquiries.js`, `backend/src/routes/seo.js`, `backend/src/routes/suppliers.js`, `backend/src/routes/admin.js`, `backend/src/routes/auth.js`, `backend/src/routes/activities.js`, `backend/src/server.js`, `backend/src/validators/apiSchemas.js`, tests, `frontend/src/pages/SupplierProfile.jsx`, `frontend/src/pages/SupplierDirectory.jsx`, `frontend/src/pages/TravelerMessages.jsx`, `frontend/src/components/EnquiryInbox.jsx`, `frontend/src/components/supplier/SupplierBadge.jsx`, `frontend/src/components/supplier/SupplierPublicProfileEditor.jsx`, `frontend/src/components/admin/SupplierProfileAdminPanel.jsx`, `docs/BUSINESS_RULES.md`, `docs/API_CONTRACTS.md`, `docs/DATA_MODEL.md`.
+- **Migration Requirements**: `033_supplier_profiles.sql` runs on startup; existing suppliers get slugs at startup. After deploying, submit `https://ideaholiday.in/sitemap-suppliers.xml` in Google Search Console.
+
+---
+
 ## [2026-09-13] - Dispatch Phase 5: Trip Completion, Stuck Trips, Problem Reports, Timeline
 - **Change**:
   1. Drivers who have used half of the response window get one reminder to accept or decline.

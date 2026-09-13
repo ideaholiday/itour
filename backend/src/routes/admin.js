@@ -37,7 +37,11 @@ import {
 import { validateBody } from "../middleware/validation.js";
 import { assignDriverToBooking } from "../services/driverDispatchService.js";
 import { dispatchTransaction, revokeAssignment } from "../services/dispatchStateService.js";
-import { adminSchemas, checkoutSchemas } from "../validators/apiSchemas.js";
+import { adminSchemas, checkoutSchemas, profileSchemas } from "../validators/apiSchemas.js";
+import {
+  grantSupplierVerification, ownerProfileView, REQUIRED_VERIFICATION_CHECKS, revokeSupplierVerification,
+  setProfileSuspended, VERIFICATION_CHECKS,
+} from "../services/supplierProfileService.js";
 
 const router = express.Router();
 router.use(authenticate, requireRoles("ADMIN"));
@@ -340,6 +344,47 @@ router.post("/suppliers/:id/verify", optionalAuthMiddleware, requireAdminAccess,
     res.status(err.status || 500).json({
       error: err.status ? err.message : "Supplier KYC status could not be saved. Please retry or contact support.",
     });
+  }
+});
+
+// POST /api/admin/suppliers/:id/profile-verification - Grant (yearly, after checks) or revoke the Verified badge
+router.post("/suppliers/:id/profile-verification", optionalAuthMiddleware, requireAdminAccess, validateBody(profileSchemas.verification), (req, res) => {
+  try {
+    const actorId = req.user?.email || req.user?.id || "admin";
+    const action = String(req.body.action).toUpperCase();
+    if (action === "GRANT") {
+      const verification = grantSupplierVerification(db, req.params.id, { checks: req.body.checks, reason: req.body.reason, actorId });
+      return res.status(201).json({ success: true, verification, profile: ownerProfileView(db, req.params.id) });
+    }
+    const result = revokeSupplierVerification(db, req.params.id, { reason: req.body.reason, actorId });
+    return res.json({ success: true, ...result, profile: ownerProfileView(db, req.params.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Supplier profile verification failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Verification decision could not be saved" });
+  }
+});
+
+// PATCH /api/admin/suppliers/:id/profile-status - Suspend or restore a public profile
+router.patch("/suppliers/:id/profile-status", optionalAuthMiddleware, requireAdminAccess, validateBody(profileSchemas.profileStatus), (req, res) => {
+  try {
+    setProfileSuspended(db, req.params.id, { suspended: req.body.suspended, reason: req.body.reason });
+    return res.json({ success: true, profile: ownerProfileView(db, req.params.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Supplier profile status change failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Profile status could not be saved" });
+  }
+});
+
+// GET /api/admin/suppliers/:id/public-profile - Profile, badge and verification history for the approval drawer
+router.get("/suppliers/:id/public-profile", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
+  try {
+    return res.json({ success: true, ...ownerProfileView(db, req.params.id), checkCatalog: VERIFICATION_CHECKS, requiredChecks: REQUIRED_VERIFICATION_CHECKS });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Admin supplier profile lookup failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not load the supplier profile" });
   }
 });
 

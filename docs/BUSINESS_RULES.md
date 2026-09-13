@@ -386,3 +386,57 @@ bookings. Implemented in `referralService.js`; the constants live in
 7. **Every v1 referral was carried over** by `backfillLegacyReferrals`: rewarded
    ones as `CLEARED` (no new credit), pending ones as `ACCRUED` at the v3 rate,
    plus one `ADJUSTMENT` wherever v1 had let a balance and its ledger drift.
+
+---
+
+## 12. Supplier Profiles
+
+Every registered supplier has a public page at `/suppliers/<slug>` that
+travelers can find on the marketplace and on Google. Code:
+`supplierProfileService.js`, `supplierEnquiryService.js`, `routes/seo.js`.
+
+### 12.1 What a profile shows, and what it never shows
+1. **Never public:** email, phone, contact name, GSTIN, PAN, bank details, the
+   supplier id. `publicSupplierView` is an allow-list and is tested for this.
+2. **No products on a profile.** A paid Spotlight (not built yet) is what will
+   put a product there. Marketplace search is unaffected: KYB-approved suppliers'
+   products stay bookable there.
+3. **Profile text refuses contact details** — phone numbers, emails, links,
+   WhatsApp. Social links are collected only as schema.org `sameAs` and are not
+   rendered.
+4. Reviews: published reviews are shown. Only booking-verified ones count toward
+   the rating (§9.1); share-link reviews are labelled as not counted. Product
+   titles are left out of profile reviews (rule 2).
+
+### 12.2 Visibility and Google
+1. A profile is **visible** unless the supplier hid it (`HIDDEN`), an admin
+   suspended it (`SUSPENDED`, reason required), or KYB is `SUSPENDED`.
+2. A visible profile is **indexable once KYB is `APPROVED`**. Before that it is
+   public with `noindex`, and it is left out of `sitemap-suppliers.xml`. Paying
+   is not required to appear on Google.
+3. City pages (`/suppliers/in/<city>`) are indexable when the city has an
+   indexable profile.
+4. A slug change keeps the old slug as a 301 redirect, and no other supplier can
+   take it. Reserved slugs (`in`, `admin`, `search`, …) are refused.
+5. Review-star structured data is emitted only with **3 or more counted reviews**.
+
+### 12.3 The Verified badge
+1. Shown only when KYB is `APPROVED` **and** an `ACTIVE` `supplier_verifications`
+   row has `valid_until` in the future. Everyone else shows **Not verified**.
+2. It certifies a yearly business check that goes beyond KYB. Required checks:
+   business identity (GSTIN or PAN), bank account in the business name, business
+   address, a call with the owner. Tourism registration and vehicle permits are
+   recorded when they apply.
+3. A grant lasts **365 days** and supersedes any active one. It lapses on its
+   own; KYB suspension removes it immediately; an admin can revoke it with a reason.
+4. **The badge is never sold.** When paid Verified plans exist, payment buys the
+   check; the badge still appears only if the checks pass (rejected checks are
+   refunded). Today admins grant it manually after checking.
+
+### 12.4 Enquiries
+1. Only signed-in travelers can enquire; a supplier cannot enquire with itself,
+   including through a traveler account on the supplier's email.
+2. One open thread per traveler per supplier: a new enquiry continues it.
+3. Messages with contact details are **refused with an explanation**, not held.
+   Suppliers see the traveler's first name only.
+4. Limits: 10 new enquiries and 60 messages per hour per client.

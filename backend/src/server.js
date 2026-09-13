@@ -34,6 +34,7 @@ import { configureSecurity } from "./middleware/security.js";
 import { apiNotFound, errorHandler, requestContext, requestLogger, stableErrorResponses } from "./middleware/observability.js";
 import { auditMutations } from "./services/auditService.js";
 import { requestBoundary } from "./middleware/validation.js";
+import { backfillSupplierSlugs } from "./services/supplierProfileService.js";
 import { backfillLegacyReferrals, findWalletDiscrepancies, processReferralLifecycle, sendReferralNotifications } from "./services/referralService.js";
 
 // Run pending migrations on startup
@@ -65,6 +66,7 @@ try {
   logger.warn("Startup backfill failed", { error: err });
 }
 
+
 // Tests and explicitly configured demo environments need a complete, bookable
 // marketplace without copying a developer database. This seed is idempotent
 // and never runs implicitly in production or normal development.
@@ -77,6 +79,14 @@ if (process.env.SEED_DEMO_DATA === "true" && process.env.NODE_ENV !== "productio
     logger.error("Demo marketplace initialization failed", { error: err });
     throw err;
   }
+}
+
+// Every supplier gets a public profile link (idempotent).
+try {
+  const slugged = backfillSupplierSlugs(db);
+  if (slugged) logger.info("Assigned supplier profile links", { count: slugged });
+} catch (err) {
+  logger.warn("Supplier profile link backfill failed", { error: err.message });
 }
 
 
@@ -94,6 +104,8 @@ import supportRouter from "./routes/support.js";
 import reviewsRouter from "./routes/reviews.js";
 import analyticsRouter from "./routes/analytics.js";
 import seoRouter from "./routes/seo.js";
+import publicSuppliersRouter from "./routes/publicSuppliers.js";
+import enquiriesRouter from "./routes/enquiries.js";
 import securityTxtRouter from "./routes/securityTxt.js";
 import metricsRouter from "./routes/metrics.js";
 import travelerRouter from "./routes/traveler.js";
@@ -169,6 +181,8 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/auth`, authRouter);
   app.use(`${prefix}/bookings`, bookingsRouter);
   app.use(`${prefix}/transfers`, transfersRouter);
+  app.use(`${prefix}/public/suppliers`, publicSuppliersRouter);
+  app.use(`${prefix}/enquiries`, enquiriesRouter);
   app.use(`${prefix}/suppliers`, suppliersRouter);
   app.use(`${prefix}/supplier-channels`, supplierChannelsRouter);
   app.use(`${prefix}/octo`, octoRouter);

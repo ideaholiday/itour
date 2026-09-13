@@ -399,6 +399,27 @@ BUSINESS_RULES §11.
 - **`user_referrals`**: v1 table, no longer written. Carried into the tables
   above at startup.
 
+### 2.15 Supplier Profiles (`suppliers` profile columns, `supplier_verifications`, `supplier_enquiries`)
+Public supplier pages, the Verified badge and traveler enquiries. Migration 033.
+See BUSINESS_RULES §12.
+
+- **`suppliers`**: `public_slug` (unique; assigned at signup and by a startup
+  backfill), `tagline`, `about`, `logo_url`, `cover_url`, `languages` and
+  `service_cities` (JSON string arrays), `social_links` (JSON object of https
+  URLs, used only for `sameAs`), `profile_status` (`PUBLISHED` default, `HIDDEN`,
+  `SUSPENDED`), `profile_updated_at`.
+- **`supplier_slug_history`**: `old_slug` → `supplier_id`, for 301 redirects.
+- **`supplier_verifications`**: one row per badge decision. `status`
+  `PENDING_CHECKS`, `ACTIVE`, `REJECTED`, `EXPIRED`, `REVOKED`; `checks` (JSON
+  codes); `source` `ADMIN` or `PURCHASE`; `purchase_id` (for paid plans);
+  `valid_from` / `valid_until` as ISO-8601 strings compared as text;
+  `decided_by`, `decision_reason`.
+- **`supplier_enquiries`**: `enquiry_ref` (`ENQ-XXXXXXXX`), `supplier_id`,
+  `user_id`, `travel_date`, `travelers`, `status` `OPEN` → `REPLIED` → `CLOSED`,
+  `last_message_at`.
+- **`supplier_enquiry_messages`**: `enquiry_id`, `author_role` (`TRAVELER` or
+  `SUPPLIER`), `author_id`, `message`.
+
 ---
 
 ## 3. Sensitive Data & Security Controls

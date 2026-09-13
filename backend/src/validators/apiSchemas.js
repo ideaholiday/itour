@@ -408,3 +408,31 @@ export const locationSchemas = {
   suggestions: object({ side: z.enum(["PICKUP", "DROP", "pickup", "drop"]).optional(), q: optionalText(100) }),
   validatePoint: object({ side: z.enum(["PICKUP", "DROP", "pickup", "drop"]).optional(), lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180), address: optionalText(500) }),
 };
+
+// Supplier profiles and enquiries. Shapes only: the services own the business
+// rules (contact details, reserved slugs, required checks) and explain them.
+export const profileSchemas = {
+  update: object({
+    slug: optionalText(80),
+    tagline: optionalText(500),
+    about: optionalText(5_000),
+    logoUrl: optionalText(2_000),
+    coverUrl: optionalText(2_000),
+    languages: z.array(z.string().max(200)).max(50).optional(),
+    serviceCities: z.array(z.string().max(200)).max(100).optional(),
+    socialLinks: z.record(z.string(), z.string().max(2_000)).optional(),
+    profileStatus: optionalText(40),
+  }),
+  enquiry: object({
+    message: text(1, 5_000),
+    travelDate: optionalText(20),
+    travelers: z.union([z.number(), z.string().max(4)]).optional().nullable(),
+  }),
+  enquiryMessage: object({ message: text(1, 5_000) }),
+  verification: object({
+    action: z.enum(["GRANT", "REVOKE", "grant", "revoke"]),
+    checks: z.array(text(1, 60)).max(20).optional(),
+    reason: optionalText(1_000),
+  }),
+  profileStatus: object({ suspended: booleanValue, reason: optionalText(1_000) }),
+};

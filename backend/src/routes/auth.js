@@ -8,6 +8,7 @@ import logger from "../config/logger.js";
 import { validateBody } from "../middleware/validation.js";
 import { authSchemas } from "../validators/apiSchemas.js";
 import { establishReferralRelationship } from "../services/referralService.js";
+import { ensurePublicSlug } from "../services/supplierProfileService.js";
 
 const router = Router();
 const SECRET = process.env.JWT_SECRET
@@ -109,6 +110,7 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
         `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, kyb_status, is_verified)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0)`
       ).run(supplierId, supplierId, companyName, contactName, email, phone, city, state);
+      ensurePublicSlug(db, { id: supplierId, company_name: companyName, city });
 
       db.prepare(
         "INSERT INTO users (id, name, email, password, phone, role) VALUES (?, ?, ?, ?, ?, 'SUPPLIER')"

@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart3, Bell, CalendarCheck, ChevronDown, ExternalLink, FileCheck, LayoutDashboard, LogOut, Map, PlusCircle, RefreshCw, Store, Users } from "lucide-react";
+import { BarChart3, Bell, CalendarCheck, ChevronDown, ExternalLink, FileCheck, Globe, LayoutDashboard, LogOut, Map, MessageSquare, PlusCircle, RefreshCw, Store, Users } from "lucide-react";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { useAuth } from "../../lib/auth.jsx";
 import SupplierNotificationBell from "./SupplierNotificationBell.jsx";
@@ -22,11 +22,13 @@ export default function SupplierHeaderNav({ supplierData, activeTab }) {
     ["CHANNELS", "Channel Manager", "/supplier/channels", RefreshCw],
     ["FLEET", "Fleet", "/supplier/dashboard?panel=fleet", Users, supplierData?.drivers?.length || null],
     ["ANALYTICS", "Analytics", "/supplier/dashboard?panel=analytics", BarChart3],
+    ["PROFILE", "Public profile", "/supplier/dashboard?panel=profile", Globe],
+    ["ENQUIRIES", "Enquiries", "/supplier/dashboard?panel=enquiries", MessageSquare],
     ["KYB", "Compliance", "/supplier/dashboard?panel=compliance", FileCheck, isKybPending ? (supplier.kyb_status === "REJECTED" ? "Rejected" : "Action") : null]
   ];
 
   const isCurrent = (id, path) => {
-    if (id === "FLEET" || id === "KYB" || id === "BUILDER" || id === "ANALYTICS") return requestedPanel === (id === "BUILDER" ? "listings" : id.toLowerCase());
+    if (["FLEET", "KYB", "BUILDER", "ANALYTICS", "PROFILE", "ENQUIRIES"].includes(id)) return requestedPanel === (id === "BUILDER" ? "listings" : id === "KYB" ? "compliance" : id.toLowerCase());
     if (id === "DASHBOARD") return location.pathname === "/supplier" || (location.pathname === "/supplier/dashboard" && !requestedPanel);
     return location.pathname === path;
   };

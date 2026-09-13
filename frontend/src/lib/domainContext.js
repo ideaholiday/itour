@@ -41,7 +41,8 @@ export function getDomainInfo() {
   }
 
   // 3. Pathname detection for default domain
-  const isSupplierPath = pathname.startsWith("/supplier");
+  // Whole segment only: /suppliers/* is the public operator directory on the traveler site.
+  const isSupplierPath = pathname === "/supplier" || pathname.startsWith("/supplier/");
   const isAdminPath = pathname.startsWith("/admin") || pathname.startsWith("/ops");
 
   return {

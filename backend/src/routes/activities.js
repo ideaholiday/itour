@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { isProfileVisible, profilePath } from "../services/supplierProfileService.js";
 import db from "../db.js";
 import logger from "../config/logger.js";
 import { getPickupSuggestions, getProductLocationContext, validatePickupPoint } from "../services/locationValidationService.js";
@@ -87,9 +88,18 @@ function parseProductRows(rows = []) {
   if (supplierIds.length > 0) {
     try {
       const placeholders = supplierIds.map(() => "?").join(",");
-      const allSuppliers = db.prepare(`SELECT id, company_name, rating, kyb_status FROM suppliers WHERE id IN (${placeholders})`).all(...supplierIds);
+      const allSuppliers = db.prepare(`SELECT id, company_name, rating, kyb_status, public_slug, profile_status FROM suppliers WHERE id IN (${placeholders})`).all(...supplierIds);
+      let verifiedIds = new Set();
+      try {
+        verifiedIds = new Set(db.prepare(`SELECT DISTINCT supplier_id FROM supplier_verifications WHERE status = 'ACTIVE' AND valid_until > ? AND supplier_id IN (${placeholders})`)
+          .all(new Date().toISOString(), ...supplierIds).map((row) => row.supplier_id));
+      } catch {}
       for (const s of allSuppliers) {
-        supplierMap.set(s.id, s);
+        supplierMap.set(s.id, {
+          ...s,
+          verified: verifiedIds.has(s.id) && String(s.kyb_status || "").toUpperCase() === "APPROVED",
+          profilePath: s.public_slug && isProfileVisible(s) ? profilePath(s.public_slug) : null,
+        });
       }
     } catch (e) {}
   }
@@ -192,8 +202,10 @@ function parseProductRows(rows = []) {
       inclusions: safeJsonParse(row.inclusions, []),
       exclusions: safeJsonParse(row.exclusions, []),
       itinerary: safeJsonParse(row.itinerary, []),
-      supplierName: supplier ? supplier.company_name : "Idea Holiday Verified Supplier",
+      supplierName: supplier ? supplier.company_name : "Local operator",
       supplierRating: supplier?.rating ?? null,
+      supplierVerified: Boolean(supplier?.verified),
+      supplierProfilePath: supplier?.profilePath || null,
       pricingVariants: pricing,
       transferRoute,
       transferMeta: transferRoute ? {

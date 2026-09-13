@@ -134,6 +134,25 @@ export const api = {
   getSupplierShareLinks: () => fetch(`${BASE}/reviews/share-links`, { headers: authHeaders() }).then(handle),
   createSupplierShareLink: (payload) => fetch(`${BASE}/reviews/share-links`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   updateSupplierShareLink: (id, payload) => fetch(`${BASE}/reviews/share-links/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  // Public supplier profiles and directory — no contact details ever come back from these.
+  searchSuppliers: (params = {}) => {
+    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "" && v !== false)).toString();
+    return fetch(`${BASE}/public/suppliers${qs ? `?${qs}` : ""}`).then(handle);
+  },
+  getSupplierDirectoryCities: () => cachedFetch(`${BASE}/public/suppliers/cities`, {}, 300000),
+  getSupplierDirectoryCity: (citySlug) => fetch(`${BASE}/public/suppliers/cities/${encodeURIComponent(citySlug)}`).then(handle),
+  getSupplierProfile: (slug) => fetch(`${BASE}/public/suppliers/${encodeURIComponent(slug)}`).then(handle),
+  getSupplierProfileReviews: (slug, page = 1) => fetch(`${BASE}/public/suppliers/${encodeURIComponent(slug)}/reviews?page=${page}`).then(handle),
+  sendSupplierEnquiry: (slug, payload) => fetch(`${BASE}/public/suppliers/${encodeURIComponent(slug)}/enquiries`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getEnquiries: (status) => fetch(`${BASE}/enquiries${status ? `?status=${encodeURIComponent(status)}` : ""}`, { headers: authHeaders() }).then(handle),
+  getEnquiry: (ref) => fetch(`${BASE}/enquiries/${encodeURIComponent(ref)}`, { headers: authHeaders() }).then(handle),
+  sendEnquiryMessage: (ref, message) => fetch(`${BASE}/enquiries/${encodeURIComponent(ref)}/messages`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ message }) }).then(handle),
+  closeEnquiry: (ref) => fetch(`${BASE}/enquiries/${encodeURIComponent(ref)}/close`, { method: "POST", headers: authHeaders() }).then(handle),
+  getOwnPublicProfile: (supplierId) => fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/public-profile`, { headers: authHeaders() }).then(handle),
+  updateOwnPublicProfile: (supplierId, payload) => fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/public-profile`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  adminGetSupplierPublicProfile: (supplierId) => fetch(`${BASE}/admin/suppliers/${encodeURIComponent(supplierId)}/public-profile`, { headers: authHeaders() }).then(handle),
+  adminDecideSupplierVerification: (supplierId, payload) => fetch(`${BASE}/admin/suppliers/${encodeURIComponent(supplierId)}/profile-verification`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  adminSetSupplierProfileStatus: (supplierId, payload) => fetch(`${BASE}/admin/suppliers/${encodeURIComponent(supplierId)}/profile-status`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   uploadReviewPhoto: (id, payload) => fetch(`${BASE}/reviews/${encodeURIComponent(id)}/photos`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   uploadFile: (payload) => fetch(`${BASE}/uploads`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   updateSupplierProductPrice: (supplierId, productId, payload) =>

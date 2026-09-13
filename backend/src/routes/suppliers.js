@@ -48,7 +48,8 @@ import {
 } from "../services/cashfreeSecureIdService.js";
 import { nanoid } from "nanoid";
 import { validateBody } from "../middleware/validation.js";
-import { bookingSchemas, supplierSchemas } from "../validators/apiSchemas.js";
+import { bookingSchemas, profileSchemas, supplierSchemas } from "../validators/apiSchemas.js";
+import { ensurePublicSlug, ownerProfileView, updateSupplierProfile } from "../services/supplierProfileService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { backfillProductOptions } from "../services/logisticsService.js";
 import { backfillProductLocationRules } from "../data/canonicalLocations.js";
@@ -154,6 +155,7 @@ router.post("/register", validateBody(supplierSchemas.registration), (req, res) 
       `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, gstin, pan_number, kyb_status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`
     ).run(id, id, companyName, contactName, email, phone, city, state, gstin || null, panNumber || null);
+    ensurePublicSlug(db, { id, company_name: companyName, city });
 
     res.json({ success: true, supplierId: id, message: "Supplier registered successfully! KYB verification pending." });
   } catch (err) {
@@ -484,6 +486,28 @@ router.patch("/:id/profile", validateBody(supplierSchemas.profileUpdate), (req, 
   } catch (err) {
     logger.error("Failed to update supplier profile", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to update supplier profile" });
+  }
+});
+
+// GET /api/suppliers/:id/public-profile - The supplier's own view of their public profile
+router.get("/:id/public-profile", (req, res) => {
+  try {
+    return res.json({ success: true, ...ownerProfileView(db, req.params.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Supplier public profile lookup failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not load your public profile" });
+  }
+});
+
+// PATCH /api/suppliers/:id/public-profile - Edit tagline, about, images, languages, cities, links, visibility
+router.patch("/:id/public-profile", validateBody(profileSchemas.update), (req, res) => {
+  try {
+    return res.json({ success: true, ...updateSupplierProfile(db, req.params.id, req.body) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Supplier public profile update failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not save your public profile" });
   }
 });
 

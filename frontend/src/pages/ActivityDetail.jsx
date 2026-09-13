@@ -25,6 +25,7 @@ import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import SeoHead from "../components/SeoHead.jsx";
 import StarRating from "../components/StarRating.jsx";
+import SupplierBadge from "../components/supplier/SupplierBadge.jsx";
 import DatePicker from "../components/ui/DatePicker.jsx";
 import ReviewGallery from "../components/traveler/ReviewGallery.jsx";
 import ReviewModal from "../components/ReviewModal.jsx";
@@ -919,9 +920,15 @@ export default function ActivityDetail() {
             {reviewData.quality?.review_count > 0 ? (
               <StarRating rating={Number(reviewData.quality.average_rating)} count={reviewData.quality.review_count} size="md" />
             ) : (
-              <span className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-bold text-stone-500">New listing &#xb7; Verified Operator</span>
+              <span className="rounded-full border border-stone-200 bg-white px-3 py-1 text-xs font-bold text-stone-500">New listing</span>
             )}
-            <span className="text-emerald-800 font-semibold text-xs">Supplied by {activity.supplierName || "Idea Holiday Verified Partner"}</span>
+            <span className="inline-flex flex-wrap items-center gap-1.5 text-xs font-semibold text-emerald-800">
+              Supplied by{" "}
+              {activity.supplierProfilePath
+                ? <Link to={activity.supplierProfilePath} className="underline underline-offset-2 hover:text-emerald-950">{activity.supplierName}</Link>
+                : <span>{activity.supplierName || "a local operator"}</span>}
+              <SupplierBadge verified={activity.supplierVerified} />
+            </span>
             {activity.bestseller && <span className="rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-black uppercase text-stone-950">Bestseller</span>}
           </div>
         </header>

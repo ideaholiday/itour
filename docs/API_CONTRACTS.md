@@ -592,3 +592,56 @@ See BUSINESS_RULES §11.
   Approve clears on the next lifecycle run.
 - **`PATCH /api/referral/admin/relationships/:id`**: `{ "status": "ACTIVE" | "BLOCKED", "reason": "…" }`.
   Reopening also clears the review flag.
+
+---
+
+## 10. Supplier Profile Endpoints
+
+Rules: BUSINESS_RULES §12. Public responses never include contact, tax or bank details.
+
+### 10.1 Public (`/api/public/suppliers`, no authentication, 120 requests/min)
+- **`GET /api/public/suppliers?q=&city=&verified=1&page=&limit=`**: Directory.
+  `{ suppliers: [{ slug, path, name, tagline, city, state, logoUrl, verified, rating: { average, count } }], pagination }`.
+  Verified first, then by counted reviews. `city` also matches service cities.
+- **`GET /api/public/suppliers/cities`**: `{ cities: [{ city, state, slug, path, supplierCount }] }`.
+- **`GET /api/public/suppliers/cities/:citySlug`**: `{ city: { …, indexable } }` or `404`.
+- **`GET /api/public/suppliers/:slug`**: `{ supplier, seo, reviews, pagination }`, or
+  `{ redirectTo }` for a renamed slug, or `404` when hidden, suspended or unknown.
+  `supplier`: `slug, path, name, tagline, about, logoUrl, coverUrl, city, state,
+  cityPath, businessType, yearsInOperation, memberSince, languages, serviceCities,
+  sameAs, badge: { status: "VERIFIED" | "NOT_VERIFIED", verifiedAt, validUntil, checks },
+  rating: { average, count }, indexable`. `seo` is the head the server renders.
+- **`GET /api/public/suppliers/:slug/reviews?page=`**: `{ reviews: [{ id, rating, title,
+  comment, travelerName, createdAt, countedInRating, supplierResponse, photos }], pagination }`.
+- **`POST /api/public/suppliers/:slug/enquiries`** (requires authentication, 10/hour):
+  `{ "message": "…", "travelDate": "YYYY-MM-DD", "travelers": 2 }` →
+  `201 { enquiry, reused: false }`, or `200 { enquiry, reused: true }` when it
+  continued an open thread. `400` for contact details, `403` for supplier accounts.
+
+### 10.2 Enquiries (`/api/enquiries`, requires authentication)
+Scoped to the caller: a traveler sees their own threads, a supplier the threads sent to it, `ADMIN`/`STAFF` all (read only).
+- **`GET /api/enquiries?status=OPEN|REPLIED|CLOSED`**: `{ enquiries: [{ ref, status, supplierName, supplierPath, travelerName, travelDate, travelers, lastMessage, lastMessageAt }] }`.
+- **`GET /api/enquiries/:ref`**: the thread with `messages: [{ id, authorRole, message, createdAt }]`.
+- **`POST /api/enquiries/:ref/messages`**: `{ "message": "…" }` → `201 { enquiry }`. `409` when closed.
+- **`POST /api/enquiries/:ref/close`**: `{ enquiry }`.
+
+### 10.3 Supplier (`/api/suppliers/:id`, the supplier or `ADMIN`/`STAFF`)
+- **`GET /api/suppliers/:id/public-profile`**: `{ profile, publicView, visible, indexable, kybStatus, completeness: { score, missing }, verification }`.
+- **`PATCH /api/suppliers/:id/public-profile`**: any of `slug, tagline (≤120), about (≤2000),
+  logoUrl, coverUrl (https or /uploads/…), languages (≤10), serviceCities (≤30),
+  socialLinks { website, instagram, facebook, youtube }, profileStatus: "PUBLISHED" | "HIDDEN"`.
+  Returns the same shape as GET. `400` with a reason, `409` for a taken slug or a suspended profile.
+
+### 10.4 Admin (`/api/admin/suppliers/:id`, requires `ADMIN`)
+- **`GET …/public-profile`**: the supplier view plus `checkCatalog` and `requiredChecks`.
+- **`POST …/profile-verification`**: `{ "action": "GRANT", "checks": ["BUSINESS_IDENTITY", "BANK_ACCOUNT", "BUSINESS_ADDRESS", "OWNER_CALL"], "reason": "…" }` → `201`,
+  or `{ "action": "REVOKE", "reason": "…" }`. `409` when KYB is not approved.
+- **`PATCH …/profile-status`**: `{ "suspended": true, "reason": "…" }` or `{ "suspended": false }`.
+
+### 10.5 Pages and sitemap (served by `routes/seo.js`)
+- **`GET /suppliers`, `/suppliers/in/:citySlug`, `/suppliers/:slug`**: the SPA's
+  `index.html` with the page's title, description, canonical, robots, Open Graph
+  and JSON-LD (`TravelAgency` + `BreadcrumbList`) written in. `301` for renamed or
+  miscased slugs, `404` with `noindex` for unknown or hidden ones. Falls through to
+  the SPA when `frontend/dist` is not built.
+- **`GET /sitemap-suppliers.xml`**: the directory, indexable city pages and indexable profiles. Listed in `robots.txt`.

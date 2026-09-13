@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import SupplierProfileAdminPanel from "../../components/admin/SupplierProfileAdminPanel.jsx";
 import {
   Users,
   Search,
@@ -570,6 +571,8 @@ export default function SupplierApprovalView() {
                 </div>
               </div>
             </div>
+
+            <SupplierProfileAdminPanel supplierId={selectedSupplier.id} />
 
             {/* Action Buttons: One-Click Approve / Reject / Suspend */}
             <div className="pt-6 border-t border-stone-200 space-y-3">

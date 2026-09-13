@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import SupplierPublicProfileEditor from "./SupplierPublicProfileEditor.jsx";
+import EnquiryInbox from "../EnquiryInbox.jsx";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
@@ -169,6 +171,22 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
       setUpdating("");
     }
   };
+
+  if (initialPanel === "profile") {
+    return <SupplierPublicProfileEditor supplierId={supplier.id} products={products} />;
+  }
+
+  if (initialPanel === "enquiries") {
+    return (
+      <section className="space-y-4">
+        <div>
+          <h2 className="font-display text-xl font-bold text-stone-900">Enquiries</h2>
+          <p className="mt-1 text-sm text-stone-600">Questions travelers sent from your public profile. A quick, helpful reply is the best way to win the booking.</p>
+        </div>
+        <EnquiryInbox viewer="SUPPLIER" />
+      </section>
+    );
+  }
 
   if (initialPanel === "compliance") {
     return (
