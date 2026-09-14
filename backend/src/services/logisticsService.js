@@ -237,10 +237,14 @@ export function persistBookingLogistics(db, bookingId, snapshot, answers = {}, a
       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(booking_id, question_code, traveler_num) DO UPDATE SET answer=excluded.answer`).run(`ans_${nanoid(12)}`, bookingId, code, value?.travelerNum ?? null, typeof value === "object" ? JSON.stringify(value.answer ?? value) : String(value), value?.unit || null);
   }
   db.prepare("INSERT INTO booking_logistics_events (id, booking_id, event_type, status, payload, actor_id) VALUES (?, ?, ?, ?, ?, ?)").run(`ble_${nanoid(12)}`, bookingId, "PICKUP_REQUESTED", "PICKUP_REQUESTED", JSON.stringify(snapshot), actorId);
+  // Optional stops table: a savepoint keeps a failure here from aborting the
+  // caller's booking transaction on PostgreSQL.
   try {
+    db.transaction(() => {
     const insertStop = db.prepare(`INSERT INTO booking_logistics_stops (id, booking_id, itinerary_day, city, location_ref, location, lat, lng, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(booking_id, itinerary_day) DO UPDATE SET city=excluded.city, location_ref=excluded.location_ref, location=excluded.location, lat=excluded.lat, lng=excluded.lng, status=excluded.status`);
     for (const hotel of snapshot.packageHotels || []) insertStop.run(`bls_${nanoid(12)}`, bookingId, hotel.day, hotel.city, hotel.locationRef, hotel.location, hotel.lat, hotel.lng, hotel.status);
+    })();
   } catch {}
 }
 

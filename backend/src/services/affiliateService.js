@@ -777,11 +777,14 @@ export function trackAffiliateClick(database = db, {
 export function resolveAttribution(database = db, { visitorId, userId = null } = {}) {
   if (!visitorId && !userId) return null;
 
+  // PostgreSQL cannot infer a type for a placeholder used only in IS NOT NULL
+  // ("could not determine data type of parameter $2"), so cast it.
+
   const row = database.prepare(`
     SELECT attr.*, a.status AS affiliate_status
     FROM affiliate_attributions attr
     JOIN affiliates a ON a.id = attr.affiliate_id
-    WHERE (attr.visitor_id = ? OR (? IS NOT NULL AND attr.user_id = ?))
+    WHERE (attr.visitor_id = ? OR (CAST(? AS TEXT) IS NOT NULL AND attr.user_id = ?))
       AND attr.consumed_booking_id IS NULL
       AND attr.expires_at > ?
       AND a.status = 'ACTIVE'

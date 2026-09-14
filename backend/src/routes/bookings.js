@@ -343,14 +343,19 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       }
 
       // Apply promo or referral code if specified
+      // Promo and creator attribution are best-effort, so each runs in its own
+      // savepoint. On PostgreSQL a failed statement aborts the whole
+      // transaction; catching the error without rolling back to a savepoint
+      // left the booking INSERT unable to commit ("current transaction is
+      // aborted") and every checkout returned a 500.
       if (req.body.promo_code) {
         try {
-          applyPromoCode(db, {
+          db.transaction(() => applyPromoCode(db, {
             code: req.body.promo_code,
             bookingId,
             userId,
             amountInr: quote.totalAmount,
-          });
+          }))();
         } catch (promoErr) {
           logger.warn("Promo code application failed during booking creation", { error: promoErr.message });
         }
@@ -359,7 +364,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         // this visitor, not from the code the browser sends: the code alone is
         // a claim anyone could make.
         try {
-          recordAffiliateBooking(db, {
+          db.transaction(() => recordAffiliateBooking(db, {
             bookingId,
             affiliateCode: req.body.affiliate_code,
             amountInr: quote.totalAmount,
@@ -367,7 +372,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
             visitorId: req.body.visitor_id || null,
             userId,
             subId: req.body.affiliate_sub_id || null,
-          });
+          }))();
         } catch (affErr) {
           logger.warn("Affiliate link attribution failed during booking", { error: affErr.message });
         }
