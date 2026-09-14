@@ -63,10 +63,9 @@ if [ -z "${OLA_MAPS_CLIENT_ID:-}" ] || [ -z "${OLA_MAPS_CLIENT_SECRET:-}" ]; the
   echo "⚠️  OLA_MAPS_CLIENT_ID/SECRET are empty. Maps fall back to OpenStreetMap tiles, OSM place search and estimated ETAs."
 fi
 
+# Mappls is the legacy provider, used only with PLACES_PROVIDER=mappls or ETA_PROVIDER=mappls.
 if [ -n "$MAPPLS_API_KEY" ]; then
   DEPLOY_ENV_VARS="${DEPLOY_ENV_VARS},MAPPLS_ORIGIN=${MAPPLS_ORIGIN}"
-else
-  echo "⚠️  MAPPLS_API_KEY is empty. Pickup autocomplete will use the manual map-pin fallback."
 fi
 
 echo "🚀 Deploying $SERVICE_NAME to Cloud Run ($PROJECT_ID / $REGION)..."

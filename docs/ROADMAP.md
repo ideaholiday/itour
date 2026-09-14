@@ -40,7 +40,7 @@ Do not rebuild these. Extend them if asked.
 **Live driver GPS** (ADR 012), web-first:
 
 - **Phase 1 — done:** drivers share phone location from the trip link (required before "On the way"), positions stored for 30 days, real positions with Live / Delayed / Signal lost on the ops map, supplier sees the driver's last position.
-- **Phase 2 — done:** traveler tracking link and Track live in My Trips with Mappls ETA, "You're at the pickup point" prompt, missed-pickup alerts (not on the way, signal lost, running late, not moving).
+- **Phase 2 — done:** traveler tracking link and Track live in My Trips with Ola Maps ETA, "You're at the pickup point" prompt, missed-pickup alerts (not on the way, signal lost, running late, not moving).
 - **Phase 3 — built, release ON HOLD:** `android-driver/` app (ADR 014).
   - **Blocked on D-U-N-S** (applied, pending as of 2026-09-14; expected by about 2026-10-14). A Google Play organisation account needs it. Resume when the owner confirms approval.
   - Then, in order: Play Console organisation account → privacy policy page covering driver location → upload key (kept outside the repo) → test on real Android phones (including Xiaomi/Oppo/Vivo battery savers) → Play listing, data-safety form and location foreground-service declaration → internal testing track → set `ANDROID_DRIVER_APP_SHA256` and `VITE_DRIVER_APP_URL` in production.
