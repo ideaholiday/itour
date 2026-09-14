@@ -155,7 +155,7 @@ router.post("/payout/request", authenticate, (req, res) => {
         + `so ₹${Number(payout.net_amount_inr).toLocaleString("en-IN")} will reach your account.`,
     });
   } catch (err) {
-    return res.status(err.status || 400).json({ error: err.message || "Payout request failed" });
+    return res.status(err.status || 400).json({ error: err.message || "Payout request failed", code: err.code });
   }
 });
 

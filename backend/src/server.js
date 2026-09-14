@@ -37,6 +37,7 @@ import { auditMutations } from "./services/auditService.js";
 import { requestBoundary } from "./middleware/validation.js";
 import { backfillSupplierSlugs } from "./services/supplierProfileService.js";
 import { backfillLegacyReferrals, findWalletDiscrepancies, processReferralLifecycle, sendReferralNotifications } from "./services/referralService.js";
+import { processSubscriptionLifecycle, sendSubscriptionReminders, syncLaunchWaivers } from "./services/supplierSubscriptionService.js";
 
 // Run pending migrations on startup
 try {
@@ -80,6 +81,14 @@ if (process.env.SEED_DEMO_DATA === "true" && process.env.NODE_ENV !== "productio
     logger.error("Demo marketplace initialization failed", { error: err });
     throw err;
   }
+}
+
+// New suppliers need a subscription; give the launch waiver to any without one (ADR 017, idempotent).
+try {
+  const waivers = syncLaunchWaivers(db);
+  if (waivers.created) logger.info("Gave launch waivers to new suppliers", waivers);
+} catch (err) {
+  logger.warn("Launch waiver sync failed", { error: err.message });
 }
 
 // Every supplier gets a public profile link (idempotent).
@@ -311,6 +320,18 @@ async function referralTick() {
 }
 const referralTimer = setInterval(referralTick, 5 * 60_000);
 referralTimer.unref();
+// Supplier subscriptions: expire lapsed cover and remind 30, 7 and 1 days before it ends.
+async function subscriptionTick() {
+  try {
+    const { expired, reminders } = processSubscriptionLifecycle(db);
+    if (expired || reminders.length) logger.info("Supplier subscription lifecycle pass", { expired, reminders: reminders.length });
+    await sendSubscriptionReminders(db, reminders);
+  } catch (error) {
+    logger.error("Supplier subscription lifecycle failed", { error });
+  }
+}
+const subscriptionTimer = setInterval(subscriptionTick, 60 * 60_000);
+subscriptionTimer.unref();
 const server = app.listen(PORT, "0.0.0.0", () => {
   logger.info("Idea Holiday API started", { port: Number(PORT) });
   if (databaseInfo.engine === "postgres") {
@@ -326,6 +347,7 @@ const shutdown = (signal) => {
   clearInterval(reservationDeliveryTimer);
   clearInterval(assignmentSlaTimer);
   clearInterval(referralTimer);
+  clearInterval(subscriptionTimer);
   server.close(() => {
     try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (error) { logger.warn("SQLite checkpoint failed", { error }); }
     try { db.close(); } catch (error) { logger.warn("SQLite close failed", { error }); }

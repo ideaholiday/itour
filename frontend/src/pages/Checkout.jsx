@@ -136,6 +136,8 @@ export default function Checkout() {
   const promoCodeForQuote = appliedPromo && appliedPromo.type !== "REFERRAL" ? appliedPromo.code : null;
 
   const [walletBalance, setWalletBalance] = useState(0);
+  // Admin-set wallet limits (Share & Earn settings); the server applies the same ones.
+  const [walletPolicy, setWalletPolicy] = useState({ walletMaxSharePct: 50, walletMaxPerBookingInr: 2000 });
   const [useWalletCredits, setUseWalletCredits] = useState(false);
 
   const [addonCalculation, setAddonCalculation] = useState({ addons: [], totalAddonsInr: 0 });
@@ -145,6 +147,7 @@ export default function Checkout() {
       api.getLoyaltyProfile()
         .then((res) => {
           if (res?.walletBalanceInr) setWalletBalance(Number(res.walletBalanceInr));
+          if (res?.policy?.walletMaxSharePct !== undefined) setWalletPolicy(res.policy);
         })
         .catch(() => {});
     }
@@ -337,7 +340,7 @@ export default function Checkout() {
   const referralDiscountAmount = Number(quote?.referral?.discountInr || 0);
   const referralUnavailable = appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
   const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount - referralDiscountAmount);
-  const maxAllowedWalletCredit = Math.min(walletBalance, remainingBeforeWallet * 0.5, 2000);
+  const maxAllowedWalletCredit = Math.min(walletBalance, remainingBeforeWallet * Number(walletPolicy.walletMaxSharePct) / 100, Number(walletPolicy.walletMaxPerBookingInr));
   const walletDiscountAmount = useWalletCredits ? Math.round(maxAllowedWalletCredit) : 0;
   const payableTotal = Math.max(0, remainingBeforeWallet - walletDiscountAmount);
 

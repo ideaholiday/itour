@@ -1,6 +1,7 @@
 import { isCoordinateInGeoFence, isPointInPolygon, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
+import { subscriptionCoveredSql } from "./supplierKybGate.js";
 import { fleetSupportsVehicle, vehicleModelSupportsCategory } from "../lib/vehicleInventory.js";
 import { priorMeanRating } from "./reviewService.js";
 
@@ -72,6 +73,7 @@ export function rankSupplierCandidates(rawCandidates, request) {
     const reasons = [];
     const coverage = coverageMatch(candidate.fences || [], request, candidate.productCity);
     if (normalizeText(candidate.kybStatus) !== "APPROVED") reasons.push("Supplier KYB is not approved");
+    if (candidate.subscriptionCovered === false) reasons.push("Supplier subscription is not active");
     if (candidate.wasPreviouslyDeclined) reasons.push("Supplier already declined or missed this booking");
     if (!candidate.isPublished) reasons.push("No published compatible listing");
     if (!comparableCity(candidate.productCity, request.city)) reasons.push("Listing city does not match the booked service");
@@ -140,6 +142,7 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
     ? `
       SELECT p.id AS candidate_product_id, p.supplier_id, p.city AS product_city, p.price_inr,
              p.status AS product_status, p.is_published, s.company_name, s.kyb_status, s.rating, s.commission_rate,
+             ${subscriptionCoveredSql("s")} AS subscription_covered,
              qs.smoothed_rating,
              tr.route_type, tr.vehicle_category AS route_vehicle_category, tr.max_passengers, tr.max_luggage,
              pi.vehicle_category AS package_vehicle_category
@@ -153,6 +156,7 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
     : `
       SELECT p.id AS candidate_product_id, p.supplier_id, p.city AS product_city, p.price_inr,
              p.status AS product_status, p.is_published, s.company_name, s.kyb_status, s.rating, s.commission_rate,
+             ${subscriptionCoveredSql("s")} AS subscription_covered,
              qs.smoothed_rating,
              tr.route_type, tr.vehicle_category AS route_vehicle_category, tr.max_passengers, tr.max_luggage,
              pi.vehicle_category AS package_vehicle_category
@@ -210,9 +214,10 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
       price: isRequestedListing ? quote.baseAmount : matchingVehicleVariant?.base_price ?? row.price_inr,
       isPublished: row.product_status === "PUBLISHED" && Number(row.is_published ?? 1) === 1,
       kybStatus: row.kyb_status,
+      subscriptionCovered: Boolean(Number(row.subscription_covered)),
       rating: row.rating,
       qualityRating: row.smoothed_rating ?? supplierPrior,
-      commissionRate: resolveCommissionRate(db, row.supplier_id, requestedProduct.product_type),
+      commissionRate: resolveCommissionRate(db, row.supplier_id, row.candidate_product_id),
       routeType: row.route_type,
       vehicleCategory: candidateVehicleCategory,
       maxPassengers: vehicleCapacity?.maxPax ?? row.max_passengers ?? 99,

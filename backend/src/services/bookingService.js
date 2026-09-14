@@ -3,7 +3,7 @@ import crypto from "crypto";
 import { computeTransferQuote, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
-import { isSupplierKybApproved } from "./supplierKybGate.js";
+import { isSupplierKybApproved, isSupplierSubscriptionCovered } from "./supplierKybGate.js";
 
 const OTP_DIGITS = 6;
 export const MAX_OTP_ATTEMPTS = 5;
@@ -170,6 +170,13 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     error.status = 409;
     throw error;
   }
+  // A supplier who signed up from 2026-09-14 also needs a subscription or waiver (ADR 017).
+  if (!isSupplierSubscriptionCovered(db, product.supplier_id)) {
+    const error = new Error("This operator is not accepting bookings right now");
+    error.status = 409;
+    error.code = "SUPPLIER_SUBSCRIPTION_REQUIRED";
+    throw error;
+  }
 
   const activityDate = requireBookingDate(input.activity_date || input.activityDate);
   const adults = toInteger(input.adults ?? input.passengers, 1);
@@ -206,7 +213,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
   const isNonVehicleProduct = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(product.product_type) ||
     ["TICKET_ONLY", "SIC", "TICKET_SIC"].includes(product.product_sub_type);
   if (!nativeSlot && !isNonVehicleProduct) validateCapacity(vehicleCategory, passengers, luggage);
-  const commissionRate = resolveCommissionRate(db, product.supplier_id, product.product_type);
+  const commissionRate = resolveCommissionRate(db, product.supplier_id, product.id);
   let baseAmount;
   let tolls = 0;
   let stateTax = 0;

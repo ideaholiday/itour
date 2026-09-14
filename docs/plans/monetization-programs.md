@@ -19,14 +19,23 @@ Most of this is already built. This plan **extends** what exists and does not re
 | Supplier subscription | **Required for suppliers who sign up from 2026-09-14**: products aren't bookable until the subscription is paid, waived or covered by a coupon. Suppliers registered before then are exempt. |
 | Payment gateway | **Cashfree** |
 | Subscription invoice | **SAC 998559, GST 18%** |
+| Launch waiver | New suppliers covered free, **no end date yet**; admin sets it later |
+| Subscription price | **Decided later** |
 
 **Still open** (these don't block Phases 0–3):
 - Subscription price and billing period (yearly or monthly).
 - New affiliate tier values that fit the 10% cap (§7a).
 - Which Income Tax section the 1% TDS falls under (CA). This affects the section printed on payout statements.
 
-**Progress:** step 1 (coupon discount bug) is built: migration 036, the 10% cap
-as a constant in `promoService.js` (Phase 0 moves it into settings).
+**Progress (2026-09-14):**
+- Built: step 1 coupon bug (migration 036); Phase 0 settings + giveaway cap
+  (037); Phase 1 30% commission per product (038); Phase 4b 1% TDS + verified PAN;
+  Phase 5 core — exemption, bookability check, launch and admin waivers, expiry
+  and reminders (039); Phase 3 Share & Earn settings (in Admin → Programs, not a
+  tab in Travel & Earn). Rules for subscriptions live in `docs/SUPPLIER_PLANS.md`.
+- Next: Phase 2 coupon engine + admin UI.
+- Waiting on the owner: new affiliate tier rates (Phase 4a), subscription price
+  (Phase 5 payment, supplier coupons). Phase 4c (spend affiliate earnings) can follow 4a.
 
 ---
 

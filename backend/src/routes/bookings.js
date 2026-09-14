@@ -23,6 +23,7 @@ import { assertBookingLocations } from "../services/locationValidationService.js
 import { bookingLogistics, buildLogisticsSnapshot, consumeBookingHold, createBookingHold, expireBookingHolds, getBookingQuestions, getOption, getProductOptions, persistBookingLogistics, validateOptionLogistics, validateQuestionAnswers } from "../services/logisticsService.js";
 import { applyWalletCreditsToCheckout, ensureUserReferralCode } from "../services/loyaltyService.js";
 import { applyPromoCode, capCouponDiscount, priceCouponForBooking, validatePromoCode } from "../services/promoService.js";
+import { giveawayBudgetInr } from "../services/programSettingsService.js";
 import { recordAffiliateBooking, resolveAttribution } from "../services/affiliateService.js";
 import {
   applyReferralToBooking,
@@ -388,8 +389,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       if (expectedCoupon?.discountInr > 0) {
         couponDiscount = capCouponDiscount({
           offeredInr: expectedCoupon.discountInr,
-          bookingValueInr: quote.totalAmount,
-          commissionInr: assignmentCommissionAmount,
+          budgetInr: giveawayBudgetInr(db, { bookingValueInr: quote.totalAmount, commissionInr: assignmentCommissionAmount }),
           otherGiveawayInr: referralDiscount + referrerCredit + expectedCoupon.creatorCommissionInr,
         });
         if (couponDiscount > 0) {

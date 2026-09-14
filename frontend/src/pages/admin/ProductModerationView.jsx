@@ -26,7 +26,10 @@ import {
 export default function ProductModerationView() {
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [categories, setCategories] = useState([]);
+  const [commission, setCommission] = useState({ defaultRatePercent: null, suppliers: [], products: [] });
+  const [rateEdit, setRateEdit] = useState(null); // { kind: 'product' | 'supplier', id, name, rate, reason }
+  const [applyAll, setApplyAll] = useState(null); // { reason, includeProducts, notify }
+  const [savingRate, setSavingRate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [typeFilter, setTypeFilter] = useState("ALL");
@@ -48,19 +51,19 @@ export default function ProductModerationView() {
   const fetchModerationData = async () => {
     setLoading(true);
     try {
-      const [prodRes, supRes, catRes] = await Promise.all([
+      const [prodRes, supRes, comRes] = await Promise.all([
         fetch(`/api/admin/products?status=${statusFilter}&type=${typeFilter}`, { headers: authHeaders() }),
         fetch("/api/admin/suppliers", { headers: authHeaders() }),
-        fetch("/api/admin/categories/commission", { headers: authHeaders() })
+        fetch("/api/admin/commission", { headers: authHeaders() })
       ]);
 
       const pData = await prodRes.json();
       const sData = await supRes.json();
-      const cData = await catRes.json();
+      const cData = await comRes.json();
 
       if (pData.success) setProducts(pData.products);
       if (sData.success) setSuppliers(sData.suppliers);
-      if (cData.success) setCategories(cData.categories);
+      if (cData.success) setCommission(cData);
     } catch (err) {
       console.error("Error fetching moderation data:", err);
       setMessage({ type: "error", text: "Failed to load moderation data. Please refresh." });
@@ -102,41 +105,50 @@ export default function ProductModerationView() {
     }
   };
 
-  const handleUpdateSupplierCommission = async (supplierId, rate) => {
+  // Commission changes need a reason, are recorded, and notify the supplier (ADR 017).
+  const sendJson = async (url, method, body) => {
+    const res = await fetch(url, { method, headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.error || "That change couldn't be saved");
+    return data;
+  };
+
+  const saveRate = async (event) => {
+    event.preventDefault();
+    setSavingRate(true);
     try {
-      const res = await fetch(`/api/admin/suppliers/${supplierId}/commission`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ commissionRate: rate })
+      const rate = rateEdit.rate === "" ? null : Number(rateEdit.rate);
+      const data = rateEdit.kind === "product"
+        ? await sendJson(`/api/admin/products/${rateEdit.id}/commission`, "PUT", { commissionRate: rate, reason: rateEdit.reason })
+        : await sendJson(`/api/admin/suppliers/${rateEdit.id}/commission`, "POST", { commissionRate: rate, reason: rateEdit.reason });
+      setMessage({
+        type: "success",
+        text: `${rateEdit.name}: ${data.rate}% commission on new bookings${data.change?.notify ? ". The supplier has been notified." : "."}`,
       });
-      const data = await res.json();
-      if (data.success) {
-        setMessage({ type: "success", text: data.message });
-        fetchModerationData();
-      } else {
-        throw new Error(data.error || "Failed to update commission rate");
-      }
+      setRateEdit(null);
+      fetchModerationData();
     } catch (err) {
-      setMessage({ type: "error", text: err.message || "Failed to update commission rate" });
+      setMessage({ type: "error", text: err.message });
+    } finally {
+      setSavingRate(false);
     }
   };
 
-  const handleUpdateCategoryCommission = async (categoryCode, rate) => {
+  const saveApplyAll = async (event) => {
+    event.preventDefault();
+    setSavingRate(true);
     try {
-      const res = await fetch("/api/admin/categories/commission", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ categoryCode, defaultCommissionRate: rate })
+      const data = await sendJson("/api/admin/commission/clear-overrides", "POST", applyAll);
+      setMessage({
+        type: "success",
+        text: `${data.clearedSuppliers} supplier and ${data.clearedProducts} product overrides cleared. They now pay ${data.defaultRatePercent}% on new bookings.`,
       });
-      const data = await res.json();
-      if (data.success) {
-        setMessage({ type: "success", text: data.message });
-        fetchModerationData();
-      } else {
-        throw new Error(data.error || "Failed to update category commission");
-      }
+      setApplyAll(null);
+      fetchModerationData();
     } catch (err) {
-      setMessage({ type: "error", text: err.message || "Failed to update category commission" });
+      setMessage({ type: "error", text: err.message });
+    } finally {
+      setSavingRate(false);
     }
   };
 
@@ -319,13 +331,13 @@ export default function ProductModerationView() {
                               <span>{p.supplier_id}</span>
                             </button>
                           )}
-                          <div className="text-[10px] text-stone-400 mt-0.5">Rate: {p.supplier_commission || 15}%</div>
+                          <div className="text-[10px] text-stone-400 mt-0.5">Commission: {p.commission_rate_effective}%</div>
                         </td>
 
                         <td className="py-4 px-4 font-mono">
                           <div className="text-emerald-700 font-bold text-sm">₹{(p.price_inr || 1200).toLocaleString()}</div>
                           <div className="text-[10px] text-stone-500">
-                            Split: ₹{Math.round((p.price_inr || 1200) * ((p.supplier_commission || 15) / 100))} Comm.
+                            Split: ₹{Math.round((p.price_inr || 0) * ((p.commission_rate_effective || 0) / 100))} Comm.
                           </div>
                         </td>
 
@@ -402,74 +414,112 @@ export default function ProductModerationView() {
         </>
       )}
 
-      {/* TAB 2: PLATFORM COMMISSION OVERRIDES */}
+      {/* TAB 2: PLATFORM COMMISSION */}
       {activeTab === "COMMISSION" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Global Category Commissions Panel */}
-          <div className="bg-white border border-stone-200 rounded-3xl p-6 space-y-4 shadow-sm">
-            <div className="border-b border-stone-200 pb-3">
-              <h2 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
-                <Percent className="w-5 h-5 text-amber-600" /> Category Level Platform Commission Defaults
-              </h2>
-              <p className="text-xs text-stone-600 mt-0.5">
-                Set default platform take-rate percentage per product category (Transfers, Sightseeing, Multi-day packages).
-              </p>
+        <div className="space-y-6">
+          <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm space-y-3">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
+                  <Percent className="w-5 h-5 text-amber-600" /> Platform commission: {commission.defaultRatePercent ?? "…"}%
+                </h2>
+                <p className="text-xs text-stone-600 mt-0.5">
+                  Every booking pays this unless its product or supplier has its own rate below. Change the default in Programs.
+                  Rates apply to new bookings; existing bookings keep theirs. Suppliers are notified when their rate changes.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={!commission.suppliers.length && !commission.products.length}
+                onClick={() => setApplyAll({ reason: "", includeProducts: false, notify: true })}
+                className="self-start rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-bold text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+              >
+                Put everyone on {commission.defaultRatePercent ?? "…"}%
+              </button>
             </div>
-
-            <div className="space-y-3 font-mono text-xs">
-              {categories.map((c) => (
-                <div key={c.category_code} className="bg-[#FAF9F6] border border-stone-200 p-4 rounded-2xl flex items-center justify-between">
-                  <div>
-                    <span className="text-stone-900 font-bold font-sans text-sm block">{c.category_name || c.category_code}</span>
-                    <span className="text-stone-500 text-[10px]">Category Code: {c.category_code}</span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      step="0.5"
-                      defaultValue={c.default_commission_rate || 15}
-                      onBlur={(e) => handleUpdateCategoryCommission(c.category_code, e.target.value)}
-                      className="w-20 bg-white border border-stone-300 rounded-xl px-2.5 py-1.5 text-center text-amber-700 font-bold focus:outline-none focus:border-amber-500"
-                    />
-                    <span className="text-stone-500">%</span>
-                  </div>
+            <p className="text-[11px] text-stone-500">
+              {commission.suppliers.length} suppliers and {commission.products.length} products have their own rate.
+            </p>
+            {applyAll && (
+              <form onSubmit={saveApplyAll} className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-3 text-xs">
+                <p className="font-bold text-stone-900">
+                  Clear {commission.suppliers.length} supplier overrides{applyAll.includeProducts ? ` and ${commission.products.length} product overrides` : ""}, so they pay {commission.defaultRatePercent}% on new bookings.
+                  Each old rate stays in the change history.
+                </p>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={applyAll.includeProducts} onChange={(e) => setApplyAll({ ...applyAll, includeProducts: e.target.checked })} /> Also clear product overrides</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={applyAll.notify} onChange={(e) => setApplyAll({ ...applyAll, notify: e.target.checked })} /> Notify affected suppliers</label>
+                <input value={applyAll.reason} onChange={(e) => setApplyAll({ ...applyAll, reason: e.target.value })} minLength={3} maxLength={500} required placeholder="Reason, for example: launch move to 30%" className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2" />
+                <div className="flex gap-2">
+                  <button type="submit" disabled={savingRate || applyAll.reason.trim().length < 3} className="rounded-xl bg-amber-500 px-4 py-2 font-bold text-stone-950 disabled:opacity-50">{savingRate ? "Saving…" : "Clear overrides"}</button>
+                  <button type="button" onClick={() => setApplyAll(null)} className="rounded-xl bg-stone-200 px-4 py-2 font-bold text-stone-800">Cancel</button>
                 </div>
-              ))}
-            </div>
+              </form>
+            )}
           </div>
 
-          {/* Supplier Vendor Override Controls */}
-          <div className="bg-white border border-stone-200 rounded-3xl p-6 space-y-4 shadow-sm">
-            <div className="border-b border-stone-200 pb-3">
-              <h2 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-amber-600" /> Vendor-Specific Commission Overrides
-              </h2>
-              <p className="text-xs text-stone-600 mt-0.5">
-                Override platform commission for high-volume vendors (e.g. reduce from 15% default to 10% incentive rate).
-              </p>
+          {rateEdit && (
+            <form onSubmit={saveRate} className="bg-white border border-amber-400 rounded-3xl p-5 shadow-sm space-y-3 text-xs">
+              <h3 className="text-sm font-bold text-stone-900">Commission for {rateEdit.name}</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block font-semibold text-stone-700">
+                  Rate (%) — leave empty to use the {rateEdit.kind === "product" ? "supplier's rate or platform default" : "platform default"}
+                  <input type="number" min="0" max="50" step="0.5" value={rateEdit.rate} onChange={(e) => setRateEdit({ ...rateEdit, rate: e.target.value })} className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2" />
+                </label>
+                <label className="block font-semibold text-stone-700">
+                  Reason
+                  <input value={rateEdit.reason} onChange={(e) => setRateEdit({ ...rateEdit, reason: e.target.value })} minLength={3} maxLength={500} required placeholder="For example: partner contract" className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2" />
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" disabled={savingRate || rateEdit.reason.trim().length < 3} className="rounded-xl bg-amber-500 px-4 py-2 font-bold text-stone-950 disabled:opacity-50">{savingRate ? "Saving…" : "Save rate"}</button>
+                <button type="button" onClick={() => setRateEdit(null)} className="rounded-xl bg-stone-200 px-4 py-2 font-bold text-stone-800">Cancel</button>
+              </div>
+            </form>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white border border-stone-200 rounded-3xl p-6 space-y-4 shadow-sm">
+              <div className="border-b border-stone-200 pb-3">
+                <h2 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
+                  <Package className="w-5 h-5 text-amber-600" /> Product commission
+                </h2>
+                <p className="text-xs text-stone-600 mt-0.5">A product's own rate beats its supplier's rate and the platform default.</p>
+              </div>
+              <div className="space-y-2 text-xs max-h-96 overflow-y-auto pr-2">
+                {products.map((p) => (
+                  <div key={p.id} className="bg-[#FAF9F6] border border-stone-200 p-3 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="text-stone-900 font-bold text-sm block truncate">{p.title}</span>
+                      <span className="text-stone-500 text-[10px]">{p.supplier_name} {p.commission_override_rate != null ? "· own rate" : ""}</span>
+                    </div>
+                    <button type="button" onClick={() => setRateEdit({ kind: "product", id: p.id, name: p.title, rate: p.commission_override_rate ?? "", reason: "" })} className="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-1.5 font-mono font-bold text-amber-700 hover:border-amber-500">
+                      {p.commission_rate_effective}%
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <div className="space-y-3 font-mono text-xs max-h-96 overflow-y-auto pr-2">
-              {suppliers.map((s) => (
-                <div key={s.id} className="bg-[#FAF9F6] border border-stone-200 p-4 rounded-2xl flex items-center justify-between">
-                  <div>
-                    <span className="text-stone-900 font-bold font-sans text-sm block">{s.company_name}</span>
-                    <span className="text-stone-500 text-[10px]">{s.city}, {s.state} &bull; Contact: {s.contact_name}</span>
+            <div className="bg-white border border-stone-200 rounded-3xl p-6 space-y-4 shadow-sm">
+              <div className="border-b border-stone-200 pb-3">
+                <h2 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
+                  <Building2 className="w-5 h-5 text-amber-600" /> Supplier commission
+                </h2>
+                <p className="text-xs text-stone-600 mt-0.5">A supplier's rate applies to its products that have no rate of their own.</p>
+              </div>
+              <div className="space-y-2 text-xs max-h-96 overflow-y-auto pr-2">
+                {suppliers.map((sup) => (
+                  <div key={sup.id} className="bg-[#FAF9F6] border border-stone-200 p-3 rounded-2xl flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="text-stone-900 font-bold text-sm block truncate">{sup.company_name}</span>
+                      <span className="text-stone-500 text-[10px]">{sup.city}{sup.state ? `, ${sup.state}` : ""} {sup.commission_override_rate != null ? "· own rate" : "· platform default"}</span>
+                    </div>
+                    <button type="button" onClick={() => setRateEdit({ kind: "supplier", id: sup.id, name: sup.company_name, rate: sup.commission_override_rate ?? "", reason: "" })} className="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-1.5 font-mono font-bold text-emerald-700 hover:border-amber-500">
+                      {sup.commission_rate_effective}%
+                    </button>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      step="0.5"
-                      defaultValue={s.commission_rate || 15.0}
-                      onBlur={(e) => handleUpdateSupplierCommission(s.id, e.target.value)}
-                      className="w-20 bg-white border border-stone-300 rounded-xl px-2.5 py-1.5 text-center text-emerald-700 font-bold focus:outline-none focus:border-amber-500"
-                    />
-                    <span className="text-stone-500">%</span>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         </div>

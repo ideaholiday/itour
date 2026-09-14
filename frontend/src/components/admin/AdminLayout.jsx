@@ -22,7 +22,8 @@ import {
   Star,
   Wallet,
   Gift,
-  UserCog
+  UserCog,
+  SlidersHorizontal
 } from "lucide-react";
 
 export default function AdminLayout({ children }) {
@@ -105,6 +106,13 @@ export default function AdminLayout({ children }) {
       path: "/admin/referrals",
       label: "Travel & Earn",
       icon: Gift,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/programs",
+      label: "Programs",
+      icon: SlidersHorizontal,
       badge: null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     },

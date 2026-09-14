@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { ensureLaunchWaiver } from "../services/supplierSubscriptionService.js";
 import { nanoid } from "nanoid";
 import jwt from "jsonwebtoken";
 import db from "../db.js";
@@ -111,6 +112,8 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0)`
       ).run(supplierId, supplierId, companyName, contactName, email, phone, city, state);
       ensurePublicSlug(db, { id: supplierId, company_name: companyName, city });
+      // A supplier signing up now needs a subscription; the launch waiver covers it for free (ADR 017).
+      ensureLaunchWaiver(db, supplierId);
 
       db.prepare(
         "INSERT INTO users (id, name, email, password, phone, role) VALUES (?, ?, ?, ?, ?, 'SUPPLIER')"

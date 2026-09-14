@@ -1,4 +1,5 @@
 import { hasKybFile } from "./kybFileService.js";
+import { resolveCommissionRate } from "./financeService.js";
 
 const ALLOWED_ACTIONS = new Set(["APPROVED", "REJECTED", "SUSPENDED"]);
 
@@ -189,7 +190,8 @@ export function saveSupplierVerification(database, {
     supplier: database.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId),
     action,
     reason,
-    commissionRate: resolvedCommission,
+    // What the supplier actually pays, which the approval notice quotes.
+    commissionRate: resolveCommissionRate(database, supplierId),
   };
 }
 

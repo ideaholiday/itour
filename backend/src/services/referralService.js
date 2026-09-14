@@ -19,27 +19,47 @@
  */
 import { nanoid } from "nanoid";
 import logger from "../config/logger.js";
+import { getProgramDefaults, getSettings } from "./programSettingsService.js";
 
-export const REFERRAL_POLICY = Object.freeze({
-  /** Share of the booking's commission the friend gets off their first paid trip. */
-  friendDiscountRate: 0.1,
-  /** Share of the booking's commission the referrer earns, on every trip. */
-  referrerRate: 0.1,
-  /** How long a friend's bookings keep earning for the referrer. */
-  earningWindowMonths: 24,
-  /** How long a clicked referral link keeps counting before signup. */
-  attributionWindowDays: 30,
-  /** Days after trip completion before a reward is spendable. */
-  clearingHoldDays: 7,
-  /** Months before unspent referral credit lapses. */
-  creditExpiryMonths: 12,
-  /** Remind the traveler this many days before credit lapses. */
-  expiryReminderDays: 30,
-  /** New referred signups per referrer per 24h before review is required. */
-  maxSignupsPerDay: 5,
-  /** Credit a referrer may clear per 30 days before further rewards wait for review. */
-  maxClearedPer30DaysInr: 5000,
-});
+/** Settings in the shape the referral code uses (rates as fractions). */
+function toPolicy(settings) {
+  return Object.freeze({
+    /** New rewards are created only while the program is on. */
+    enabled: settings.enabled,
+    /** Share of the booking's commission the friend gets off their first paid trip. */
+    friendDiscountRate: settings.friendDiscountPct / 100,
+    /** Share of the booking's commission the referrer earns, on every trip. */
+    referrerRate: settings.referrerRewardPct / 100,
+    /** How long a friend's bookings keep earning for the referrer. */
+    earningWindowMonths: settings.earningWindowMonths,
+    /** How long a clicked referral link keeps counting before signup. */
+    attributionWindowDays: settings.attributionWindowDays,
+    /** Days after trip completion before a reward is spendable. */
+    clearingHoldDays: settings.clearingHoldDays,
+    /** Months before unspent referral credit lapses. */
+    creditExpiryMonths: settings.creditExpiryMonths,
+    /** Remind the traveler this many days before credit lapses. */
+    expiryReminderDays: settings.expiryReminderDays,
+    /** New referred signups per referrer per 24h before review is required. */
+    maxSignupsPerDay: settings.maxSignupsPerDay,
+    /** Credit a referrer may clear per 30 days before further rewards wait for review. */
+    maxClearedPer30DaysInr: settings.maxClearedPer30DaysInr,
+    /** Wallet credit may pay at most this share of what is left, and this many rupees. */
+    walletMaxShare: settings.walletMaxSharePct / 100,
+    walletMaxPerBookingInr: settings.walletMaxPerBookingInr,
+  });
+}
+
+/** The defaults, before any admin change (program setting `referral`). */
+export const REFERRAL_POLICY = toPolicy(getProgramDefaults("referral"));
+
+/**
+ * The policy in force: the `referral` program setting an admin controls. Rates
+ * are frozen onto each reward, so a change applies to new rewards only.
+ */
+export function referralPolicy(database) {
+  return toPolicy(getSettings(database, "referral"));
+}
 
 const DAY_MS = 86_400_000;
 const LIVE_REWARD_STATUSES = ["ACCRUED", "HELD_FOR_REVIEW", "CLEARED"];
@@ -198,7 +218,7 @@ export function trackReferralClick(database, { referralCode, visitorId, channel 
   if (userId && userId === referrer.id) return { tracked: false, reason: "SELF" };
 
   const id = `rat_${nanoid(12)}`;
-  const expiresAt = sqlTimestamp(addDays(now, REFERRAL_POLICY.attributionWindowDays));
+  const expiresAt = sqlTimestamp(addDays(now, referralPolicy(database).attributionWindowDays));
   database.prepare(`
     INSERT INTO referral_attributions (id, visitor_id, referrer_user_id, referral_code, channel, landing_path, expires_at, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -341,7 +361,7 @@ export function establishReferralRelationship(database, {
       INSERT INTO referral_relationships (id, referrer_user_id, referred_user_id, referral_code, attribution_id, source, established_at, earns_until, status, blocked_reason)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'BLOCKED', ?)
     `).run(blockedId, referrer.id, referredUser.id, referrer.referral_code, attribution?.id || null, source,
-      sqlTimestamp(now), sqlTimestamp(addMonths(now, REFERRAL_POLICY.earningWindowMonths)), eligibility.signal);
+      sqlTimestamp(now), sqlTimestamp(addMonths(now, referralPolicy(database).earningWindowMonths)), eligibility.signal);
     recordSignal(database, { userId: referredUser.id, referrerUserId: referrer.id, relationshipId: blockedId, signal: eligibility.signal, detail: eligibility.detail, action: "BLOCKED" });
     return { established: false, reason: eligibility.signal, relationship: getRelationshipForUser(database, referredUser.id) };
   }
@@ -350,7 +370,7 @@ export function establishReferralRelationship(database, {
   const recentSignups = database.prepare(
     "SELECT COUNT(*) AS count FROM referral_relationships WHERE referrer_user_id = ? AND established_at >= ?",
   ).get(referrer.id, since)?.count || 0;
-  const requiresReview = recentSignups >= REFERRAL_POLICY.maxSignupsPerDay ? 1 : 0;
+  const requiresReview = recentSignups >= referralPolicy(database).maxSignupsPerDay ? 1 : 0;
 
   const id = `rrel_${nanoid(12)}`;
   database.prepare(`
@@ -358,7 +378,7 @@ export function establishReferralRelationship(database, {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
   `).run(id, referrer.id, referredUser.id, referrer.referral_code,
     attribution && attribution.referrer_user_id === referrer.id ? attribution.id : null,
-    source, sqlTimestamp(now), sqlTimestamp(addMonths(now, REFERRAL_POLICY.earningWindowMonths)), requiresReview);
+    source, sqlTimestamp(now), sqlTimestamp(addMonths(now, referralPolicy(database).earningWindowMonths)), requiresReview);
 
   if (attribution && attribution.referrer_user_id === referrer.id) {
     database.prepare("UPDATE referral_attributions SET consumed_user_id = ?, consumed_at = ? WHERE id = ?")
@@ -394,12 +414,14 @@ export function previewReferralBenefit(database, {
   // `referrerCreditInr` is what the referrer would earn on this booking. It is
   // derived from commission, so it stays on the server (the giveaway cap uses it).
   const none = (reason) => ({ eligible: false, discountInr: 0, reason, referrerFirstName: null, referrerCreditInr: 0 });
+  // Paused by an admin: no new discounts or rewards, while existing ones still clear.
+  if (!referralPolicy(database).enabled) return none("PAUSED");
   const relationship = getRelationshipForUser(database, userId);
 
   if (relationship) {
     if (!relationshipIsEarning(relationship, now)) return none(relationship.status === "BLOCKED" ? "BLOCKED" : "EXPIRED");
     const referrer = getUser(database, relationship.referrer_user_id);
-    const { refereeAmountInr, referrerAmountInr } = computeReferralAmounts({ commissionInr, isFirstTrip: true });
+    const { refereeAmountInr, referrerAmountInr } = computeReferralAmounts({ commissionInr, isFirstTrip: true, policy: referralPolicy(database) });
     if (hasPaidReferralTrip(database, relationship.id)) {
       return { ...none("FIRST_TRIP_USED"), referrerFirstName: firstName(referrer?.name), referrerCreditInr: referrerAmountInr };
     }
@@ -418,7 +440,7 @@ export function previewReferralBenefit(database, {
   const eligibility = evaluateReferralEligibility(database, { referrer, referredUser, visitorId, travelerPhone, travelerEmail });
   if (!eligibility.ok) return { ...none(eligibility.signal), referrerFirstName: firstName(referrer.name) };
 
-  const { refereeAmountInr, referrerAmountInr } = computeReferralAmounts({ commissionInr, isFirstTrip: true });
+  const { refereeAmountInr, referrerAmountInr } = computeReferralAmounts({ commissionInr, isFirstTrip: true, policy: referralPolicy(database) });
   return { eligible: refereeAmountInr > 0, discountInr: refereeAmountInr, reason: null, referrerFirstName: firstName(referrer.name), referrerCreditInr: referrerAmountInr };
 }
 
@@ -442,6 +464,8 @@ export function applyReferralToBooking(database, {
   now = new Date(),
 }) {
   if (!bookingId || !userId) return { applied: false, discountInr: 0 };
+  const policy = referralPolicy(database);
+  if (!policy.enabled) return { applied: false, discountInr: 0 };
 
   let relationship = getRelationshipForUser(database, userId);
   if (!relationship && (isTravelerReferralCode(referralCode) || visitorId)) {
@@ -472,8 +496,8 @@ export function applyReferralToBooking(database, {
   }
 
   const isFirstTrip = !hasPaidReferralTrip(database, relationship.id, bookingId);
-  const friend = computeReferralAmounts({ commissionInr: quoteCommissionInr, isFirstTrip });
-  const earned = computeReferralAmounts({ commissionInr: bookingCommissionInr, isFirstTrip: false });
+  const friend = computeReferralAmounts({ commissionInr: quoteCommissionInr, isFirstTrip, policy });
+  const earned = computeReferralAmounts({ commissionInr: bookingCommissionInr, isFirstTrip: false, policy });
   // The discount can never exceed what this booking actually earns.
   const discountInr = Math.min(friend.refereeAmountInr, floorRupees(bookingCommissionInr));
   const paidTrips = database.prepare(`
@@ -626,7 +650,7 @@ export function markReferralTripCompleted(database, bookingId, { now = new Date(
     WHERE referrer_user_id = ?
       AND ((status = 'CLEARED' AND cleared_at >= ?) OR (status = 'ACCRUED' AND completed_at IS NOT NULL))
   `).get(reward.referrer_user_id, sqlTimestamp(addDays(now, -30)))?.total || 0;
-  const overLimit = money(earnedRecently) + money(reward.referrer_amount_inr) > REFERRAL_POLICY.maxClearedPer30DaysInr;
+  const overLimit = money(earnedRecently) + money(reward.referrer_amount_inr) > referralPolicy(database).maxClearedPer30DaysInr;
 
   if (relationship?.requires_review || overLimit) {
     database.prepare("UPDATE referral_rewards SET status = 'HELD_FOR_REVIEW', completed_at = ? WHERE id = ?").run(sqlTimestamp(now), reward.id);
@@ -639,7 +663,7 @@ export function markReferralTripCompleted(database, bookingId, { now = new Date(
     return { rewardId: reward.id, status: "HELD_FOR_REVIEW" };
   }
 
-  const payableAt = sqlTimestamp(addDays(now, REFERRAL_POLICY.clearingHoldDays));
+  const payableAt = sqlTimestamp(addDays(now, referralPolicy(database).clearingHoldDays));
   database.prepare("UPDATE referral_rewards SET completed_at = ?, payable_at = ? WHERE id = ?").run(sqlTimestamp(now), payableAt, reward.id);
   return { rewardId: reward.id, status: "ACCRUED", payableAt };
 }
@@ -689,7 +713,7 @@ export function clearReferralReward(database, rewardId, { now = new Date() } = {
       bookingId: reward.booking_id,
       rewardId: reward.id,
       description: `Earned ₹${amount} from ${firstName(friend?.name) || "a friend"}'s trip`,
-      expiresAt: sqlTimestamp(addMonths(now, REFERRAL_POLICY.creditExpiryMonths)),
+      expiresAt: sqlTimestamp(addMonths(now, referralPolicy(database).creditExpiryMonths)),
       now,
     });
     notification = { rewardId: reward.id, userId: reward.referrer_user_id, amountInr: amount, balanceAfterInr: posted?.balanceAfterInr, friendFirstName: firstName(friend?.name) };
@@ -769,7 +793,7 @@ export function restoreWalletCreditForBooking(database, bookingId, { now = new D
       amountInr: amount,
       bookingId,
       description: `Returned ₹${amount} of wallet credit from cancelled booking ${booking.ref || bookingId}`,
-      expiresAt: sqlTimestamp(addMonths(now, REFERRAL_POLICY.creditExpiryMonths)),
+      expiresAt: sqlTimestamp(addMonths(now, referralPolicy(database).creditExpiryMonths)),
       now,
     });
     result = { bookingId, restoredInr: amount };
@@ -812,13 +836,13 @@ function collectExpiryReminders(database, { now = new Date() } = {}) {
     WHERE expires_at IS NOT NULL AND remaining_inr > 0 AND expiry_reminded_at IS NULL
       AND expires_at > ? AND expires_at <= ?
     GROUP BY user_id
-  `).all(sqlTimestamp(now), sqlTimestamp(addDays(now, REFERRAL_POLICY.expiryReminderDays)));
+  `).all(sqlTimestamp(now), sqlTimestamp(addDays(now, referralPolicy(database).expiryReminderDays)));
 
   for (const row of rows) {
     database.prepare(`
       UPDATE wallet_transactions SET expiry_reminded_at = ?
       WHERE user_id = ? AND expires_at IS NOT NULL AND remaining_inr > 0 AND expiry_reminded_at IS NULL AND expires_at <= ?
-    `).run(sqlTimestamp(now), row.user_id, sqlTimestamp(addDays(now, REFERRAL_POLICY.expiryReminderDays)));
+    `).run(sqlTimestamp(now), row.user_id, sqlTimestamp(addDays(now, referralPolicy(database).expiryReminderDays)));
   }
   return rows.map((row) => ({ userId: row.user_id, amountInr: money(row.amount), expiresAt: row.first_expiry }));
 }
@@ -1060,13 +1084,19 @@ export function getReferralSummary(database, userId, { now = new Date() } = {}) 
   }
 
   return {
-    policy: {
-      friendDiscountPct: Math.round(REFERRAL_POLICY.friendDiscountRate * 100),
-      referrerRewardPct: Math.round(REFERRAL_POLICY.referrerRate * 100),
-      earningWindowMonths: REFERRAL_POLICY.earningWindowMonths,
-      clearingHoldDays: REFERRAL_POLICY.clearingHoldDays,
-      creditExpiryMonths: REFERRAL_POLICY.creditExpiryMonths,
-    },
+    policy: (() => {
+      const policy = referralPolicy(database);
+      return {
+        enabled: policy.enabled,
+        friendDiscountPct: Math.round(policy.friendDiscountRate * 10000) / 100,
+        referrerRewardPct: Math.round(policy.referrerRate * 10000) / 100,
+        earningWindowMonths: policy.earningWindowMonths,
+        clearingHoldDays: policy.clearingHoldDays,
+        creditExpiryMonths: policy.creditExpiryMonths,
+        walletMaxSharePct: Math.round(policy.walletMaxShare * 10000) / 100,
+        walletMaxPerBookingInr: policy.walletMaxPerBookingInr,
+      };
+    })(),
     friends: friends.map((friend) => ({
       id: friend.id,
       firstName: firstName(friend.friend_name) || "Friend",
@@ -1258,8 +1288,8 @@ export function backfillLegacyReferrals(database, { now = new Date() } = {}) {
           INSERT INTO referral_relationships (id, referrer_user_id, referred_user_id, referral_code, source, established_at, earns_until, status)
           VALUES (?, ?, ?, ?, 'LEGACY', ?, ?, ?)
         `).run(id, referrer.id, friend.id, row.referral_code || referrer.referral_code || "LEGACY",
-          sqlTimestamp(establishedAt), sqlTimestamp(addMonths(establishedAt, REFERRAL_POLICY.earningWindowMonths)),
-          addMonths(establishedAt, REFERRAL_POLICY.earningWindowMonths).getTime() > new Date(now).getTime() ? "ACTIVE" : "EXPIRED");
+          sqlTimestamp(establishedAt), sqlTimestamp(addMonths(establishedAt, referralPolicy(database).earningWindowMonths)),
+          addMonths(establishedAt, referralPolicy(database).earningWindowMonths).getTime() > new Date(now).getTime() ? "ACTIVE" : "EXPIRED");
         relationship = getRelationshipForUser(database, row.referred_user_id);
         summary.relationships += 1;
       }
@@ -1270,7 +1300,7 @@ export function backfillLegacyReferrals(database, { now = new Date() } = {}) {
       if (!booking || exists) continue;
 
       const rewarded = row.status === "REWARDED";
-      const earned = computeReferralAmounts({ commissionInr: booking.commission_amount, isFirstTrip: false });
+      const earned = computeReferralAmounts({ commissionInr: booking.commission_amount, isFirstTrip: false, policy: referralPolicy(database) });
       database.prepare(`
         INSERT INTO referral_rewards (
           id, relationship_id, referrer_user_id, referred_user_id, booking_id, sequence, booking_margin_inr,

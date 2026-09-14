@@ -54,6 +54,7 @@ Idea Holiday utilizes environment-specific `.env` files locally and Google Secre
 | `WHATSAPP_APP_SECRET` | Optional | `<meta-app-secret>` | Webhook signature verification. |
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN`| Optional | `<meta-verify-token>` | Webhook registration handshake. |
 | `WHATSAPP_TEMPLATE_LANGUAGE` | Optional | `en_US` | Default template locale. |
+| `WHATSAPP_TEMPLATE_SUPPLIER_COMMISSION` | Optional | `<approved-template-name>` | Commission change notice to suppliers. Variables: `{{1}}` what (e.g. `for your listings`), `{{2}}` old rate, `{{3}}` new rate. Template not yet submitted to Meta; unset, the notice goes by email and free-text WhatsApp (delivered only inside the 24-hour window). |
 
 #### 3.1.1 Driver Dispatch Templates
 Dispatch messages use their own template names, so existing approved templates keep their variable counts. Each body below is submitted to Meta **exactly as written** as a **Utility** template under the name shown, then the approved name is set in the variable. The wording follows this account's approved templates (fixed opening, `Label: value.`); shorter `Hello {{1}}` styles were rejected as `INVALID_FORMAT` or `INCORRECT_CATEGORY`. A free-text `Update: {{n}}` variable was also rejected as `INCORRECT_CATEGORY`, and new driver-detail templates kept being rejected, so the driver trip and traveler driver-details messages reuse the account's approved `idea_holiday_driver_trip` and `idea_holiday_driver_details` with their approved variables.

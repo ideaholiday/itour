@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
+import { applySupplierSubscriptionMigration } from "./fixtures/supplierSubscriptions.js";
 import { createCircuitQuote, getCircuitQuote } from "../src/services/circuitQuoteService.js";
 
 function futureDate(days = 10) {
@@ -50,6 +51,7 @@ function testDatabase() {
     .run("tour_1", "Shared Heritage Walk", "DAY_TOUR", "SHARED", "Panaji", 1000, "FLEXIBLE_24H");
   database.prepare("INSERT INTO products VALUES (?, 'supplier_1', ?, ?, ?, ?, 'Goa', ?, 'PUBLISHED', 1, ?)")
     .run("transfer_1", "Private Hotel Transfer", "TRANSFER", "PRIVATE", "Goa", 2000, "MODERATE_48H");
+  applySupplierSubscriptionMigration(database);
   return database;
 }
 

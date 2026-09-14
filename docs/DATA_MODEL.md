@@ -71,7 +71,8 @@ erDiagram
   - `contact_name`, `email`, `phone`, `city`, `state`.
   - `gstin`, `pan_number`: Legal tax identifiers.
   - `kyb_status`: `PENDING`, `APPROVED`, `REJECTED`. Only `APPROVED` vendors can publish listings.
-  - `commission_rate`: Real percentage (default 18.0%).
+  - `commission_rate`: Legacy percentage, no longer used to price bookings.
+  - `commission_override_rate`: The supplier's own commission %, or `NULL` for the platform default (BUSINESS_RULES §3.2).
   - `payout_bank_details`: JSON object with `{ account_number, ifsc, bank_name, beneficiary_name, upi_id }`.
   - `rating`: Float, `NULL` until a verified review exists (see BUSINESS_RULES §9).
 - **`kyb_documents`**:
@@ -431,6 +432,29 @@ See BUSINESS_RULES §12.
   `last_message_at`.
 - **`supplier_enquiry_messages`**: `enquiry_id`, `author_role` (`TRAVELER` or
   `SUPPLIER`), `author_id`, `message`.
+
+### 2.16 Program Settings, Commission and Supplier Subscriptions
+
+Migration 037, ADR 017. Read and written only through `programSettingsService`.
+
+- **`program_settings`**: `key` (program, e.g. `giveaway`) primary key,
+  `value_json` (validated settings), `updated_by`, `updated_at`. No row means the
+  code defaults apply.
+- **`program_settings_audit`**: append-only. `key`, `old_value_json`,
+  `new_value_json`, `changed_by`, `reason` (required), `created_at`.
+- **`products.commission_override_rate`** (migration 038): the product's own
+  commission %, or `NULL`.
+- **`commission_rate_changes`** (migration 038): append-only. `scope`
+  (`PLATFORM` | `SUPPLIER` | `PRODUCT`), `supplier_id`, `product_id`, `old_rate`
+  and `new_rate` (the rate actually paid before and after), `changed_by`, `reason`,
+  `notify` (1 when the affected suppliers are sent a notice), `notified_at`.
+- **`suppliers.subscription_exempt`** (migration 039): 1 for suppliers registered
+  before 2026-09-14; they need no subscription (SUPPLIER_PLANS.md).
+- **`supplier_subscriptions`** (migration 039): `supplier_id`, `plan_code`
+  (`MARKETPLACE`), `status` (`PENDING_PAYMENT` | `ACTIVE` | `WAIVED` | `EXPIRED` |
+  `CANCELLED`), `source` (`PURCHASE` | `WAIVER` | `LAUNCH` | `COUPON`), `starts_at`,
+  `ends_at` (UTC text, `NULL` = no end date), `granted_by`, `reason`,
+  `last_reminder_days`.
 
 ---
 

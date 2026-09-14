@@ -8,12 +8,12 @@ import logger from "../config/logger.js";
 export const MIN_PAYOUT_INR = 1000;
 
 /**
- * Commission paid to a resident Indian is a brokerage payment, so TDS is
- * deducted at source under section 194H. A verified PAN gets the normal rate;
- * without one, section 206AA forces the penal rate.
+ * TDS withheld on every creator payout (ADR 017): 1%, set by the owner. Only a
+ * creator with a verified PAN can be paid at all, so there is no no-PAN rate.
+ * Which Income Tax section applies is for the CA to confirm, so statements
+ * do not name one.
  */
-export const TDS_RATE_WITH_PAN = 0.05;
-export const TDS_RATE_WITHOUT_PAN = 0.20;
+export const TDS_RATE = 0.01;
 
 /** Days a matured commission waits before it can be withdrawn. */
 export const DEFAULT_PAYOUT_HOLD_DAYS = 14;
@@ -1073,14 +1073,10 @@ export function computeBalances(database = db, affiliateId) {
   };
 }
 
-/**
- * TDS on a commission payment, per section 194H. Without a verified PAN,
- * section 206AA applies the penal rate — which is why the dashboard nags
- * creators to finish PAN verification before they withdraw.
- */
+/** TDS on a creator payout: the gross leaves the balance, the net reaches the bank. */
 export function computeTds(affiliate, grossAmountInr) {
   const gross = round2(grossAmountInr);
-  const rate = affiliate?.pan_verified ? TDS_RATE_WITH_PAN : TDS_RATE_WITHOUT_PAN;
+  const rate = TDS_RATE;
   const tds = round2(gross * rate);
   return { grossInr: gross, tdsRate: rate, tdsInr: tds, netInr: round2(gross - tds) };
 }
@@ -1150,6 +1146,11 @@ export function requestPayout(database = db, affiliateId, { amountInr, paymentMe
 
   if (affiliate.kyc_status !== "VERIFIED") {
     throw affiliateError("KYC verification (PAN & Bank Account) is required before requesting payouts", 403);
+  }
+
+  // ADR 017: TDS is deducted against a verified PAN, so nobody is paid without one.
+  if (!affiliate.pan_verified) {
+    throw Object.assign(affiliateError("Verify your PAN before requesting a payout. Your commission keeps building up until then.", 403), { code: "PAN_NOT_VERIFIED" });
   }
 
   const method = String(paymentMethod || "BANK_TRANSFER").toUpperCase();
@@ -1274,7 +1275,7 @@ export function settlePayout(database = db, payoutId, { utrReference, actorId = 
         amountInr: -tds,
         payoutId: payout.id,
         actorId,
-        note: `TDS @ ${(Number(payout.tds_rate) * 100).toFixed(0)}% u/s 194H`,
+        note: `TDS @ ${Number((Number(payout.tds_rate) * 100).toFixed(2))}%`,
       });
     }
 
@@ -1399,7 +1400,7 @@ export function getAffiliateDashboardMetrics(database = db, affiliateId) {
     campaignTotals.set(key, entry);
   }
 
-  const nextTdsRate = affiliate.pan_verified ? TDS_RATE_WITH_PAN : TDS_RATE_WITHOUT_PAN;
+  const nextTdsRate = TDS_RATE;
 
   return {
     affiliateId: affiliate.id,
@@ -1440,9 +1441,10 @@ export function getAffiliateDashboardMetrics(database = db, affiliateId) {
       holdDays: Number(affiliate.payout_hold_days ?? DEFAULT_PAYOUT_HOLD_DAYS),
       attributionWindowDays: Number(affiliate.attribution_window_days ?? DEFAULT_ATTRIBUTION_WINDOW_DAYS),
       tdsRate: nextTdsRate,
+      panRequired: !affiliate.pan_verified,
       tdsNote: affiliate.pan_verified
-        ? "TDS of 5% is deducted at source under section 194H."
-        : "Without a verified PAN, TDS is deducted at 20% under section 206AA. Verify your PAN to reduce this to 5%.",
+        ? "TDS of 1% is deducted at source from every payout."
+        : "Verify your PAN to withdraw. TDS of 1% is deducted at source from every payout.",
       accountCoolingHours: PAYOUT_ACCOUNT_COOLING_HOURS,
     },
     metrics: {

@@ -373,6 +373,19 @@ describe("Influencer & Affiliate System", () => {
     assert.equal(balances.withdrawableInr, 0);
   });
 
+  it("refuses any payout without a verified PAN, even after KYC", () => {
+    const affiliate = getAffiliateByCode(db, testAffCode);
+    db.prepare("UPDATE affiliates SET pan_verified = 0 WHERE id = ?").run(affiliate.id);
+    try {
+      assert.throws(
+        () => requestPayout(db, affiliate.id, { amountInr: 1000 }),
+        (error) => error.status === 403 && error.code === "PAN_NOT_VERIFIED",
+      );
+    } finally {
+      db.prepare("UPDATE affiliates SET pan_verified = 1 WHERE id = ?").run(affiliate.id);
+    }
+  });
+
   it("blocks a payout while the commission is still clearing", () => {
     const affiliate = getAffiliateByCode(db, testAffCode);
     assert.throws(
@@ -405,22 +418,19 @@ describe("Influencer & Affiliate System", () => {
     assert.equal(payout.amount_inr, 1000);
     assert.equal(payout.gross_amount_inr, 1000);
     assert.equal(payout.status, "REQUESTED");
-    // PAN is verified, so TDS is 5% under 194H, not the penal 20%.
-    assert.equal(payout.tds_rate, 0.05);
-    assert.equal(payout.tds_amount_inr, 50);
-    assert.equal(payout.net_amount_inr, 950);
+    // ADR 017: 1% TDS on every payout.
+    assert.equal(payout.tds_rate, 0.01);
+    assert.equal(payout.tds_amount_inr, 10);
+    assert.equal(payout.net_amount_inr, 990);
     assert.ok(payout.payout_account_id, "payout must name the account it is going to");
 
     // The reservation removes it from what can be withdrawn again.
     assert.equal(computeBalances(db, affiliate.id).withdrawableInr, 0);
   });
 
-  it("computes the penal TDS rate when PAN is not verified", () => {
-    const withPan = computeTds({ pan_verified: 1 }, 1000);
-    const withoutPan = computeTds({ pan_verified: 0 }, 1000);
-    assert.equal(withPan.netInr, 950);
-    assert.equal(withoutPan.tdsInr, 200);
-    assert.equal(withoutPan.netInr, 800);
+  it("withholds 1% TDS on every payout", () => {
+    assert.deepEqual(computeTds({ pan_verified: 1 }, 1000), { grossInr: 1000, tdsRate: 0.01, tdsInr: 10, netInr: 990 });
+    assert.deepEqual(computeTds({ pan_verified: 1 }, 1234.5), { grossInr: 1234.5, tdsRate: 0.01, tdsInr: 12.35, netInr: 1222.15 });
   });
 
   it("rejects payout request below minimum threshold of ₹1,000", () => {
@@ -459,8 +469,8 @@ describe("Influencer & Affiliate System", () => {
 
     const balances = computeBalances(db, affiliate.id);
     assert.equal(balances.withdrawableInr, 0);
-    assert.equal(balances.tdsWithheldInr, 50);
-    assert.equal(balances.netReceivedInr, 950);
+    assert.equal(balances.tdsWithheldInr, 10);
+    assert.equal(balances.netReceivedInr, 990);
   });
 
   it("refuses to settle the same payout twice", () => {
@@ -594,7 +604,7 @@ describe("Influencer & Affiliate System", () => {
     assert.equal(dashboard.kycStatus, "VERIFIED");
     assert.ok(dashboard.metrics);
     assert.equal(dashboard.metrics.paidEarningsInr, 1000);
-    assert.equal(dashboard.metrics.tdsWithheldInr, 50);
+    assert.equal(dashboard.metrics.tdsWithheldInr, 10);
     assert.ok(dashboard.shareLinks.couponCode);
     assert.ok(dashboard.shareLinks.defaultLink);
     assert.ok(Array.isArray(dashboard.referrals));
@@ -605,7 +615,7 @@ describe("Influencer & Affiliate System", () => {
     // The payout policy the UI needs to explain the numbers it is showing.
     assert.equal(dashboard.payoutPolicy.minPayoutInr, 1000);
     assert.equal(dashboard.payoutPolicy.holdDays, 14);
-    assert.equal(dashboard.payoutPolicy.tdsRate, 0.05);
+    assert.equal(dashboard.payoutPolicy.tdsRate, 0.01);
 
     // Campaign attribution survives to the dashboard.
     assert.ok(dashboard.campaigns.some((c) => c.subId === "reels-march"));

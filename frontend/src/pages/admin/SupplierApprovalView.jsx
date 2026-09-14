@@ -99,8 +99,8 @@ export default function SupplierApprovalView() {
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           action, // 'APPROVED' | 'REJECTED' | 'SUSPENDED'
-          reason,
-          commissionRate: selectedSupplier.commission_rate ?? 15.0
+          // Commission is set in Products → Commission; approving must not pin a rate.
+          reason
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -332,7 +332,7 @@ export default function SupplierApprovalView() {
                       <div>PAN: <span className="text-stone-500">{s.pan_number || "N/A"}</span></div>
                     </td>
                     <td className="py-4 px-4 font-mono font-bold text-amber-700">
-                      {s.commission_rate || 15.0}%
+                      {s.commission_rate_effective}%
                     </td>
                     <td className="py-4 px-4 font-mono text-stone-700">
                       <div className="font-bold text-emerald-700">{s.published_products || 0} live</div>
@@ -408,7 +408,7 @@ export default function SupplierApprovalView() {
                 </div>
                 <div className="text-right font-mono text-xs">
                   <span className="text-stone-500 block">Platform Commission</span>
-                  <span className="text-amber-700 font-bold text-base">{selectedSupplier.commission_rate || 15}%</span>
+                  <span className="text-amber-700 font-bold text-base">{selectedSupplier.commission_rate_effective}%</span>
                 </div>
               </div>
 

@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { onReferralBookingCancelled } from "./referralService.js";
+import { getSettings } from "./programSettingsService.js";
 
 function financeError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -7,15 +8,27 @@ function financeError(message, status = 400) {
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
-export function resolveCommissionRate(database, supplierId, productType) {
-  const row = database.prepare(`
-    SELECT s.commission_override_rate, s.commission_rate, cc.default_commission_rate
-    FROM suppliers s
-    LEFT JOIN category_commissions cc ON UPPER(cc.category_code) = UPPER(?)
-    WHERE s.id = ?
-  `).get(productType, supplierId);
-  if (!row) return 18;
-  const resolved = row.commission_override_rate ?? row.default_commission_rate ?? row.commission_rate ?? 18;
+/**
+ * The commission % for a booking of this supplier's product, most specific
+ * first: product override → supplier override → platform default (ADR 017).
+ * Callers freeze the result onto the booking.
+ */
+export function resolveCommissionRate(database, supplierId, productId = null) {
+  const override = (table, id) => {
+    if (!id) return null;
+    try {
+      return database.prepare(`SELECT commission_override_rate FROM ${table} WHERE id = ?`).get(id);
+    } catch (error) {
+      // Before migration 038 products have no override column.
+      if (/no such column|does not exist/i.test(error.message)) return null;
+      throw error;
+    }
+  };
+  const product = override("products", productId);
+  const supplier = override("suppliers", supplierId);
+  const resolved = product?.commission_override_rate
+    ?? supplier?.commission_override_rate
+    ?? getSettings(database, "commission").defaultRatePercent;
   return Math.max(0, Math.min(50, Number(resolved) || 0));
 }
 

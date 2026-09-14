@@ -1247,7 +1247,7 @@ export default function AffiliateDashboardPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-stone-500">
-                      TDS @ {(payoutPreview.rate * 100).toFixed(0)}% (section 194H)
+                      TDS @ {Number((payoutPreview.rate * 100).toFixed(2))}%
                     </span>
                     <span className="font-semibold text-rose-600">
                       −₹{payoutPreview.tds.toLocaleString("en-IN")}

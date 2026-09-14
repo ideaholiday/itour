@@ -41,7 +41,8 @@ import {
   updateDispatchStatus,
 } from "../services/driverDispatchService.js";
 
-import { calculateRefundQuote, createRefundRecord, finalizeRefund, getSupplierPayoutLedger } from "../services/financeService.js";
+import { calculateRefundQuote, createRefundRecord, finalizeRefund, getSupplierPayoutLedger, resolveCommissionRate } from "../services/financeService.js";
+import { getSubscriptionStatus } from "../services/supplierSubscriptionService.js";
 import {
   verifyGstin,
   verifyPan,
@@ -150,10 +151,11 @@ router.get("/:id", (req, res) => {
 
     res.json({
       success: true,
-      supplier,
+      supplier: { ...supplier, commission_rate_effective: resolveCommissionRate(db, supplier.id) },
+      subscription: getSubscriptionStatus(db, supplier.id),
       kybDocs,
       geoFences,
-      products,
+      products: products.map((product) => ({ ...product, commission_rate_effective: resolveCommissionRate(db, supplier.id, product.id) })),
       bookings,
       drivers,
       blockedDates,

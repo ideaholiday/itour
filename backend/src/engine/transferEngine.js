@@ -1,4 +1,5 @@
 import logger from "../config/logger.js";
+import { resolveCommissionRate } from "../services/financeService.js";
 
 /**
  * TRANSFER ENGINE & PRICING MATRIX
@@ -182,7 +183,7 @@ export function matchSupplierGeoFences(db, pickupLat, pickupLng, dropLat, dropLn
   try {
     const fences = db
       .prepare(
-        `SELECT g.*, s.company_name, s.rating as supplier_rating, s.commission_rate
+        `SELECT g.*, s.company_name, s.rating as supplier_rating
          FROM geo_fences g
          JOIN suppliers s ON g.supplier_id = s.id
          WHERE (g.is_active IS NULL OR CAST(g.is_active AS TEXT) NOT IN ('0', 'false')) AND COALESCE(g.approval_status, 'APPROVED') = 'APPROVED'`
@@ -218,7 +219,7 @@ export function matchSupplierGeoFences(db, pickupLat, pickupLng, dropLat, dropLn
           supplierId: fence.supplier_id,
           supplierName: fence.company_name,
           supplierRating: fence.supplier_rating,
-          commissionRate: fence.commission_rate || 18.0,
+          commissionRate: resolveCommissionRate(db, fence.supplier_id),
           zoneName: fence.zone_name,
           city: fence.city,
           centerLat: fence.center_lat,

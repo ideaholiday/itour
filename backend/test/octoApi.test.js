@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
+import { applySupplierSubscriptionMigration } from "./fixtures/supplierSubscriptions.js";
 import {
   getOctoCapabilities,
   getOctoSuppliers,
@@ -131,8 +132,8 @@ function setupOctoTestDb() {
   `);
 
   db.prepare(`
-    INSERT INTO suppliers (id, company_name, contact_name, email, phone, city, state, is_verified, kyb_status)
-    VALUES ('sup_test_01', 'Goa Adventure Club', 'Rahul Verma', 'rahul@goaadventure.com', '+919876543210', 'Goa', 'Goa', 1, 'APPROVED')
+    INSERT INTO suppliers (id, company_name, contact_name, email, phone, city, state, is_verified, kyb_status, created_at)
+    VALUES ('sup_test_01', 'Goa Adventure Club', 'Rahul Verma', 'rahul@goaadventure.com', '+919876543210', 'Goa', 'Goa', 1, 'APPROVED', '2026-01-01 00:00:00')
   `).run();
 
   db.prepare(`
@@ -156,6 +157,7 @@ function setupOctoTestDb() {
     blackoutDates: [],
   });
 
+  applySupplierSubscriptionMigration(db);
   return db;
 }
 

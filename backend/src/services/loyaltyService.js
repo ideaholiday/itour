@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import db from "../db.js";
 import {
-  REFERRAL_POLICY,
+  referralPolicy,
   buildReferralLink,
   findReferrerByCode,
   getReferralSummary,
@@ -163,7 +163,8 @@ export function applyWalletCreditsToCheckout(database = db, userId, { bookingAmo
     };
   }
 
-  const maxAllowedDiscount = Math.floor(Math.min(amount * 0.5, 2000, availableBalance));
+  const { walletMaxShare, walletMaxPerBookingInr } = referralPolicy(database);
+  const maxAllowedDiscount = Math.floor(Math.min(amount * walletMaxShare, walletMaxPerBookingInr, availableBalance));
 
   let creditToApply = requestedCreditInr !== undefined
     ? Math.min(Number(requestedCreditInr) || 0, maxAllowedDiscount)
@@ -221,7 +222,7 @@ export function getPublicReferralInfo(database = db, referralCode) {
   }
 
   const name = referrer.name ? referrer.name.split(" ")[0] : "A friend";
-  const discountPct = Math.round(REFERRAL_POLICY.friendDiscountRate * 100);
+  const discountPct = Math.round(referralPolicy(database).friendDiscountRate * 100);
   return {
     valid: true,
     referralCode: referrer.referral_code,

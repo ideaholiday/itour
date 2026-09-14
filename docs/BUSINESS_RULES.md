@@ -58,14 +58,25 @@ $$\text{Vacancies} = \text{Configured Max Capacity} - \text{Confirmed Seats} - \
    - Tiered hotel packages (`Cab Only`, `3-Star`, `4-Star`, `5-Star`) priced per person per night + base transport fare.
 
 ### 3.2 Platform Commission & Supplier Net Earnings
-1. **Standard Platform Commission**: **18.0%** (unless overridden by supplier contract or product category).
-2. **Frozen Commission**: Commission percentage and exact rupee amount are frozen on the booking record at creation.
+1. **Platform Commission (ADR 017)**: **30%** by default. A booking's rate resolves
+   **product override → supplier override → platform default**
+   (`resolveCommissionRate`). Category defaults and `suppliers.commission_rate` no
+   longer decide it. Admins set the default in Admin → Programs and per-product or
+   per-supplier rates in Listings → Commission Overrides, each with a reason
+   (0–50%). Approving a supplier's KYB never sets a rate.
+   - Every change is recorded in `commission_rate_changes`, and the suppliers whose
+     rate actually moves are sent a notice (email + WhatsApp). "Put everyone on the
+     default" clears supplier (and optionally product) overrides; it can be run with
+     notices off, as for the 2026-09-14 launch move to 30%.
+2. **Frozen Commission**: Commission percentage and exact rupee amount are frozen on the booking record at creation. A rate change applies to new bookings only.
 3. **Supplier Net Payable**:
    $$\text{Supplier Earnings} = \text{Total Fare} - \text{Platform Commission} - \text{Retained Tax}$$
 4. **Giveaway cap (ADR 017)**: everything one booking gives away (a coupon discount,
    the Travel & Earn friend discount and referrer credit, a creator's commission)
    stays within **10% of the booking's value** and never exceeds its commission.
    Wallet credit being spent is not counted; it was paid for when it was earned.
+   Admins change the share in Admin → Programs (`giveaway.maxBookingValuePct`,
+   0–50%). Every change needs a reason, is audited, and applies to new bookings.
 5. **Coupons (`promo_codes`) are charged, not only shown.** The server prices the
    discount from its own quote (whole rupees, rounded down), cuts it to what the cap
    leaves after the referral and creator commission, and takes it off `amount_inr`.
@@ -303,10 +314,12 @@ exists to stop a specific way the money goes wrong.
 ### 10.5 Payouts and tax
 1. **Minimum withdrawal is ₹1,000**, and never more than the withdrawable
    balance.
-2. **TDS is withheld at source** on every payout, because commission to a
-   resident is a brokerage payment under section 194H: **5% with a verified
-   PAN**, **20% without** (section 206AA). A payout therefore carries three
-   figures — gross, TDS, net — and the net is what reaches the bank.
+2. **TDS of 1% is withheld at source** on every payout (ADR 017, `TDS_RATE`).
+   **A creator must have a verified PAN to be paid at all** (`PAN_NOT_VERIFIED`);
+   commission keeps accruing until then. A payout carries three figures — gross,
+   TDS, net — and the net is what reaches the bank. Payouts requested before this
+   change keep the rate they were requested at. Which Income Tax section applies
+   is for the CA to confirm, so statements do not name one.
 3. **The destination must be verified and out of its cooling period**, or the
    request is refused.
 4. **Settlement requires the bank's UTR.** Settling marks the funding
@@ -324,8 +337,10 @@ Travelers invite friends. The friend gets a discount on their first trip, and
 the referrer earns wallet credit on every trip that friend takes. The program is
 built so it cannot cost cash: everything it gives away is a fixed share of the
 commission on the booking that earned it, and credit can only be spent on more
-bookings. Implemented in `referralService.js`; the constants live in
-`REFERRAL_POLICY`.
+bookings. Implemented in `referralService.js`. **Admins set every number below**
+(Admin → Programs, setting `referral`; the figures here are the defaults), and can
+pause new rewards. Rates freeze onto each reward. Friend + referrer rates at the
+highest commission in use must fit the giveaway cap (§3.2), or the change is refused.
 
 ### 11.1 What a booking gives away
 1. **Friend discount: 10% of the booking's commission, on the friend's first
@@ -394,7 +409,7 @@ bookings. Implemented in `referralService.js`; the constants live in
    row together. The lifecycle job logs an error if any user's cached balance
    and ledger sum disagree.
 2. **Each money movement happens once per booking** (`UNIQUE (booking_id, entry_type)`).
-3. **Spending:** up to 50% of what is left after other discounts, at most ₹2,000
+3. **Spending:** up to 50% of what is left after other discounts, at most ₹2,000 (both admin-set)
    per booking, never more than the balance. If the deduction fails, the booking
    is not created — it never keeps a discount it did not pay for.
 4. **Credit cannot be withdrawn as cash.** This keeps it a discount rather than a
@@ -412,6 +427,8 @@ bookings. Implemented in `referralService.js`; the constants live in
 ---
 
 ## 12. Supplier Profiles
+
+Who can take bookings once KYB is approved (subscriptions, waivers): [`SUPPLIER_PLANS.md`](SUPPLIER_PLANS.md).
 
 Every registered supplier has a public page at `/suppliers/<slug>` that
 travelers can find on the marketplace and on Google. Code:

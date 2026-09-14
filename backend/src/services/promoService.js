@@ -1,5 +1,6 @@
 import { recordAffiliateBooking, resolveTier } from "./affiliateService.js";
-import { REFERRAL_POLICY, findReferrerByCode } from "./referralService.js";
+import { findReferrerByCode, referralPolicy } from "./referralService.js";
+import { giveawayBudgetInr } from "./programSettingsService.js";
 
 function promoError(message, status = 400) {
   const error = new Error(message);
@@ -82,7 +83,7 @@ export function validatePromoCode(database, { code, amountInr = 0, userId = null
     if (userId && referrer.id === userId) {
       throw promoError("You cannot use your own referral code", 400);
     }
-    const discountPct = Math.round(REFERRAL_POLICY.friendDiscountRate * 100);
+    const discountPct = Math.round(referralPolicy(database).friendDiscountRate * 100);
 
     // The rupee amount depends on the trip, so it is priced with the booking
     // quote rather than here. Nothing is taken off the order at this step.
@@ -137,19 +138,13 @@ export function applyPromoCode(database, { code, bookingId, userId = null, amoun
 }
 
 /**
- * ADR 017: everything one booking gives away (coupon, referral discount and
- * credit, creator commission) stays within this share of the booking's value,
- * and never exceeds the booking's commission.
+ * A coupon's rupee discount after the giveaway cap, in whole rupees rounded down.
+ * `budgetInr` is what the whole booking may give away (`giveawayBudgetInr`);
+ * `otherGiveawayInr` is what the referral and creator already take from it.
  */
-export const MAX_GIVEAWAY_SHARE_OF_BOOKING = 0.1;
-
-/** A coupon's rupee discount after the giveaway cap, in whole rupees rounded down. */
-export function capCouponDiscount({ offeredInr, bookingValueInr, commissionInr, otherGiveawayInr = 0 }) {
-  const budget = Math.min(
-    (Number(bookingValueInr) || 0) * MAX_GIVEAWAY_SHARE_OF_BOOKING,
-    Number(commissionInr) || 0,
-  ) - (Number(otherGiveawayInr) || 0);
-  return Math.max(0, Math.floor(Math.min(Number(offeredInr) || 0, budget)));
+export function capCouponDiscount({ offeredInr, budgetInr, otherGiveawayInr = 0 }) {
+  const remaining = (Number(budgetInr) || 0) - (Number(otherGiveawayInr) || 0);
+  return Math.max(0, Math.floor(Math.min(Number(offeredInr) || 0, remaining)));
 }
 
 /**
@@ -167,8 +162,7 @@ export function priceCouponForBooking(database, { code, bookingValueInr, commiss
     : 0;
   const discountInr = capCouponDiscount({
     offeredInr: promo.discountAmount,
-    bookingValueInr,
-    commissionInr,
+    budgetInr: giveawayBudgetInr(database, { bookingValueInr, commissionInr }),
     otherGiveawayInr: (Number(otherGiveawayInr) || 0) + creatorCommissionInr,
   });
   return {

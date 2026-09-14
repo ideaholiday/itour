@@ -42,6 +42,8 @@ Schema changes: only as a new file in `backend/migrations/` (AGENTS.md R7). Igno
 | Support cases, refunds | `support.js`, `traveler.js` (self-cancel), `admin.js` (finance refunds) | `supportCaseService`, `financeService`, `bookingRefundService` | `pages/ops/SupportCasesView.jsx`, `components/traveler/BookingModificationModal.jsx` |
 | Notifications (email, WhatsApp, SMS) | `ops.js`, `notificationWebhooks.js` | `notificationService`, `whatsappService`, `emailService`, `smsService`, `notificationLogService` | `pages/ops/WhatsAppNotificationView.jsx` |
 | Affiliates, referrals, loyalty | `affiliate.js`, `adminAffiliates.js`, `referral.js`, `promo.js` | `affiliateService`, `referralService`, `loyaltyService`, `promoService` | `pages/AffiliateDashboardPage.jsx`, `pages/TravelAndEarn.jsx` |
+| Program settings (giveaway cap, commission) | `admin.js` (`/api/admin/programs`, `/commission`) | `programSettingsService`, `commissionService`, `financeService.resolveCommissionRate` | `pages/admin/ProgramsView.jsx`, `pages/admin/ProductModerationView.jsx` |
+| Supplier subscriptions, launch waiver | `admin.js` (`/supplier-subscriptions`), `auth.js` (signup) | `supplierSubscriptionService`, `supplierKybGate` | `pages/admin/ProgramsView.jsx`, `components/supplier/SupplierDashboardOverview.jsx` |
 | OCTo API and channel manager | `octo.js`, `supplierChannels.js` | `octoService`, `channelManagerService`, `channels/channelRegistry.js` | `pages/supplier/SupplierChannelManagerPage.jsx` |
 | Uploads (incl. private KYB files) | `uploads.js` | `uploadService`, `kybFileService` | `components/KybDocumentViewer.jsx` |
 | Auth | `auth.js` | `lib/passwords.js` | `lib/auth.jsx`, `pages/Login.jsx` |

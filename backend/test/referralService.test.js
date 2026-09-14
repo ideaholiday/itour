@@ -456,3 +456,27 @@ test("the ledger always explains the balance across random money movements", () 
   assert.ok(metrics.costPctOfMargin <= 20, `cost ${metrics.costPctOfMargin}% of margin stays within the 10% + 10% ceiling`);
   assert.equal(metrics.walletDiscrepancies, 0);
 });
+
+test("admin-set Share & Earn rates apply to new rewards only, and pausing stops new ones", async () => {
+  const { updateSettings } = await import("../src/services/programSettingsService.js");
+  const db = createDatabase();
+  executeMigrationSql(db, fs.readFileSync(path.join(__dirname, "..", "migrations", "037_program_settings.sql"), "utf8").split("-- @down")[0]);
+  addUser(db, "priya", { phone: "9876543210", code: "REF-PRIYA1" });
+  addUser(db, "rahul", { phone: "9123456780" });
+  addUser(db, "meena", { phone: "9123456781" });
+
+  const first = book(db, "bk_rate_1", { userId: "rahul", commission: 1000, code: "REF-PRIYA1" });
+  assert.equal(first.discountInr, 100, "default 10% of commission");
+
+  updateSettings(db, "referral", { friendDiscountPct: 15, referrerRewardPct: 12 }, { reason: "Festival push" });
+  assert.equal(previewReferralBenefit(db, { userId: "meena", referralCode: "REF-PRIYA1", commissionInr: 1000 }).discountInr, 150);
+  const second = book(db, "bk_rate_2", { userId: "meena", commission: 1000, code: "REF-PRIYA1" });
+  assert.deepEqual([second.discountInr, second.referrerAmountInr], [150, 120]);
+  assert.equal(db.prepare("SELECT referrer_amount_inr FROM referral_rewards WHERE booking_id = 'bk_rate_1'").get().referrer_amount_inr, 100, "earlier reward keeps its rate");
+  assert.equal(getReferralSummary(db, "priya").policy.friendDiscountPct, 15);
+
+  updateSettings(db, "referral", { enabled: false }, { reason: "Paused for audit" });
+  assert.equal(previewReferralBenefit(db, { userId: "meena", commissionInr: 1000 }).reason, "PAUSED");
+  addBooking(db, "bk_rate_3", { userId: "meena", commission: 1000 });
+  assert.deepEqual(applyReferralToBooking(db, { bookingId: "bk_rate_3", userId: "meena", quoteCommissionInr: 1000, bookingCommissionInr: 1000 }), { applied: false, discountInr: 0 });
+});

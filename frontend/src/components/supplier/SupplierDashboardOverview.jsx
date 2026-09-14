@@ -127,6 +127,21 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
       to: "?panel=compliance",
       cta: "View compliance"
     },
+    // ADR 017: suppliers who signed up from 2026-09-14 need a subscription to take bookings.
+    isApproved && supplierData?.subscription?.required && !supplierData.subscription.covered && {
+      level: "urgent",
+      title: "Subscription needed — not receiving new bookings",
+      copy: "Your free launch offer has ended. Contact the Idea Holiday team to keep selling. Bookings already made are not affected.",
+      to: "/contact-us",
+      cta: "Contact us"
+    },
+    isApproved && supplierData?.subscription?.covered && supplierData.subscription.cover?.source === "LAUNCH" && {
+      level: "growth",
+      title: supplierData.subscription.cover.endsAt
+        ? `Free launch offer until ${supplierData.subscription.cover.endsAt.slice(0, 10)}`
+        : "You're on the free launch offer",
+      copy: "New suppliers need a subscription to take bookings. Yours is free during the launch offer; we'll remind you before it ends.",
+    },
     pendingBookings.length > 0 && {
       level: "urgent",
       title: `${pendingBookings.length} booking${pendingBookings.length > 1 ? "s" : ""} need confirmation`,
@@ -486,7 +501,7 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
               <span className="text-[10px] text-stone-500">Next payout</span>
             </div>
             <div>
-              <strong className="block text-sm font-bold text-stone-900">{supplier.commission_rate || 18}%</strong>
+              <strong className="block text-sm font-bold text-stone-900">{supplier.commission_rate_effective ?? supplier.commission_rate}%</strong>
               <span className="text-[10px] text-stone-500">Commission</span>
             </div>
           </div>

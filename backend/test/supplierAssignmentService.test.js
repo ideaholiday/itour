@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
+import { applySupplierSubscriptionMigration } from "./fixtures/supplierSubscriptions.js";
 import { findAutomaticSupplierAssignment, rankSupplierCandidates } from "../src/services/supplierAssignmentService.js";
 
 const approvedFence = {
@@ -163,6 +164,7 @@ test("assigns the purchased transfer variant instead of the route's default vehi
     .run("lucknow-zone", "lucknow-supplier", "Lucknow", 26.7606, 80.8893, 35, "[]", 1, "APPROVED");
   db.prepare("INSERT INTO supplier_drivers VALUES (?, ?, ?, ?)")
     .run("ertiga-1", "lucknow-supplier", "Maruti Ertiga ZXI (SUV)", "AVAILABLE");
+  applySupplierSubscriptionMigration(db);
 
   const product = db.prepare("SELECT * FROM products WHERE id = ?").get("lucknow-transfer");
   const result = findAutomaticSupplierAssignment(db, {

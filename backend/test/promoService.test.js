@@ -163,12 +163,11 @@ describe("Traveler Promo Codes & Referral Engine", () => {
     assert.throws(() => priceCouponForBooking(db, { code: "TESTEXPIRED", bookingValueInr: 2000, commissionInr: 600 }), /expired/);
   });
 
-  it("caps a coupon at 10% of the booking and never more than its commission", () => {
-    assert.equal(capCouponDiscount({ offeredInr: 5000, bookingValueInr: 10000, commissionInr: 3000 }), 1000);
-    assert.equal(capCouponDiscount({ offeredInr: 5000, bookingValueInr: 10000, commissionInr: 400 }), 400);
-    assert.equal(capCouponDiscount({ offeredInr: 500, bookingValueInr: 10000, commissionInr: 3000, otherGiveawayInr: 600 }), 400);
-    assert.equal(capCouponDiscount({ offeredInr: 500, bookingValueInr: 10000, commissionInr: 3000, otherGiveawayInr: 1500 }), 0);
-    assert.equal(capCouponDiscount({ offeredInr: 99.9, bookingValueInr: 10000, commissionInr: 3000 }), 99, "whole rupees, rounded down");
+  it("gives a coupon only what the booking's giveaway budget has left", () => {
+    assert.equal(capCouponDiscount({ offeredInr: 5000, budgetInr: 1000 }), 1000);
+    assert.equal(capCouponDiscount({ offeredInr: 500, budgetInr: 1000, otherGiveawayInr: 600 }), 400);
+    assert.equal(capCouponDiscount({ offeredInr: 500, budgetInr: 1000, otherGiveawayInr: 1500 }), 0);
+    assert.equal(capCouponDiscount({ offeredInr: 99.9, budgetInr: 1000 }), 99, "whole rupees, rounded down");
   });
 
   it("leaves traveler referral codes to the booking route", () => {

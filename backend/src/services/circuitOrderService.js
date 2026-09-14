@@ -2,6 +2,7 @@ import { getInventoryRules, reserveNativeInventory, attachNativeReservation } fr
 import { nanoid } from "nanoid";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
+import { isSupplierSubscriptionCovered } from "./supplierKybGate.js";
 
 const HOLD_VALIDITY_MS = 10 * 60 * 1000;
 const ACTIVE_ORDER_STATUS = "PENDING_PAYMENT";
@@ -288,7 +289,8 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
       if (!product || product.status !== "PUBLISHED" || Number(product.is_published ?? 1) !== 1) {
         throw orderError(`${line.productTitle || "Circuit item"} is no longer published`, 409, "PRODUCT_UNAVAILABLE");
       }
-      if (product.kyb_status !== "APPROVED" || String(product.supplier_id) !== String(line.supplierId)) {
+      if (product.kyb_status !== "APPROVED" || String(product.supplier_id) !== String(line.supplierId)
+        || !isSupplierSubscriptionCovered(database, product.supplier_id)) {
         throw orderError(`${line.productTitle || product.title} is no longer available from the quoted supplier`, 409, "SUPPLIER_UNAVAILABLE");
       }
 
@@ -318,7 +320,7 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
       const orderItemId = `coi_${nanoid(14)}`;
       const bookingId = `bk_${nanoid(12)}`;
       const bookingRef = `IH-${nanoid(7).toUpperCase()}`;
-      const commissionRate = resolveCommissionRate(database, product.supplier_id, product.product_type);
+      const commissionRate = resolveCommissionRate(database, product.supplier_id, product.id);
       const commissionAmount = money(totalAmount * commissionRate / 100);
       const supplierPayout = money(totalAmount - commissionAmount);
       const location = String(line.location || product.city || product.destination_name || "Supplier meeting point").trim();

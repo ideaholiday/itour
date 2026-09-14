@@ -34,12 +34,21 @@ import {
   getReconciliationReport,
   processSettlementBatch,
   reconcileSettlementBatch,
+  resolveCommissionRate,
 } from "../services/financeService.js";
 import { validateBody } from "../middleware/validation.js";
 import { assignDriverToBooking } from "../services/driverDispatchService.js";
 import { dispatchTransaction, revokeAssignment } from "../services/dispatchStateService.js";
 import { adminSchemas, checkoutSchemas, profileSchemas } from "../validators/apiSchemas.js";
 import { addTeamMember, listTeam, removeTeamMember, resetTeamMemberPassword, updateTeamMember } from "../services/teamService.js";
+import { listPrograms, listSettingsAudit, updateSettings } from "../services/programSettingsService.js";
+import {
+  getSubscriptionStatus, grantSubscriptionWaiver, listSupplierSubscriptions, revokeSubscription, syncLaunchWaivers,
+} from "../services/supplierSubscriptionService.js";
+import {
+  clearCommissionOverrides, listCommissionChanges, listCommissionOverrides, recordPlatformCommissionChange,
+  sendCommissionChangeNotices, setProductCommission, setSupplierCommission,
+} from "../services/commissionService.js";
 import {
   grantSupplierVerification, ownerProfileView, REQUIRED_VERIFICATION_CHECKS, revokeSupplierVerification,
   setProfileSuspended, VERIFICATION_CHECKS,
@@ -235,6 +244,7 @@ router.get("/suppliers", optionalAuthMiddleware, requireAdminAccess, (req, res) 
         secureIdVerifications,
         total_products: sup.total_products || 0,
         published_products: sup.published_products || 0,
+        commission_rate_effective: resolveCommissionRate(db, sup.id),
       };
     });
 
@@ -442,51 +452,154 @@ router.get("/suppliers/:id/public-profile", optionalAuthMiddleware, requireAdmin
   }
 });
 
-// POST /api/admin/suppliers/:id/commission - Update platform commission percentage for supplier
+// Commission (ADR 017): product override → supplier override → platform default.
+// Every change needs a reason, is recorded, and notifies the affected suppliers.
+function commissionFailure(res, req, error, fallback) {
+  if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+function queueCommissionNotices(changes) {
+  const due = changes.filter((change) => change?.notify);
+  if (due.length) queueNotification(sendCommissionChangeNotices(db, due), "Commission change notices");
+}
+
+// POST /api/admin/suppliers/:id/commission { commissionRate | null, reason }
 router.post("/suppliers/:id/commission", optionalAuthMiddleware, requireAdminAccess, validateBody(adminSchemas.commission), (req, res) => {
   try {
-    const { id } = req.params;
-    const { commissionRate } = req.body;
-
-    const rate = Number(commissionRate);
-    if (isNaN(rate) || rate < 0 || rate > 50) {
-      return res.status(400).json({ error: "Commission rate must be between 0% and 50%" });
-    }
-
-    db.prepare("UPDATE suppliers SET commission_rate = ?, commission_override_rate = ? WHERE id = ?").run(rate, rate, id);
-    res.json({ success: true, message: `Supplier commission updated to ${rate}%` });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update commission rate" });
+    const result = setSupplierCommission(db, {
+      supplierId: req.params.id,
+      rate: req.body.commissionRate ?? req.body.commission_rate ?? null,
+      actorId: req.user.id,
+      reason: req.body.reason,
+    });
+    queueCommissionNotices([result.change]);
+    res.json({ success: true, ...result, message: result.override === null ? `Supplier is on the platform default (${result.rate}%)` : `Supplier commission updated to ${result.rate}%` });
+  } catch (error) {
+    commissionFailure(res, req, error, "Failed to update commission rate");
   }
 });
 
-// GET & POST /api/admin/categories/commission - Manage platform commission per product category
-router.get("/categories/commission", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
+// PUT /api/admin/products/:id/commission { commissionRate | null, reason }
+router.put("/products/:id/commission", validateBody(adminSchemas.commission), (req, res) => {
   try {
-    const categories = db.prepare("SELECT * FROM category_commissions").all();
-    res.json({ success: true, categories });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch category commissions" });
+    const result = setProductCommission(db, {
+      productId: req.params.id,
+      rate: req.body.commissionRate ?? req.body.commission_rate ?? null,
+      actorId: req.user.id,
+      reason: req.body.reason,
+    });
+    queueCommissionNotices([result.change]);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    commissionFailure(res, req, error, "Failed to update product commission");
   }
 });
 
-router.post("/categories/commission", optionalAuthMiddleware, requireAdminAccess, validateBody(adminSchemas.categoryCommission), (req, res) => {
+router.get("/commission", (req, res) => {
   try {
-    const { categoryCode, defaultCommissionRate } = req.body;
-    const rate = Number(defaultCommissionRate);
-    if (!categoryCode || isNaN(rate)) {
-      return res.status(400).json({ error: "categoryCode and valid defaultCommissionRate required" });
+    res.json({ success: true, ...listCommissionOverrides(db), changes: listCommissionChanges(db, { limit: 100 }) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not load commission settings");
+  }
+});
+
+// Supplier subscriptions (ADR 017): new suppliers need cover to take bookings.
+router.get("/supplier-subscriptions", (req, res) => {
+  try {
+    res.json({ success: true, suppliers: listSupplierSubscriptions(db) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not load supplier subscriptions");
+  }
+});
+
+router.get("/suppliers/:id/subscription", (req, res) => {
+  try {
+    res.json({ success: true, subscription: getSubscriptionStatus(db, req.params.id) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not load the supplier's subscription");
+  }
+});
+
+// POST /api/admin/suppliers/:id/subscription/waiver { until: "YYYY-MM-DD" | null, reason }
+router.post("/suppliers/:id/subscription/waiver", validateBody(adminSchemas.subscriptionWaiver), (req, res) => {
+  try {
+    const waiver = grantSubscriptionWaiver(db, { supplierId: req.params.id, until: req.body.until ?? null, reason: req.body.reason, actorId: req.user.id });
+    res.status(201).json({ success: true, waiver, subscription: getSubscriptionStatus(db, req.params.id) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not waive the subscription");
+  }
+});
+
+// POST /api/admin/supplier-subscriptions/:id/end { reason }
+router.post("/supplier-subscriptions/:id/end", validateBody(adminSchemas.endSubscription), (req, res) => {
+  try {
+    const ended = revokeSubscription(db, { subscriptionId: req.params.id, reason: req.body.reason, actorId: req.user.id });
+    res.json({ success: true, subscription: getSubscriptionStatus(db, ended.supplier_id) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not end the subscription");
+  }
+});
+
+// POST /api/admin/commission/clear-overrides { includeProducts, notify, reason }
+// Puts suppliers (and optionally products) on the platform default.
+router.post("/commission/clear-overrides", validateBody(adminSchemas.clearCommissionOverrides), (req, res) => {
+  try {
+    const result = clearCommissionOverrides(db, {
+      includeProducts: req.body.includeProducts,
+      notify: req.body.notify,
+      actorId: req.user.id,
+      reason: req.body.reason,
+    });
+    queueCommissionNotices(result.changes);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not clear commission overrides");
+  }
+});
+
+// Program settings (ADR 017): giveaway cap and, per phase, the other money programs.
+router.get("/programs", (req, res) => {
+  try {
+    res.json({ success: true, programs: listPrograms(db) });
+  } catch (error) {
+    logger.error("Program settings lookup failed", { requestId: req.requestId, error });
+    res.status(500).json({ error: "Could not load program settings" });
+  }
+});
+
+router.get("/programs/audit", (req, res) => {
+  try {
+    const key = typeof req.query.key === "string" && req.query.key ? req.query.key : null;
+    res.json({ success: true, changes: listSettingsAudit(db, { key, limit: 200 }) });
+  } catch (error) {
+    logger.error("Program settings audit lookup failed", { requestId: req.requestId, error });
+    res.status(500).json({ error: "Could not load the change history" });
+  }
+});
+
+router.put("/programs/:key", validateBody(adminSchemas.programSettings), (req, res) => {
+  try {
+    const result = updateSettings(db, req.params.key, req.body.settings, { actorId: req.user.id, reason: req.body.reason });
+    if (req.params.key === "commission" && result.changed) {
+      const change = recordPlatformCommissionChange(db, {
+        oldRate: result.previous.defaultRatePercent,
+        newRate: result.settings.defaultRatePercent,
+        actorId: req.user.id,
+        reason: req.body.reason,
+        notify: req.body.notify !== false,
+      });
+      queueCommissionNotices([change]);
     }
-
-    db.prepare(
-      `INSERT INTO category_commissions (category_code, category_name, default_commission_rate, updated_at)
-       VALUES (?, ?, ?, datetime('now'))
-       ON CONFLICT(category_code) DO UPDATE SET default_commission_rate = excluded.default_commission_rate, updated_at = datetime('now')`
-    ).run(categoryCode, categoryCode.replace("_", " "), rate);
-
-    res.json({ success: true, message: `Default commission for ${categoryCode} updated to ${rate}%` });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update category commission" });
+    if (req.params.key === "supplier_subscriptions" && result.changed) {
+      result.launchWaivers = syncLaunchWaivers(db);
+    }
+    res.json({ success: true, ...result });
+  } catch (error) {
+    if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message, code: error.code });
+    logger.error("Program settings update failed", { requestId: req.requestId, error });
+    res.status(500).json({ error: "Could not save program settings" });
   }
 });
 
@@ -531,6 +644,7 @@ router.get("/products", optionalAuthMiddleware, requireAdminAccess, (req, res) =
       return {
         ...p,
         is_published: Boolean(p.is_published === undefined ? (p.status === "PUBLISHED" ? 1 : 0) : p.is_published),
+        commission_rate_effective: resolveCommissionRate(db, p.supplier_id, p.id),
         routeDetail,
         packageDetail
       };

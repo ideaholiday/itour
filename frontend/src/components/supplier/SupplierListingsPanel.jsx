@@ -476,6 +476,11 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
                     )}
                     <span className="text-[10px] text-stone-500">{shared ? "/ seat" : "/ vehicle"}</span>
                   </div>
+                  {product.commission_rate_effective != null && Number(product.price_inr) > 0 && (
+                    <span className="text-[10px] text-stone-500">
+                      Platform commission {product.commission_rate_effective}% · you receive {money(Number(product.price_inr) * (100 - product.commission_rate_effective) / 100)}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -588,6 +593,11 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
                   />
                 </div>
                 <p className="mt-1 text-[10px] text-stone-500">The amount travelers will pay for this booking.</p>
+                {editingProduct?.commission_rate_effective != null && Number(newPrice) > 0 && (
+                  <p className="mt-1 text-[10px] font-semibold text-emerald-800">
+                    Platform commission {editingProduct.commission_rate_effective}%: you receive {money(Number(newPrice) * (100 - editingProduct.commission_rate_effective) / 100)}.
+                  </p>
+                )}
               </div>
 
               <div>
