@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import db from "../db.js";
 import { verifyPan, verifyBankAccount, calculateNameMatchScore } from "./cashfreeSecureIdService.js";
 import logger from "../config/logger.js";
+import { postWalletEntry } from "./referralService.js";
 
 /** Smallest withdrawal we will process, in rupees. */
 export const MIN_PAYOUT_INR = 1000;
@@ -1064,6 +1065,17 @@ export function computeBalances(database = db, affiliateId) {
     WHERE affiliate_id = ?
   `).get(now, now, affiliateId) || {};
 
+  // Earnings moved into the wallet count as paid (migration 042).
+  let transfers = { gross: 0, tds: 0, net: 0 };
+  try {
+    transfers = database.prepare(`
+      SELECT COALESCE(SUM(gross_amount_inr), 0) AS gross, COALESCE(SUM(tds_amount_inr), 0) AS tds, COALESCE(SUM(net_amount_inr), 0) AS net
+      FROM affiliate_wallet_transfers WHERE affiliate_id = ?
+    `).get(affiliateId) || transfers;
+  } catch (error) {
+    if (!/no such table|does not exist/i.test(error.message)) throw error;
+  }
+
   const payouts = database.prepare(`
     SELECT
       COALESCE(SUM(CASE WHEN status IN ('REQUESTED', 'PROCESSING') THEN COALESCE(gross_amount_inr, amount_inr) ELSE 0 END), 0) AS reserved,
@@ -1076,7 +1088,7 @@ export function computeBalances(database = db, affiliateId) {
 
   const cleared = round2(referrals.cleared);
   const reserved = round2(payouts.reserved);
-  const paid = round2(payouts.paid);
+  const paid = round2(Number(payouts.paid) + Number(transfers.gross));
 
   return {
     pendingInr: round2(referrals.pending),
@@ -1084,7 +1096,8 @@ export function computeBalances(database = db, affiliateId) {
     clearedInr: cleared,
     reservedInr: reserved,
     paidInr: paid,
-    tdsWithheldInr: round2(payouts.tds_withheld),
+    tdsWithheldInr: round2(Number(payouts.tds_withheld) + Number(transfers.tds)),
+    walletTransferredInr: round2(transfers.net),
     netReceivedInr: round2(payouts.net_received),
     lifetimeEarningsInr: round2(referrals.lifetime),
     withdrawableInr: round2(Math.max(0, cleared - reserved - paid)),
@@ -1232,6 +1245,71 @@ export function requestPayout(database = db, affiliateId, { amountInr, paymentMe
   return database.prepare("SELECT * FROM affiliate_payouts WHERE id = ?").get(payoutId);
 }
 
+/** Marks the oldest cleared commission PAID up to `grossInr`, so statements line up with trips. */
+function markFundingCommissionPaid(database, affiliateId, grossInr) {
+  let remaining = round2(grossInr);
+  const funding = database.prepare(`
+    SELECT id, earning_inr FROM affiliate_referrals
+    WHERE affiliate_id = ? AND status = 'ELIGIBLE'
+    ORDER BY eligible_at ASC
+  `).all(affiliateId) || [];
+  for (const referral of funding) {
+    if (remaining < Number(referral.earning_inr)) break;
+    database.prepare("UPDATE affiliate_referrals SET status = 'PAID', settled_at = datetime('now') WHERE id = ?").run(referral.id);
+    remaining = round2(remaining - Number(referral.earning_inr));
+  }
+}
+
+/**
+ * "Use for travel" (ADR 017): moves withdrawable commission into the creator's
+ * traveler wallet. It is paid like a bank payout — verified PAN, 1% TDS, the
+ * commission marked PAID — but settles at once, has no minimum and needs no
+ * payout account. The net becomes wallet credit that never expires and can pay
+ * a whole booking. It cannot be turned back into cash.
+ */
+export function transferEarningsToWallet(database = db, affiliateId, { amountInr } = {}) {
+  const affiliate = database.prepare("SELECT * FROM affiliates WHERE id = ?").get(affiliateId);
+  if (!affiliate) throw affiliateError("Affiliate profile not found", 404);
+  if (affiliate.status !== "ACTIVE") throw affiliateError("This affiliate account is not active", 403);
+  if (!affiliate.pan_verified) {
+    throw Object.assign(affiliateError("Verify your PAN before moving earnings. TDS is deducted against it.", 403), { code: "PAN_NOT_VERIFIED" });
+  }
+  const gross = round2(amountInr || 0);
+  if (gross <= 0) throw affiliateError("Enter an amount to move", 400);
+  const balances = computeBalances(database, affiliateId);
+  if (gross > balances.withdrawableInr) {
+    throw affiliateError(`You can move up to ₹${balances.withdrawableInr.toLocaleString("en-IN")} right now.`, 400);
+  }
+
+  const { tdsRate, tdsInr, netInr } = computeTds(affiliate, gross);
+  const transferId = `aff_wal_${nanoid(12)}`;
+  database.transaction(() => {
+    database.prepare(`
+      INSERT INTO affiliate_wallet_transfers (id, affiliate_id, user_id, gross_amount_inr, tds_rate, tds_amount_inr, net_amount_inr)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(transferId, affiliateId, affiliate.user_id, gross, tdsRate, tdsInr, netInr);
+    database.prepare(`
+      UPDATE affiliates SET paid_earnings_inr = COALESCE(paid_earnings_inr, 0) + ?,
+        available_balance_inr = CASE WHEN COALESCE(available_balance_inr, 0) > ? THEN available_balance_inr - ? ELSE 0 END,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(gross, gross, gross, affiliateId);
+    markFundingCommissionPaid(database, affiliateId, gross);
+    writeLedger(database, { affiliateId, entryType: "ADJUSTMENT", amountInr: -gross, note: `Moved to wallet as travel credit (${transferId})` });
+    if (tdsInr > 0) writeLedger(database, { affiliateId, entryType: "PAYOUT_TDS", amountInr: -tdsInr, note: `TDS @ ${Number((tdsRate * 100).toFixed(2))}% on wallet transfer ${transferId}` });
+    const posted = postWalletEntry(database, {
+      userId: affiliate.user_id,
+      entryType: "AFFILIATE_TRANSFER",
+      amountInr: netInr,
+      description: `₹${netInr} of creator earnings moved to your wallet (₹${tdsInr} TDS withheld)`,
+      creditSource: "AFFILIATE",
+    });
+    database.prepare("UPDATE affiliate_wallet_transfers SET wallet_transaction_id = ? WHERE id = ?").run(posted.id, transferId);
+  })();
+  logger.info("Creator earnings moved to wallet", { affiliateId, transferId, gross, netInr });
+  return { transferId, grossInr: gross, tdsRate, tdsInr, netInr, balances: computeBalances(database, affiliateId) };
+}
+
 /**
  * Finance confirms the money left, with the bank's UTR as proof.
  */
@@ -1263,19 +1341,7 @@ export function settlePayout(database = db, payoutId, { utrReference, actorId = 
 
     // Mark the commission that funded this withdrawal as settled, oldest first,
     // so a creator's statement lines up with the trips behind it.
-    let remaining = gross;
-    const funding = database.prepare(`
-      SELECT id, earning_inr FROM affiliate_referrals
-      WHERE affiliate_id = ? AND status = 'ELIGIBLE'
-      ORDER BY eligible_at ASC
-    `).all(payout.affiliate_id) || [];
-    for (const referral of funding) {
-      if (remaining < Number(referral.earning_inr)) break;
-      database.prepare(
-        "UPDATE affiliate_referrals SET status = 'PAID', settled_at = datetime('now') WHERE id = ?"
-      ).run(referral.id);
-      remaining = round2(remaining - Number(referral.earning_inr));
-    }
+    markFundingCommissionPaid(database, payout.affiliate_id, gross);
 
     writeLedger(database, {
       affiliateId: payout.affiliate_id,

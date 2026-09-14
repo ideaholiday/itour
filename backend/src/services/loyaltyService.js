@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import db from "../db.js";
 import {
   referralPolicy,
+  walletBalances,
   buildReferralLink,
   findReferrerByCode,
   getReferralSummary,
@@ -107,6 +108,8 @@ export function getTravelerLoyaltyProfile(database = db, userId) {
     referralCode,
     referralLink: buildReferralLink(referralCode),
     walletBalanceInr: summary.wallet.balanceInr,
+    // The part of the balance that is the user's own creator earnings (no expiry, not capped at checkout).
+    affiliateCreditInr: walletBalances(database, userId).affiliateInr,
     expiringSoonInr: summary.wallet.expiringSoonInr,
     nextExpiryAt: summary.wallet.nextExpiryAt,
     clawbackPendingInr: summary.wallet.clawbackPendingInr,
@@ -164,7 +167,11 @@ export function applyWalletCreditsToCheckout(database = db, userId, { bookingAmo
   }
 
   const { walletMaxShare, walletMaxPerBookingInr } = referralPolicy(database);
-  const maxAllowedDiscount = Math.floor(Math.min(amount * walletMaxShare, walletMaxPerBookingInr, availableBalance));
+  // Referral credit is capped per booking; a creator's own earnings can pay the rest (ADR 017).
+  const { affiliateInr, otherInr } = walletBalances(database, userId);
+  const cappedPart = Math.floor(Math.min(amount * walletMaxShare, walletMaxPerBookingInr, otherInr));
+  const affiliatePart = Math.floor(Math.min(affiliateInr, Math.max(0, amount - cappedPart)));
+  const maxAllowedDiscount = Math.min(Math.floor(availableBalance), cappedPart + affiliatePart);
 
   let creditToApply = requestedCreditInr !== undefined
     ? Math.min(Number(requestedCreditInr) || 0, maxAllowedDiscount)
@@ -182,6 +189,8 @@ export function applyWalletCreditsToCheckout(database = db, userId, { bookingAmo
     originalAmountInr: amount,
     payableAmountInr,
     maxAllowedDiscountInr: maxAllowedDiscount,
+    // Most of this spend that may come from referral credit; the rest is creator earnings.
+    maxFromOtherInr: cappedPart,
   };
 }
 

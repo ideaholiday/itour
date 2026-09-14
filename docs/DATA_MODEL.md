@@ -355,6 +355,7 @@ tables enforce.
   - `available_balance_inr`, `lifetime_earnings_inr`, `paid_earnings_inr`: cached
     running totals. Authoritative balances are derived by `computeBalances()`.
 - **`affiliates.commission_override_rate`** (fraction) and **`traveler_discount_override_pct`** (migration 041): a creator's own rates, `NULL` = tier's. **`affiliate_rate_changes`**: append-only tier/creator rate edits (`scope`, `tier_code`, `affiliate_id`, old/new JSON, `changed_by`, `reason`).
+- **`affiliate_wallet_transfers`** (migration 042): creator earnings moved to the wallet — `affiliate_id`, `user_id`, `gross_amount_inr`, `tds_rate`, `tds_amount_inr`, `net_amount_inr`, `wallet_transaction_id`. **`wallet_transactions.credit_source`** (`AFFILIATE` for that credit: no expiry, `remaining_inr` tracked) and **`affiliate_inr`** (on a `REDEMPTION`, the part paid from it; refunds return it as `AFFILIATE_RESTORED`).
 - **`affiliate_tiers`**: Commission bands — `min_completed_bookings`,
   `min_lifetime_gmv_inr`, `commission_rate`. Seeded Starter / Rising / Elite.
 - **`affiliate_payout_accounts`**: A creator's bank accounts and UPI handles.

@@ -61,6 +61,8 @@ promo path and is credited on the code itself.
     account unverified, or account still cooling off; `400` below the ₹1,000 minimum or above the withdrawable
     balance (the message names how much is still clearing).
 
+- **`POST /api/affiliate/wallet-transfer`** `{ amountInr }` → `201 { transfer: { transferId, grossInr, tdsRate, tdsInr, netInr, balances }, message }`: "Use for travel". `403 PAN_NOT_VERIFIED`, `400` above the withdrawable balance. Balances gain `walletTransferredInr` (net moved); `paidInr` and `tdsWithheldInr` include transfers. `GET /api/loyalty/profile` returns `affiliateCreditInr`.
+
 ### 8.5 Admin (`/api/admin/affiliates`, requires `ADMIN`)
 - **`GET /api/admin/affiliates/tiers`** → `{ giveawayCapPct, tiers: [{ code, label, minCompletedBookings, minLifetimeGmvInr, commissionPct, travelerDiscountPct, sortOrder, overCap, creators }], changes }`.
 - **`PUT /api/admin/affiliates/tiers/:code`** `{ label?, commissionPct?, travelerDiscountPct?, minCompletedBookings?, minLifetimeGmvInr?, reason }` → `{ tier, notified }`. Re-places every creator, syncs their code's discount, emails creators whose rates moved.

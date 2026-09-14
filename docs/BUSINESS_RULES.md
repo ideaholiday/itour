@@ -326,6 +326,9 @@ exists to stop a specific way the money goes wrong.
 6. **Full account numbers are disclosed deliberately.** The admin payout queue
    shows only a masked destination; the complete details come from a separate,
    audit-logged endpoint used by the person actually making the transfer.
+7. **Use for travel:** withdrawable commission can move into the creator's wallet:
+   verified PAN, 1% TDS, no minimum, settled at once. It never expires, is spent
+   after other credit, isn't capped (§11.4.3), and can't become cash again.
 
 ## 11. Travel & Earn: Traveler Referral Rules
 
@@ -406,7 +409,7 @@ highest commission in use must fit the giveaway cap (§3.2), or the change is re
    and ledger sum disagree.
 2. **Each money movement happens once per booking** (`UNIQUE (booking_id, entry_type)`).
 3. **Spending:** up to 50% of what is left after other discounts, at most ₹2,000 (both admin-set)
-   per booking, never more than the balance. If the deduction fails, the booking
+   per booking (creator earnings, §10.5.7, pay the rest), never more than the balance. If the deduction fails, the booking
    is not created — it never keeps a discount it did not pay for.
 4. **Credit cannot be withdrawn as cash.** This keeps it a discount rather than a
    payout, outside the TDS and payout-account controls of §10. Do not make it

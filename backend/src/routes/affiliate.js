@@ -17,6 +17,7 @@ import {
   buildShareLink,
   MIN_PAYOUT_INR,
   redactAffiliate,
+ transferEarningsToWallet,
 } from "../services/affiliateService.js";
 import { authenticate, optionalAuthMiddleware } from "../middleware/auth.js";
 import logger from "../config/logger.js";
@@ -156,6 +157,25 @@ router.post("/payout/request", authenticate, (req, res) => {
     });
   } catch (err) {
     return res.status(err.status || 400).json({ error: err.message || "Payout request failed", code: err.code });
+  }
+});
+
+/**
+ * POST /api/affiliate/wallet-transfer { amountInr }
+ * "Use for travel": moves withdrawable earnings into the creator's wallet, less 1% TDS.
+ */
+router.post("/wallet-transfer", authenticate, (req, res) => {
+  try {
+    const existing = getAffiliateByUserId(db, req.user.id);
+    if (!existing) return res.status(404).json({ error: "Affiliate account not found" });
+    const transfer = transferEarningsToWallet(db, existing.id, { amountInr: Number(req.body?.amountInr) });
+    return res.status(201).json({
+      success: true,
+      transfer,
+      message: `₹${transfer.netInr.toLocaleString("en-IN")} is in your wallet for your next booking (₹${transfer.tdsInr.toLocaleString("en-IN")} TDS withheld).`,
+    });
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message || "Could not move your earnings", code: err.code });
   }
 });
 

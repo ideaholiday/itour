@@ -147,7 +147,7 @@ export default function Checkout() {
       api.getLoyaltyProfile()
         .then((res) => {
           if (res?.walletBalanceInr) setWalletBalance(Number(res.walletBalanceInr));
-          if (res?.policy?.walletMaxSharePct !== undefined) setWalletPolicy(res.policy);
+          if (res?.policy?.walletMaxSharePct !== undefined) setWalletPolicy({ ...res.policy, affiliateCreditInr: Number(res.affiliateCreditInr || 0) });
         })
         .catch(() => {});
     }
@@ -340,7 +340,10 @@ export default function Checkout() {
   const referralDiscountAmount = Number(quote?.referral?.discountInr || 0);
   const referralUnavailable = appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
   const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount - referralDiscountAmount);
-  const maxAllowedWalletCredit = Math.min(walletBalance, remainingBeforeWallet * Number(walletPolicy.walletMaxSharePct) / 100, Number(walletPolicy.walletMaxPerBookingInr));
+  // Referral credit is capped; creator earnings in the wallet can pay the rest (the server applies the same split).
+  const creatorCredit = Math.min(walletBalance, Number(walletPolicy.affiliateCreditInr || 0));
+  const cappedWalletCredit = Math.floor(Math.min(walletBalance - creatorCredit, remainingBeforeWallet * Number(walletPolicy.walletMaxSharePct) / 100, Number(walletPolicy.walletMaxPerBookingInr)));
+  const maxAllowedWalletCredit = Math.min(walletBalance, cappedWalletCredit + Math.floor(Math.min(creatorCredit, Math.max(0, remainingBeforeWallet - cappedWalletCredit))));
   const walletDiscountAmount = useWalletCredits ? Math.round(maxAllowedWalletCredit) : 0;
   const payableTotal = Math.max(0, remainingBeforeWallet - walletDiscountAmount);
 

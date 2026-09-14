@@ -324,6 +324,8 @@ export const api = {
     fetch("/api/affiliate/profile", { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   updateAffiliateKyc: (payload) =>
     fetch("/api/affiliate/kyc", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  moveAffiliateEarningsToWallet: (payload) =>
+    fetch("/api/affiliate/wallet-transfer", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   requestAffiliatePayout: (payload) =>
     fetch("/api/affiliate/payout/request", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   trackAffiliateClick: (payload) =>

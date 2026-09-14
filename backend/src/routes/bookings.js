@@ -311,12 +311,16 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       : null;
     const requestedWalletCredit = Number(req.body.wallet_credit_inr) || 0;
     let appliedWalletCredit = 0;
+    let walletMaxFromOther = null;
     if (requestedWalletCredit > 0 && existingUser) {
       const walletCalc = applyWalletCreditsToCheckout(db, userId, {
         bookingAmountInr: quote.totalAmount - (expectedReferral.discountInr || 0) - (expectedCoupon?.discountInr || 0),
         requestedCreditInr: requestedWalletCredit,
       });
-      if (walletCalc?.applied) appliedWalletCredit = walletCalc.creditDiscountInr || 0;
+      if (walletCalc?.applied) {
+        appliedWalletCredit = walletCalc.creditDiscountInr || 0;
+        walletMaxFromOther = walletCalc.maxFromOtherInr ?? null;
+      }
     }
     let referralDiscount = 0;
     let referrerCredit = 0;
@@ -364,7 +368,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
 
       // A booking that cannot pay for its wallet discount is not created at all.
       if (appliedWalletCredit > 0) {
-        redeemWalletCredit(db, { userId, bookingId, amountInr: appliedWalletCredit });
+        redeemWalletCredit(db, { userId, bookingId, amountInr: appliedWalletCredit, maxFromOtherInr: walletMaxFromOther });
         db.prepare("UPDATE bookings SET wallet_credit_applied_inr = ? WHERE id = ?").run(appliedWalletCredit, bookingId);
       }
 

@@ -245,6 +245,29 @@ export default function AffiliateDashboardPage() {
     }
   };
 
+  // "Use for travel": earnings move into the wallet (1% TDS, no minimum) and never expire there.
+  const handleWalletTransfer = async () => {
+    const amount = Number(payoutAmount);
+    if (!amount) {
+      setPayoutErrorMsg("Enter the amount to move into your wallet");
+      return;
+    }
+    setPayoutSubmitting(true);
+    setPayoutSuccessMsg("");
+    setPayoutErrorMsg("");
+    try {
+      const res = await api.moveAffiliateEarningsToWallet({ amountInr: amount });
+      setPayoutSuccessMsg(res?.message || "Moved to your wallet.");
+      setShowPayoutModal(false);
+      setPayoutAmount("");
+      fetchDashboard();
+    } catch (err) {
+      setPayoutErrorMsg(err?.message || "Could not move your earnings");
+    } finally {
+      setPayoutSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen grid place-items-center bg-[#FAF9F6] dark:bg-stone-950">
@@ -1270,6 +1293,17 @@ export default function AffiliateDashboardPage() {
                 >
                   {payoutSubmitting ? "Submitting Request..." : "Confirm Payout Request"}
                 </button>
+                <button
+                  type="button"
+                  onClick={handleWalletTransfer}
+                  disabled={payoutSubmitting}
+                  className="mt-2 w-full py-3 rounded-xl border border-amber-500 text-amber-700 dark:text-amber-400 font-bold text-xs transition-colors hover:bg-amber-500/10 disabled:opacity-50"
+                >
+                  Use for travel instead
+                </button>
+                <p className="mt-1.5 text-[10px] text-stone-500 text-center">
+                  Moves this amount into your Idea Holiday wallet, less 1% TDS. No minimum, no bank account needed, never expires, and can pay a whole booking. It can't be turned back into cash.
+                </p>
               </div>
             </form>
           </div>
