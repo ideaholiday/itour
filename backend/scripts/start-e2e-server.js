@@ -1,10 +1,14 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const workspace = mkdtempSync(path.join(tmpdir(), "idea-holiday-browser-e2e-"));
 const databasePath = path.join(workspace, "browser-e2e.sqlite");
 writeFileSync(databasePath, "");
+// Browser tests that need a server-signed link (a driver's private trip link)
+// read the test database; this file tells them where it is.
+mkdirSync(path.join(import.meta.dirname, "..", "test-results"), { recursive: true });
+writeFileSync(path.join(import.meta.dirname, "..", "test-results", "browser-e2e-database-path.txt"), databasePath);
 
 Object.assign(process.env, {
   NODE_ENV: "test",

@@ -22,6 +22,7 @@ import { authenticate, optionalAuthMiddleware, requireRoles, requireSchedulerOrR
 import logger from "../config/logger.js";
 import { validateBody } from "../middleware/validation.js";
 import { opsSchemas } from "../validators/apiSchemas.js";
+import { driverLocationTrail, latestDriverLocation, purgeExpiredDriverLocations } from "../services/driverLocationService.js";
 
 const router = express.Router();
 const opsAccess = requireRoles("ADMIN", "STAFF");
@@ -157,6 +158,8 @@ router.post("/process-assignment-timeouts", optionalAuthMiddleware, requireSched
       success: true,
       assignments: processExpiredSupplierAssignments(db, { limit }),
       circuitReconfirmations,
+      // Driver positions are kept for 30 days (ADR 012).
+      locationRetention: purgeExpiredDriverLocations(db),
     });
   } catch (err) {
     return res.status(500).json({ error: "Assignment timeouts could not be processed" });
@@ -477,6 +480,18 @@ router.post("/tasks/:id/update", validateBody(opsSchemas.task), (req, res) => {
     res.json({ success: true, message: `Task status set to ${status || "RESOLVED"}` });
   } catch (err) {
     res.status(500).json({ error: "Failed to update staff task" });
+  }
+});
+
+// GET /api/ops/live-tracking/:assignmentId/trail - A trip's recent driver positions, oldest first
+router.get("/live-tracking/:assignmentId/trail", (req, res) => {
+  try {
+    const exists = db.prepare("SELECT id FROM driver_assignments WHERE id = ?").get(req.params.assignmentId);
+    if (!exists) return res.status(404).json({ error: "Driver assignment not found" });
+    res.json({ success: true, location: latestDriverLocation(db, exists.id), trail: driverLocationTrail(db, exists.id, { limit: req.query.limit }) });
+  } catch (err) {
+    logger.error("Driver trail lookup failed", { requestId: req.requestId, error: err });
+    res.status(500).json({ error: "Could not load the driver trail" });
   }
 });
 

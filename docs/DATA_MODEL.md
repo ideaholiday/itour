@@ -288,6 +288,12 @@ erDiagram
   - `driver_name`, `driver_phone`.
   - `vehicle_model`, `vehicle_number`.
   - `assignment_status`: `ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `COMPLETED`.
+  - `last_lat`, `last_lng`, `last_accuracy_m`, `last_speed_kmh`, `last_heading`, `last_location_source` (`DRIVER` | `OPS`), `last_location_at`: the newest driver position (migration 035). Cleared after 30 days.
+- **`driver_location_pings`** (migration 035): every accepted driver position.
+  - `assignment_id`, `booking_id`, `supplier_id`.
+  - `lat`, `lng`, `accuracy_m`, `speed_kmh`, `heading`.
+  - `source`: `DRIVER` (phone) or `OPS` (entered by operations).
+  - `recorded_at` (phone time), `received_at` (server time). Rows are deleted 30 days after `received_at`.
 
 ### 2.7 Circuit Orders (`circuit_quotes`, `circuit_orders`, `circuit_requests`)
 - **`circuit_quotes`**:

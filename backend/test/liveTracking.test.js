@@ -112,7 +112,7 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
     assert.equal(updateRes.telemetry.speed_kmh, 42);
     assert.equal(updateRes.telemetry.heading, 90);
 
-    const cached = getDriverCoordinates(assignment.id);
+    const cached = getDriverCoordinates(db, assignment.id);
     assert.ok(cached);
     assert.equal(cached.lat, 27.1650);
 

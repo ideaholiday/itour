@@ -184,6 +184,8 @@ export const api = {
     fetch(`${BASE}/admin/reminders/status/${encodeURIComponent(bookingId)}`, { headers: authHeaders() }).then(handle),
   getLiveTracking: () =>
     fetch("/api/ops/live-tracking", { headers: authHeaders() }).then(handle),
+  getDriverTrail: (assignmentId) =>
+    fetch(`/api/ops/live-tracking/${encodeURIComponent(assignmentId)}/trail`, { headers: authHeaders() }).then(handle),
   updateDriverLocation: (payload) =>
     fetch("/api/ops/driver-location", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   verifyPickupOtp: (payload) =>

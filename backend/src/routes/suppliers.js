@@ -128,7 +128,8 @@ router.get("/:id", (req, res) => {
       SELECT b.*, p.title as product_title, p.hero_image, p.city, p.is_instant_booking, p.cancellation_policy,
              da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number, da.assignment_status,
              da.supplier_driver_id, da.acknowledgement, da.response_deadline, da.driver_email, da.assignment_source, da.assigned_at, da.last_status_at,
-             da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at
+             da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at,
+             da.last_lat AS driver_last_lat, da.last_lng AS driver_last_lng, da.last_accuracy_m AS driver_last_accuracy_m, da.last_location_at AS driver_last_location_at
       FROM bookings b
       LEFT JOIN products p ON b.product_id = p.id
       LEFT JOIN driver_assignments da ON b.id = da.booking_id

@@ -73,6 +73,7 @@ Winston logging (`backend/src/config/logger.js`) enforces automated, recursive r
 - **Masked Data**: Phone numbers and email addresses are partially masked in standard operational logs.
 - **Request Bodies**: HTTP request bodies are excluded from production logging unless `LOG_REQUEST_BODY=true` is explicitly configured for targeted debugging.
 - **Audit Log**: Successful authenticated mutations and authorization denials are written to `audit_logs` (`auditService.js`). Raw request payloads, secrets, full PII and raw IP addresses are never stored.
+- **Driver Location**: Driver positions are collected only for an accepted, active trip, after the trip page tells the driver who will see them. They are visible to operations, the booking's supplier and the traveler, and deleted after 30 days (`driverLocationService.purgeExpiredDriverLocations`). Location uploads need the driver's trip session and are limited per session.
 - **Web Vitals Telemetry**: `POST /api/telemetry/web-vitals` accepts only bounded metric name/value/rating, normalized route, app and navigation type. No identifiers, query strings, emails or other PII.
 
 ---

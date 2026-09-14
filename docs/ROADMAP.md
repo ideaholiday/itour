@@ -37,7 +37,11 @@ Do not rebuild these. Extend them if asked.
 
 ## NOW
 
-Nothing is mid-flight. Pick from **NEXT** when asked, or take direction from the user.
+**Live driver GPS** (ADR 012), web-first:
+
+- **Phase 1 — done:** drivers share phone location from the trip link (required before "On the way"), positions stored for 30 days, real positions with Live / Delayed / Signal lost on the ops map, supplier sees the driver's last position.
+- **Phase 2 — next:** traveler tracking link with ETA (Mappls), "Arrived?" suggestion near pickup, operations alerts when a driver is far, not moving or has lost signal close to pickup.
+- **Phase 3 — only if Phase 1 gaps hurt:** Android driver app that keeps sharing while navigating (Play Store, location-permission review).
 
 Standing obligations that apply to every change:
 
@@ -84,9 +88,7 @@ Phases 1–2 are done (see DONE). Remaining, in order:
 
 ## LATER
 
-- **Chauffeur PWA** — driver app for QR scanning and OTP entry.
 - **Proximity dispatch** — allocate drivers by live GPS and rating.
-- **Mappls telemetry** — turn-by-turn driver tracking.
 - **B2B sub-agent portal** — credit lines, whitelabel vouchers, corporate billing.
 - **BigQuery warehouse** — only worth it past ~1000 bookings/day.
 

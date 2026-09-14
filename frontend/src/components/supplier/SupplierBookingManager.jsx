@@ -51,6 +51,24 @@ const CANCEL_REASONS = [
   "Other operational constraint"
 ];
 
+// The driver's last shared position (ADR 012): the supplier sees it for the whole trip.
+function DriverLocationLine({ booking, onRefresh }) {
+  if (!booking.driver_last_location_at || booking.driver_last_lat == null || booking.driver_last_lng == null) {
+    return ["EN_ROUTE", "ARRIVED", "TRIP_STARTED"].includes(booking.assignment_status)
+      ? <span className="block text-[10px] font-semibold text-amber-700">No live location from the driver yet</span>
+      : null;
+  }
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(booking.driver_last_location_at)) / 60000));
+  const stale = minutes > 5;
+  return (
+    <span className={`flex flex-wrap items-center gap-1.5 text-[10px] font-semibold ${stale ? "text-rose-700" : "text-emerald-800"}`}>
+      <span>{stale ? "Last location" : "● Live location"} {minutes < 1 ? "just now" : `${minutes} min ago`}{booking.driver_last_accuracy_m ? ` · ±${Math.round(booking.driver_last_accuracy_m)} m` : ""}</span>
+      <a className="underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${booking.driver_last_lat},${booking.driver_last_lng}`} onClick={(event) => event.stopPropagation()}>Open in Maps</a>
+      {onRefresh && <button type="button" className="underline" onClick={(event) => { event.stopPropagation(); onRefresh(); }}>Refresh</button>}
+    </span>
+  );
+}
+
 export default function SupplierBookingManager({ supplierData, loading, onRefresh }) {
   const [activeFilter, setActiveFilter] = useState("ALL"); // ALL, PENDING, IN_PROGRESS, COMPLETED, CANCELLED
   const [searchTerm, setSearchTerm] = useState("");
@@ -571,9 +589,12 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                             {b.cancellation_reason || "Refunded / Cancelled"}
                           </span>
                         ) : hasDriver ? (
-                          <span className="text-stone-700 font-medium flex items-center gap-1">
-                            <Car className="h-3 w-3 text-stone-400" /> {b.driver_name} ({b.vehicle_number || "Assigned"})
-                          </span>
+                          <>
+                            <span className="text-stone-700 font-medium flex items-center gap-1">
+                              <Car className="h-3 w-3 text-stone-400" /> {b.driver_name} ({b.vehicle_number || "Assigned"})
+                            </span>
+                            <DriverLocationLine booking={b} />
+                          </>
                         ) : (
                           <span className="text-amber-700 font-bold text-[10px]">⚠️ Driver unassigned</span>
                         )}
@@ -869,6 +890,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     </span>
                   )}
                 </div>
+                {selectedBooking.driver_name && <div className="mt-2"><DriverLocationLine booking={selectedBooking} onRefresh={onRefresh} /></div>}
 
                 <form onSubmit={handleAssignDriverSubmit} className="mt-3 space-y-3">
                   <div className="grid gap-2 sm:grid-cols-2">

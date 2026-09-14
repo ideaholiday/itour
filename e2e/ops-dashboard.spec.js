@@ -9,11 +9,11 @@ test("operations staff see who is signed in, an honest live map, and can sign ou
   await expect(page.getByText("Operations staff")).toBeVisible();
   await expect(page.getByRole("link", { name: "Admin panel" })).toHaveCount(0);
 
-  // No driver has shared a position, so the board must not claim live GPS.
-  await expect(page.getByText("NO LIVE GPS YET")).toBeVisible();
+  // The board reports how many drivers really share location (none unless another journey shared one).
+  await expect(page.getByText(/^(NO LIVE GPS YET|LIVE GPS \d+\/\d+)$/)).toBeVisible();
   await expect(page.getByText("LIVE GPS ACTIVE")).toHaveCount(0);
   await page.getByRole("button", { name: /Live Map/ }).click();
-  await expect(page.getByText(/Live GPS 0\/\d+/)).toBeVisible();
+  await expect(page.getByText(/Live GPS \d+\/\d+/)).toBeVisible();
   if (process.env.E2E_SCREENSHOT_DIR) {
     // Map tiles come from the internet, so only wait for them when capturing a screenshot.
     await expect(page.locator("img.leaflet-tile-loaded").first()).toBeVisible({ timeout: 20_000 });

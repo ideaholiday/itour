@@ -1,6 +1,7 @@
 import { randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { assignDriverToBooking, bookingWindow, bookingWithDuration, getFleetAvailability, updateDispatchStatus, verifyPickupOtp } from './driverDispatchService.js';
+import { assertDriverSharingLocation } from './driverLocationService.js';
 import { dispatchTransaction, scheduleKey, departureKey, enqueueDispatch, revokeAssignment, isCancelledBooking } from './dispatchStateService.js';
 
 const active = b => b.payment_status === 'PAID' && ['confirmed', 'driver_assigned'].includes(String(b.status).toLowerCase()) && ['SUPPLIER_ACCEPTED','LEGACY_ASSIGNED','MANUAL_ASSIGNED','AUTO_REALLOCATED','RESCHEDULE_RECONFIRMED'].includes(b.supplier_assignment_status || 'LEGACY_ASSIGNED');
@@ -287,6 +288,10 @@ export function confirmDriverByPhone(db, { bookingId, supplierId = null, actorId
 }
 
 export function driverAction(db, context, { action, otp, note }, now = new Date()) {
+  // Drivers share live location for the whole trip (ADR 012): no movement
+  // status without a recent fix from their own phone. Checked before the OTP so
+  // a missing location never burns an OTP attempt.
+  if (['EN_ROUTE', 'ARRIVED', 'START'].includes(action)) assertDriverSharingLocation(db, context.assignment.id, now);
   // Failed OTP attempts must commit, so verification is outside the transition transaction.
   if (action === 'START') {
     const current = currentDriverAssignment(db, context.assignment.id, context.assignment.revision, now);

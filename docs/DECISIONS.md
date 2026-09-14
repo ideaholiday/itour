@@ -138,3 +138,16 @@ This document records significant technical and product architectural decisions.
   - Removing someone sets their role to `TRAVELER` rather than deleting the user, so their history stays. Nobody can remove or demote themselves, and the last administrator always remains.
   - `STAFF` sign in at the admin portal and land in Operations (`/ops`); the admin panel stays `ADMIN`-only.
 - **Consequences**: Per-person alert preferences and self-service password change are not part of this; ask an admin to reset a password.
+
+---
+
+## ADR 012: Live Driver GPS, Web First
+- **Date**: 2026-09-14
+- **Context**: The ops map showed invented driver positions. Owners want real driver and trip tracking from the driver's phone.
+- **Decision Made**:
+  - **Web first.** Drivers share location from the private trip page in the phone browser. An Android app (Phase 3) is built only if web gaps (locked screen, switching to Maps) prove to be a problem.
+  - **Sharing is mandatory.** A driver can't go "On the way", arrive or start the trip without a recent position from their own phone. Operations and suppliers can still move a trip for a driver who can't share.
+  - **Visibility.** Operations, the booking's supplier and the traveler can see the driver's location for the whole trip.
+  - **Retention.** Positions are deleted after 30 days.
+  - Maps never show invented positions; a trip without a reported position is marked as having none.
+- **Consequences**: Phase 1 (sharing, storage, ops and supplier views) shipped first; the traveler tracking link and alerts are Phase 2. Web tracking pauses when the page is not on screen.

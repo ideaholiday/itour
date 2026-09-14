@@ -412,8 +412,14 @@ verified review — see BUSINESS_RULES §9.3.
 - **`GET /api/ops/bookings/:bookingId/fleet-availability`**: The booking supplier's fleet with availability reasons, available drivers first.
 - **`POST /api/ops/fallback-override`**: Operations take over assignment. Body: `bookingId`, `notes` (required reason), and either `supplierDriverId` or an outside driver (`fallbackDriverName`, `fallbackDriverPhone`, `fallbackDriverEmail`, `seatCapacity`, `fallbackVehicleModel`, `fallbackVehicleNumber`). With `confirmedByPhone: true` the driver is accepted immediately and `notes` is recorded as the phone confirmation.
 - **`POST /api/ops/bookings/:bookingId/confirm-driver`** `{ "note": "..." }`: Same as the supplier phone confirmation, for any supplier's booking.
-- **Scheduler endpoints** (`X-Scheduler-Token` or `ADMIN`/`STAFF`): `POST /api/ops/process-driver-dispatch`, `POST /api/ops/process-assignment-timeouts`, `POST /api/ops/process-reservation-outbox`, `POST /api/ops/process-post-trip-invites`.
+- **Scheduler endpoints** (`X-Scheduler-Token` or `ADMIN`/`STAFF`): `POST /api/ops/process-driver-dispatch`, `POST /api/ops/process-assignment-timeouts` (also deletes driver positions older than 30 days), `POST /api/ops/process-reservation-outbox`, `POST /api/ops/process-post-trip-invites`.
 - **`POST /api/ops/reset-pickup-otp`**: Resets an OTP lock for a stranded traveler after telephone verification.
+- **`GET /api/ops/live-tracking`**: active trips; `driver_telemetry` (`lat`, `lng`, `accuracy_m`, `speed_kmh`, `heading`, `source` `DRIVER`|`OPS`, `updated_at`, `freshness` `LIVE`|`DELAYED`|`LOST`) is `null` when nothing was reported. `GET …/:assignmentId/trail` → `{ location, trail }`. `POST /api/ops/driver-location` stores an `OPS` position.
+
+### 4.1.1 Driver trip link (`/api/driver-trips`, driver session)
+- **`POST /action`**: `EN_ROUTE`, `ARRIVED`, `START` → `409 LOCATION_SHARING_REQUIRED` without a phone position from the last 5 minutes.
+- **`POST /location`** `{ points: [{ lat, lng, accuracy?, speed? (m/s), heading?, recordedAt? }] }` (1–20) → `{ accepted, rejected, location }`. Accepted trips in `ASSIGNED`–`TRIP_STARTED` only; bad, >1,000 m, >250 km/h, future or >6 h old points are dropped (`422` if none left); 30 requests/min per session. `GET /` includes `trip.location`.
+- Supplier `GET /api/suppliers/:id` bookings carry `driver_last_lat`, `driver_last_lng`, `driver_last_accuracy_m`, `driver_last_location_at`.
 
 ### 4.2 Circuit Management Queue
 - **`GET /api/ops/circuits`**: Lists pending multi-supplier circuit reschedule/cancellation requests.
@@ -652,7 +658,7 @@ Scoped to the caller: a traveler sees their own threads, a supplier the threads 
 - **`PATCH …/profile-status`**: `{ "suspended": true, "reason": "…" }` or `{ "suspended": false }`.
 
 ### 10.4.1 Team (`/api/admin/team`, requires `ADMIN`)
-The `ADMIN` and `STAFF` users who run the platform; all of them receive booking and operations alerts.
+`ADMIN` and `STAFF` users; all receive booking and operations alerts.
 - **`GET /api/admin/team`** → `{ members: [{ id, name, email, phone, role }], currentUserId }`.
 - **`POST /api/admin/team`**: `{ "name": "…", "email": "…", "phone": "+91 98765 43210", "role": "STAFF" | "ADMIN" }` → `201`
   `{ member, temporaryPassword, promotedExistingAccount }`. A new person gets a one-time `temporaryPassword`; an existing

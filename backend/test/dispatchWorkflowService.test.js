@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { executeMigrationSql } from "../src/services/migrationRunner.js";
 import { assignDriverToBooking } from "../src/services/driverDispatchService.js";
 import { enqueueDispatch } from "../src/services/dispatchStateService.js";
+import { recordDriverLocations } from "../src/services/driverLocationService.js";
 import {
   classifyDeliveryResults,
   dispatchRetryDelayMs,
@@ -63,6 +64,7 @@ function database() {
   `);
   executeMigrationSql(db, fs.readFileSync(new URL("../migrations/026_driver_dispatch_workflow.sql", import.meta.url), "utf8").split("-- @down")[0]);
   executeMigrationSql(db, fs.readFileSync(new URL("../migrations/031_staff_task_supplier.sql", import.meta.url), "utf8").split("-- @down")[0]);
+  executeMigrationSql(db, fs.readFileSync(new URL("../migrations/035_driver_live_location.sql", import.meta.url), "utf8").split("-- @down")[0]);
   db.prepare("INSERT INTO suppliers (id) VALUES ('supplier-1')").run();
   db.prepare("INSERT INTO products (id, duration_hours, group_type) VALUES ('lucknow-tour', 8, 'PRIVATE')").run();
   db.prepare("INSERT INTO supplier_drivers (id, supplier_id, driver_name, driver_phone, vehicle_model, vehicle_number, status) VALUES ('driver-1', 'supplier-1', 'Ravi Kumar', '+919876543210', 'Swift Dzire Sedan', 'UP-32-AB-1234', 'AVAILABLE')").run();
@@ -484,4 +486,20 @@ test("the dispatch queue lists trip problems separately from driver assignment",
   assert.equal(listDispatchExceptions(db, { now: new Date(PICKUP + 70 * 60000) }).length, 0);
   const issues = listDispatchExceptions(db, { now: new Date(PICKUP + 70 * 60000), taskTypes: ["PICKUP_NOT_STARTED", "TRIP_COMPLETION_OVERDUE"] });
   assert.deepEqual(issues.map((i) => [i.task_type, i.minutes_to_pickup]), [["PICKUP_NOT_STARTED", -70]]);
+});
+
+test("a driver must share live location before going on the way, arriving or starting the trip", () => {
+  const db = database();
+  const assignment = acceptedTrip(db);
+  const context = { assignment: db.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignment.id) };
+  assert.throws(() => driverAction(db, context, { action: "EN_ROUTE" }), (err) => err.code === "LOCATION_SHARING_REQUIRED");
+  assert.equal(db.prepare("SELECT assignment_status FROM driver_assignments WHERE id = ?").get(assignment.id).assignment_status, "ASSIGNED");
+
+  recordDriverLocations(db, context, [{ lat: 26.8467, lng: 80.9462, accuracy: 18 }]);
+  assert.equal(driverAction(db, context, { action: "EN_ROUTE" }).assignment_status, "EN_ROUTE");
+
+  // Sharing stopped long ago: arriving is refused until the phone reports again.
+  db.prepare("UPDATE driver_assignments SET last_location_at = ? WHERE id = ?").run(new Date(Date.now() - 10 * 60_000).toISOString(), assignment.id);
+  assert.throws(() => driverAction(db, context, { action: "ARRIVED" }), (err) => err.code === "LOCATION_SHARING_REQUIRED");
+  assert.throws(() => driverAction(db, context, { action: "START", otp: "1234" }), (err) => err.code === "LOCATION_SHARING_REQUIRED", "checked before the OTP, so no attempt is used");
 });

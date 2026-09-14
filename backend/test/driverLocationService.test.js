@@ -1,0 +1,89 @@
+import fs from "node:fs";
+import test from "node:test";
+import assert from "node:assert/strict";
+import Database from "better-sqlite3";
+import { executeMigrationSql } from "../src/services/migrationRunner.js";
+import {
+  assertDriverSharingLocation,
+  driverLocationTrail,
+  latestDriverLocation,
+  locationFreshness,
+  normalizeLocationPoint,
+  purgeExpiredDriverLocations,
+  recordDriverLocations,
+} from "../src/services/driverLocationService.js";
+
+const NOW = new Date("2026-09-14T08:00:00.000Z");
+const at = (secondsAgo) => new Date(NOW.getTime() - secondsAgo * 1000).toISOString();
+
+function database() {
+  const db = new Database(":memory:");
+  db.exec(`CREATE TABLE driver_assignments (
+    id TEXT PRIMARY KEY, booking_id TEXT, supplier_id TEXT, assignment_status TEXT, acknowledgement TEXT
+  )`);
+  executeMigrationSql(db, fs.readFileSync(new URL("../migrations/035_driver_live_location.sql", import.meta.url), "utf8").split("-- @down")[0]);
+  db.prepare("INSERT INTO driver_assignments (id, booking_id, supplier_id, assignment_status, acknowledgement) VALUES ('da-1', 'bk-1', 'sup-1', 'ASSIGNED', 'ACCEPTED')").run();
+  return db;
+}
+const assignment = (db) => db.prepare("SELECT * FROM driver_assignments WHERE id = 'da-1'").get();
+
+test("points are validated before they are stored", () => {
+  assert.ok(normalizeLocationPoint({ lat: 26.8467, lng: 80.9462, accuracy: 12, recordedAt: at(5) }, NOW).point);
+  assert.equal(normalizeLocationPoint({ lat: 91, lng: 80 }, NOW).rejected, "INVALID_COORDINATES");
+  assert.equal(normalizeLocationPoint({ lat: 0, lng: 0 }, NOW).rejected, "INVALID_COORDINATES", "a browser's empty fix is not a place");
+  assert.equal(normalizeLocationPoint({ lat: 26.8, lng: 80.9, accuracy: 5000 }, NOW).rejected, "LOW_ACCURACY");
+  assert.equal(normalizeLocationPoint({ lat: 26.8, lng: 80.9, recordedAt: new Date(NOW.getTime() + 10 * 60_000).toISOString() }, NOW).rejected, "FUTURE_TIME");
+  assert.equal(normalizeLocationPoint({ lat: 26.8, lng: 80.9, speed: 100 }, NOW).rejected, "IMPOSSIBLE_SPEED", "360 km/h from a phone is noise");
+  assert.equal(normalizeLocationPoint({ lat: 26.8, lng: 80.9, speed: 10 }, NOW).point.speed_kmh, 36, "the Geolocation API reports metres per second");
+});
+
+test("a batch stores every valid point and the latest position never moves backwards", () => {
+  const db = database();
+  const result = recordDriverLocations(db, { assignment: assignment(db) }, [
+    { lat: 26.84, lng: 80.94, accuracy: 20, recordedAt: at(30) },
+    { lat: 26.85, lng: 80.95, accuracy: 15, recordedAt: at(10) },
+    { lat: 99, lng: 80.95 },
+  ], { now: NOW });
+  assert.equal(result.accepted, 2);
+  assert.deepEqual(result.rejected, { INVALID_COORDINATES: 1 });
+  assert.equal(result.latest.lat, 26.85);
+  assert.equal(result.latest.freshness, "LIVE");
+
+  // A delayed batch from before the network gap arrives later.
+  recordDriverLocations(db, { assignment: assignment(db) }, [{ lat: 26.80, lng: 80.90, recordedAt: at(120) }], { now: NOW });
+  assert.equal(latestDriverLocation(db, "da-1", NOW).lat, 26.85);
+  assert.deepEqual(driverLocationTrail(db, "da-1").map((point) => point.lat), [26.80, 26.84, 26.85], "the trail is ordered by when each point was recorded");
+});
+
+test("location is only taken during an accepted, active trip", () => {
+  const db = database();
+  db.prepare("UPDATE driver_assignments SET acknowledgement = 'PENDING'").run();
+  assert.throws(() => recordDriverLocations(db, { assignment: assignment(db) }, [{ lat: 26.8, lng: 80.9 }], { now: NOW }), (err) => err.code === "TRIP_NOT_ACCEPTED");
+  db.prepare("UPDATE driver_assignments SET acknowledgement = 'ACCEPTED', assignment_status = 'COMPLETED'").run();
+  assert.throws(() => recordDriverLocations(db, { assignment: assignment(db) }, [{ lat: 26.8, lng: 80.9 }], { now: NOW }), (err) => err.code === "TRIP_NOT_TRACKABLE");
+});
+
+test("freshness is live for a minute, delayed up to five, then lost", () => {
+  assert.equal(locationFreshness(at(30), NOW), "LIVE");
+  assert.equal(locationFreshness(at(200), NOW), "DELAYED");
+  assert.equal(locationFreshness(at(900), NOW), "LOST");
+  assert.equal(locationFreshness(null, NOW), "NONE");
+});
+
+test("only a recent fix from the driver's own phone counts as sharing", () => {
+  const db = database();
+  assert.throws(() => assertDriverSharingLocation(db, "da-1", NOW), (err) => err.code === "LOCATION_SHARING_REQUIRED");
+  recordDriverLocations(db, { assignment: assignment(db) }, [{ lat: 26.8, lng: 80.9, recordedAt: at(20) }], { source: "OPS", now: NOW });
+  assert.throws(() => assertDriverSharingLocation(db, "da-1", NOW), "a position typed in by operations is not the driver sharing");
+  recordDriverLocations(db, { assignment: assignment(db) }, [{ lat: 26.8, lng: 80.9, recordedAt: at(10) }], { now: NOW });
+  assert.doesNotThrow(() => assertDriverSharingLocation(db, "da-1", NOW));
+  assert.throws(() => assertDriverSharingLocation(db, "da-1", new Date(NOW.getTime() + 6 * 60_000)), "a fix older than five minutes is not sharing");
+});
+
+test("positions older than 30 days are deleted, including the trip's last position", () => {
+  const db = database();
+  recordDriverLocations(db, { assignment: assignment(db) }, [{ lat: 26.8, lng: 80.9, recordedAt: at(5) }], { now: NOW });
+  assert.deepEqual(purgeExpiredDriverLocations(db, new Date(NOW.getTime() + 29 * 86_400_000)), { pings: 0, assignments: 0 });
+  assert.deepEqual(purgeExpiredDriverLocations(db, new Date(NOW.getTime() + 31 * 86_400_000)), { pings: 1, assignments: 1 });
+  assert.equal(latestDriverLocation(db, "da-1", NOW), null);
+});

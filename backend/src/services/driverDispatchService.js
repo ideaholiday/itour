@@ -6,8 +6,7 @@ import { normalizeWhatsAppPhone } from "./whatsappService.js";
 import { hashPickupOtp } from "./bookingService.js";
 import { markReferralTripCompleted } from "./referralService.js";
 import { onTripCompleted } from "./affiliateService.js";
-
-const driverGpsCache = new Map();
+import { latestDriverLocation, recordDriverLocations, telemetryFromAssignment } from "./driverLocationService.js";
 
 export const DISPATCH_STATUS_TRANSITIONS = Object.freeze({
   ASSIGNED: ["EN_ROUTE"],
@@ -296,31 +295,19 @@ export function verifyPickupOtp(database, bookingId, enteredOtp) {
   return result;
 }
 
+/** A position typed in by operations (for a driver who can't share from their phone). */
 export function updateDriverCoordinates(database, assignmentId, coords = {}) {
   const assignment = database.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignmentId);
   if (!assignment) throw dispatchError("Driver assignment not found", 404);
-
-  const lat = Number(coords.lat);
-  const lng = Number(coords.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (!Number.isFinite(Number(coords.lat)) || !Number.isFinite(Number(coords.lng)) || coords.lat === null || coords.lng === null) {
     throw dispatchError("Valid numeric lat and lng coordinates required", 400);
   }
-
-  const telemetry = {
-    lat,
-    lng,
-    speed_kmh: Number(coords.speed_kmh || coords.speed || 0),
-    heading: Number(coords.heading || 0),
-    battery_pct: coords.battery_pct != null ? Number(coords.battery_pct) : 95,
-    updated_at: new Date().toISOString(),
-  };
-
-  driverGpsCache.set(assignment.id, telemetry);
-  return { assignmentId: assignment.id, telemetry };
+  const result = recordDriverLocations(database, { assignment }, [{ lat: coords.lat, lng: coords.lng, speed_kmh: coords.speed_kmh ?? coords.speed, heading: coords.heading }], { source: "OPS" });
+  return { assignmentId: assignment.id, telemetry: result.latest };
 }
 
-export function getDriverCoordinates(assignmentId) {
-  return driverGpsCache.get(assignmentId) || null;
+export function getDriverCoordinates(database, assignmentId) {
+  return latestDriverLocation(database, assignmentId);
 }
 
 export function getLiveDispatchTelemetry(database) {
@@ -331,7 +318,8 @@ export function getLiveDispatchTelemetry(database) {
            p.id as product_id, p.title as product_title, p.hero_image, p.category, p.city as product_city,
            s.id as supplier_id, s.company_name as supplier_name, s.phone as supplier_phone,
            da.id as assignment_id, da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number,
-           da.assignment_status, da.assigned_at, da.en_route_at, da.arrived_at, da.trip_started_at, da.last_status_at
+           da.assignment_status, da.assigned_at, da.en_route_at, da.arrived_at, da.trip_started_at, da.last_status_at,
+           da.last_lat, da.last_lng, da.last_accuracy_m, da.last_speed_kmh, da.last_heading, da.last_location_source, da.last_location_at
     FROM bookings b
     LEFT JOIN products p ON p.id = b.product_id
     LEFT JOIN suppliers s ON s.id = b.supplier_id
@@ -346,9 +334,10 @@ export function getLiveDispatchTelemetry(database) {
     // Only a position a driver or operator actually reported. The map shows a
     // trip without one at its pickup point, marked as having no live GPS, and
     // never invents a position, speed or battery level.
-    const telemetry = (row.assignment_id && driverGpsCache.get(row.assignment_id)) || null;
+    const { last_lat, last_lng, last_accuracy_m, last_speed_kmh, last_heading, last_location_source, last_location_at, ...trip } = row;
+    const telemetry = telemetryFromAssignment(row);
     return {
-      ...row,
+      ...trip,
       pickup_lat: coordinate(row.pickup_lat),
       pickup_lng: coordinate(row.pickup_lng),
       drop_lat: coordinate(row.drop_lat),

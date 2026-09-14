@@ -138,6 +138,13 @@ Every dispatch message goes by email (HTML trip card with a plain-text part) and
    The chosen driver's score and its parts are stored on the `ASSIGNED` event.
 5. **Supplier notice.** The supplier is told which driver was requested and the response deadline, so it can step in. The notice is dropped if the driver has already accepted.
 
+### 6.3.1 Live Driver Location
+1. **Sharing is required for the trip.** A driver can't go "On the way", arrive or start the trip from their link unless their phone sent a position in the last 5 minutes. Sharing continues until the trip is completed. A position entered by operations does not count. Operations and the supplier can still move a trip for a driver who can't share, and that is recorded as their action.
+2. **Who sees it.** Operations, the booking's supplier and the traveler see the driver's position for the whole trip. (Traveler tracking is Phase 2.)
+3. **Only real positions.** Maps show a driver where a position was reported, marked Live (under a minute), Delayed (up to 5 minutes) or Signal lost. A trip without one is pinned at its pickup and says so.
+4. **Retention.** Positions, including each trip's last position, are deleted after 30 days.
+5. **Web limits.** The trip page only sends while it is open on screen; it keeps the screen awake and sends at least once a minute. Locked phones or switching to another app stop updates, which shows as Delayed or Signal lost.
+
 ### 6.4 Trip Completion
 1. **Completion is recorded once, through dispatch.** Driver link, supplier and operations completion all update the assignment, booking, payout (`PAYMENT_HELD` → `SCHEDULED`), timeline and notifications the same way. A supplier marking a dispatched booking completed goes through this path.
 2. **Stuck trips are watched.** An accepted trip not started 1 hour after pickup opens a `PICKUP_NOT_STARTED` task (CRITICAL). A started trip still open 2 hours after its expected end (pickup plus product, transfer or package duration; 8 hours for tours without one) opens `TRIP_COMPLETION_OVERDUE` (HIGH) and alerts the driver and supplier; at 6 hours it becomes CRITICAL and operations are alerted. Starting or completing the trip closes these tasks and drops alerts not yet sent.
