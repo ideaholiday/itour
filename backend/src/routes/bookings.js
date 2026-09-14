@@ -22,7 +22,7 @@ import { guestNotificationPreferences, notifyBookingLogisticsEvent, notifyDispat
 import { assertBookingLocations } from "../services/locationValidationService.js";
 import { bookingLogistics, buildLogisticsSnapshot, consumeBookingHold, createBookingHold, expireBookingHolds, getBookingQuestions, getOption, getProductOptions, persistBookingLogistics, validateOptionLogistics, validateQuestionAnswers } from "../services/logisticsService.js";
 import { applyWalletCreditsToCheckout, ensureUserReferralCode } from "../services/loyaltyService.js";
-import { applyPromoCode, validatePromoCode } from "../services/promoService.js";
+import { applyPromoCode, capCouponDiscount, priceCouponForBooking, validatePromoCode } from "../services/promoService.js";
 import { recordAffiliateBooking, resolveAttribution } from "../services/affiliateService.js";
 import {
   applyReferralToBooking,
@@ -153,6 +153,29 @@ function referralPreview(req, quote) {
   }
 }
 
+/**
+ * The coupon a quote carries, priced the way the booking will charge it. Only
+ * the traveler-facing result leaves the server: never the commission, the
+ * creator's earning or the referrer's credit behind the cap.
+ */
+function couponPreview(req, quote, referral) {
+  const code = req.body.promo_code;
+  if (!code || isTravelerReferralCode(code)) return null;
+  try {
+    const coupon = priceCouponForBooking(db, {
+      code,
+      bookingValueInr: quote.totalAmount,
+      commissionInr: quote.commissionAmount,
+      userId: req.user?.id || null,
+      otherGiveawayInr: (referral.discountInr || 0) + (referral.referrerCreditInr || 0),
+    });
+    return coupon && { valid: true, code: coupon.code, description: coupon.description, discountInr: coupon.discountInr, capped: coupon.capped };
+  } catch (error) {
+    if (!error.status || error.status >= 500) logger.warn("Coupon preview failed", { error: error.message });
+    return { valid: false, code: String(code).trim().toUpperCase(), discountInr: 0, error: error.message };
+  }
+}
+
 router.post("/quote", optionalAuthMiddleware, validateBody(bookingQuoteSchema), (req, res) => {
   try {
     const productId = req.body.product_id || req.body.activity_id;
@@ -160,7 +183,9 @@ router.post("/quote", optionalAuthMiddleware, validateBody(bookingQuoteSchema), 
     const answers = validateQuestionAnswers(db, option?.id, req.body.booking_question_answers || {}, req.body);
     assertBookingLocations(db, req.body, { requireOperationalDetails: false, deferLocationValidation: true });
     const quote = calculateBookingQuote(db, req.body, { ownerId: req.user?.id });
-    res.json({ success: true, quote: { ...publicQuote(quote), referral: referralPreview(req, quote), option: option || null, bookingQuestions: option ? getBookingQuestions(db, option.id) : [], normalizedAnswers: answers } });
+    const referralBenefit = referralPreview(req, quote);
+    const { referrerCreditInr: _referrerCredit, ...referral } = referralBenefit;
+    res.json({ success: true, quote: { ...publicQuote(quote), referral, coupon: couponPreview(req, quote, referralBenefit), option: option || null, bookingQuestions: option ? getBookingQuestions(db, option.id) : [], normalizedAnswers: answers } });
   } catch (error) {
     res.status(error.status || 500).json({
       error: error.message || "Could not price this booking",
@@ -267,16 +292,32 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         travelerEmail: req.body.traveler_email,
       })
       : { discountInr: 0 };
+    // A coupon is priced like the friend discount: from the quote the traveler
+    // saw, then capped again inside the transaction against the booking's own
+    // commission and referral. An invalid code refuses the booking rather than
+    // charging a price checkout did not show.
+    const couponCode = req.body.promo_code && !isTravelerReferralCode(req.body.promo_code) ? req.body.promo_code : null;
+    const expectedCoupon = couponCode
+      ? priceCouponForBooking(db, {
+        code: couponCode,
+        bookingValueInr: quote.totalAmount,
+        commissionInr: quote.commissionAmount,
+        userId: existingUser?.id || null,
+        otherGiveawayInr: (expectedReferral.discountInr || 0) + (expectedReferral.referrerCreditInr || 0),
+      })
+      : null;
     const requestedWalletCredit = Number(req.body.wallet_credit_inr) || 0;
     let appliedWalletCredit = 0;
     if (requestedWalletCredit > 0 && existingUser) {
       const walletCalc = applyWalletCreditsToCheckout(db, userId, {
-        bookingAmountInr: quote.totalAmount - (expectedReferral.discountInr || 0),
+        bookingAmountInr: quote.totalAmount - (expectedReferral.discountInr || 0) - (expectedCoupon?.discountInr || 0),
         requestedCreditInr: requestedWalletCredit,
       });
       if (walletCalc?.applied) appliedWalletCredit = walletCalc.creditDiscountInr || 0;
     }
     let referralDiscount = 0;
+    let referrerCredit = 0;
+    let couponDiscount = 0;
     let finalPayableAmount = Math.max(0, quote.totalAmount - appliedWalletCredit);
 
     db.transaction(() => {
@@ -336,9 +377,24 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
           travelerEmail: req.body.traveler_email,
         });
         referralDiscount = referral.discountInr || 0;
+        referrerCredit = referral.referrerAmountInr || 0;
         if (referralDiscount > 0) {
           finalPayableAmount = Math.max(0, finalPayableAmount - referralDiscount);
           db.prepare("UPDATE bookings SET referral_discount_inr = ?, amount_inr = ? WHERE id = ?").run(referralDiscount, finalPayableAmount, bookingId);
+        }
+      }
+
+      // The coupon comes out of commission too, never the supplier's payout.
+      if (expectedCoupon?.discountInr > 0) {
+        couponDiscount = capCouponDiscount({
+          offeredInr: expectedCoupon.discountInr,
+          bookingValueInr: quote.totalAmount,
+          commissionInr: assignmentCommissionAmount,
+          otherGiveawayInr: referralDiscount + referrerCredit + expectedCoupon.creatorCommissionInr,
+        });
+        if (couponDiscount > 0) {
+          finalPayableAmount = Math.max(0, finalPayableAmount - couponDiscount);
+          db.prepare("UPDATE bookings SET coupon_discount_inr = ?, amount_inr = ? WHERE id = ?").run(couponDiscount, finalPayableAmount, bookingId);
         }
       }
 
@@ -447,6 +503,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       original_amount_inr: quote.totalAmount,
       wallet_credit_applied_inr: appliedWalletCredit,
       referral_discount_inr: referralDiscount,
+      coupon_discount_inr: couponDiscount,
       quote: {
         ...publicQuote(quote),
         supplierId: selectedSupplier.supplierId,

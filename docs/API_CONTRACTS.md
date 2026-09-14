@@ -583,12 +583,13 @@ See BUSINESS_RULES §11.
   `quote.referral: { eligible, discountInr, referrerFirstName, reason }`. `reason`
   is one of `FIRST_TRIP_USED`, `BLOCKED`, `EXPIRED`, `SELF_REFERRAL`,
   `SAME_PHONE`, `EMAIL_ALIAS`, `SAME_DEVICE`, `NOT_NEW_TRAVELER`, `UNKNOWN_CODE`,
-  `NO_REFERRAL`, `AFFILIATE_REFERRAL`. Commission is never returned.
-- **`POST /api/bookings`** accepts `referral_code` and `wallet_credit_inr`, and
-  returns `referral_discount_inr` and `wallet_credit_applied_inr` alongside
-  `amount_inr` (what the payment gateway charges) and `original_amount_inr`.
-- **`POST /api/promo/validate`** with a `REF-` code returns `type: "REFERRAL"`,
-  `discountAmount: 0`: the rupee discount is priced by the quote, not here.
+  `NO_REFERRAL`, `AFFILIATE_REFERRAL`. No commission. `promo_code` adds
+  `quote.coupon` (`valid`, `discountInr`, `capped`, `error`).
+- **`POST /api/bookings`** has `referral_code`, `promo_code`, `wallet_credit_inr`;
+  returns `amount_inr` (charged), `original_amount_inr`,
+  `referral_discount_inr`/`coupon_discount_inr`/`wallet_credit_applied_inr`.
+- **`POST /api/promo/validate`**: a `REF-` code gives `type: "REFERRAL"`,
+  `discountAmount: 0` (priced by quote).
 
 ### 9.3 Traveler (requires authentication)
 - **`GET /api/loyalty/profile`**: Code, link, wallet (`walletBalanceInr`,

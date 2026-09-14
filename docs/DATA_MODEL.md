@@ -404,8 +404,9 @@ BUSINESS_RULES §11.
   `wallet_clawback_pending_inr` is reversed credit still owed;
   `signup_visitor_id` is the browser the account signed up from; `referral_code`
   is the traveler's `REF-` code.
-- **`bookings`**: `referral_discount_inr` and `wallet_credit_applied_inr`. With
-  them, `amount_inr + wallet_credit_applied_inr + referral_discount_inr =
+- **`bookings`**: `referral_discount_inr`, `wallet_credit_applied_inr` and
+  `coupon_discount_inr` (migration 036, the charged `promo_codes` discount). With
+  them, `amount_inr + wallet_credit_applied_inr + referral_discount_inr + coupon_discount_inr =
   commission_amount + supplier_payout_amount`.
 - **`user_referrals`**: v1 table, no longer written. Carried into the tables
   above at startup.

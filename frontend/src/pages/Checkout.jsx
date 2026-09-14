@@ -132,6 +132,8 @@ export default function Checkout() {
 
   // A traveler referral code is priced by the server quote, never in the browser.
   const referralCodeForQuote = appliedPromo?.type === "REFERRAL" ? appliedPromo.code : null;
+  // So is a coupon: the quote returns the discount the booking will actually charge.
+  const promoCodeForQuote = appliedPromo && appliedPromo.type !== "REFERRAL" ? appliedPromo.code : null;
 
   const [walletBalance, setWalletBalance] = useState(0);
   const [useWalletCredits, setUseWalletCredits] = useState(false);
@@ -331,7 +333,7 @@ export default function Checkout() {
     ticketTiersParsed.map(({ tierId, count }) => [tierId, count])
   ), [ticketTiersParam]);
 
-  const discountAmount = appliedPromo && appliedPromo.type !== "REFERRAL" ? Number(appliedPromo.discountAmount || 0) : 0;
+  const discountAmount = promoCodeForQuote && quote?.coupon?.valid ? Number(quote.coupon.discountInr || 0) : 0;
   const referralDiscountAmount = Number(quote?.referral?.discountInr || 0);
   const referralUnavailable = appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
   const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount - referralDiscountAmount);
@@ -422,6 +424,7 @@ export default function Checkout() {
         origin_state: params.get("originState"),
         dest_state: params.get("destState"),
         referral_code: referralCodeForQuote,
+        promo_code: promoCodeForQuote,
         ...getBookingAttributionFields(),
       }).then((data) => {
         setQuote(data.quote);
@@ -434,7 +437,7 @@ export default function Checkout() {
       }).finally(() => setQuoteLoading(false));
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, requiresFlight, packageHotels, params, ticketSelections, pickupTime, nativeHold?.holdId, referralCodeForQuote]);
+  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, requiresFlight, packageHotels, params, ticketSelections, pickupTime, nativeHold?.holdId, referralCodeForQuote, promoCodeForQuote]);
 
   const progress = useMemo(() => [
     { label: "Traveler", ready: travelerReady, icon: UserRound },
@@ -512,7 +515,7 @@ export default function Checkout() {
         package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
         origin_state: params.get("originState"),
         special_requests: specialRequests.trim(),
-        promo_code: appliedPromo && appliedPromo.type !== "REFERRAL" ? appliedPromo.code : null,
+        promo_code: promoCodeForQuote,
         referral_code: referralCodeForQuote,
         // Lets the server match this booking to the referral click that brought
         // the traveler here, so the creator is actually paid for the link.
@@ -1186,6 +1189,16 @@ export default function Checkout() {
                     )}
                     {promoError && (
                       <p className="text-[10px] font-mono text-rose-600">{promoError}</p>
+                    )}
+                    {promoCodeForQuote && quote?.coupon && !quote.coupon.valid && (
+                      <p className="text-[10px] font-mono text-rose-600">{quote.coupon.error}</p>
+                    )}
+                    {promoCodeForQuote && quote?.coupon?.valid && quote.coupon.capped && (
+                      <p className="text-[10px] font-mono text-stone-500">
+                        {discountAmount > 0
+                          ? `This code takes ${formatPrice(discountAmount)} off this booking, the most offers can give on it.`
+                          : "This booking already has the most discount offers can give, so this code adds nothing."}
+                      </p>
                     )}
                     {referralUnavailable && (
                       <p className="text-[10px] font-mono text-stone-500">

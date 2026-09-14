@@ -1,4 +1,4 @@
-import { recordAffiliateBooking } from "./affiliateService.js";
+import { recordAffiliateBooking, resolveTier } from "./affiliateService.js";
 import { REFERRAL_POLICY, findReferrerByCode } from "./referralService.js";
 
 function promoError(message, status = 400) {
@@ -134,4 +134,50 @@ export function applyPromoCode(database, { code, bookingId, userId = null, amoun
   } catch (err) {
     return null;
   }
+}
+
+/**
+ * ADR 017: everything one booking gives away (coupon, referral discount and
+ * credit, creator commission) stays within this share of the booking's value,
+ * and never exceeds the booking's commission.
+ */
+export const MAX_GIVEAWAY_SHARE_OF_BOOKING = 0.1;
+
+/** A coupon's rupee discount after the giveaway cap, in whole rupees rounded down. */
+export function capCouponDiscount({ offeredInr, bookingValueInr, commissionInr, otherGiveawayInr = 0 }) {
+  const budget = Math.min(
+    (Number(bookingValueInr) || 0) * MAX_GIVEAWAY_SHARE_OF_BOOKING,
+    Number(commissionInr) || 0,
+  ) - (Number(otherGiveawayInr) || 0);
+  return Math.max(0, Math.floor(Math.min(Number(offeredInr) || 0, budget)));
+}
+
+/**
+ * What a promo code takes off a booking, priced from the server quote. The
+ * discount comes out of commission, so it is capped by what the booking can
+ * give away once the referral and, for a creator's code, the creator's
+ * commission are paid for. Throws the promo error for a code that is not valid.
+ * Traveler `REF-` codes are not coupons and return null.
+ */
+export function priceCouponForBooking(database, { code, bookingValueInr, commissionInr, userId = null, otherGiveawayInr = 0 }) {
+  const promo = validatePromoCode(database, { code, amountInr: bookingValueInr, userId });
+  if (promo.type === "REFERRAL") return null;
+  const creatorCommissionInr = promo.affiliateId
+    ? Math.round((Number(bookingValueInr) || 0) * (Number(resolveTier(database, promo.affiliateId).commission_rate) || 0.1) * 100) / 100
+    : 0;
+  const discountInr = capCouponDiscount({
+    offeredInr: promo.discountAmount,
+    bookingValueInr,
+    commissionInr,
+    otherGiveawayInr: (Number(otherGiveawayInr) || 0) + creatorCommissionInr,
+  });
+  return {
+    code: promo.code,
+    type: promo.type,
+    description: promo.description,
+    offeredInr: Math.floor(Number(promo.discountAmount) || 0),
+    discountInr,
+    creatorCommissionInr,
+    capped: discountInr < Math.floor(Number(promo.discountAmount) || 0),
+  };
 }

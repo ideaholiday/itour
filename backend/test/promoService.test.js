@@ -1,7 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import db from "../src/db.js";
-import { validatePromoCode, applyPromoCode } from "../src/services/promoService.js";
+import { validatePromoCode, applyPromoCode, capCouponDiscount, priceCouponForBooking } from "../src/services/promoService.js";
 import { ensureUserReferralCode } from "../src/services/loyaltyService.js";
 
 const referralCodeFor = (userId) => ensureUserReferralCode(db, db.prepare("SELECT id, name, referral_code FROM users WHERE id = ?").get(userId));
@@ -148,6 +148,27 @@ describe("Traveler Promo Codes & Referral Engine", () => {
 
     const updated = db.prepare("SELECT times_used FROM promo_codes WHERE code = 'TESTFIX200'").get();
     assert.equal(updated.times_used, initial.times_used + 1);
+  });
+
+  it("prices a coupon for a booking within the giveaway cap", () => {
+    // ₹2,000 booking, ₹600 commission: at most 10% of the booking (₹200) is given away.
+    const underCap = priceCouponForBooking(db, { code: "TESTFIX200", bookingValueInr: 2000, commissionInr: 600 });
+    assert.deepEqual([underCap.discountInr, underCap.capped], [200, false]);
+
+    // A friend discount already spends ₹60 of the ₹200, so the coupon gets the rest.
+    const shared = priceCouponForBooking(db, { code: "TESTFIX200", bookingValueInr: 2000, commissionInr: 600, otherGiveawayInr: 60 });
+    assert.deepEqual([shared.offeredInr, shared.discountInr, shared.capped], [200, 140, true]);
+
+    assert.equal(priceCouponForBooking(db, { code: referralCodeFor(user1Id), bookingValueInr: 2000, commissionInr: 600, userId: user2Id }), null);
+    assert.throws(() => priceCouponForBooking(db, { code: "TESTEXPIRED", bookingValueInr: 2000, commissionInr: 600 }), /expired/);
+  });
+
+  it("caps a coupon at 10% of the booking and never more than its commission", () => {
+    assert.equal(capCouponDiscount({ offeredInr: 5000, bookingValueInr: 10000, commissionInr: 3000 }), 1000);
+    assert.equal(capCouponDiscount({ offeredInr: 5000, bookingValueInr: 10000, commissionInr: 400 }), 400);
+    assert.equal(capCouponDiscount({ offeredInr: 500, bookingValueInr: 10000, commissionInr: 3000, otherGiveawayInr: 600 }), 400);
+    assert.equal(capCouponDiscount({ offeredInr: 500, bookingValueInr: 10000, commissionInr: 3000, otherGiveawayInr: 1500 }), 0);
+    assert.equal(capCouponDiscount({ offeredInr: 99.9, bookingValueInr: 10000, commissionInr: 3000 }), 99, "whole rupees, rounded down");
   });
 
   it("leaves traveler referral codes to the booking route", () => {

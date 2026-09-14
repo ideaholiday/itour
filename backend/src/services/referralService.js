@@ -391,17 +391,19 @@ export function previewReferralBenefit(database, {
   travelerEmail = null,
   now = new Date(),
 }) {
-  const none = (reason) => ({ eligible: false, discountInr: 0, reason, referrerFirstName: null });
+  // `referrerCreditInr` is what the referrer would earn on this booking. It is
+  // derived from commission, so it stays on the server (the giveaway cap uses it).
+  const none = (reason) => ({ eligible: false, discountInr: 0, reason, referrerFirstName: null, referrerCreditInr: 0 });
   const relationship = getRelationshipForUser(database, userId);
 
   if (relationship) {
     if (!relationshipIsEarning(relationship, now)) return none(relationship.status === "BLOCKED" ? "BLOCKED" : "EXPIRED");
     const referrer = getUser(database, relationship.referrer_user_id);
+    const { refereeAmountInr, referrerAmountInr } = computeReferralAmounts({ commissionInr, isFirstTrip: true });
     if (hasPaidReferralTrip(database, relationship.id)) {
-      return { ...none("FIRST_TRIP_USED"), referrerFirstName: firstName(referrer?.name) };
+      return { ...none("FIRST_TRIP_USED"), referrerFirstName: firstName(referrer?.name), referrerCreditInr: referrerAmountInr };
     }
-    const { refereeAmountInr } = computeReferralAmounts({ commissionInr, isFirstTrip: true });
-    return { eligible: refereeAmountInr > 0, discountInr: refereeAmountInr, reason: null, referrerFirstName: firstName(referrer?.name) };
+    return { eligible: refereeAmountInr > 0, discountInr: refereeAmountInr, reason: null, referrerFirstName: firstName(referrer?.name), referrerCreditInr: referrerAmountInr };
   }
 
   let referrer = referralCode ? findReferrerByCode(database, referralCode) : null;
@@ -416,8 +418,8 @@ export function previewReferralBenefit(database, {
   const eligibility = evaluateReferralEligibility(database, { referrer, referredUser, visitorId, travelerPhone, travelerEmail });
   if (!eligibility.ok) return { ...none(eligibility.signal), referrerFirstName: firstName(referrer.name) };
 
-  const { refereeAmountInr } = computeReferralAmounts({ commissionInr, isFirstTrip: true });
-  return { eligible: refereeAmountInr > 0, discountInr: refereeAmountInr, reason: null, referrerFirstName: firstName(referrer.name) };
+  const { refereeAmountInr, referrerAmountInr } = computeReferralAmounts({ commissionInr, isFirstTrip: true });
+  return { eligible: refereeAmountInr > 0, discountInr: refereeAmountInr, reason: null, referrerFirstName: firstName(referrer.name), referrerCreditInr: referrerAmountInr };
 }
 
 /**

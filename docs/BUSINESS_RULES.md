@@ -62,6 +62,16 @@ $$\text{Vacancies} = \text{Configured Max Capacity} - \text{Confirmed Seats} - \
 2. **Frozen Commission**: Commission percentage and exact rupee amount are frozen on the booking record at creation.
 3. **Supplier Net Payable**:
    $$\text{Supplier Earnings} = \text{Total Fare} - \text{Platform Commission} - \text{Retained Tax}$$
+4. **Giveaway cap (ADR 017)**: everything one booking gives away (a coupon discount,
+   the Travel & Earn friend discount and referrer credit, a creator's commission)
+   stays within **10% of the booking's value** and never exceeds its commission.
+   Wallet credit being spent is not counted; it was paid for when it was earned.
+5. **Coupons (`promo_codes`) are charged, not only shown.** The server prices the
+   discount from its own quote (whole rupees, rounded down), cuts it to what the cap
+   leaves after the referral and creator commission, and takes it off `amount_inr`.
+   It comes out of commission, never the supplier's payout. `POST /api/bookings/quote`
+   returns the same figure checkout shows. A code that is no longer valid when the
+   booking is created refuses the booking; it is never silently dropped.
 
 ---
 
@@ -329,7 +339,7 @@ bookings. Implemented in `referralService.js`; the constants live in
    and 10% after, whatever it costs. Tiers (Explorer, Voyager, Globe Trotter) are
    recognition only and never change the rate.
 4. **Discounts come out of commission, never the supplier's payout.**
-   `amount_inr + wallet_credit_applied_inr + referral_discount_inr` equals
+   `amount_inr + wallet_credit_applied_inr + referral_discount_inr + coupon_discount_inr` equals
    `commission_amount + supplier_payout_amount` on every booking.
 5. **One referrer per booking.** A booking brought in by a creator's coupon or
    link (§10) pays the creator and carries no traveler referral, so the two
