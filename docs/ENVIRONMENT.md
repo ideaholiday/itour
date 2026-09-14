@@ -130,11 +130,12 @@ Idea Holiday booking {{1}} needs a driver assignment. Service: {{2}}. Scheduled 
 | Variable | Required? | Example Placeholder | Purpose |
 | :--- | :--- | :--- | :--- |
 | `ENABLE_DEMO_PAYMENT` | Dev Only | `true` / `false` | Enables instant test payment bypass. |
-| `CASHFREE_APP_ID` | For Cashfree| `<cashfree-app-id>` | Cashfree Merchant Application ID. |
-| `CASHFREE_SECRET_KEY` | For Cashfree| `<cashfree-secret-key>` | Cashfree Merchant API Secret. |
-| `CASHFREE_ENVIRONMENT` | For Cashfree| `SANDBOX` / `PRODUCTION` | Cashfree API environment. |
+| `CASHFREE_APP_ID` | For Cashfree| `<cashfree-app-id>` | Cashfree PG App ID. Production reads Secret Manager `idea-holiday-cashfree-app-id`. |
+| `CASHFREE_SECRET_KEY` | For Cashfree| `<cashfree-secret-key>` | Cashfree PG secret; also signs webhooks. Production reads `idea-holiday-cashfree-secret-key`. |
+| `CASHFREE_ENV` | For Cashfree| `TEST` / `PROD` | `PROD` (or `PRODUCTION`) takes real payments via `api.cashfree.com`; anything else stays on sandbox. `deploy.sh` sets `PROD` and ignores the value in `backend/.env`. |
+| `CASHFREE_SECUREID_PUBLIC_KEY` | For SecureID | PEM or base64 PEM | Public key for the `X-Cf-Signature` header. Production reads `idea-holiday-cashfree-secureid-public-key`: `.dockerignore` drops `*.pem`, so the `_PATH` file never reaches the container. |
 | `CASHFREE_SECUREID_SIMULATE` | No | `true` | Answers every identity/bank verification from a local fixture without calling Cashfree. Set by the test suite so KYC tests do not depend on a live verification wallet; useful offline. **Never set in production** — it would mark bank accounts verified that no bank confirmed. |
-| `CASHFREE_SECUREID_SIMULATION_FALLBACK` | No | `false` to disable | When unset, a *network or IP-whitelist failure* falls back to the same fixture. An API that answers with an error (for example an empty verification wallet) is not covered by this and surfaces as a failure. |
+| `CASHFREE_SECUREID_SIMULATION_FALLBACK` | No | `false` to disable | When unset, a *network or IP-whitelist failure* falls back to the same fixture — never on Cloud Run (`K_SERVICE`) or with `NODE_ENV=production`. An API that answers with an error (for example an empty verification wallet) is not covered by this and surfaces as a failure. |
 | `RAZORPAY_KEY_ID` | For Razorpay| `<razorpay-key-id>` | Razorpay Public Key. |
 | `RAZORPAY_KEY_SECRET` | For Razorpay| `<razorpay-secret-key>` | Razorpay Secret Key. |
 

@@ -204,6 +204,10 @@ export async function initiateCashfreeTransfer({
   const appId = process.env.CASHFREE_APP_ID || CASHFREE_APP_ID;
   const secretKey = process.env.CASHFREE_SECRET_KEY || CASHFREE_SECRET_KEY;
 
+  // Live traffic must never record a settlement that did not move money: a
+  // simulated UTR would mark a supplier paid while nothing reached their bank.
+  const liveRuntime = env === "PROD" || env === "PRODUCTION" || process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE);
+
   if (appId && secretKey && (env === "PROD" || env === "PRODUCTION")) {
     try {
       const payoutBase = "https://api.cashfree.com/payout/v1";
@@ -230,6 +234,9 @@ export async function initiateCashfreeTransfer({
       });
 
       const data = await res.json().catch(() => ({}));
+      if (!(res.ok && data.status === "SUCCESS") && liveRuntime) {
+        throw Object.assign(new Error(`Cashfree transfer did not complete${data.message ? `: ${data.message}` : ""}. Pay the supplier manually and record the bank UTR.`), { status: 502, code: "PAYOUT_NOT_COMPLETED" });
+      }
       if (res.ok && data.status === "SUCCESS") {
         return {
           success: true,
@@ -242,8 +249,16 @@ export async function initiateCashfreeTransfer({
         };
       }
     } catch (err) {
+      if (liveRuntime) {
+        if (err.code === "PAYOUT_NOT_COMPLETED") throw err;
+        throw Object.assign(new Error(`Cashfree transfer failed: ${err.message}. Pay the supplier manually and record the bank UTR.`), { status: 502, code: "PAYOUT_NOT_COMPLETED" });
+      }
       console.warn("Cashfree Payouts API live call failed, falling back to simulated settlement:", err.message);
     }
+  }
+
+  if (liveRuntime) {
+    throw Object.assign(new Error("Automated Cashfree payouts are not configured for live mode. Pay the supplier manually and record the bank UTR."), { status: 503, code: "PAYOUT_NOT_CONFIGURED" });
   }
 
   // Realistic verified settlement execution in sandbox/simulation mode

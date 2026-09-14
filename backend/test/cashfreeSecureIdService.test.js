@@ -485,3 +485,20 @@ test("simulation fallback never fakes a result in production", async () => {
     process.env.NODE_ENV = originalNodeEnv;
   }
 });
+
+test("simulation fallback is off on Cloud Run even when NODE_ENV is unset", async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalService = process.env.K_SERVICE;
+  delete process.env.NODE_ENV;
+  process.env.K_SERVICE = "idea-holiday-marketplace";
+  process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK = "true";
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = async () => { throw new TypeError("fetch failed"); };
+    await assert.rejects(() => verifyPan({ pan: "AAACB8781B" }), /fetch failed/);
+  } finally {
+    global.fetch = originalFetch;
+    if (originalNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalNodeEnv;
+    if (originalService === undefined) delete process.env.K_SERVICE; else process.env.K_SERVICE = originalService;
+  }
+});

@@ -5,7 +5,9 @@ set -e
 PROJECT_ID="my-project-8591-489308"
 REGION="us-central1"
 SERVICE_NAME="idea-holiday-marketplace"
-DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest,ASSIGNMENT_SCHEDULER_TOKEN=idea-holiday-assignment-scheduler-token:latest"
+# Live Cashfree credentials come only from Secret Manager, never from a local
+# backend/.env (which holds sandbox keys for development).
+DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest,ASSIGNMENT_SCHEDULER_TOKEN=idea-holiday-assignment-scheduler-token:latest,CASHFREE_APP_ID=idea-holiday-cashfree-app-id:latest,CASHFREE_SECRET_KEY=idea-holiday-cashfree-secret-key:latest,CASHFREE_SECUREID_PUBLIC_KEY=idea-holiday-cashfree-secureid-public-key:latest"
 
 if [ -f "backend/.env" ]; then
   source backend/.env
@@ -15,14 +17,14 @@ SUPABASE_URL="${SUPABASE_URL:-https://jidknptoyloucgldaool.supabase.co}"
 SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-sb_publishable_WwdMLSfWZE8fErjAKcs6UQ_tIBSHZcA}"
 MAPPLS_API_KEY="${MAPPLS_API_KEY:-${MAPMYINDIA_API_KEY:-}}"
 MAPPLS_ORIGIN="${MAPPLS_ORIGIN:-https://ideaholiday.in}"
-CASHFREE_APP_ID="${CASHFREE_APP_ID:-}"
-CASHFREE_SECRET_KEY="${CASHFREE_SECRET_KEY:-}"
-CASHFREE_ENV="${CASHFREE_ENV:-TEST}"
+# Production takes real payments. backend/.env sets CASHFREE_ENV=TEST for local
+# work, so it is deliberately not read here; override with DEPLOY_CASHFREE_ENV.
+CASHFREE_ENV="${DEPLOY_CASHFREE_ENV:-PROD}"
 CASHFREE_API_VERSION="${CASHFREE_API_VERSION:-2023-08-01}"
 DEMO_PAYMENT_ONLY="${DEMO_PAYMENT_ONLY:-false}"
 ENABLE_DEMO_PAYMENT="${ENABLE_DEMO_PAYMENT:-true}"
 
-DEPLOY_ENV_VARS="SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY},CASHFREE_APP_ID=${CASHFREE_APP_ID},CASHFREE_SECRET_KEY=${CASHFREE_SECRET_KEY},CASHFREE_ENV=${CASHFREE_ENV},CASHFREE_API_VERSION=${CASHFREE_API_VERSION},DEMO_PAYMENT_ONLY=${DEMO_PAYMENT_ONLY},ENABLE_DEMO_PAYMENT=${ENABLE_DEMO_PAYMENT},DATABASE_ENGINE=postgres,POSTGRES_SCHEMA=marketplace"
+DEPLOY_ENV_VARS="NODE_ENV=production,SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY},CASHFREE_ENV=${CASHFREE_ENV},CASHFREE_API_VERSION=${CASHFREE_API_VERSION},DEMO_PAYMENT_ONLY=${DEMO_PAYMENT_ONLY},ENABLE_DEMO_PAYMENT=${ENABLE_DEMO_PAYMENT},DATABASE_ENGINE=postgres,POSTGRES_SCHEMA=marketplace"
 
 # Keep the production runtime aligned with locally configured transactional
 # notification providers. Long-lived credentials should be moved to Secret

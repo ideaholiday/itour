@@ -155,8 +155,9 @@ async function secureIdRequest(path, { method = "POST", body, query } = {}) {
   // The fallback returns VALID for PANs and bank accounts nobody checked, so it
   // must never kick in on production traffic — an un-whitelisted IP or a
   // network blip there has to fail loudly, not mark payout details verified.
-  const allowSimulation = process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK !== "false"
-    && process.env.NODE_ENV !== "production";
+  // Cloud Run (K_SERVICE) is live traffic even when NODE_ENV was not set.
+  const liveRuntime = process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE);
+  const allowSimulation = process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK !== "false" && !liveRuntime;
 
   // Offline mode: never touch the live API at all. Tests and local development
   // must not depend on a real verification wallet having balance — the fallback
@@ -164,7 +165,7 @@ async function secureIdRequest(path, { method = "POST", body, query } = {}) {
   if (process.env.CASHFREE_SECUREID_SIMULATE === "true") {
     // Simulated verification marks PANs and bank accounts good that nobody
     // checked. In production that is a payout-fraud hole, not a convenience.
-    if (process.env.NODE_ENV === "production") {
+    if (liveRuntime) {
       throw new Error("CASHFREE_SECUREID_SIMULATE cannot be used in production");
     }
     return { __simulated: true, ...simulateSecureIdResponse(path, body, query) };

@@ -7,6 +7,7 @@ import {
   processCashfreeRefund,
   getCashfreeOrder,
   getCashfreeRefundStatus,
+  initiateCashfreeTransfer,
 } from "../src/services/cashfreeService.js";
 
 test("verifies Cashfree webhook signature correctly", () => {
@@ -276,4 +277,30 @@ test("generated Cashfree refund ids are unique within the same millisecond", asy
   // refund_id is the provider's idempotency key, so a collision would make one
   // refund silently duplicate another.
   assert.equal(ids.size, 50, "every generated refund id must be distinct");
+});
+
+test("a supplier payout is never faked on live traffic", async t => {
+  withCredentials(t);
+  const payout = { transferId: "tr_1", amount: 1500, beneficiaryDetails: { account_number: "50200012345678", ifsc: "HDFC0000123" } };
+
+  // Local sandbox keeps the simulated settlement for development.
+  delete process.env.K_SERVICE;
+  delete process.env.NODE_ENV;
+  assert.equal((await initiateCashfreeTransfer(payout)).status, "PROCESSED");
+
+  // Cloud Run on sandbox keys: no real transfer is possible, so refuse.
+  process.env.K_SERVICE = "idea-holiday-marketplace";
+  await assert.rejects(() => initiateCashfreeTransfer(payout), (err) => err.code === "PAYOUT_NOT_CONFIGURED");
+
+  // Live keys, but Cashfree does not confirm the transfer.
+  process.env.CASHFREE_ENV = "PROD";
+  stubFetch(t, () => jsonResponse({ status: "ERROR", message: "Insufficient balance" }, { ok: false, status: 400 }));
+  await assert.rejects(() => initiateCashfreeTransfer(payout), (err) => err.code === "PAYOUT_NOT_COMPLETED" && /Insufficient balance/.test(err.message));
+
+  stubFetch(t, () => { throw new TypeError("fetch failed"); });
+  await assert.rejects(() => initiateCashfreeTransfer(payout), (err) => err.code === "PAYOUT_NOT_COMPLETED");
+
+  stubFetch(t, () => jsonResponse({ status: "SUCCESS", data: { referenceId: "ref_9", utr: "UTR123" } }));
+  const done = await initiateCashfreeTransfer(payout);
+  assert.equal(done.utr, "UTR123");
 });

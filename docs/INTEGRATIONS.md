@@ -71,8 +71,9 @@ Primary payment gateway for domestic Indian payments (UPI, Credit/Debit cards, C
 ### Configuration & Credentials
 - `CASHFREE_APP_ID`: Client application identifier.
 - `CASHFREE_SECRET_KEY`: Merchant secret key.
-- `CASHFREE_ENVIRONMENT`: `SANDBOX` or `PRODUCTION`.
-- `CASHFREE_BASE_URL`: `https://api.cashfree.com/pg` (or `https://sandbox.cashfree.com/pg`).
+- `CASHFREE_ENV`: `TEST` (sandbox, `https://sandbox.cashfree.com/pg`) or `PROD` (real money, `https://api.cashfree.com/pg`).
+- Orders send `order_meta.notify_url` = `${PUBLIC_APP_URL}/api/checkout/cashfree/webhook` (https only), so a traveler who closes the tab after paying is still confirmed.
+- Supplier settlements through "Process via Cashfree" never record a simulated UTR on live traffic; if the Payouts call does not succeed, pay manually and record the bank UTR.
 
 ### Request & Webhook Flow
 1. Server initializes payment session via `POST /orders` using `x-client-id` and `x-client-secret`.

@@ -114,3 +114,14 @@ This document records significant technical and product architectural decisions.
   - When Cashfree SecureID has verified **both** GSTIN and PAN, the supplier is set to KYB `APPROVED` (and `is_verified`) automatically, with no admin click.
   - Admins see the real KYB: no placeholder documents or numbers, every uploaded document is viewable, and manual approval is blocked while required documents (transport license, PAN) are missing. KYB files are never publicly reachable.
 - **Consequences**: KYB approval is separate from the yearly Verified badge (ADR 008). Auto-approval must never grant the badge.
+
+---
+
+## ADR 010: Production Takes Real Cashfree Payments
+- **Date**: 2026-09-14
+- **Context**: Production ran the Cashfree payment gateway on sandbox keys, so checkout collected no real money. SecureID was already live but failed every call because its signing key never reached the container.
+- **Decision Made**:
+  - Production (`ideaholiday.in`) runs Cashfree PG with `CASHFREE_ENV=PROD` and real payments.
+  - Live Cashfree credentials (PG App ID, PG secret, SecureID public key) come only from Secret Manager. `deploy.sh` never reads them, or `CASHFREE_ENV`, from a local `backend/.env`.
+  - Live traffic (Cloud Run or `NODE_ENV=production`) never simulates money or identity: no simulated supplier payout UTR, no simulated SecureID result.
+- **Consequences**: A failed automated supplier transfer surfaces as an error; ops pay manually and record the bank UTR. Sandbox testing belongs on local or staging, not on production.

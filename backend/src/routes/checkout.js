@@ -312,6 +312,9 @@ router.post("/cashfree/create-order", authenticate, requireBookingOwner(), valid
         phone: booking.traveler_phone || "9999999999",
       },
       returnUrl: returnUrl || `${process.env.PUBLIC_APP_URL || "http://localhost:3000"}/checkout/verify?order_id={order_id}&bookingRef=${encodeURIComponent(booking.ref)}`,
+      // Server-to-server confirmation for travelers whose tab closes after
+      // paying. Cashfree only accepts an https notify_url.
+      notifyUrl: /^https:\/\//.test(process.env.PUBLIC_APP_URL || "") ? `${process.env.PUBLIC_APP_URL.replace(/\/$/, "")}/api/checkout/cashfree/webhook` : undefined,
       notes: {
         bookingId: booking.id,
         bookingRef: booking.ref,
