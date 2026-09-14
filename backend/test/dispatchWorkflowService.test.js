@@ -503,3 +503,29 @@ test("a driver must share live location before going on the way, arriving or sta
   assert.throws(() => driverAction(db, context, { action: "ARRIVED" }), (err) => err.code === "LOCATION_SHARING_REQUIRED");
   assert.throws(() => driverAction(db, context, { action: "START", otp: "1234" }), (err) => err.code === "LOCATION_SHARING_REQUIRED", "checked before the OTP, so no attempt is used");
 });
+
+test("from 30 minutes before pickup, a driver who may miss it opens one task and alert per reason until they arrive", () => {
+  const db = database();
+  const assignment = acceptedTrip(db);
+  processTripWatch(db, { now: new Date(PICKUP - 45 * 60000) });
+  assert.equal(tripTaskOf(db, "DRIVER_LOCATION_RISK"), undefined, "nothing is checked earlier than 30 minutes before pickup");
+
+  processTripWatch(db, { now: new Date(PICKUP - 25 * 60000) });
+  processTripWatch(db, { now: new Date(PICKUP - 20 * 60000) });
+  assert.match(tripTaskOf(db, "DRIVER_LOCATION_RISK").notes, /has not started/);
+  assert.equal(jobs(db, "DRIVER_LOCATION_RISK").length, 1, "the same reason alerts once");
+
+  // On the way, but the phone stopped sharing: a new reason, a new alert.
+  const context = { assignment: db.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignment.id) };
+  recordDriverLocations(db, context, [{ lat: 26.8467, lng: 80.9462 }]);
+  driverAction(db, context, { action: "EN_ROUTE" });
+  db.prepare("UPDATE driver_assignments SET last_location_at = ? WHERE id = ?").run(new Date(PICKUP - 30 * 60000).toISOString(), assignment.id);
+  processTripWatch(db, { now: new Date(PICKUP - 15 * 60000) });
+  assert.match(tripTaskOf(db, "DRIVER_LOCATION_RISK").notes, /live location stopped/);
+  assert.equal(jobs(db, "DRIVER_LOCATION_RISK").length, 2);
+
+  // Reaching pickup settles it.
+  db.prepare("UPDATE driver_assignments SET last_location_source = 'DRIVER', last_location_at = ? WHERE id = ?").run(new Date().toISOString(), assignment.id);
+  driverAction(db, context, { action: "ARRIVED" });
+  assert.equal(tripTaskOf(db, "DRIVER_LOCATION_RISK"), undefined);
+});

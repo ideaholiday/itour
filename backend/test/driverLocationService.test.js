@@ -87,3 +87,35 @@ test("positions older than 30 days are deleted, including the trip's last positi
   assert.deepEqual(purgeExpiredDriverLocations(db, new Date(NOW.getTime() + 31 * 86_400_000)), { pings: 1, assignments: 1 });
   assert.equal(latestDriverLocation(db, "da-1", NOW), null);
 });
+
+test("location risk: late, not moving and signal lost are told apart", async () => {
+  const { assessDriverLocationRisk, distanceMeters, estimateDrive } = await import("../src/services/driverLocationService.js");
+  assert.equal(distanceMeters({ lat: 26.8467, lng: 80.9462 }, { lat: 26.8467, lng: 80.9462 }), 0);
+  assert.ok(Math.abs(distanceMeters({ lat: 26.8467, lng: 80.9462 }, { lat: 26.7606, lng: 80.8893 }) - 11_140) < 200, "Hazratganj to Lucknow airport is about 11 km as the crow flies");
+  assert.deepEqual(estimateDrive(10_000), { distanceM: 13_500, minutes: 21 });
+
+  const db = database();
+  db.prepare("UPDATE driver_assignments SET assignment_status = 'EN_ROUTE'").run();
+  const booking = { pickup_lat: 26.8467, pickup_lng: 80.9462 };
+  const pickupAtMs = NOW.getTime() + 20 * 60_000;
+  const risk = () => assessDriverLocationRisk(db, { booking, assignment: assignment(db), pickupAtMs, now: NOW });
+
+  assert.equal(risk().reason, "SIGNAL_LOST", "on the way without any position");
+  // 30 km out with 20 minutes to go.
+  recordDriverLocations(db, { assignment: assignment(db) }, [{ lat: 27.1167, lng: 81.0, recordedAt: at(20) }], { now: NOW });
+  assert.equal(risk().reason, "RUNNING_LATE");
+  assert.match(risk().detail, /may be \d+ min late/);
+
+  // Close enough to make it, but parked 3 km away for 10 minutes.
+  const parked = database();
+  parked.prepare("UPDATE driver_assignments SET assignment_status = 'EN_ROUTE'").run();
+  const points = [600, 420, 240, 60].map((secondsAgo) => ({ lat: 26.8737, lng: 80.9462, recordedAt: at(secondsAgo) }));
+  recordDriverLocations(parked, { assignment: assignment(parked) }, points, { now: NOW });
+  assert.equal(assessDriverLocationRisk(parked, { booking, assignment: assignment(parked), pickupAtMs, now: NOW }).reason, "NOT_MOVING");
+
+  // Moving towards pickup and on time: no alert.
+  const moving = database();
+  moving.prepare("UPDATE driver_assignments SET assignment_status = 'EN_ROUTE'").run();
+  recordDriverLocations(moving, { assignment: assignment(moving) }, [600, 300, 30].map((secondsAgo, index) => ({ lat: 26.88 - index * 0.01, lng: 80.9462, recordedAt: at(secondsAgo) })), { now: NOW });
+  assert.equal(assessDriverLocationRisk(moving, { booking, assignment: assignment(moving), pickupAtMs, now: NOW }), null);
+});

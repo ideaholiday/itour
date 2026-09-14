@@ -169,3 +169,67 @@ export function purgeExpiredDriverLocations(db, now = new Date()) {
       WHERE last_location_at IS NOT NULL AND last_location_at < ?`).run(cutoff).changes,
   }))();
 }
+
+/** Great-circle distance in metres, or null when either point is missing. */
+export function distanceMeters(from, to) {
+  const points = [from?.lat, from?.lng, to?.lat, to?.lng].map(finiteOrNull);
+  if (points.some((value) => value === null)) return null;
+  const [lat1, lng1, lat2, lng2] = points;
+  const rad = (degrees) => (degrees * Math.PI) / 180;
+  const a = Math.sin(rad(lat2 - lat1) / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(rad(lng2 - lng1) / 2) ** 2;
+  return Math.round(6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+/**
+ * Travel time from straight-line distance, for alerts and as the ETA fallback:
+ * roads are ~1.35× the straight line; city trips average ~22 km/h, regional
+ * ~40 km/h and highway runs ~55 km/h in India.
+ */
+export function estimateDrive(distanceM) {
+  if (!Number.isFinite(distanceM)) return null;
+  const roadKm = (distanceM * 1.35) / 1000;
+  const speedKmh = roadKm < 10 ? 22 : roadKm < 50 ? 40 : 55;
+  return { distanceM: Math.round(roadKm * 1000), minutes: Math.max(1, Math.ceil((roadKm / speedKmh) * 60)) };
+}
+
+/** Within this distance of pickup the driver page suggests tapping Arrived. */
+export const ARRIVAL_RADIUS_M = 150;
+export const LOCATION_RISK = Object.freeze({ watchMinutesBefore: 30, lateGraceMinutes: 10, stillWindowMinutes: 10, stillRadiusM: 150, farFromPickupM: 1_000 });
+
+/**
+ * Why a driver may miss a pickup that starts soon, from what their phone
+ * reported. Returns null when nothing looks wrong. Uses the local estimate only,
+ * so the scheduler never spends paid routing calls.
+ */
+export function assessDriverLocationRisk(db, { booking, assignment, pickupAtMs, now = new Date() }) {
+  const status = assignment?.assignment_status;
+  const minutesToPickup = Math.round((pickupAtMs - now.getTime()) / 60_000);
+  const pickupClock = new Date(pickupAtMs).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+  if (status === "ASSIGNED") {
+    return { reason: "NOT_ON_THE_WAY", detail: `Driver has not started for the ${pickupClock} IST pickup (${minutesToPickup > 0 ? `${minutesToPickup} min left` : "pickup time reached"})` };
+  }
+  if (status !== "EN_ROUTE") return null;
+  const location = telemetryFromAssignment(assignment, now);
+  if (!location || location.freshness === "LOST") {
+    return { reason: "SIGNAL_LOST", detail: location ? `Driver's live location stopped ${Math.round((now.getTime() - Date.parse(location.updated_at)) / 60_000)} min ago while on the way` : "Driver is on the way but has not shared a location" };
+  }
+  const pickup = { lat: booking.pickup_lat, lng: booking.pickup_lng };
+  const distance = distanceMeters(location, pickup);
+  if (distance !== null) {
+    const drive = estimateDrive(distance);
+    const lateBy = Math.round((now.getTime() + drive.minutes * 60_000 - pickupAtMs) / 60_000);
+    if (lateBy > LOCATION_RISK.lateGraceMinutes) {
+      return { reason: "RUNNING_LATE", detail: `Driver is about ${(drive.distanceM / 1000).toFixed(1)} km away and may be ${lateBy} min late for the ${pickupClock} IST pickup` };
+    }
+  }
+  const since = new Date(now.getTime() - LOCATION_RISK.stillWindowMinutes * 60_000).toISOString();
+  const recent = db.prepare("SELECT lat, lng, recorded_at FROM driver_location_pings WHERE assignment_id = ? AND source = 'DRIVER' AND recorded_at >= ? ORDER BY recorded_at").all(assignment.id, since);
+  const spanMinutes = recent.length > 1 ? (Date.parse(recent.at(-1).recorded_at) - Date.parse(recent[0].recorded_at)) / 60_000 : 0;
+  if (spanMinutes >= LOCATION_RISK.stillWindowMinutes - 2 && (distance === null || distance > LOCATION_RISK.farFromPickupM)) {
+    const moved = Math.max(...recent.map((point) => distanceMeters(recent[0], point)));
+    if (moved < LOCATION_RISK.stillRadiusM) {
+      return { reason: "NOT_MOVING", detail: `Driver has not moved for ${Math.round(spanMinutes)} min${distance !== null ? `, about ${(distance / 1000).toFixed(1)} km from pickup` : ""}` };
+    }
+  }
+  return null;
+}

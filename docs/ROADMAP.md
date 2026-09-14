@@ -40,7 +40,7 @@ Do not rebuild these. Extend them if asked.
 **Live driver GPS** (ADR 012), web-first:
 
 - **Phase 1 — done:** drivers share phone location from the trip link (required before "On the way"), positions stored for 30 days, real positions with Live / Delayed / Signal lost on the ops map, supplier sees the driver's last position.
-- **Phase 2 — next:** traveler tracking link with ETA (Mappls), "Arrived?" suggestion near pickup, operations alerts when a driver is far, not moving or has lost signal close to pickup.
+- **Phase 2 — done:** traveler tracking link and Track live in My Trips with Mappls ETA, "You're at the pickup point" prompt, missed-pickup alerts (not on the way, signal lost, running late, not moving).
 - **Phase 3 — only if Phase 1 gaps hurt:** Android driver app that keeps sharing while navigating (Play Store, location-permission review).
 
 Standing obligations that apply to every change:

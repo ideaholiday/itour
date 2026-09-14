@@ -20,6 +20,7 @@ export default function DriverTrip() {
   const setSharing = (value) => { sharingRef.current = value; setSharingState(value); };
   const [lastSent, setLastSent] = useState(null);
   const [locationMessage, setLocationMessage] = useState('');
+  const [distanceToPickupM, setDistanceToPickupM] = useState(null);
   const watchRef = useRef(null);
   const queueRef = useRef([]);
   const lastSentAtRef = useRef(0);
@@ -63,6 +64,7 @@ export default function DriverTrip() {
       const data = await request('/location', { points });
       lastSentAtRef.current = Date.now();
       setLastSent({ at: new Date(), accuracy: data.location?.accuracy_m ?? null });
+      setDistanceToPickupM(Number.isFinite(data.distanceToPickupM) ? data.distanceToPickupM : null);
       setLocationMessage('');
     } catch (err) {
       if (err.code === 'TRIP_NOT_TRACKABLE') { stopSharing(); return; }
@@ -133,7 +135,7 @@ export default function DriverTrip() {
   }, []);
   useEffect(() => {
     if (!session) return;
-    request('').then(data => setTrip(data.trip)).catch(err => setError(err.message));
+    request('').then(data => { setTrip(data.trip); setDistanceToPickupM(Number.isFinite(data.trip?.distanceToPickupM) ? data.trip.distanceToPickupM : null); }).catch(err => setError(err.message));
   }, [session]);
 
   // A reopened or reloaded page resumes sharing for a trip that is under way.
@@ -209,6 +211,13 @@ export default function DriverTrip() {
         </div>
       )}
 
+      {trip.acknowledgement === 'ACCEPTED' && trip.status === 'EN_ROUTE' && distanceToPickupM !== null && distanceToPickupM <= (trip.arrivalRadiusM || 150) && (
+        <div role="status" className="rounded-xl border-2 border-emerald-500 bg-emerald-50 p-4 text-emerald-950">
+          <p className="font-bold">You're at the pickup point.</p>
+          <p className="text-sm">Tap Arrived so the traveler knows you're here.</p>
+          <button type="button" disabled={busy} onClick={() => act('ARRIVED')} className="mt-3 rounded-xl bg-emerald-700 px-5 py-3 font-semibold text-white disabled:opacity-50">Arrived at pickup</button>
+        </div>
+      )}
       {trip.status !== 'COMPLETED' && <label className="block">Service note (optional)<textarea className="mt-2 w-full rounded border p-3" maxLength={1000} value={note} onChange={e => setNote(e.target.value)} /></label>}
       <div className="flex flex-wrap gap-3">
         {trip.acknowledgement === 'PENDING' && <>{button('Accept trip', 'ACCEPT')}{button('Decline trip', 'DECLINE')}</>}

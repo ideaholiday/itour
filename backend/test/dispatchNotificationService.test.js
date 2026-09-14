@@ -280,3 +280,18 @@ test("the driver reminder reuses the approved request template, and completion i
   assert.match(traveler.template.components[0].parameters[3].text, /\/bookings\?report=IH-ABC$/);
   assert.match(traveler.html, /report a problem/i);
 });
+
+test("the traveler gets a live tracking link, and a driver at risk of missing pickup alerts the supplier and operations", () => {
+  const db = database();
+  accept(db);
+  const [onTheWay] = buildDispatchMessages(db, job(db, "DISPATCH_EN_ROUTE"));
+  assert.match(onTheWay.template.components[0].parameters[3].text, /Track live: https?:\/\/.+\/track\/IH-ABC#.+/);
+  assert.match(onTheWay.html, /Track your driver live/);
+
+  const late = buildDispatchMessages(db, job(db, "DRIVER_LOCATION_RISK", { reason: "Driver is about 12.0 km away and may be 18 min late for the 09:00 IST pickup" }));
+  assert.deepEqual(roles(late), ["SUPPLIER", "STAFF"]);
+  assert.ok(late.every((m) => templateKey(m) === "TRIP_STATUS"));
+  assert.match(late[1].template.components[0].parameters[3].text, /Driver Ravi Kumar \(\+919876543210\)/);
+  const lost = buildDispatchMessages(db, job(db, "DRIVER_LOCATION_RISK", { reason: "Driver's live location stopped 7 min ago while on the way" }));
+  assert.deepEqual(roles(lost), ["SUPPLIER", "STAFF", "DRIVER"], "the driver is asked to reopen the trip page");
+});

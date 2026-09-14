@@ -151,3 +151,14 @@ This document records significant technical and product architectural decisions.
   - **Retention.** Positions are deleted after 30 days.
   - Maps never show invented positions; a trip without a reported position is marked as having none.
 - **Consequences**: Phase 1 (sharing, storage, ops and supplier views) shipped first; the traveler tracking link and alerts are Phase 2. Web tracking pauses when the page is not on screen.
+
+---
+
+## ADR 013: Traveler Tracking Link and Missed-Pickup Alerts
+- **Date**: 2026-09-14
+- **Context**: Phase 2 of ADR 012: travelers follow their driver, and operations hear about a likely missed pickup before it happens.
+- **Decision Made**:
+  - The traveler opens tracking from a signed link (booking-bound, 7 days) in the "driver on the way" and "trip started" messages, or from My Trips when signed in. No sign-in is required for the link.
+  - The ETA shown to travelers comes from Mappls driving time with live traffic (`ETA_PROVIDER=mappls`), cached for a minute per route; if Mappls fails, a local estimate is shown and marked as estimated.
+  - Missed-pickup alerts use only the local estimate, so the scheduler never spends paid routing calls.
+- **Consequences**: A trip without pickup coordinates gets no ETA, running-late or arrival prompt; it still gets not-on-the-way, signal-lost and not-moving alerts.

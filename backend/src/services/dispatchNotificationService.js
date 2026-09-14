@@ -2,6 +2,7 @@ import { sendRecipientChannels } from './notificationService.js';
 import { whatsAppTemplate } from './whatsappService.js';
 import { driverTripUrl } from './dispatchWorkflowService.js';
 import { guestDocumentLinks } from './guestDocumentService.js';
+import { trackingUrl } from './tripTrackingService.js';
 import logger from '../config/logger.js';
 
 // Dispatch WhatsApp templates. Each body is the exact text submitted to Meta as a
@@ -233,6 +234,16 @@ export function buildDispatchMessages(db, job, { now = new Date() } = {}) {
         statusMessage({ ...staff, role: String(staff.role).toUpperCase() }, event === 'PICKUP_NOT_STARTED' ? 'Pickup not started' : 'Trip completion overdue', `${reason}. Driver ${assignment.driver_name} (${assignment.driver_phone}); supplier ${booking.supplier_name || ''} (${booking.supplier_phone || 'no phone'}).`, opsLink);
       }
     }
+  } else if (event === 'DRIVER_LOCATION_RISK') {
+    // From 30 minutes before pickup: not on the way, signal lost, running late or not moving.
+    const reason = payload.reason || 'Driver may miss the pickup';
+    statusMessage(supplier, 'Driver may miss the pickup', `${reason}. Call ${assignment.driver_name} (${assignment.driver_phone}) now.`, { label: 'Open bookings', url: `${appUrl()}/supplier/bookings` });
+    for (const staff of db.prepare("SELECT id, name, email, phone, role FROM users WHERE UPPER(role) IN ('ADMIN','STAFF')").all()) {
+      statusMessage({ ...staff, role: String(staff.role).toUpperCase() }, 'Driver may miss the pickup', `${reason}. Driver ${assignment.driver_name} (${assignment.driver_phone}); supplier ${booking.supplier_name || ''} ${booking.supplier_phone || ''}`.trim(), { label: 'Open live trip board', url: `${appUrl()}/ops/live` });
+    }
+    if (/location/i.test(reason) && tripUrl) {
+      statusMessage(driver, 'Live location stopped', `Open your trip page and keep it on screen so the traveler can see you: ${tripUrl}`, { label: 'Open trip page', url: tripUrl });
+    }
   } else if (event === 'DRIVER_AUTO_ASSIGNED') {
     // The supplier learns which of its drivers was requested, so it can step in before the deadline.
     statusMessage(supplier, 'Driver auto-assigned', `${assignment.driver_name} (${vehicle}) was sent the trip request and must accept by ${formatIst(assignment.response_deadline)}.`, { label: 'Open bookings', url: `${appUrl()}/supplier/bookings` });
@@ -276,10 +287,12 @@ export function buildDispatchMessages(db, job, { now = new Date() } = {}) {
     const bookingsLink = { label: 'View booking', url: `${appUrl()}/bookings` };
     const supplierLink = { label: 'Open bookings', url: `${appUrl()}/supplier/bookings` };
     const driverName = assignment?.driver_name || 'Your driver';
-    if (event === 'DISPATCH_EN_ROUTE') statusMessage(traveler, 'Your driver is on the way', `${driverName} is heading to ${location} in ${vehicle}.`, bookingsLink);
+    // The traveler follows the driver live for the whole trip (ADR 012).
+    const trackLink = { label: 'Track your driver live', url: trackingUrl(booking, now.getTime()) };
+    if (event === 'DISPATCH_EN_ROUTE') statusMessage(traveler, 'Your driver is on the way', `${driverName} is heading to ${location} in ${vehicle}. Track live: ${trackLink.url}`, trackLink);
     if (event === 'DISPATCH_ARRIVED') statusMessage(traveler, 'Your driver has arrived', `Check number plate ${assignment?.vehicle_number} before you share your pickup OTP.`, bookingsLink);
     if (event === 'DISPATCH_TRIP_STARTED') {
-      statusMessage(traveler, 'Your trip has started', 'Pickup is verified. Have a wonderful trip.', bookingsLink);
+      statusMessage(traveler, 'Your trip has started', `Pickup is verified. Have a wonderful trip. Follow your trip live: ${trackLink.url}`, trackLink);
       statusMessage(supplier, 'Service started', `${driverName} verified the traveler pickup OTP.`, supplierLink);
     }
     if (event === 'DISPATCH_COMPLETED') {

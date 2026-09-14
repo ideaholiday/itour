@@ -420,6 +420,7 @@ verified review — see BUSINESS_RULES §9.3.
 - **`POST /action`**: `EN_ROUTE`, `ARRIVED`, `START` → `409 LOCATION_SHARING_REQUIRED` without a phone position from the last 5 minutes.
 - **`POST /location`** `{ points: [{ lat, lng, accuracy?, speed? (m/s), heading?, recordedAt? }] }` (1–20) → `{ accepted, rejected, location }`. Accepted trips in `ASSIGNED`–`TRIP_STARTED` only; bad, >1,000 m, >250 km/h, future or >6 h old points are dropped (`422` if none left); 30 requests/min per session. `GET /` includes `trip.location`.
 - Supplier `GET /api/suppliers/:id` bookings carry `driver_last_lat`, `driver_last_lng`, `driver_last_accuracy_m`, `driver_last_location_at`.
+- **`GET /api/tracking/:ref`** (traveler): `X-Tracking-Token` from the signed link (`/track/<ref>#<token>`, 7 days) or the signed-in owner; else `404`. → `{ trip: { status, driver, location (EN_ROUTE–TRIP_STARTED only), eta { minutes, distanceM, source MAPPLS|ESTIMATE|NEARBY, to PICKUP|DROP }, pickup, drop } }`. Driver `GET /` adds `pickup`, `distanceToPickupM`.
 
 ### 4.2 Circuit Management Queue
 - **`GET /api/ops/circuits`**: Lists pending multi-supplier circuit reschedule/cancellation requests.
@@ -660,13 +661,8 @@ Scoped to the caller: a traveler sees their own threads, a supplier the threads 
 ### 10.4.1 Team (`/api/admin/team`, requires `ADMIN`)
 `ADMIN` and `STAFF` users; all receive booking and operations alerts.
 - **`GET /api/admin/team`** → `{ members: [{ id, name, email, phone, role }], currentUserId }`.
-- **`POST /api/admin/team`**: `{ "name": "…", "email": "…", "phone": "+91 98765 43210", "role": "STAFF" | "ADMIN" }` → `201`
-  `{ member, temporaryPassword, promotedExistingAccount }`. A new person gets a one-time `temporaryPassword`; an existing
-  traveler account is promoted and keeps its password (`temporaryPassword: null`). `409` if already on the team or the email
-  is a supplier account; `400` if the number is not WhatsApp-deliverable. The phone is stored as `+<country><number>`.
-- **`PATCH /api/admin/team/:id`**: any of `{ name, phone, role }`. `409` when demoting yourself or the last `ADMIN`.
-- **`DELETE /api/admin/team/:id`**: revokes team access (role becomes `TRAVELER`; the account and history stay). `409` for yourself or the last `ADMIN`.
-- **`POST /api/admin/team/:id/reset-password`** → `{ member, temporaryPassword }`; the previous password stops working.
+- **`POST /api/admin/team`** `{ name, email, phone, role: STAFF|ADMIN }` → `201 { member, temporaryPassword, promotedExistingAccount }`. A traveler account is promoted (password kept, `temporaryPassword: null`); `409` if already on the team or a supplier; `400` if the phone isn't WhatsApp-deliverable (stored `+<cc><number>`).
+- **`PATCH …/:id`** `{ name?, phone?, role? }`; **`DELETE …/:id`** (role → `TRAVELER`); **`POST …/:id/reset-password`** → `{ temporaryPassword }`. `409` for yourself or the last `ADMIN`.
 
 ### 10.5 Pages and sitemap (served by `routes/seo.js`)
 - **`GET /suppliers`, `/suppliers/in/:citySlug`, `/suppliers/:slug`**: the SPA's

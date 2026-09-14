@@ -249,6 +249,10 @@ function updateDispatchStatusLocked(database, { supplierId, bookingId, nextStatu
   database.transaction(() => {
     database.prepare(`UPDATE driver_assignments SET assignment_status = ?, last_status_at = datetime('now'), ${timestampColumn} = datetime('now'), notes = ? WHERE id = ?`)
       .run(normalizedNext, note?.trim() || assignment.notes || null, assignment.id);
+    if (["ARRIVED", "TRIP_STARTED", "COMPLETED"].includes(normalizedNext)) {
+      // The driver reached pickup, so a "may miss the pickup" location alert is settled.
+      database.prepare("UPDATE staff_tasks SET status = 'COMPLETED' WHERE booking_id = ? AND task_type = 'DRIVER_LOCATION_RISK' AND status = 'OPEN'").run(bookingId);
+    }
     if (normalizedNext === "TRIP_STARTED") {
       database.prepare("UPDATE bookings SET status = 'in_progress' WHERE id = ?").run(bookingId);
       database.prepare("UPDATE staff_tasks SET status = 'COMPLETED' WHERE booking_id = ? AND task_type = 'PICKUP_NOT_STARTED' AND status = 'OPEN'").run(bookingId);

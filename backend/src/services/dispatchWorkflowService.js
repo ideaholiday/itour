@@ -1,7 +1,7 @@
 import { randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { assignDriverToBooking, bookingWindow, bookingWithDuration, getFleetAvailability, updateDispatchStatus, verifyPickupOtp } from './driverDispatchService.js';
-import { assertDriverSharingLocation } from './driverLocationService.js';
+import { assertDriverSharingLocation, assessDriverLocationRisk, LOCATION_RISK } from './driverLocationService.js';
 import { dispatchTransaction, scheduleKey, departureKey, enqueueDispatch, revokeAssignment, isCancelledBooking } from './dispatchStateService.js';
 
 const active = b => b.payment_status === 'PAID' && ['confirmed', 'driver_assigned'].includes(String(b.status).toLowerCase()) && ['SUPPLIER_ACCEPTED','LEGACY_ASSIGNED','MANUAL_ASSIGNED','AUTO_REALLOCATED','RESCHEDULE_RECONFIRMED'].includes(b.supplier_assignment_status || 'LEGACY_ASSIGNED');
@@ -157,6 +157,10 @@ export function processTripWatch(db, { now = new Date(), supplierId = null } = {
       else if (at >= window.end + TRIP_WATCH.overdueHours * 3600000) raise('TRIP_COMPLETION_OVERDUE', 'TRIP_OVERDUE', 'END+2', 'HIGH', `Trip still open ${TRIP_WATCH.overdueHours} hours after its expected end: driver to mark it complete`);
     } else if (at >= window.start + TRIP_WATCH.notStartedMinutes * 60000) {
       raise('PICKUP_NOT_STARTED', 'PICKUP_NOT_STARTED', 'START+1', 'CRITICAL', `Pickup not started ${TRIP_WATCH.notStartedMinutes} minutes after pickup time (driver status: ${assignment.assignment_status.replaceAll('_', ' ').toLowerCase()})`);
+    } else if (at >= window.start - LOCATION_RISK.watchMinutesBefore * 60000) {
+      // From 30 minutes before pickup, the driver's live location says whether they will make it (ADR 012).
+      const risk = assessDriverLocationRisk(db, { booking, assignment, pickupAtMs: window.start, now });
+      if (risk) raise('DRIVER_LOCATION_RISK', 'DRIVER_LOCATION_RISK', `LOC-${risk.reason}`, 'HIGH', risk.detail);
     }
   }
   return { checked: rows.length, alerts };
@@ -325,7 +329,7 @@ export function driverAction(db, context, { action, otp, note }, now = new Date(
 }
 
 // Open "assign manually" work, most urgent pickup first, with what each needs next.
-export const TRIP_ISSUE_TASK_TYPES = Object.freeze(['PICKUP_NOT_STARTED', 'TRIP_COMPLETION_OVERDUE']);
+export const TRIP_ISSUE_TASK_TYPES = Object.freeze(['PICKUP_NOT_STARTED', 'TRIP_COMPLETION_OVERDUE', 'DRIVER_LOCATION_RISK']);
 
 export function listDispatchExceptions(db, { supplierId = null, now = new Date(), taskTypes = ['DRIVER_ASSIGNMENT_REQUIRED'] } = {}) {
   const rows = db.prepare(`SELECT t.id, t.task_type, t.booking_id, t.priority, t.notes, t.status, t.created_at, t.assigned_staff_name,
@@ -377,6 +381,7 @@ function isObsoleteDispatchJob(job, booking, assignment) {
   if (['DRIVER_REQUEST', 'DRIVER_REQUEST_REMINDER', 'DRIVER_AUTO_ASSIGNED'].includes(job.event_type) && assignment?.acknowledgement !== 'PENDING') return true;
   if (['TRIP_OVERDUE', 'TRIP_OVERDUE_OPS'].includes(job.event_type) && assignment?.assignment_status !== 'TRIP_STARTED') return true;
   if (job.event_type === 'PICKUP_NOT_STARTED' && !['ASSIGNED', 'EN_ROUTE', 'ARRIVED'].includes(assignment?.assignment_status)) return true;
+  if (job.event_type === 'DRIVER_LOCATION_RISK' && !['ASSIGNED', 'EN_ROUTE'].includes(assignment?.assignment_status)) return true;
   if (['PRE_TRIP_REMINDER', 'DRIVER_PICKUP_REMINDER'].includes(job.event_type) && ['in_progress', 'completed'].includes(String(booking.status).toLowerCase())) return true;
   if (job.event_type === 'DRIVER_PICKUP_REMINDER' && assignment?.assignment_status !== 'ASSIGNED') return true;
   // An accepted driver makes an unassigned alert stale; the accepted revision queues its own reminder.

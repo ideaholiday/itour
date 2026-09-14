@@ -137,17 +137,20 @@ function TripOverride({ task, onDone }) {
 
 function TripIssueCard({ task, supplierId, onSelect, onChanged }) {
   const late = task.task_type === 'PICKUP_NOT_STARTED';
+  // Live GPS says the driver may miss pickup (ADR 012): call them; nothing to override yet.
+  const atRisk = task.task_type === 'DRIVER_LOCATION_RISK';
   return <article className={`mt-3 rounded-xl border p-3 text-sm ${task.priority === 'CRITICAL' ? 'border-rose-300 bg-rose-50/60' : 'border-amber-200 bg-amber-50/60'}`}>
     <div className="flex flex-wrap items-center gap-2">
       <strong className="font-mono">{task.ref}</strong>
-      <span className="rounded-full bg-rose-700 px-2 py-0.5 text-[10px] font-black uppercase text-white">{late ? 'Pickup not started' : 'Completion overdue'}</span>
+      <span className="rounded-full bg-rose-700 px-2 py-0.5 text-[10px] font-black uppercase text-white">{atRisk ? 'Driver may miss pickup' : late ? 'Pickup not started' : 'Completion overdue'}</span>
     </div>
     <p className="mt-1 text-xs text-stone-700">{task.product_title || 'Trip'} · pickup {istTime(task.pickup_at)} IST · {task.pickup_location}</p>
     {!supplierId && <p className="text-xs text-stone-600">Supplier: {task.supplier_name || task.supplier_id}{task.supplier_phone && <> · <a className="underline" href={`tel:${task.supplier_phone}`}>{task.supplier_phone}</a></>}</p>}
     <p className="mt-1 text-xs font-semibold text-stone-800">{task.notes}</p>
     {task.driver_name && <p className="text-xs text-stone-700">Driver {task.driver_name} · <a className="underline" href={`tel:${task.driver_phone}`}>{task.driver_phone}</a> · {task.vehicle_number} · status {String(task.assignment_status || '').replaceAll('_', ' ').toLowerCase()}</p>}
     <div className="mt-2 flex flex-wrap gap-2">
-      {!supplierId && <TripOverride task={task} onDone={onChanged} />}
+      {!supplierId && !atRisk && <TripOverride task={task} onDone={onChanged} />}
+      {!supplierId && atRisk && <a className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-bold" href="/ops/live">Open live map</a>}
       {supplierId && onSelect && <button type="button" className="rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-xs font-bold" onClick={() => onSelect(task.booking_id)}>Open booking</button>}
     </div>
     <TimelineToggle supplierId={supplierId} bookingId={task.booking_id} />

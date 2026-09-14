@@ -67,5 +67,22 @@ test("a driver must share phone location to go on the way, and operations then s
     await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/ops-live-driver.png` });
     await driverPage.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/driver-page.png`, fullPage: true });
   }
+
+  // The traveler follows the driver live from My Trips.
+  const travelerContext = await browser.newContext();
+  const travelerPage = await travelerContext.newPage();
+  await loginThroughUi(travelerPage, { email: booking.email, password: "BrowserTraveler@2026" }, "/bookings");
+  await travelerPage.getByRole("link", { name: "Track live" }).first().click();
+  await expect(travelerPage).toHaveURL(new RegExp(`/track/${booking.ref}$`));
+  await expect(travelerPage.getByRole("heading", { name: "Ravi Kumar is on the way" })).toBeVisible();
+  await expect(travelerPage.getByText("GA-03-AB-1234")).toBeVisible();
+  await expect(travelerPage.getByText(/Location updated/)).toBeVisible();
+  await expect(travelerPage.getByRole("link", { name: "Call driver" })).toHaveAttribute("href", "tel:+919812345678");
+  if (process.env.E2E_SCREENSHOT_DIR) {
+    await expect(travelerPage.locator("img.leaflet-tile-loaded").first()).toBeVisible({ timeout: 20_000 });
+    await travelerPage.setViewportSize({ width: 412, height: 915 });
+    await travelerPage.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/traveler-tracking.png`, fullPage: true });
+  }
+  await travelerContext.close();
   await allowed.close();
 });

@@ -152,7 +152,8 @@ Idea Holiday booking {{1}} needs a driver assignment. Service: {{2}}. Scheduled 
 ### 3.4 Geocoding & Supabase
 | Variable | Required? | Example Placeholder | Purpose |
 | :--- | :--- | :--- | :--- |
-| `MAPPLS_API_KEY` | Optional | `<mappls-api-key>` | Mappls MapmyIndia search key. |
+| `MAPPLS_API_KEY` | Optional | `<mappls-api-key>` | Mappls MapmyIndia search key; also used for traveler ETA when `ETA_PROVIDER=mappls`. |
+| `ETA_PROVIDER` | Optional | `mappls` | Traveler tracking ETA from Mappls driving time with live traffic (cached a minute per route). Unset: a local estimate. Alerts always use the local estimate. Production sets `mappls`. |
 | `SUPABASE_URL` | Optional | `https://<id>.supabase.co` | Supabase Cloud project URL. |
 | `SUPABASE_ANON_KEY` | Optional | `<supabase-anon-key>` | Supabase anonymous public key. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional | `<supabase-service-key>`| Supabase backend service role key. |

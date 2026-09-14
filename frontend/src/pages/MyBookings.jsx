@@ -709,6 +709,14 @@ export default function MyBookings() {
                                 " "
                               )}
                             </span>
+                            {["ASSIGNED", "EN_ROUTE", "ARRIVED", "TRIP_STARTED"].includes(String(booking.assignment_status || "").toUpperCase()) && (
+                              <Link
+                                to={`/track/${encodeURIComponent(booking.ref)}`}
+                                className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-600 bg-white px-3 py-1.5 font-bold text-emerald-800 shadow-sm hover:bg-emerald-50"
+                              >
+                                <MapPin className="h-3.5 w-3.5" /> Track live
+                              </Link>
+                            )}
                             <a
                               href={`tel:${booking.driver_phone}`}
                               className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-1.5 font-bold text-white shadow-sm hover:bg-emerald-700"

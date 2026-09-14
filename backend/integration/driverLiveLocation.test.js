@@ -4,6 +4,7 @@ import { test } from "node:test";
 import Database from "better-sqlite3";
 import { requestJson, startTestServer } from "./helpers/serverHarness.js";
 import { hashPassword } from "../src/lib/passwords.js";
+import { createTrackingToken } from "../src/services/tripTrackingService.js";
 
 /**
  * Live driver location over HTTP (ADR 012): a driver can't go "On the way"
@@ -12,6 +13,7 @@ import { hashPassword } from "../src/lib/passwords.js";
  */
 
 const JWT_SECRET = "integration-jwt-secret-with-at-least-32-characters";
+const DOCUMENT_LINK_SECRET = "integration-document-link-secret-32-characters";
 const SUPPLIER = { email: "multisolution33@gmail.com", password: "Idea@2026" };
 const STAFF = { email: "gps.staff@example.test", password: "Integration@Staff2026" };
 
@@ -27,7 +29,8 @@ function driverLinkToken(assignment) {
 }
 
 test("drivers share live location before going on the way, and operations and the supplier see it", async (t) => {
-  const api = await startTestServer();
+  const api = await startTestServer({ DOCUMENT_LINK_SECRET });
+  process.env.DOCUMENT_LINK_SECRET = DOCUMENT_LINK_SECRET;
   t.after(() => api.stop());
   const db = new Database(api.databasePath);
   t.after(() => db.close());
@@ -96,6 +99,23 @@ test("drivers share live location before going on the way, and operations and th
   assert.equal(onTheWay.response.status, 200, JSON.stringify(onTheWay.data));
   const tripView = await requestJson(api.baseUrl, "/api/driver-trips", { token: driverToken });
   assert.equal(tripView.data.trip.location.lat, 15.5449);
+  assert.equal(tripView.data.trip.arrivalRadiusM, 150);
+
+  // The traveler follows the driver: by the signed link, or signed in; nobody else.
+  const ref = booking.data.ref;
+  const bookingRow = db.prepare("SELECT id, ref FROM bookings WHERE id = ?").get(booking.data.bookingId);
+  assert.equal((await requestJson(api.baseUrl, `/api/tracking/${ref}`)).response.status, 404);
+  assert.equal((await requestJson(api.baseUrl, `/api/tracking/${ref}`, { token: supplier.token })).response.status, 404, "a supplier uses its own bookings view");
+  const byLink = await requestJson(api.baseUrl, `/api/tracking/${ref}`, { headers: { "X-Tracking-Token": createTrackingToken(bookingRow) } });
+  assert.equal(byLink.response.status, 200, JSON.stringify(byLink.data));
+  assert.equal(byLink.data.trip.status, "EN_ROUTE");
+  assert.equal(byLink.data.trip.location.lat, 15.5449);
+  assert.equal(byLink.data.trip.driver.vehicleNumber, "GA-03-AB-1234");
+  const otherBookingLink = createTrackingToken({ id: "bk_someone_else", ref });
+  assert.equal((await requestJson(api.baseUrl, `/api/tracking/${ref}`, { headers: { "X-Tracking-Token": otherBookingLink } })).response.status, 404);
+  const signedIn = await requestJson(api.baseUrl, `/api/tracking/${ref.toLowerCase()}`, { token: traveler.data.token });
+  assert.equal(signedIn.response.status, 200);
+  assert.equal(signedIn.data.trip.driver.name, "Ravi Kumar");
 
   // Operations see the real position and the trail.
   db.prepare("INSERT INTO users (id, name, email, password, phone, role) VALUES ('usr_gps_staff', 'GPS Staff', ?, ?, '+919800000001', 'STAFF')").run(STAFF.email, hashPassword(STAFF.password));

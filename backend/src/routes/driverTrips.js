@@ -5,7 +5,9 @@ import { z } from 'zod';
 import db from '../db.js';
 import { validateBody } from '../middleware/validation.js';
 import { authenticateDriver, exchangeDriverLink, driverAction } from '../services/dispatchWorkflowService.js';
-import { latestDriverLocation, MAX_POINTS_PER_BATCH, recordDriverLocations } from '../services/driverLocationService.js';
+import { ARRIVAL_RADIUS_M, distanceMeters, latestDriverLocation, MAX_POINTS_PER_BATCH, recordDriverLocations } from '../services/driverLocationService.js';
+
+const pickupPoint = (b) => (b.pickup_lat == null || b.pickup_lng == null ? null : { lat: Number(b.pickup_lat), lng: Number(b.pickup_lng) });
 
 const router = express.Router();
 // Location uploads are limited per trip session instead: many phones share one carrier IP.
@@ -28,6 +30,8 @@ router.get('/', (req, res) => {
     passengers: Number(b.adults || 0) + Number(b.children || 0), driverName: a.driver_name, vehicleModel: a.vehicle_model, vehicleNumber: a.vehicle_number,
     acknowledgement: a.acknowledgement, responseDeadline: a.response_deadline, status: a.assignment_status, completedAt: a.completed_at,
     location: latestDriverLocation(db, a.id),
+    pickup: pickupPoint(b), arrivalRadiusM: ARRIVAL_RADIUS_M,
+    distanceToPickupM: distanceMeters(latestDriverLocation(db, a.id), pickupPoint(b)),
   } });
 });
 router.post('/action', validateBody(z.object({ action: z.enum(['ACCEPT','DECLINE','EN_ROUTE','ARRIVED','START','COMPLETE']), otp: z.string().regex(/^\d{4,6}$/).optional(), note: z.string().max(1000).optional() }).strict()), (req, res) => {
@@ -41,7 +45,7 @@ router.post('/location', locationLimit, validateBody(z.object({ points: z.array(
 }).strict()).min(1).max(MAX_POINTS_PER_BATCH) }).strict()), (req, res) => {
   try {
     const result = recordDriverLocations(db, req.driverTrip, req.body.points);
-    res.json({ success: true, accepted: result.accepted, rejected: result.rejected, location: result.latest });
+    res.json({ success: true, accepted: result.accepted, rejected: result.rejected, location: result.latest, distanceToPickupM: distanceMeters(result.latest, pickupPoint(req.driverTrip.booking)) });
   } catch (err) { res.status(err.status || 500).json({ error: err.message, code: err.code }); }
 });
 export default router;
