@@ -524,18 +524,37 @@ export function validateBookingLocations(db, input, { requireOperationalDetails 
   return { valid: true, pickup: routeResult.pickup, drop: routeResult.drop, needsOpsReview: Boolean(routeResult.needsOpsReview), productType: context.product.product_type };
 }
 
-export function getPickupSuggestions(db, productId, side, searchQuery = "") {
+/**
+ * Everything pickup suggestions read from the database for one product: its
+ * location context and the active canonical locations (null before migration 014).
+ * Loaded once so a caller can reuse it across keystrokes.
+ */
+export function loadPickupSuggestionSource(db, productId) {
   const context = getProductLocationContext(db, productId);
-  if (!context) return [];
+  if (!context) return null;
+  let locations = null;
+  try {
+    locations = db.prepare("SELECT * FROM canonical_locations WHERE (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").all();
+  } catch {
+    // Handled in filterPickupSuggestions.
+  }
+  return { productId, context, locations };
+}
+
+export function getPickupSuggestions(db, productId, side, searchQuery = "") {
+  return filterPickupSuggestions(loadPickupSuggestionSource(db, productId), side, searchQuery);
+}
+
+export function filterPickupSuggestions(source, side, searchQuery = "") {
+  if (!source) return [];
+  const { productId, context } = source;
   const normalizedSide = String(side || "PICKUP").toUpperCase();
   const rule = context.rules.find((entry) => String(entry.rule_side).toUpperCase() === normalizedSide);
   if (!rule) return [];
   const query = normalized(searchQuery);
   const allowedTypes = parseJson(rule.allowed_location_types).map((type) => String(type).toUpperCase());
-  let rows;
-  try {
-    rows = db.prepare("SELECT * FROM canonical_locations WHERE (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").all();
-  } catch {
+  let rows = source.locations;
+  if (!rows) {
     // Before migration 014 is applied, expose the route's own anchor as a
     // safe, product-scoped suggestion rather than failing the endpoint.
     if (context.route) {

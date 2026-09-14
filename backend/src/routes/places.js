@@ -19,6 +19,27 @@ const NOMINATIM_USER_AGENT = process.env.NOMINATIM_USER_AGENT || "IdeaHoliday/1.
 // Rough India bounding box (minLon,minLat,maxLon,maxLat) used to bias/limit OSM results.
 const INDIA_BBOX = "68,6,98,38";
 
+// Autocomplete fires on every pause in typing, and many travelers search the same
+// hotels and airports. Ola answers are kept for 10 minutes per query and area.
+const AUTOCOMPLETE_CACHE_TTL_MS = 10 * 60_000;
+const AUTOCOMPLETE_CACHE_MAX_ENTRIES = 2000;
+const autocompleteCache = new Map();
+
+function cachedAutocomplete(key) {
+  const entry = autocompleteCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    autocompleteCache.delete(key);
+    return null;
+  }
+  return entry.suggestions;
+}
+
+function rememberAutocomplete(key, suggestions) {
+  if (autocompleteCache.size >= AUTOCOMPLETE_CACHE_MAX_ENTRIES) autocompleteCache.delete(autocompleteCache.keys().next().value);
+  autocompleteCache.set(key, { suggestions, expiresAt: Date.now() + AUTOCOMPLETE_CACHE_TTL_MS });
+}
+
 function getProvider() {
   const configured = String(process.env.PLACES_PROVIDER || "").trim().toLowerCase();
   if (["ola", "mappls", "osm"].includes(configured)) return configured;
@@ -192,6 +213,14 @@ router.get("/places", async (req, res) => {
     if (!olaMapsConfigured()) {
       return res.status(503).json({ success: false, suggestions: [], code: "OLA_MAPS_NOT_CONFIGURED", error: "Location search is not configured. Use your current location or set the pin on the map." });
     }
+    const context = String(req.query.context || "").slice(0, 160);
+    // Bias rounded to ~1 km so nearby pins share cache entries.
+    const cacheKey = [query.toLowerCase(), hasBias ? biasLat.toFixed(2) : "", hasBias ? biasLng.toFixed(2) : "", context.toLowerCase()].join("|");
+    const cached = cachedAutocomplete(cacheKey);
+    if (cached) {
+      res.set("Cache-Control", "private, max-age=300");
+      return res.json({ success: true, suggestions: cached, provider: "ola" });
+    }
     try {
       const places = await autocompletePlaces(query.slice(0, 80), { lat: hasBias ? biasLat : null, lng: hasBias ? biasLng : null });
       const seen = new Set();
@@ -205,11 +234,12 @@ router.get("/places", async (req, res) => {
         .map(({ types, ...place }) => place);
       const suggestions = rankSuggestions(normalized, {
         query,
-        context: String(req.query.context || "").slice(0, 160),
+        context,
         lat: hasBias ? biasLat : null,
         lng: hasBias ? biasLng : null,
       }).slice(0, 8);
 
+      rememberAutocomplete(cacheKey, suggestions);
       res.set("Cache-Control", "private, max-age=300");
       return res.json({ success: true, suggestions, provider: "ola" });
     } catch (error) {

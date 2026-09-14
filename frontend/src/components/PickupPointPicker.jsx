@@ -82,6 +82,7 @@ export default function PickupPointPicker({
   const [message, setMessage] = useState("");
   const [recentPlaces, setRecentPlaces] = useState(loadRecentPlaces);
   const [provider, setProvider] = useState("");
+  const searchCacheRef = useRef(new Map());
   const pointLabel = kind === "dropoff" ? "drop-off" : "pickup";
 
   useEffect(() => {
@@ -115,49 +116,75 @@ export default function PickupPointPicker({
       return;
     }
 
+    const params = new URLSearchParams({ query });
+    const bias = searchBiasRef.current;
+    if (Number.isFinite(bias.lat) && Number.isFinite(bias.lng)) {
+      params.set("lat", String(bias.lat));
+      params.set("lng", String(bias.lng));
+    }
+    // A new booking has no selected pickup/drop-off to bias the first
+    // search. Fall back to the booked product's destination so matching
+    // hotels and places in that city are ranked ahead of other cities.
+    const context = bias.address || searchContext;
+    if (context) params.set("context", context);
+
+    // Backspacing or retyping a query shows its earlier answer at once.
+    const cacheKey = `${productId || ""}|${validationSide}|${params}`;
+    const cached = searchCacheRef.current.get(cacheKey);
+    if (cached) {
+      setSuggestions(cached.suggestions);
+      if (cached.provider) setProvider(cached.provider);
+      setActiveIndex(-1);
+      setSearching(false);
+      setMessage("");
+      return;
+    }
+
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setSearching(true);
       setMessage("");
       try {
-        if (productId) {
-          const scopedResponse = await fetch(`/api/activities/${encodeURIComponent(productId)}/pickup-suggestions?side=${encodeURIComponent(validationSide)}&q=${encodeURIComponent(query)}`, { signal: controller.signal });
-          const scopedData = await scopedResponse.json().catch(() => ({}));
-          // The scoped endpoint only searches a small curated list of
-          // canonical anchors (airports, stations, hotel zones). When it has
-          // no match for what the traveler typed, fall through to the
-          // general address search below instead of leaving them stuck with
-          // an empty dropdown for a real hotel/address that just isn't in
-          // that curated list.
-          if (scopedResponse.ok && (scopedData.suggestions || []).length > 0) {
-            setSuggestions((scopedData.suggestions || []).map((place) => ({
+        // The scoped endpoint only searches a small curated list of
+        // canonical anchors (airports, stations, hotel zones). When it has
+        // no match for what the traveler typed, fall through to the
+        // general address search instead of leaving them stuck with
+        // an empty dropdown for a real hotel/address that just isn't in
+        // that curated list. Both requests start together so a miss costs
+        // no extra round trip.
+        const scopedRequest = productId
+          ? fetch(`/api/activities/${encodeURIComponent(productId)}/pickup-suggestions?side=${encodeURIComponent(validationSide)}&q=${encodeURIComponent(query)}`, { signal: controller.signal })
+            .then(async (response) => (response.ok ? (await response.json().catch(() => ({}))).suggestions || [] : []))
+            .catch((error) => { if (error.name === "AbortError") throw error; return []; })
+          : Promise.resolve([]);
+        const generalRequest = fetch(`/api/places?${params}`, { signal: controller.signal })
+          .then(async (response) => ({ response, data: await response.json().catch(() => ({})) }));
+        // Keep the general request's rejection handled while the scoped one is awaited.
+        generalRequest.catch(() => {});
+
+        const scoped = await scopedRequest;
+        let result;
+        if (scoped.length > 0) {
+          result = {
+            suggestions: scoped.map((place) => ({
               id: place.id,
               label: place.name,
               description: place.displayHint || `${place.city}, ${place.state}`,
               category: String(place.type || "Location").replaceAll("_", " "),
               lat: Number(place.lat),
               lng: Number(place.lng),
-            })));
-            setActiveIndex(-1);
-            return;
-          }
+            })),
+            provider: "",
+          };
+        } else {
+          const { response, data } = await generalRequest;
+          if (!response.ok) throw new Error(data.error || "Location search is unavailable.");
+          result = { suggestions: data.suggestions || [], provider: data.provider || "" };
         }
-        const params = new URLSearchParams({ query });
-        const bias = searchBiasRef.current;
-        if (Number.isFinite(bias.lat) && Number.isFinite(bias.lng)) {
-          params.set("lat", String(bias.lat));
-          params.set("lng", String(bias.lng));
-        }
-        // A new booking has no selected pickup/drop-off to bias the first
-        // search. Fall back to the booked product's destination so matching
-        // hotels and places in that city are ranked ahead of other cities.
-        const context = bias.address || searchContext;
-        if (context) params.set("context", context);
-        const response = await fetch(`/api/places?${params}`, { signal: controller.signal });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || "Location search is unavailable.");
-        setSuggestions(data.suggestions || []);
-        if (data.provider) setProvider(data.provider);
+        if (searchCacheRef.current.size >= 100) searchCacheRef.current.delete(searchCacheRef.current.keys().next().value);
+        searchCacheRef.current.set(cacheKey, result);
+        setSuggestions(result.suggestions);
+        if (result.provider) setProvider(result.provider);
         setActiveIndex(-1);
       } catch (error) {
         if (error.name !== "AbortError") {
@@ -167,7 +194,7 @@ export default function PickupPointPicker({
       } finally {
         if (!controller.signal.aborted) setSearching(false);
       }
-    }, 300);
+    }, 250);
 
     return () => {
       controller.abort();

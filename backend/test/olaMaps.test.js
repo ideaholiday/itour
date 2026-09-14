@@ -110,6 +110,10 @@ test("map tile proxy serves Ola tiles, validates coordinates and falls back to O
   assert.equal(tile.status, 200);
   assert.equal(tile.headers.get("content-type"), "image/png");
   assert.deepEqual(new Uint8Array(await tile.arrayBuffer()), png);
+  const tileCalls = () => ola.calls.filter((call) => call.url.pathname.startsWith("/tiles/")).length;
+  const again = await request("/api/tiles/12/2968/1715.png");
+  assert.deepEqual(new Uint8Array(await again.arrayBuffer()), png);
+  assert.equal(tileCalls(), 1, "a repeated tile is served from memory");
   assert.equal((await request("/api/tiles/3/8/0.png")).status, 400, "x outside the zoom level");
   assert.equal((await request("/api/tiles/20/0/0.png")).status, 400, "zoom above the maximum");
   assert.equal((await request("/api/tiles/12/1/1.png")).status, 404, "upstream 404 passes through");
@@ -137,6 +141,12 @@ test("places routes answer from Ola when its credentials are configured", async 
   assert.equal(search.provider, "ola");
   assert.equal(search.suggestions[0].id, "ola-platform:5000328387055");
   assert.equal(search.suggestions[0].category, "Airports");
+  const autocompleteCalls = () => ola.calls.filter((call) => call.url.pathname === "/places/v1/autocomplete").length;
+  const repeat = await (await request("/api/places?query=Lucknow%20Airport")).json();
+  assert.deepEqual(repeat.suggestions, search.suggestions);
+  assert.equal(autocompleteCalls(), 1, "a repeated query is answered from the cache");
+  await request("/api/places?query=lucknow%20airport&lat=26.85&lng=80.95");
+  assert.equal(autocompleteCalls(), 2, "a different search area asks Ola again");
 
   const resolved = await (await request("/api/places/resolve?placeId=ola-platform:5000328387055")).json();
   assert.deepEqual([resolved.location.lat, resolved.location.lng, resolved.location.address], [26.764725, 80.878551, "Amausi, Lucknow, Uttar Pradesh 226008"]);

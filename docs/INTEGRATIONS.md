@@ -134,6 +134,7 @@ The location provider for India (ADR 015): base-map tiles for every Leaflet map,
 - **Places**: `/places/v1/autocomplete`, `/details`, `/geocode`, `/reverse-geocode`.
 - **ETA**: `/routing/v1/distanceMatrix/basic` (road distance and time).
 - The project API key is domain-restricted and is not used; the server uses OAuth only.
+- **In-memory caches** (per Cloud Run instance): autocomplete answers 10 min per query, area (~1 km) and context, up to 2,000; tiles a day, up to 2,000 (~40 MB). The checkout picker also starts the product-scoped `pickup-suggestions` lookup and `/api/places` together, and that lookup reads a product's location rules once a minute.
 - Transfer fares do **not** use Ola road distance; they keep the straight-line × 1.25 formula (ADR 015).
 
 ### Endpoints we expose

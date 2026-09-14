@@ -2,7 +2,7 @@ import { Router } from "express";
 import { isProfileVisible, profilePath } from "../services/supplierProfileService.js";
 import db from "../db.js";
 import logger from "../config/logger.js";
-import { getPickupSuggestions, getProductLocationContext, validatePickupPoint } from "../services/locationValidationService.js";
+import { filterPickupSuggestions, getProductLocationContext, loadPickupSuggestionSource, validatePickupPoint } from "../services/locationValidationService.js";
 import { validateBody } from "../middleware/validation.js";
 import { locationSchemas } from "../validators/apiSchemas.js";
 import { ensureDefaultProductOption, getBookingQuestions, getProductOptions } from "../services/logisticsService.js";
@@ -425,13 +425,32 @@ router.get("/activities", (req, res) => {
   }
 });
 
+// Suggestions fire on every keystroke; the product's location rules and the
+// canonical locations are read once a minute per product, then filtered in memory.
+// Booking validation always reads the database directly.
+const SUGGESTION_SOURCE_TTL_MS = 60_000;
+const SUGGESTION_SOURCE_MAX_ENTRIES = 500;
+const suggestionSourceCache = new Map();
+
+function pickupSuggestionSource(productId) {
+  const now = Date.now();
+  const cached = suggestionSourceCache.get(productId);
+  if (cached && cached.expiresAt > now) return cached.source;
+  const product = db.prepare(`SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1 AND ${approvedSupplierSql("products")}`).get(productId);
+  const source = product ? loadPickupSuggestionSource(db, productId) : null;
+  if (!source) return null;
+  if (suggestionSourceCache.size >= SUGGESTION_SOURCE_MAX_ENTRIES) suggestionSourceCache.delete(suggestionSourceCache.keys().next().value);
+  suggestionSourceCache.set(productId, { source, expiresAt: now + SUGGESTION_SOURCE_TTL_MS });
+  return source;
+}
+
 function sendSuggestions(req, res) {
   try {
-    const product = db.prepare(`SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1 AND ${approvedSupplierSql("products")}`).get(req.params.id);
-    if (!product) return res.status(404).json({ error: "Product not found", code: "PRODUCT_NOT_FOUND", requestId: req.requestId });
+    const source = pickupSuggestionSource(req.params.id);
+    if (!source) return res.status(404).json({ error: "Product not found", code: "PRODUCT_NOT_FOUND", requestId: req.requestId });
     const side = String(req.query.side || req.body?.side || "PICKUP").toUpperCase();
     const query = String(req.query.q || req.body?.q || "").slice(0, 100);
-    const suggestions = getPickupSuggestions(db, req.params.id, side, query);
+    const suggestions = filterPickupSuggestions(source, side, query);
     res.json({ success: true, suggestions });
   } catch (error) {
     logger.error("Product pickup suggestions failed", { requestId: req.requestId, error });
