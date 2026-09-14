@@ -7,7 +7,7 @@ REGION="us-central1"
 SERVICE_NAME="idea-holiday-marketplace"
 # Live Cashfree credentials come only from Secret Manager, never from a local
 # backend/.env (which holds sandbox keys for development).
-DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest,ASSIGNMENT_SCHEDULER_TOKEN=idea-holiday-assignment-scheduler-token:latest,CASHFREE_APP_ID=idea-holiday-cashfree-app-id:latest,CASHFREE_SECRET_KEY=idea-holiday-cashfree-secret-key:latest,CASHFREE_SECUREID_PUBLIC_KEY=idea-holiday-cashfree-secureid-public-key:latest"
+DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest,ASSIGNMENT_SCHEDULER_TOKEN=idea-holiday-assignment-scheduler-token:latest,CASHFREE_APP_ID=idea-holiday-cashfree-app-id:latest,CASHFREE_SECRET_KEY=idea-holiday-cashfree-secret-key:latest,CASHFREE_SECUREID_PUBLIC_KEY=idea-holiday-cashfree-secureid-public-key:latest,WHATSAPP_APP_SECRET=idea-holiday-whatsapp-app-secret:latest,WHATSAPP_WEBHOOK_VERIFY_TOKEN=idea-holiday-whatsapp-webhook-verify-token:latest"
 
 if [ -f "backend/.env" ]; then
   source backend/.env
@@ -36,7 +36,7 @@ for key in \
   WHATSAPP_CLOUD_API_ENABLED WHATSAPP_API_VERSION WHATSAPP_BASE_URL \
   WHATSAPP_PHONE_NUMBER_ID WHATSAPP_BUSINESS_ACCOUNT_ID WHATSAPP_ACCESS_TOKEN \
   WHATSAPP_DEFAULT_COUNTRY_CODE WHATSAPP_SENDER_PHONE WHATSAPP_TIMEOUT \
-  WHATSAPP_APP_SECRET WHATSAPP_WEBHOOK_VERIFY_TOKEN WHATSAPP_TEMPLATE_LANGUAGE \
+  WHATSAPP_TEMPLATE_LANGUAGE \
   WHATSAPP_TEMPLATE_BOOKING_CONFIRMED WHATSAPP_TEMPLATE_BOOKING_DOCUMENTS \
   WHATSAPP_TEMPLATE_SUPPLIER_ASSIGNMENT WHATSAPP_TEMPLATE_SUPPLIER_ACCEPTED \
   WHATSAPP_TEMPLATE_DRIVER_ASSIGNED WHATSAPP_TEMPLATE_DRIVER_TRIP \

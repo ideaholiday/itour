@@ -106,3 +106,25 @@ test("request boundary blocks prototype keys without echoing payloads", () => {
   assert.equal(res.payload.code, "VALIDATION_ERROR");
   assert.equal(JSON.stringify(res.payload).includes("must-not-leak"), false);
 });
+
+test("request boundary accepts Meta's failed-delivery WhatsApp status payload", () => {
+  const body = { object: "whatsapp_business_account", entry: [{ id: "1", changes: [{ field: "messages", value: {
+    messaging_product: "whatsapp",
+    statuses: [{ id: "wamid.X", status: "failed", errors: [{ code: 131047, title: "Re-engagement message",
+      error_data: { details: "Message failed to send because more than 24 hours have passed" } }] }],
+  } }] }] };
+  const res = response();
+  let nextCalled = false;
+  requestBoundary({ body, query: {}, requestId: "req-meta", method: "POST", originalUrl: "/api/webhooks/whatsapp" }, res, () => { nextCalled = true; });
+  assert.equal(nextCalled, true);
+});
+
+test("request boundary still rejects absurdly deep nesting", () => {
+  let body = { leaf: "x" };
+  for (let i = 0; i < 20; i += 1) body = { child: body };
+  const res = response();
+  let nextCalled = false;
+  requestBoundary({ body, query: {}, requestId: "req-deep", method: "POST", originalUrl: "/api/test" }, res, () => { nextCalled = true; });
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 400);
+});
