@@ -100,6 +100,7 @@ import adminRouter from "./routes/admin.js";
 import opsRouter from "./routes/ops.js";
 import checkoutRouter from "./routes/checkout.js";
 import placesRouter from "./routes/places.js";
+import mapsRouter from "./routes/maps.js";
 import notificationWebhooksRouter from "./routes/notificationWebhooks.js";
 import supportRouter from "./routes/support.js";
 import reviewsRouter from "./routes/reviews.js";
@@ -200,6 +201,7 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/reviews`, reviewsRouter);
   app.use(`${prefix}/webhooks`, notificationWebhooksRouter);
   app.use(prefix, placesRouter);
+  app.use(`${prefix}/maps`, mapsRouter);
   app.use(prefix, travelerRouter);
   app.use(prefix, uploadsRouter);
   app.use(prefix, searchRouter);

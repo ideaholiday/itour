@@ -175,3 +175,16 @@ This document records significant technical and product architectural decisions.
   - Trip links open the app through Android App Links once `ANDROID_DRIVER_APP_SHA256` is set.
   - Target the SDK level Google Play requires (API 36 from 31 Aug 2026), minimum Android 8 (API 26).
 - **Consequences**: The app is built with Gradle outside `npm run check`. iPhone drivers keep the web page. Some Android makers still stop background services under aggressive battery settings; drivers may need to exempt the app.
+
+---
+
+## ADR 015: Ola Maps for Maps, Places and ETA; Fares Keep the Formula
+- **Date**: 2026-09-14
+- **Context**: OpenStreetMap blocked our map tiles (the site sent no Referer), and its public tile and search servers are not meant for production traffic. Owners chose Ola Maps as the India location provider.
+- **Decision Made**:
+  - Ola Maps serves base-map tiles, address autocomplete, place details, geocoding, reverse geocoding and traveler tracking ETA (supersedes the Mappls ETA in ADR 013).
+  - The server authenticates with OAuth client credentials; tiles are proxied through `/api/maps/tiles` so no Ola credential is in the browser bundle.
+  - **Transfer fares keep the straight-line × 1.25 distance formula.** Ola road distance is not used for pricing, so no fares change.
+  - Without Ola credentials the app falls back to OpenStreetMap tiles, OSM place search and estimated ETAs; Mappls stays selectable.
+  - Pages send `Referrer-Policy: strict-origin-when-cross-origin` so third-party map servers see only our origin.
+- **Consequences**: Tile traffic passes through Cloud Run (browser-cached for a day). Transfer search still shows the pricing distance, which can differ from the real road distance.

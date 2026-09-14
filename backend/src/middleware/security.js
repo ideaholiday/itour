@@ -99,6 +99,7 @@ export function buildCspDirectives(environment = process.env) {
       "data:",
       "blob:",
       "https:",
+      "https://tile.openstreetmap.org",
       "https://*.tile.openstreetmap.org",
       "https://apis.mappls.com",
       "https://images.unsplash.com",
@@ -173,6 +174,9 @@ export function configureSecurity(app, environment = process.env) {
     },
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
+    // Helmet's default "no-referrer" makes OpenStreetMap block every map tile (403 "Access blocked").
+    // Cross-origin requests get only our origin, so paths with trip tokens never leak.
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
   }));
 
   app.use(cors(corsOptions(environment)));
@@ -198,7 +202,15 @@ export function configureSecurity(app, environment = process.env) {
     scope: "checkout",
   });
 
-  app.use("/api", globalLimiter);
+  const mapTileLimiter = createRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    limit: positiveInteger(environment.MAP_TILE_RATE_LIMIT, 5_000),
+    scope: "map-tiles",
+  });
+
+  // A single map view loads dozens of tiles, so tiles get their own, larger budget.
+  const isMapTile = (req) => /^\/(v1\/)?maps\/tiles\//.test(req.path);
+  app.use("/api", (req, res, next) => (isMapTile(req) ? mapTileLimiter : globalLimiter)(req, res, next));
   app.use([
     "/api/auth/login",
     "/api/auth/signup",

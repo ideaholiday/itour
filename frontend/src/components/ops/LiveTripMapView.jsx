@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../../lib/mapTiles.js";
 import { api } from "../../lib/api.js";
 import {
   Car,
@@ -145,13 +146,7 @@ export default function LiveTripMapView({
         scrollWheelZoom: true,
       });
 
-      L.tileLayer(
-        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          maxZoom: 19,
-        }
-      ).addTo(map);
+      addBaseTiles(map);
 
       markersGroupRef.current = L.featureGroup().addTo(map);
       polylinesGroupRef.current = L.featureGroup().addTo(map);

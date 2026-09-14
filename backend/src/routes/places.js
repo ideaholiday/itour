@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { rankSuggestions } from "../lib/placeRanking.js";
 import logger from "../config/logger.js";
+import { autocompletePlaces, geocodeAddress as olaGeocodeAddress, olaMapsConfigured, placeDetails, reverseGeocode as olaReverseGeocode } from "../services/olaMapsService.js";
 
 const router = Router();
 
@@ -8,9 +9,9 @@ const MAPPLS_BASE = "https://search.mappls.com/search";
 const PLACE_DETAILS_BASE = "https://place.mappls.com/O2O/entity/place-details";
 const MAPPLS_ORIGIN = (process.env.MAPPLS_ORIGIN || "https://ideaholiday.in").replace(/\/$/, "");
 
-// OSM-based providers are free (no API key, no per-request billing) and are the
-// default. Mappls remains available as an opt-in fallback via PLACES_PROVIDER=mappls
-// for accounts that already have a paid key and want its India-specific coverage.
+// Ola Maps is the default when OLA_MAPS_CLIENT_ID/SECRET are set (see olaMapsService).
+// Without them the free OSM stack (Photon + Nominatim) answers. PLACES_PROVIDER
+// forces one of "ola", "osm" or the legacy "mappls".
 const PHOTON_BASE = process.env.PHOTON_BASE_URL || "https://photon.komoot.io/api/";
 const NOMINATIM_BASE = process.env.NOMINATIM_BASE_URL || "https://nominatim.openstreetmap.org";
 // Nominatim's usage policy requires a descriptive, non-generic User-Agent identifying the app.
@@ -20,9 +21,9 @@ const INDIA_BBOX = "68,6,98,38";
 
 function getProvider() {
   const configured = String(process.env.PLACES_PROVIDER || "").trim().toLowerCase();
-  if (configured === "mappls" || configured === "osm") return configured;
-  // Default to the free OSM stack unless an operator has explicitly opted into Mappls.
-  return "osm";
+  if (["ola", "mappls", "osm"].includes(configured)) return configured;
+  // Ola Maps when its credentials are present; otherwise the free OSM stack.
+  return olaMapsConfigured() ? "ola" : "osm";
 }
 
 function getApiKey() {
@@ -35,7 +36,7 @@ function numberOrNull(value) {
 }
 
 function categoryFor(place = {}) {
-  const value = `${place.type || ""} ${place.placeName || ""} ${place.placeAddress || ""}`.toLowerCase();
+  const value = `${place.type || ""} ${(place.types || []).join(" ")} ${place.placeName || ""} ${place.placeAddress || ""}`.toLowerCase();
   if (/airport|airfield|terminal/.test(value)) return "Airports";
   if (/hotel|resort|lodging|hostel|guest house|homestay/.test(value)) return "Hotels & Resorts";
   if (/city|locality|district|state|village/.test(value)) return "Cities & Areas";
@@ -187,6 +188,36 @@ router.get("/places", async (req, res) => {
   const biasLng = Number(req.query.lng);
   const hasBias = isIndiaCoordinate(biasLat, biasLng);
 
+  if (provider === "ola") {
+    if (!olaMapsConfigured()) {
+      return res.status(503).json({ success: false, suggestions: [], code: "OLA_MAPS_NOT_CONFIGURED", error: "Location search is not configured. Use your current location or set the pin on the map." });
+    }
+    try {
+      const places = await autocompletePlaces(query.slice(0, 80), { lat: hasBias ? biasLat : null, lng: hasBias ? biasLng : null });
+      const seen = new Set();
+      const normalized = places
+        .map((place) => ({ ...place, category: categoryFor({ types: place.types, placeName: place.label, placeAddress: place.description }) }))
+        .filter((place) => {
+          if (!place.id || !place.label || seen.has(place.id)) return false;
+          seen.add(place.id);
+          return true;
+        })
+        .map(({ types, ...place }) => place);
+      const suggestions = rankSuggestions(normalized, {
+        query,
+        context: String(req.query.context || "").slice(0, 160),
+        lat: hasBias ? biasLat : null,
+        lng: hasBias ? biasLng : null,
+      }).slice(0, 8);
+
+      res.set("Cache-Control", "private, max-age=300");
+      return res.json({ success: true, suggestions, provider: "ola" });
+    } catch (error) {
+      logger.error("Ola Maps autocomplete failed", { requestId: req.requestId, error });
+      return res.status(502).json({ success: false, suggestions: [], error: "Location search is temporarily unavailable. You can still set the pin manually." });
+    }
+  }
+
   if (provider === "osm") {
     try {
       const url = new URL(PHOTON_BASE);
@@ -269,13 +300,39 @@ router.get("/places", async (req, res) => {
   }
 });
 
-// Resolve an eLoc/Mappls Pin (or an OSM-encoded id) into coordinates. Address
+// Resolve an Ola place id, eLoc/Mappls Pin or OSM-encoded id into coordinates. Address
 // geocoding is used when the id does not already carry coordinates.
 router.get("/places/resolve", async (req, res) => {
   const provider = getProvider();
   const placeId = String(req.query.placeId || "").trim();
   const address = String(req.query.address || "").trim();
   if (!placeId && address.length < 3) return res.status(400).json({ success: false, error: "Choose a valid place." });
+
+  if (provider === "ola") {
+    if (!olaMapsConfigured()) return res.status(503).json({ success: false, error: "Location search is not configured." });
+    try {
+      let place = placeId ? await placeDetails(placeId) : null;
+      if ((!place || place.lat === null || place.lng === null) && address) place = await olaGeocodeAddress(address.slice(0, 255));
+      if (!place || place.lat === null || place.lng === null || !isIndiaCoordinate(place.lat, place.lng)) {
+        return res.json({ success: true, location: { id: placeId, address, lat: null, lng: null, requiresPin: true } });
+      }
+      return res.json({
+        success: true,
+        location: {
+          id: place.id || placeId,
+          label: place.label,
+          description: place.address,
+          category: categoryFor({ types: place.types, placeName: place.label, placeAddress: place.address }),
+          lat: place.lat,
+          lng: place.lng,
+          address: place.address || address,
+        },
+      });
+    } catch (error) {
+      logger.error("Ola Maps place resolution failed", { requestId: req.requestId, error });
+      return res.status(502).json({ success: false, error: "We could not confirm this map point. Try another result or set the pin manually." });
+    }
+  }
 
   if (provider === "osm") {
     try {
@@ -343,6 +400,17 @@ router.get("/places/reverse", async (req, res) => {
   const lat = Number(req.query.lat);
   const lng = Number(req.query.lng);
   if (!isIndiaCoordinate(lat, lng)) return res.status(400).json({ success: false, error: "Choose a point within India." });
+
+  if (provider === "ola") {
+    if (!olaMapsConfigured()) return res.status(503).json({ success: false, error: "Location search is not configured." });
+    try {
+      const address = await olaReverseGeocode(lat, lng);
+      return res.json({ success: true, location: { address: address || `Pinned location (${lat.toFixed(6)}, ${lng.toFixed(6)})`, lat, lng } });
+    } catch (error) {
+      logger.error("Ola Maps reverse geocode failed", { requestId: req.requestId, error });
+      return res.status(502).json({ success: false, error: "The pin is saved, but its street address could not be loaded." });
+    }
+  }
 
   if (provider === "osm") {
     try {

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../lib/mapTiles.js";
 import { authHeaders } from "../lib/api.js";
 import IdeaHolidayLogo from "../components/IdeaHolidayLogo.jsx";
 
@@ -97,7 +98,7 @@ export default function TripTracking() {
     if (!points.length) return;
     if (!mapRef.current) {
       mapRef.current = L.map(mapElement.current, { zoomControl: true, scrollWheelZoom: false }).setView([points[0].lat, points[0].lng], 14);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(mapRef.current);
+      addBaseTiles(mapRef.current);
       layerRef.current = L.featureGroup().addTo(mapRef.current);
     }
     const layer = layerRef.current;

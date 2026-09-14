@@ -1,12 +1,14 @@
 import logger from "../config/logger.js";
 import { distanceMeters, estimateDrive } from "./driverLocationService.js";
+import { drivingDistance, olaMapsConfigured } from "./olaMapsService.js";
 
 /**
  * Time to reach a point, for the traveler tracking page.
  *
- * Mappls driving ETA (live traffic, India) is used when ETA_PROVIDER=mappls and
- * a Mappls key is configured; otherwise, or when Mappls fails, a local estimate
- * from straight-line distance. Answers are cached for a minute per rounded
+ * Ola Maps driving time is used when ETA_PROVIDER=ola and Ola credentials are
+ * configured (Mappls with live traffic when ETA_PROVIDER=mappls and a Mappls key
+ * is set); otherwise, or when the provider fails, a local estimate from
+ * straight-line distance. Answers are cached for a minute per rounded
  * route so a page polling every 15 seconds costs at most one call a minute.
  */
 
@@ -45,7 +47,16 @@ export async function tripEta(from, to, { now = Date.now(), fetchImpl = globalTh
   if (cached && now - cached.at < CACHE_MS) return cached.eta;
 
   let eta = null;
-  if (String(process.env.ETA_PROVIDER || "").toLowerCase() === "mappls" && mapplsKey()) {
+  const provider = String(process.env.ETA_PROVIDER || "").toLowerCase();
+  if (provider === "ola" && olaMapsConfigured()) {
+    try {
+      const route = await drivingDistance(from, to, { fetchImpl });
+      eta = { minutes: Math.max(1, Math.ceil(route.durationS / 60)), distanceM: Math.round(route.distanceM), source: "OLA" };
+    } catch (error) {
+      logger.warn("Ola Maps ETA failed; using the local estimate", { error: error.message });
+    }
+  }
+  if (provider === "mappls" && mapplsKey()) {
     try {
       eta = await mapplsEta(from, to, fetchImpl);
     } catch (error) {

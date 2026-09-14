@@ -420,7 +420,7 @@ verified review — see BUSINESS_RULES §9.3.
 - **`POST /action`**: `EN_ROUTE`, `ARRIVED`, `START` → `409 LOCATION_SHARING_REQUIRED` without a phone position from the last 5 minutes.
 - **`POST /location`** `{ points: [{ lat, lng, accuracy?, speed? (m/s), heading?, recordedAt? }] }` (1–20) → `{ accepted, rejected, location }`. Accepted trips in `ASSIGNED`–`TRIP_STARTED` only; bad, >1,000 m, >250 km/h, future or >6 h old points are dropped (`422` if none left); 30 requests/min per session. `GET /` includes `trip.location`.
 - Supplier `GET /api/suppliers/:id` bookings carry `driver_last_lat`, `driver_last_lng`, `driver_last_accuracy_m`, `driver_last_location_at`.
-- **`GET /api/tracking/:ref`** (traveler): `X-Tracking-Token` from the signed link (`/track/<ref>#<token>`, 7 days) or the signed-in owner; else `404`. → `{ trip: { status, driver, location (EN_ROUTE–TRIP_STARTED only), eta { minutes, distanceM, source MAPPLS|ESTIMATE|NEARBY, to PICKUP|DROP }, pickup, drop } }`. Driver `GET /` adds `pickup`, `distanceToPickupM`.
+- **`GET /api/tracking/:ref`** (traveler): `X-Tracking-Token` from the signed link (`/track/<ref>#<token>`, 7 days) or the signed-in owner; else `404`. → `{ trip: { status, driver, location (EN_ROUTE–TRIP_STARTED only), eta { minutes, distanceM, source OLA|MAPPLS|ESTIMATE|NEARBY, to PICKUP|DROP }, pickup, drop } }`. Driver `GET /` adds `pickup`, `distanceToPickupM`.
 
 ### 4.2 Circuit Management Queue
 - **`GET /api/ops/circuits`**: Lists pending multi-supplier circuit reschedule/cancellation requests.

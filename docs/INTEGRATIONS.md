@@ -123,14 +123,36 @@ Fallback channel for urgent supplier booking dispatches in low-connectivity area
 
 ---
 
-## 6. Mappls / MapmyIndia Geocoding
+## 6. Ola Maps (Maps, Places, ETA)
 
 ### Overview & Purpose
-Indian geocoding, reverse geocoding, and address autocomplete fallback for addresses not found in `canonical_locations`.
+The location provider for India (ADR 015): base-map tiles for every Leaflet map, address autocomplete, place details, geocoding, reverse geocoding and traveler tracking ETA. Code: `backend/src/services/olaMapsService.js`; routes `places.js` and `maps.js`.
+
+### How it connects
+- **Auth**: OAuth client-credentials grant against `account.olamaps.io`; the bearer token is cached until a minute before expiry and refreshed once on a 401. Every call sends `X-Request-Id`.
+- **Tiles**: raster PNGs from `api.olamaps.io/tiles/v1/styles/default-light-standard/{z}/{x}/{y}.png`, proxied by `GET /api/maps/tiles/...` so no credential reaches the browser. Without credentials the proxy redirects to OpenStreetMap.
+- **Places**: `/places/v1/autocomplete`, `/details`, `/geocode`, `/reverse-geocode`.
+- **ETA**: `/routing/v1/distanceMatrix/basic` (road distance and time).
+- The project API key is domain-restricted and is not used; the server uses OAuth only.
+- Transfer fares do **not** use Ola road distance; they keep the straight-line × 1.25 formula (ADR 015).
+
+### Endpoints we expose
+- `GET /api/places?query=&lat=&lng=` → `{ provider, suggestions: [{ id, label, description, category, lat, lng }] }`.
+- `GET /api/places/resolve?placeId=&address=` and `GET /api/places/reverse?lat=&lng=` → `{ location: { address, lat, lng } }` (`requiresPin` when unlocatable).
+- `GET /api/maps/tiles/:z/:x/:y.png` (z ≤ 19) → PNG, cached a day; `302` to OpenStreetMap without credentials; own `MAP_TILE_RATE_LIMIT`.
+
+### Configuration & Credentials
+- `OLA_MAPS_CLIENT_ID`, `OLA_MAPS_CLIENT_SECRET` (server only), `ETA_PROVIDER=ola`.
+
+---
+
+## 6.1 Mappls / MapmyIndia Geocoding (legacy)
+
+### Overview & Purpose
+Previous India geocoding provider, still selectable with `PLACES_PROVIDER=mappls` and `ETA_PROVIDER=mappls`.
 
 ### Configuration & Credentials
 - `MAPPLS_API_KEY`: API key for MapmyIndia place search.
-- Used when a product has no rigid pickup polygon constraint.
 
 ---
 

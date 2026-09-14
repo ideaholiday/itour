@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../../lib/mapTiles.js";
 import { MapPin } from "lucide-react";
 
 const CITY_COORDINATES = {
@@ -100,14 +101,7 @@ export default function CircuitRouteMapView({
         scrollWheelZoom: true,
       });
 
-      L.tileLayer(
-        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          maxZoom: 18,
-          subdomains: "abcd",
-        }
-      ).addTo(map);
+      addBaseTiles(map, { maxZoom: 18 });
 
       layerGroupRef.current = L.featureGroup().addTo(map);
       mapRef.current = map;

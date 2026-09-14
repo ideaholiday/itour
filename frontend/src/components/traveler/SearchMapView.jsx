@@ -2,6 +2,7 @@ import { activityPath } from "../../lib/activityUrl.js";
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../../lib/mapTiles.js";
 import { Link } from "react-router-dom";
 import { Star, MapPin, X, ArrowRight, ShieldCheck } from "lucide-react";
 import { useCurrency } from "../../lib/currency.jsx";
@@ -67,15 +68,7 @@ export default function SearchMapView({
         scrollWheelZoom: true,
       });
 
-      // OpenStreetMap tiles (CARTO basemaps now require an API key)
-      L.tileLayer(
-        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          maxZoom: 18,
-          subdomains: "abcd",
-        }
-      ).addTo(map);
+      addBaseTiles(map, { maxZoom: 18 });
 
       const markersGroup = L.featureGroup().addTo(map);
       markersGroupRef.current = markersGroup;

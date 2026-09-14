@@ -43,3 +43,16 @@ test("security.txt route serves RFC 9116 content", () => {
   assert.ok(body.includes("Expires:"));
   assert.ok(body.includes("Canonical:"));
 });
+
+test("pages send a Referer origin so OpenStreetMap serves map tiles", async () => {
+  const app = express();
+  configureSecurity(app, { NODE_ENV: "test" });
+  app.get("/", (_req, res) => res.send("ok"));
+  const server = app.listen(0);
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/`);
+    assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
+  } finally {
+    server.close();
+  }
+});

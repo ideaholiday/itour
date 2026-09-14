@@ -154,8 +154,12 @@ Idea Holiday booking {{1}} needs a driver assignment. Service: {{2}}. Scheduled 
 | :--- | :--- | :--- | :--- |
 | `MAPPLS_API_KEY` | Optional | `<mappls-api-key>` | Mappls MapmyIndia search key; also used for traveler ETA when `ETA_PROVIDER=mappls`. |
 | `ANDROID_DRIVER_APP_SHA256` | For app links | `AB:CD:…` (32 bytes) | SHA-256 signing-certificate fingerprint(s) of the driver app, comma-separated (Play Console → App integrity). Enables `/.well-known/assetlinks.json` so trip links open in the app. |
+| `OLA_MAPS_CLIENT_ID`, `OLA_MAPS_CLIENT_SECRET` | Recommended | `<ola-client-id>`, `<ola-client-secret>` | Ola Maps OAuth client credentials, server-side only. Enable map tiles (`/api/maps/tiles`), place search, geocoding and the `ETA_PROVIDER=ola` ETA. Unset: OpenStreetMap tiles, OSM place search, estimated ETA. |
+| `PLACES_PROVIDER` | Optional | `ola` | Forces `ola`, `osm` or `mappls` for `/api/places*`. Unset: `ola` when Ola credentials are set, else `osm`. |
+| `MAP_TILE_RATE_LIMIT` | Optional | `5000` | Map tile requests per IP per 15 minutes; tiles are exempt from the general API limit. |
+| `VITE_MAP_TILE_URL` | Optional (frontend build) | `/api/maps/tiles/{z}/{x}/{y}.png` | Leaflet base-map tiles for every map. Default is the backend proxy (Ola Maps, or OpenStreetMap without Ola credentials). Set with `VITE_MAP_TILE_ATTRIBUTION` to use another tile provider. |
 | `VITE_DRIVER_APP_URL` | Optional (frontend build) | Play Store URL | Shows "Get the Idea Holiday Driver app" to Android drivers using the browser trip page. |
-| `ETA_PROVIDER` | Optional | `mappls` | Traveler tracking ETA from Mappls driving time with live traffic (cached a minute per route). Unset: a local estimate. Alerts always use the local estimate. Production sets `mappls`. |
+| `ETA_PROVIDER` | Optional | `ola` | Traveler tracking ETA from Ola Maps driving distance and time (`ola`) or Mappls live traffic (`mappls`), cached a minute per route. Unset or on failure: a local estimate. Alerts always use the local estimate. Production sets `ola`. |
 | `SUPABASE_URL` | Optional | `https://<id>.supabase.co` | Supabase Cloud project URL. |
 | `SUPABASE_ANON_KEY` | Optional | `<supabase-anon-key>` | Supabase anonymous public key. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional | `<supabase-service-key>`| Supabase backend service role key. |

@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../lib/mapTiles.js";
 import {
   Check, ChevronDown, Clock, Crosshair, LoaderCircle, LocateFixed, MapPin,
   Navigation, Search, X
@@ -283,10 +284,7 @@ export default function PickupPointPicker({
     const center = hasPoint ? { lat: value.lat, lng: value.lng } : INDIA_CENTER;
     const map = L.map(mapContainerRef.current, { zoomControl: false }).setView([center.lat, center.lng], hasPoint ? 16 : 5);
     L.control.zoom({ position: "bottomright" }).addTo(map);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+    addBaseTiles(map);
     if (hasPoint) {
       markerRef.current = L.marker([value.lat, value.lng], { draggable: true, icon: locationIcon(markerLabel) }).addTo(map);
       markerRef.current.on("dragend", () => {
@@ -412,7 +410,7 @@ export default function PickupPointPicker({
               </button>
             ))}
             {!searching && !suggestions.length && !message && <p className="px-4 py-5 text-center text-xs text-stone-500">No matching {pointLabel} points. Try a hotel, landmark, airport, or drop a pin on the map below.</p>}
-            {provider === "mappls" && <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by Mappls</p>}
+            {(provider === "mappls" || provider === "ola") && <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by {provider === "ola" ? "Ola Maps" : "Mappls"}</p>}
             {provider === "osm" && <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by OpenStreetMap</p>}
           </div>
         )}
@@ -426,7 +424,7 @@ export default function PickupPointPicker({
       {value.confirmed && (
         <div className="flex items-start gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900">
           <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-          <span><strong className="block font-bold text-emerald-900">{kind === "dropoff" ? "Drop-off" : "Pickup"} point confirmed</strong>{value.mapplsPin ? `Mappls Pin ${value.mapplsPin} · ` : ""}{Number(value.lat).toFixed(5)}, {Number(value.lng).toFixed(5)}</span>
+          <span><strong className="block font-bold text-emerald-900">{kind === "dropoff" ? "Drop-off" : "Pickup"} point confirmed</strong>{value.mapplsPin && !/^(ola-platform|osm):/.test(value.mapplsPin) ? `Mappls Pin ${value.mapplsPin} · ` : ""}{Number(value.lat).toFixed(5)}, {Number(value.lng).toFixed(5)}</span>
         </div>
       )}
 

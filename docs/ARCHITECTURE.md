@@ -31,7 +31,7 @@ graph TD
         MetaWA["Meta WhatsApp Cloud API<br/>(Transactional Templates)"]
         EmailService["Amazon SES v2 / Brevo<br/>(Transactional Email)"]
         SMS["Twilio Messaging<br/>(Supplier SMS)"]
-        Mappls["Mappls / MapmyIndia<br/>(Geocoding & Autocomplete)"]
+        OlaMaps["Ola Maps<br/>(Tiles, Places & ETA)"]
     end
 
     ViteClient -->|HTTP / JSON| API
@@ -45,7 +45,7 @@ graph TD
     Services --> MetaWA
     Services --> EmailService
     Services --> SMS
-    Services --> Mappls
+    Services --> OlaMaps
 ```
 
 ---
@@ -164,8 +164,8 @@ sequenceDiagram
    - High-deliverability transactional email delivery with custom HTML templates.
 5. **Twilio Messaging**:
    - Optional SMS dispatch for urgent supplier assignments when data connection is unavailable.
-6. **Mappls / MapmyIndia**:
-   - Geocoding and location autocomplete fallback for Indian addresses and landmarks.
+6. **Ola Maps**:
+   - Map tiles (proxied by the backend), place autocomplete, geocoding, reverse geocoding and tracking ETA. Mappls remains a selectable legacy provider.
 
 ---
 
