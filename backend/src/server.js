@@ -105,6 +105,7 @@ import supportRouter from "./routes/support.js";
 import reviewsRouter from "./routes/reviews.js";
 import analyticsRouter from "./routes/analytics.js";
 import seoRouter from "./routes/seo.js";
+import { driverAppAssetLinks } from "./lib/androidAppLinks.js";
 import publicSuppliersRouter from "./routes/publicSuppliers.js";
 import enquiriesRouter from "./routes/enquiries.js";
 import securityTxtRouter from "./routes/securityTxt.js";
@@ -237,6 +238,14 @@ app.get(["/api/health", "/api/v1/health"], (req, res) =>
     features: ["transfers", "sightseeing", "multi_day_packages", "4_role_ecosystem"]
   })
 );
+
+// Android App Links: trip links open in the driver app once its certificate is configured.
+app.get("/.well-known/assetlinks.json", (_req, res) => {
+  const links = driverAppAssetLinks();
+  if (!links) return res.status(404).json({ error: "Not configured" });
+  res.set("Cache-Control", "public, max-age=3600");
+  return res.json(links);
+});
 
 // Serve production static frontend if dist exists
 const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");

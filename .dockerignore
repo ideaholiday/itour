@@ -27,3 +27,6 @@ scripts
 **/*.p12
 **/*service-account*.json
 **/*service_account*.json
+
+# The Android driver app is built separately, never in the API image.
+android-driver

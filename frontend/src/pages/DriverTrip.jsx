@@ -6,6 +6,10 @@ const SEND_EVERY_MS = 15000;
 const MAX_QUEUED_POINTS = 20;
 // Phones only report when the position changes; a waiting driver still sends one a minute.
 const HEARTBEAT_MS = 60000;
+// Inside the Idea Holiday Driver Android app a native service shares location,
+// and keeps doing so while the driver uses Maps or locks the phone (ADR 014).
+const driverApp = () => (typeof window !== 'undefined' ? window.IdeaHolidayDriverApp : null);
+const DRIVER_APP_URL = import.meta.env.VITE_DRIVER_APP_URL || '';
 
 export default function DriverTrip() {
   const [session, setSession] = useState(() => sessionStorage.getItem('driverTripSession') || '');
@@ -46,7 +50,9 @@ export default function DriverTrip() {
     } catch { /* not supported or refused; the reminder text still asks to keep the page open */ }
   }
 
-  function stopSharing() {
+  /** `leavingPage`: closing the page must not stop the app's service mid-trip. */
+  function stopSharing({ leavingPage = false } = {}) {
+    if (driverApp() && !leavingPage) driverApp().stopSharing();
     if (watchRef.current !== null) navigator.geolocation?.clearWatch(watchRef.current);
     watchRef.current = null;
     if (heartbeatRef.current) clearInterval(heartbeatRef.current);
@@ -76,8 +82,49 @@ export default function DriverTrip() {
     }
   }
 
+  // Status pushed by the app's location service.
+  useEffect(() => {
+    if (!driverApp()) return undefined;
+    window.__ideaHolidayDriverAppStatus = (status) => {
+      if (!status) return;
+      if (status.state === 'ON') {
+        setSharing('on');
+        if (status.lastSentAtMs) { lastSentAtRef.current = status.lastSentAtMs; setLastSent({ at: new Date(status.lastSentAtMs), accuracy: status.accuracyM ?? null }); }
+        if (Number.isFinite(status.distanceToPickupM)) setDistanceToPickupM(status.distanceToPickupM);
+        setLocationMessage(status.message || '');
+        if (firstFixRef.current) { firstFixRef.current.resolve(); firstFixRef.current = null; }
+      } else if (status.state === 'STARTING') {
+        setSharing('starting');
+      } else if (status.state === 'OFFLINE') {
+        setSharing('on');
+        setLocationMessage(status.message || 'No network. Your location will be sent when the connection returns.');
+      } else if (status.state === 'STOPPED') {
+        setSharing(status.message ? 'blocked' : 'off');
+        setLocationMessage(status.message || '');
+        if (firstFixRef.current) { firstFixRef.current.reject(new Error(status.message || 'Location sharing stopped.')); firstFixRef.current = null; }
+      }
+    };
+    return () => { delete window.__ideaHolidayDriverAppStatus; };
+  }, []);
+
+  function startSharingInApp() {
+    if (sharingRef.current === 'on') return Promise.resolve();
+    setSharing('starting');
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        if (!firstFixRef.current) return;
+        firstFixRef.current = null;
+        setSharing('off');
+        reject(new Error('Could not get your GPS position. Move to an open area and tap Share location.'));
+      }, 60000);
+      firstFixRef.current = { resolve: () => { window.clearTimeout(timer); resolve(); }, reject: (err) => { window.clearTimeout(timer); reject(err); } };
+      driverApp().startSharing(sessionRef.current, trip?.bookingRef || null);
+    });
+  }
+
   /** Starts sharing and resolves once the first position has reached the server. */
   function startSharing() {
+    if (driverApp()) return startSharingInApp();
     if (!navigator.geolocation) {
       setSharing('unsupported');
       return Promise.reject(new Error('This browser cannot share location. Open the trip link in Chrome or Safari.'));
@@ -126,6 +173,8 @@ export default function DriverTrip() {
   useEffect(() => {
     const token = window.location.hash.slice(1);
     if (!token) return;
+    // The app keeps the link so its service can renew the 12-hour session on long trips.
+    driverApp()?.rememberLink(token);
     window.history.replaceState(null, '', window.location.pathname);
     setBusy(true);
     request('/session', { token }, '').then(data => {
@@ -141,7 +190,7 @@ export default function DriverTrip() {
   // A reopened or reloaded page resumes sharing for a trip that is under way.
   const tripStatus = trip?.status;
   useEffect(() => {
-    if (SHARING_STATUSES.includes(tripStatus) && trip?.acknowledgement === 'ACCEPTED' && watchRef.current === null) startSharing().catch(() => {});
+    if (SHARING_STATUSES.includes(tripStatus) && trip?.acknowledgement === 'ACCEPTED' && watchRef.current === null && sharingRef.current !== 'on') startSharing().catch(() => {});
     if (tripStatus && !SHARING_STATUSES.includes(tripStatus) && tripStatus !== 'ASSIGNED') stopSharing();
   }, [tripStatus]);
 
@@ -152,7 +201,7 @@ export default function DriverTrip() {
       flush().catch(() => {});
     };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { document.removeEventListener('visibilitychange', onVisible); stopSharing(); };
+    return () => { document.removeEventListener('visibilitychange', onVisible); stopSharing({ leavingPage: true }); };
   }, []);
 
   async function act(action) {
@@ -206,7 +255,9 @@ export default function DriverTrip() {
           {sharing === 'starting' && <p><strong>Getting your GPS position…</strong> Allow location if your phone asks.</p>}
           {['off', 'blocked', 'unsupported'].includes(sharing) && tripUnderWay && <p><strong>Location sharing is off.</strong> The traveler and your supplier can't see you.</p>}
           {locationMessage && <p className="mt-1">{locationMessage}</p>}
-          {sharing === 'on' && <p className="mt-1">Keep this page open on screen. If you switch to another app or lock the phone, your location stops updating.</p>}
+          {sharing === 'on' && (driverApp()
+            ? <p className="mt-1">You can use Maps or lock your phone. Sharing continues until you complete the trip.</p>
+            : <p className="mt-1">Keep this page open on screen. If you switch to another app or lock the phone, your location stops updating.{DRIVER_APP_URL && /android/i.test(navigator.userAgent) && <> <a className="font-semibold underline" href={DRIVER_APP_URL}>Get the Idea Holiday Driver app</a> to keep sharing while you navigate.</>}</p>)}
           {sharing !== 'on' && sharing !== 'starting' && tripUnderWay && <button type="button" onClick={() => startSharing().catch((err) => setLocationMessage(err.message))} className="mt-3 rounded-xl bg-emerald-700 px-4 py-2 font-semibold text-white">Share location</button>}
         </div>
       )}

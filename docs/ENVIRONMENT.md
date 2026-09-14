@@ -153,6 +153,8 @@ Idea Holiday booking {{1}} needs a driver assignment. Service: {{2}}. Scheduled 
 | Variable | Required? | Example Placeholder | Purpose |
 | :--- | :--- | :--- | :--- |
 | `MAPPLS_API_KEY` | Optional | `<mappls-api-key>` | Mappls MapmyIndia search key; also used for traveler ETA when `ETA_PROVIDER=mappls`. |
+| `ANDROID_DRIVER_APP_SHA256` | For app links | `AB:CD:…` (32 bytes) | SHA-256 signing-certificate fingerprint(s) of the driver app, comma-separated (Play Console → App integrity). Enables `/.well-known/assetlinks.json` so trip links open in the app. |
+| `VITE_DRIVER_APP_URL` | Optional (frontend build) | Play Store URL | Shows "Get the Idea Holiday Driver app" to Android drivers using the browser trip page. |
 | `ETA_PROVIDER` | Optional | `mappls` | Traveler tracking ETA from Mappls driving time with live traffic (cached a minute per route). Unset: a local estimate. Alerts always use the local estimate. Production sets `mappls`. |
 | `SUPABASE_URL` | Optional | `https://<id>.supabase.co` | Supabase Cloud project URL. |
 | `SUPABASE_ANON_KEY` | Optional | `<supabase-anon-key>` | Supabase anonymous public key. |

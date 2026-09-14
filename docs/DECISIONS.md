@@ -162,3 +162,16 @@ This document records significant technical and product architectural decisions.
   - The ETA shown to travelers comes from Mappls driving time with live traffic (`ETA_PROVIDER=mappls`), cached for a minute per route; if Mappls fails, a local estimate is shown and marked as estimated.
   - Missed-pickup alerts use only the local estimate, so the scheduler never spends paid routing calls.
 - **Consequences**: A trip without pickup coordinates gets no ETA, running-late or arrival prompt; it still gets not-on-the-way, signal-lost and not-moving alerts.
+
+---
+
+## ADR 014: Driver Android App as a Thin Shell
+- **Date**: 2026-09-14
+- **Context**: Browser GPS stops when the driver locks the phone or switches to Maps (ADR 012). Owners approved an Android app.
+- **Decision Made**:
+  - A small native Kotlin app (`in.ideaholiday.driver`) shows the existing driver trip page in a WebView; there is no second driver UI.
+  - A foreground service of type `location` sends positions to the same `/api/driver-trips/location` endpoint, using Android's own location providers (no Google Play services, so phones without them work). It needs only "while using the app" permission, never background location, and shows an ongoing notification.
+  - The page detects the app bridge and hands sharing to the service; in a browser it works as before.
+  - Trip links open the app through Android App Links once `ANDROID_DRIVER_APP_SHA256` is set.
+  - Target the SDK level Google Play requires (API 36 from 31 Aug 2026), minimum Android 8 (API 26).
+- **Consequences**: The app is built with Gradle outside `npm run check`. iPhone drivers keep the web page. Some Android makers still stop background services under aggressive battery settings; drivers may need to exempt the app.

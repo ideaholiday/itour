@@ -41,7 +41,7 @@ Do not rebuild these. Extend them if asked.
 
 - **Phase 1 — done:** drivers share phone location from the trip link (required before "On the way"), positions stored for 30 days, real positions with Live / Delayed / Signal lost on the ops map, supplier sees the driver's last position.
 - **Phase 2 — done:** traveler tracking link and Track live in My Trips with Mappls ETA, "You're at the pickup point" prompt, missed-pickup alerts (not on the way, signal lost, running late, not moving).
-- **Phase 3 — only if Phase 1 gaps hurt:** Android driver app that keeps sharing while navigating (Play Store, location-permission review).
+- **Phase 3 — built, not yet released:** `android-driver/` app (ADR 014). Release needs: Play Console account, upload key, privacy policy URL covering driver location, Play listing and data-safety form, `ANDROID_DRIVER_APP_SHA256` set in production, testing on real Android phones (including Xiaomi/Oppo/Vivo battery savers).
 
 Standing obligations that apply to every change:
 

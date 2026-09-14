@@ -155,6 +155,18 @@ Set `DATABASE_URL` in `backend/.env`, then `cd backend && npm run migrate:up && 
 ### Local Prometheus + Grafana
 `docker-compose.observability.yml` starts a localhost-only stack with alert rules and dashboards. Follow `observability/README.md`.
 
+### Driver Android app (`android-driver/`)
+Needs JDK 17+ and the Android SDK (`android-driver/local.properties`: `sdk.dir=…`). The build downloads platform 36 on first run.
+```bash
+cd android-driver
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+./gradlew testDebugUnitTest lintDebug assembleDebug     # or `gradle …` if the wrapper download is blocked
+./gradlew assembleDebug -PdriverBaseUrl=http://10.0.2.2:5173   # emulator against local dev
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew bundleRelease                                  # Play upload; signed when keystore.properties exists
+```
+Release signing reads `android-driver/keystore.properties` (git-ignored). Never commit the keystore or its passwords.
+
 ### Deploying
 CI/CD runs from `.github/workflows/deploy.yml` (staging on `staging`, blue-green production on `main`, with smoke tests and rollback).
 Manual deploy: `./deploy.sh`. Smoke-test a URL: `bash scripts/smoke-tests.sh <service-url>`. Roll back: `bash scripts/rollback.sh [SERVICE_NAME] [REGION] [PROJECT_ID]`.

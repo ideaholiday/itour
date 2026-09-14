@@ -24,9 +24,9 @@ Full detail: [`docs/PRODUCT.md`](docs/PRODUCT.md).
 | `frontend/` | Marketplace + supplier/admin UI (:5173). **This is what ships** (Dockerfile) | React 19, Vite 8, react-router 7, zod **4**, Tailwind **3**, lucide-react 1.x |
 | `app/`, `components/`, `lib/` (root) | Optional Next.js Supabase-auth app (:3000) | Next 16, zod **3**, Tailwind 3, lucide-react 0.x |
 | `e2e/` | Playwright browser journeys | Playwright 1.6x |
+| `android-driver/` | Driver Android app: trip page in a WebView + native location service. Built with Gradle, not in `npm run check` | Kotlin, AGP 9.4, target SDK 36, min SDK 26 |
 
-zod differs between the root app (3) and the rest (4). Express is 4, so async
-handlers do **not** forward rejections; don't copy Express 5 examples.
+zod differs between the root app (3) and the rest (4). Express is 4, so async handlers do **not** forward rejections; don't copy Express 5 examples.
 
 ### Never break these
 

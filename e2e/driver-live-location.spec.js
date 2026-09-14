@@ -22,8 +22,8 @@ function driverLink(bookingId) {
   }
 }
 
-test("a driver must share phone location to go on the way, and operations then see the real position", async ({ browser, request, page }) => {
-  const booking = await createPaidBooking(request, "driver-gps");
+async function bookingWithConfirmedDriver(request, suffix) {
+  const booking = await createPaidBooking(request, suffix);
   const supplierLogin = await (await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier })).json();
   const supplierId = supplierLogin.user.supplier_id;
   const headers = { Authorization: `Bearer ${supplierLogin.token}` };
@@ -36,7 +36,11 @@ test("a driver must share phone location to go on the way, and operations then s
     },
   });
   expect(assigned.status(), await assigned.text()).toBe(200);
-  const link = driverLink(booking.bookingId);
+  return { booking, link: driverLink(booking.bookingId) };
+}
+
+test("a driver must share phone location to go on the way, and operations then see the real position", async ({ browser, request, page }) => {
+  const { booking, link } = await bookingWithConfirmedDriver(request, "driver-gps");
 
   // Location blocked: the trip does not move.
   const blocked = await browser.newContext({ permissions: [] });
@@ -85,4 +89,40 @@ test("a driver must share phone location to go on the way, and operations then s
   }
   await travelerContext.close();
   await allowed.close();
+});
+
+test("inside the Android driver app the page hands sharing to the app's location service", async ({ browser, request }) => {
+  const { booking, link } = await bookingWithConfirmedDriver(request, "driver-app");
+  // Browser location is blocked: only the app's native service can share.
+  const context = await browser.newContext({ permissions: [] });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    window.__appCalls = [];
+    window.IdeaHolidayDriverApp = {
+      rememberLink: (token) => window.__appCalls.push(["rememberLink", /^[^.]+\.[a-f0-9]{64}$/.test(token)]),
+      startSharing: (session, ref) => {
+        window.__appCalls.push(["startSharing", ref]);
+        window.__ideaHolidayDriverAppStatus?.({ state: "STARTING" });
+        // What LocationService does: send a position with the driver session, then report ON.
+        fetch("/api/driver-trips/location", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session}` },
+          body: JSON.stringify({ points: [{ lat: 15.5449, lng: 73.755, accuracy: 9 }] }),
+        }).then((response) => response.json()).then((data) => window.__ideaHolidayDriverAppStatus?.({
+          state: "ON", lastSentAtMs: Date.now(), accuracyM: 9, distanceToPickupM: data.distanceToPickupM ?? null, message: null,
+        }));
+      },
+      stopSharing: () => window.__appCalls.push(["stopSharing"]),
+      version: () => "1.0.0",
+    };
+  });
+  await page.goto(link);
+  await page.getByRole("button", { name: "Share location and go on the way" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Status:" })).toContainText("EN ROUTE");
+  await expect(page.getByText("You can use Maps or lock your phone.")).toBeVisible();
+  const calls = await page.evaluate(() => window.__appCalls);
+  expect(calls).toContainEqual(["rememberLink", true]);
+  expect(calls).toContainEqual(["startSharing", booking.ref]);
+  expect(calls.some(([name]) => name === "stopSharing")).toBe(false);
+  await context.close();
 });
