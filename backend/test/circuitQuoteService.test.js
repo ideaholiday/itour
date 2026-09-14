@@ -111,7 +111,7 @@ test("flags custom and unavailable items without trusting planner estimates", ()
   assert.equal(quote.status, "ACTION_REQUIRED");
   assert.equal(quote.breakdown.totalAmount, 0);
   assert.deepEqual(quote.issues.map((issue) => issue.code), ["ITEM_UNAVAILABLE", "PRODUCT_LINK_REQUIRED"]);
-  assert.equal(quote.issues[0].message, "Sold out");
+  assert.equal(quote.issues[0].message, "Sold out on the selected date. Please choose another date.");
 });
 
 test("requires itinerary ownership and a valid future travel date", () => {

@@ -81,3 +81,21 @@ test("blocking one vehicle preserves other compatible fleet inventory", () => {
   assert.equal(second.remainingFleetCapacity, 0);
   db.close();
 });
+
+test("an expired circuit checkout hold stops consuming capacity the moment it lapses", () => {
+  const db = database();
+  // Circuit support is detected from these columns; hold_expires_at stores ISO text.
+  db.exec(`
+    ALTER TABLE bookings ADD COLUMN circuit_order_id TEXT;
+    CREATE TABLE circuit_orders (id TEXT PRIMARY KEY, status TEXT, hold_expires_at TEXT);
+  `);
+  addRule(db, { capacity: 1, reason: "One car only" });
+  // Expired one second ago, so on the same UTC day as "now".
+  db.prepare("INSERT INTO circuit_orders VALUES ('order-1', 'PENDING_PAYMENT', ?)").run(new Date(Date.now() - 1000).toISOString());
+  db.prepare("INSERT INTO bookings VALUES ('booking-1', 'supplier-1', 'product-1', 'product-1', '2026-09-10', '09:00', 'SEDAN', 'pending_payment', 'order-1')").run();
+  assert.equal(evaluateSupplierAvailability(db, request).available, true);
+
+  db.prepare("UPDATE circuit_orders SET hold_expires_at = ?").run(new Date(Date.now() + 600000).toISOString());
+  assert.equal(evaluateSupplierAvailability(db, request).available, false);
+  db.close();
+});

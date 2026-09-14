@@ -196,7 +196,8 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
       vehicleCategory,
     });
     if (!availability.available) {
-      const error = new Error(availability.reasons[0] || "The selected date or time is unavailable. Please choose another option");
+      // Closed, blocked or full all read the same to a traveler; the supplier's note stays internal.
+      const error = new Error("Sold out on the selected date. Please choose another date.");
       error.status = 409;
       throw error;
     }
