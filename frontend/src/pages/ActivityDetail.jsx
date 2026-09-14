@@ -96,7 +96,7 @@ function startTimeFromActivity(activity) {
 
 // ─── Shared UI helpers ────────────────────────────────────────
 
-function TravelerCounter({ label, helper, value, min, onChange }) {
+function TravelerCounter({ label, helper, value, min, max = Infinity, onChange }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl border border-stone-200 bg-white px-3 py-2.5 shadow-sm">
       <div>
@@ -115,8 +115,9 @@ function TravelerCounter({ label, helper, value, min, onChange }) {
         <button
           type="button"
           aria-label={`Add ${label}`}
-          onClick={() => onChange(value + 1)}
-          className="grid h-8 w-8 place-items-center rounded-full border border-stone-300 text-base text-stone-700 hover:bg-stone-100"
+          onClick={() => onChange(Math.min(max, value + 1))}
+          disabled={value >= max}
+          className="grid h-8 w-8 place-items-center rounded-full border border-stone-300 text-base text-stone-700 hover:bg-stone-100 disabled:opacity-30"
         >+</button>
       </div>
     </div>
@@ -168,18 +169,23 @@ function QuoteSummary({ serverQuote, quoteLoading, formatPrice, addonsTotalInr, 
   );
 }
 
-function VehicleSelector({ vehicles, selectedVehicle, setSelectedVehicle, formatPrice }) {
+const vehicleCode = (v) => v.vehicle_type || v.vehicleType || v.code;
+const vehiclePax = (v) => Number(v.max_pax || v.maxPax || v.pax || 4);
+
+function VehicleSelector({ vehicles, selectedVehicle, setSelectedVehicle, formatPrice, headcount = 0 }) {
   return (
     <div className="space-y-2">
       {vehicles.map((v) => {
-        const vCode = v.vehicle_type || v.vehicleType || v.code;
+        const vCode = vehicleCode(v);
         const isSelected = selectedVehicle === vCode;
+        const tooSmall = headcount > vehiclePax(v);
         return (
           <button
             key={v.id || vCode}
             type="button"
             onClick={() => setSelectedVehicle(vCode)}
-            className={`w-full rounded-xl border-2 px-4 py-3 text-left transition-all ${
+            disabled={tooSmall}
+            className={`w-full rounded-xl border-2 px-4 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
               isSelected
                 ? "border-amber-500 bg-amber-50/60 ring-1 ring-amber-400"
                 : "border-stone-200 bg-stone-50 hover:border-amber-300"
@@ -189,8 +195,11 @@ function VehicleSelector({ vehicles, selectedVehicle, setSelectedVehicle, format
               <div>
                 <span className="text-sm font-bold text-stone-900">{v.label || v.name || vCode}</span>
                 <p className="mt-0.5 text-[11px] text-stone-500">
-                  Up to {v.max_pax || v.maxPax || v.pax || 4} pax · {v.max_luggage || v.maxLuggage || v.bags || 2} bags
+                  Up to {vehiclePax(v)} pax · {v.max_luggage || v.maxLuggage || v.bags || 2} bags
                 </p>
+                {tooSmall && (
+                  <p className="mt-0.5 text-[10px] font-semibold text-rose-600">Too small for {headcount} travelers</p>
+                )}
               </div>
               <div className="text-right shrink-0 ml-3">
                 {(v.price_inr || v.priceInr) && (
@@ -432,12 +441,22 @@ function BookingPanelTour({
 // ─── Booking Panel: TRANSFER ──────────────────────────────────
 
 function BookingPanelTransfer({
-  activity, date, setDate, nativeDeparture, vehicleOptions, selectedVehicle, setSelectedVehicle,
-  serverQuote, quoteLoading, quoteError, formatPrice, currency, onBook,
+  activity, date, setDate, nativeDeparture, adults, setAdults, children, setChildren,
+  vehicleOptions, selectedVehicle, setSelectedVehicle,
+  serverQuote, quoteLoading, quoteError, formatPrice, currency, headcount, onBook,
 }) {
   const subType = activity.productSubType || activity.product_sub_type || "";
   const isAirport = subType === "AIRPORT_RAILWAY";
   const vehicles = vehicleOptions.length > 0 ? vehicleOptions : DEFAULT_VEHICLES;
+  const largestVehiclePax = Math.max(...vehicles.map(vehiclePax));
+
+  // When the group outgrows the chosen vehicle, move to the smallest one that seats everyone.
+  useEffect(() => {
+    const current = vehicles.find((v) => vehicleCode(v) === selectedVehicle);
+    if (current && vehiclePax(current) >= headcount) return;
+    const fit = vehicles.filter((v) => vehiclePax(v) >= headcount).sort((a, b) => vehiclePax(a) - vehiclePax(b))[0];
+    if (fit) setSelectedVehicle(vehicleCode(fit));
+  }, [headcount, vehicles, selectedVehicle, setSelectedVehicle]);
 
   return (
     <div className="space-y-5 rounded-3xl border border-stone-200 bg-white p-5 shadow-xl sm:p-6">
@@ -453,6 +472,19 @@ function BookingPanelTransfer({
           <DatePicker value={date} min={localDate(0)} onChange={setDate} theme="light" showIcon={false}
             ariaLabel="Choose transfer date" popoverTitle="Choose transfer date"
             buttonClassName="py-3.5 border-stone-300 rounded-xl" />
+        </div>
+
+        <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3">
+          <div className="mb-3 flex items-center justify-between gap-2 text-xs font-bold text-stone-700">
+            <span className="flex items-center gap-2"><Users className="h-4 w-4 text-amber-600" /> Travelers</span>
+            <span className="text-[10px] font-normal text-stone-400">Max {largestVehiclePax} per booking</span>
+          </div>
+          <div className="space-y-2">
+            <TravelerCounter label="Adults" helper="Age 12+" value={adults} min={1}
+              max={largestVehiclePax - children} onChange={setAdults} />
+            <TravelerCounter label="Children" helper="Age 3-11" value={children} min={0}
+              max={largestVehiclePax - adults} onChange={setChildren} />
+          </div>
         </div>
 
         {isAirport && (
@@ -472,7 +504,7 @@ function BookingPanelTransfer({
           </div>
           <p className="mb-2 text-[11px] text-stone-400">Fixed fares - Fastag tolls and GST included</p>
           <VehicleSelector vehicles={vehicles} selectedVehicle={selectedVehicle}
-            setSelectedVehicle={setSelectedVehicle} formatPrice={formatPrice} />
+            setSelectedVehicle={setSelectedVehicle} formatPrice={formatPrice} headcount={headcount} />
         </div>
       </div>
 
@@ -863,7 +895,8 @@ export default function ActivityDetail() {
       adults={adults} setAdults={setAdults} children={children} setChildren={setChildren}
       sicHubs={sicHubs} />
   ) : isTransfer ? (
-    <BookingPanelTransfer {...sharedProps} />
+    <BookingPanelTransfer {...sharedProps}
+      adults={adults} setAdults={setAdults} children={children} setChildren={setChildren} />
   ) : (
     <BookingPanelAttractionExperience {...sharedProps}
       adults={adults} setAdults={setAdults} children={children} setChildren={setChildren}
@@ -1055,15 +1088,17 @@ export default function ActivityDetail() {
                   {vehicleOptions.map((v) => {
                     const vCode = v.vehicle_type || v.vehicleType;
                     const isSelected = selectedVehicle === vCode;
+                    const tooSmall = isTransfer && headcount > vehiclePax(v);
                     return (
-                      <button key={v.id} type="button" onClick={() => setSelectedVehicle(vCode)}
-                        className={`rounded-2xl border-2 p-4 text-left transition-all ${isSelected ? "border-amber-500 bg-amber-50/60 ring-2 ring-amber-400 shadow-sm" : "border-stone-200 bg-stone-50 hover:border-amber-200"}`}>
+                      <button key={v.id} type="button" onClick={() => setSelectedVehicle(vCode)} disabled={tooSmall}
+                        className={`rounded-2xl border-2 p-4 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50 ${isSelected ? "border-amber-500 bg-amber-50/60 ring-2 ring-amber-400 shadow-sm" : "border-stone-200 bg-stone-50 hover:border-amber-200"}`}>
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-sm text-stone-900">{v.label || v.vehicle_type}</span>
                           {v.is_recommended ? <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[9px] font-bold text-stone-950">&#9733; Best</span>
                             : isSelected ? <Check className="h-4 w-4 text-amber-700" /> : null}
                         </div>
                         <p className="mt-1 text-xs text-stone-500">Up to {v.max_pax || v.maxPax || 4} pax &#xb7; {v.max_luggage || v.maxLuggage || 2} bags</p>
+                        {tooSmall && <p className="mt-0.5 text-[10px] font-semibold text-rose-600">Too small for {headcount} travelers</p>}
                         <p className="mt-2 text-sm font-mono font-bold text-stone-900">{formatPrice(v.price_inr || v.priceInr)}</p>
                       </button>
                     );
