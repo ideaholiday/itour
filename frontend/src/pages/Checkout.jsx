@@ -12,6 +12,7 @@ import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 import { useCurrency } from "../lib/currency.jsx";
 import PickupPointPicker from "../components/PickupPointPicker.jsx";
+import { isValidTravelNumber, typedAddressAccepted } from "../lib/checkoutLocation.js";
 
 const PICKUP_TYPES = [
   { id: "HOTEL", label: "Hotel / stay", icon: "🏨", placeholder: "Hotel or property name, full address and area" },
@@ -270,8 +271,12 @@ export default function Checkout() {
   const isArrivalTransfer = isTransfer && String(activity?.transferMeta?.serviceDirection || "ARRIVAL").toUpperCase() !== "DEPARTURE";
   const pickupRule = activity?.locationRules?.find((rule) => rule.side === "PICKUP");
   const dropRule = activity?.locationRules?.find((rule) => rule.side === "DROP");
-  const pickupIsFixed = pickupRule?.mode === "FIXED_LOCATION" || (isTransfer && isArrivalTransfer);
-  const dropIsFixed = dropRule?.mode === "FIXED_LOCATION" || (isTransfer && !isArrivalTransfer);
+  // A terminal is only locked when the listing actually names it. Listings
+  // without a route row would otherwise leave an empty, read-only pickup that
+  // no traveler can fill in, and the booking could never be submitted.
+  const pickupIsFixed = Boolean(activity?.transferMeta?.originName) && (pickupRule?.mode === "FIXED_LOCATION" || (isTransfer && isArrivalTransfer));
+  const dropIsFixed = Boolean(activity?.transferMeta?.destName) && (dropRule?.mode === "FIXED_LOCATION" || (isTransfer && !isArrivalTransfer));
+  const travelNumberLabel = productSubType === "AIRPORT_RAILWAY" ? "Flight / train number" : "Flight number";
 
   const destinationSearchContext = [
     isPackage ? activity?.packageItinerary?.start_city : "",
@@ -310,11 +315,17 @@ export default function Checkout() {
     (pickupPoint.address.trim().length >= 3)
   );
   const travelerReady = Boolean(travelerName.trim() && travelerPhone.trim() && travelerEmail.trim());
-  const dropAllowsTypedAddress = !dropRule || dropRule.mode === "CITY_ANYWHERE";
+  // A hotel typed by hand (no map pin) is bookable wherever the server accepts
+  // it; operations confirm the exact spot.
+  const dropTypedAccepted = typedAddressAccepted(dropRule, dropLocation);
   const dropReady = (!isTransfer && !isPackage) || Boolean(
-    dropLocation.trim().length >= 3 && (dropPoint.confirmed || dropAllowsTypedAddress)
+    dropLocation.trim().length >= 3 && (dropPoint.confirmed || dropTypedAccepted)
   );
-  const flightReady = !requiresFlight || Boolean(/^[A-Z0-9]{2}[- ]?\d{1,4}$/i.test(flightNumber.trim()) && flightTime);
+  const dropCityHint = !dropPoint.confirmed && dropLocation.trim().length >= 3 && !dropTypedAccepted && dropRule?.mode !== "FIXED_LOCATION"
+    ? `Add the city to your address (for example "${dropLocation.trim()}, ${dropRule?.allowedCity || activity?.city || "city"}"), or pick a suggestion or set the pin on the map.`
+    : "";
+  const flightNumberValid = isValidTravelNumber(flightNumber);
+  const flightReady = !requiresFlight || Boolean(flightNumberValid && flightTime);
   const packageHotelsReady = !isPackage || packageHotels.every((hotel) => hotel.point.confirmed && hotel.point.address.trim().length >= 3);
   const ticketSelections = useMemo(() => Object.fromEntries(
     ticketTiersParsed.map(({ tierId, count }) => [tierId, count])
@@ -434,18 +445,22 @@ export default function Checkout() {
   const handleSubmitBooking = async (event) => {
     event.preventDefault();
     setError("");
+    if (!travelerReady) {
+      setError("Add the traveler's full name, mobile number and email.");
+      return;
+    }
     if (!pickupReady) {
       setError(isTransfer ? "Select and confirm the exact pickup point, then choose the ready time." : "Choose how you will join the experience and add the requested details.");
       document.getElementById("pickup-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (!dropReady) {
-      setError("Select the drop-off from Mappls and confirm its exact point on the map.");
+      setError(dropCityHint || (isTransfer ? "Enter your hotel or drop-off address, or set its point on the map." : "Select the drop-off and confirm its exact point on the map."));
       document.getElementById("dropoff-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (!flightReady) {
-      setError("Enter a valid flight number and scheduled flight time before continuing.");
+      setError(`Enter a valid ${travelNumberLabel.toLowerCase()} (for example 6E-2134${productSubType === "AIRPORT_RAILWAY" ? " or 12004" : ""}) and the scheduled time before continuing.`);
       document.getElementById("pickup-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
@@ -761,18 +776,18 @@ export default function Checkout() {
                           readOnly={pickupIsFixed}
                           aria-readonly={pickupIsFixed}
                           onChange={(e) => !pickupIsFixed && setPickupPoint((prev) => ({ ...prev, address: e.target.value }))}
-                          placeholder="Airport or railway station terminal..."
-                          className="w-full rounded-xl border border-stone-300 bg-stone-100 p-3 text-xs text-stone-900 font-semibold outline-none"
+                          placeholder={pickupIsFixed ? "Airport or railway station terminal..." : `Arrival airport or railway station, e.g. ${activity?.city || "city"} airport`}
+                          className={`w-full rounded-xl border border-stone-300 p-3 text-xs text-stone-900 font-semibold outline-none ${pickupIsFixed ? "bg-stone-100" : "bg-[#FAF9F6] focus:border-amber-500 focus:bg-white"}`}
                         />
                         {pickupIsFixed && <p className="text-[11px] font-bold text-amber-800">🔒 Fixed pickup point — travelers cannot override this terminal.</p>}
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="text-xs font-bold text-stone-700">
-                            Flight Number <span className="text-rose-600">*</span>
+                            {travelNumberLabel} <span className="text-rose-600">*</span>
                             <input
                               required
                               value={flightNumber}
                               onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
-                              placeholder="e.g. 6E-2134 (IndiGo) or AI-864"
+                              placeholder={productSubType === "AIRPORT_RAILWAY" ? "e.g. 6E-2134 or train 12004" : "e.g. 6E-2134 (IndiGo) or AI-864"}
                               className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 focus:border-amber-500 focus:bg-white outline-none"
                             />
                           </label>
@@ -787,6 +802,7 @@ export default function Checkout() {
                             />
                           </label>
                         </div>
+                        {flightNumber.trim() && !flightNumberValid && <p role="alert" className="text-[11px] font-semibold text-rose-700">Use the {travelNumberLabel.toLowerCase()} only, for example 6E-2134{productSubType === "AIRPORT_RAILWAY" ? " or train 12004" : ""}.</p>}
                         <label className="block text-xs font-bold text-stone-700">Terminal / gate <span className="font-normal text-stone-500">(optional)</span><input value={terminalGate} onChange={(e) => setTerminalGate(e.target.value)} placeholder="e.g. Terminal 1, Gate A" className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
                         <p className="rounded-xl bg-amber-50 p-2.5 text-[11px] font-semibold text-amber-900">Includes {activity?.transferMeta?.freeWaitingMins || 60} minutes free waiting after flight arrival.</p>
                       </div>
@@ -813,6 +829,9 @@ export default function Checkout() {
                           productId={id}
                           validationSide="DROP"
                         />
+                        {dropCityHint
+                          ? <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-[11px] font-semibold text-amber-900">{dropCityHint}</p>
+                          : !dropPoint.confirmed && dropReady && <p className="rounded-xl border border-emerald-200 bg-white p-2.5 text-[11px] text-emerald-900">✓ We'll use this address as typed and confirm the exact spot with you. Setting the pin on the map helps your driver find it faster.</p>}
                         <div className="rounded-xl bg-white border border-emerald-200 p-2.5 text-[11px] text-emerald-900 leading-relaxed">
                           ✨ <strong>Any Hotel or Address Covered:</strong> Your chauffeur will meet you with your nameboard at the terminal and drive you directly to this location.
                         </div>
@@ -842,12 +861,12 @@ export default function Checkout() {
                         />
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="text-xs font-bold text-stone-700">
-                            Departure Flight / Train Number
+                            Departure {travelNumberLabel}
                             <input
                               required
                               value={flightNumber}
                               onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
-                              placeholder="e.g. 6E-5021 (IndiGo)"
+                              placeholder={productSubType === "AIRPORT_RAILWAY" ? "e.g. 6E-5021 or train 12004" : "e.g. 6E-5021 (IndiGo)"}
                               className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 focus:border-amber-500 focus:bg-white outline-none"
                             />
                           </label>
@@ -862,6 +881,7 @@ export default function Checkout() {
                             />
                           </label>
                         </div>
+                        {flightNumber.trim() && !flightNumberValid && <p role="alert" className="text-[11px] font-semibold text-rose-700">Use the {travelNumberLabel.toLowerCase()} only, for example 6E-5021{productSubType === "AIRPORT_RAILWAY" ? " or train 12004" : ""}.</p>}
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="text-xs font-bold text-stone-700">Scheduled departure time <span className="text-rose-600">*</span><input type="time" required value={flightTime} onChange={(e) => setFlightTime(e.target.value)} className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
                           <label className="text-xs font-bold text-stone-700">Terminal / gate <span className="font-normal text-stone-500">(optional)</span><input value={terminalGate} onChange={(e) => setTerminalGate(e.target.value)} placeholder="e.g. Terminal 3" className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
@@ -1019,7 +1039,7 @@ export default function Checkout() {
 
             <button
               type="submit"
-              disabled={processing || quoteLoading || !quote || !travelerReady || !pickupReady || !dropReady || !flightReady || !packageHotelsReady}
+              disabled={processing || quoteLoading || !quote}
               className="w-full rounded-2xl bg-amber-500 hover:bg-amber-400 px-6 py-4 text-sm font-black text-stone-950 shadow-md shadow-amber-500/20 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {processing
