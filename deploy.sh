@@ -3,7 +3,7 @@
 set -e
 
 PROJECT_ID="my-project-8591-489308"
-REGION="us-central1"
+REGION="asia-northeast1"
 SERVICE_NAME="idea-holiday-marketplace"
 # Live Cashfree credentials come only from Secret Manager, never from a local
 # backend/.env (which holds sandbox keys for development).

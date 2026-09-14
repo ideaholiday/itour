@@ -192,12 +192,12 @@ The API also runs driver dispatch on a 30-second in-process timer, but Cloud Run
 | `idea-holiday-queue-drain` | `POST /api/ops/process-reservation-outbox` | `* * * * *` | Booking confirmation outbox delivery. |
 | `post-trip-invites` | `POST /api/ops/process-post-trip-invites` | `15 * * * *` | Review and report-a-problem invites for trips completed in the last 7 days. |
 
-All four jobs run in `Asia/Kolkata`, send `X-Scheduler-Token` from the `idea-holiday-assignment-scheduler-token` secret, and are created in project `my-project-8591-489308`, region `us-central1`. The token is attached to Cloud Run as `ASSIGNMENT_SCHEDULER_TOKEN` by `deploy.sh`.
+All four jobs run in `Asia/Kolkata`, send `X-Scheduler-Token` from the `idea-holiday-assignment-scheduler-token` secret, and are created in project `my-project-8591-489308`, Cloud Scheduler location `us-central1`. They call the Cloud Run service in `asia-northeast1` (ADR 016). The token is attached to Cloud Run as `ASSIGNMENT_SCHEDULER_TOKEN` by `deploy.sh`.
 
 Create or update the dispatch job (run once per environment):
 
 ```bash
-SERVICE_URL=$(gcloud run services describe idea-holiday-marketplace --region=us-central1 --format='value(status.url)')
+SERVICE_URL=$(gcloud run services describe idea-holiday-marketplace --region=asia-northeast1 --format='value(status.url)')
 gcloud scheduler jobs create http driver-dispatch \
   --location=us-central1 --schedule="*/5 * * * *" --time-zone="Asia/Kolkata" \
   --uri="${SERVICE_URL}/api/ops/process-driver-dispatch" --http-method=POST \

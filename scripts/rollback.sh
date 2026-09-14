@@ -9,7 +9,7 @@
 set -euo pipefail
 
 SERVICE_NAME="${1:-idea-holiday-marketplace}"
-REGION="${2:-us-central1}"
+REGION="${2:-asia-northeast1}"
 PROJECT_ID="${3:-my-project-8591-489308}"
 SLACK_WEBHOOK="${SLACK_WEBHOOK:-}"
 

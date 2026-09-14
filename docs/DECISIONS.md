@@ -188,3 +188,17 @@ This document records significant technical and product architectural decisions.
   - Without Ola credentials the app falls back to OpenStreetMap tiles, OSM place search and estimated ETAs; Mappls stays selectable.
   - Pages send `Referrer-Policy: strict-origin-when-cross-origin` so third-party map servers see only our origin.
 - **Consequences**: Tile traffic passes through Cloud Run (browser-cached for a day). Transfer search still shows the pricing distance, which can differ from the real road distance.
+
+---
+
+## ADR 016: Cloud Run Runs in Tokyo, Next to the Database
+- **Date**: 2026-09-14
+- **Context**: The API ran in `us-central1` while the Supabase database is in `ap-northeast-1` (Tokyo) and travelers and Ola Maps are in India. Every request crossed the Pacific, and each database read crossed it again. Owners asked for a faster site with **no increase in running cost**: no load balancer, Redis or always-on instances.
+- **Decision Made**:
+  - The Cloud Run service `idea-holiday-marketplace` moves to `asia-northeast1` (Tokyo): the same Tier 1 price as `us-central1`, next to the database, and it supports Cloud Run domain mappings, so DNS at GoDaddy is unchanged.
+  - `asia-south1` (Mumbai) was rejected: it does not support domain mappings (would need a paid load balancer) and every database read would still go to Tokyo.
+  - `ideaholiday.in`, `supply.ideaholiday.in` and `admin.ideaholiday.in` are remapped to the Tokyo service; Cloud Scheduler jobs keep their `us-central1` location and call the Tokyo URL.
+  - The `us-central1` service is left idle (scales to zero, no cost) as a fallback until the move is confirmed, then deleted. Container images stay in the `us-central1` Artifact Registry.
+  - `--min-instances` stays at 0 (no always-on cost), so the first request after idle still waits for a cold start.
+- **Consequences**: Remapping domains reissues their managed certificates, with brief HTTPS errors during the switch. India to Tokyo is about 0.1 s each way; database reads become local.
+
