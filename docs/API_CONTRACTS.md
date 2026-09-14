@@ -529,6 +529,12 @@ Scoped to the caller: a traveler sees their own threads, a supplier the threads 
   socialLinks { website, instagram, facebook, youtube }, profileStatus: "PUBLISHED" | "HIDDEN"`.
   Returns the same shape as GET. `400` with a reason, `409` for a taken slug or a suspended profile.
 
+- **`GET /api/suppliers/:id/share-kit`** → `{ shareKit: { slug, visible, profileUrl, reviewLinkUrl, links: { profile|review: { tracked, qrSvg, qrPng, standee, sticker } }, widgetUrl, embedCode, scans: [{ target, channel, total, last30Days }] } }`. Rules: [`SHARE_KIT.md`](SHARE_KIT.md).
+
+### 10.3.1 Share kit (public, 120 requests/min)
+- **`GET /go/s/:slug?t=profile|review&c=qr|standee|sticker|voucher|widget|link`** → `302` to the profile or review link, counting the visit; unknown or hidden → `302 /suppliers`.
+- **`GET /api/share/s/:slug/qr.svg`**, **`/qr.png`** (`t`, `c`, `download=1` for an attachment); **`/print?format=standee|sticker&t=`** (HTML); **`/widget`** (framable HTML). `404` for an unknown or hidden profile.
+
 ### 10.4 Admin (`/api/admin/suppliers/:id`, requires `ADMIN`)
 - **`GET …/public-profile`**: the supplier view plus `checkCatalog` and `requiredChecks`.
 - **`POST …/profile-verification`**: `{ "action": "GRANT", "checks": ["BUSINESS_IDENTITY", "BANK_ACCOUNT", "BUSINESS_ADDRESS", "OWNER_CALL"], "reason": "…" }` → `201`,

@@ -110,3 +110,24 @@ test("a new supplier sees their subscription cover and that it isn't on sale yet
   await expect(page.getByText(/isn't on sale yet/)).toBeVisible();
   if (process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/supplier-subscription.png`, fullPage: true });
 });
+
+test("a supplier opens their share kit: QR codes load and the standee prints from its own page", async ({ page, context }) => {
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.getByRole("link", { name: /^Share kit/ }).first().click();
+  await expect(page.getByRole("heading", { name: "Share kit", exact: true })).toBeVisible();
+  const qr = page.getByRole("img", { name: "QR code for your public profile" });
+  await expect(qr).toBeVisible();
+  await expect.poll(() => qr.evaluate((img) => img.naturalWidth)).toBeGreaterThan(0);
+  await expect(page.getByLabel("Widget embed code")).toHaveValue(/<iframe src=".*\/api\/share\/s\/.*\/widget"/);
+
+  const [standee] = await Promise.all([
+    context.waitForEvent("page"),
+    page.getByRole("link", { name: "A5 standee" }).first().click(),
+  ]);
+  await standee.waitForLoadState();
+  await expect(standee.getByRole("heading", { name: "Find us on Idea Holiday" })).toBeVisible();
+  if (process.env.E2E_SCREENSHOT_DIR) {
+    await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/supplier-share-kit.png`, fullPage: true });
+    await standee.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/supplier-standee.png` });
+  }
+});

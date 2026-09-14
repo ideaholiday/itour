@@ -31,6 +31,7 @@ import BlockDatesModal from "./BlockDatesModal.jsx";
 import ManageFleetModal from "./ManageFleetModal.jsx";
 import SupplierListingsPanel from "./SupplierListingsPanel.jsx";
 import SupplierSubscriptionPanel from "./SupplierSubscriptionPanel.jsx";
+import SupplierShareKitPanel from "./SupplierShareKitPanel.jsx";
 import SupplierRevenueCard from "./SupplierRevenueCard.jsx";
 import SupplierBookingSnapshot from "./SupplierBookingSnapshot.jsx";
 import SupplierPerformanceRing from "./SupplierPerformanceRing.jsx";
@@ -204,6 +205,10 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
         <EnquiryInbox viewer="SUPPLIER" />
       </section>
     );
+  }
+
+  if (initialPanel === "share") {
+    return <SupplierShareKitPanel supplierId={supplier.id} />;
   }
 
   if (initialPanel === "subscription") {

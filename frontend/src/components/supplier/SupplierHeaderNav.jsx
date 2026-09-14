@@ -1,6 +1,6 @@
 import React from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart3, Bell, CalendarCheck, ChevronDown, CreditCard, ExternalLink, FileCheck, Globe, LayoutDashboard, LogOut, Map, MessageSquare, PlusCircle, RefreshCw, Store, Users } from "lucide-react";
+import { BarChart3, Bell, CalendarCheck, ChevronDown, CreditCard, QrCode, ExternalLink, FileCheck, Globe, LayoutDashboard, LogOut, Map, MessageSquare, PlusCircle, RefreshCw, Store, Users } from "lucide-react";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { useAuth } from "../../lib/auth.jsx";
 import SupplierNotificationBell from "./SupplierNotificationBell.jsx";
@@ -23,6 +23,7 @@ export default function SupplierHeaderNav({ supplierData, activeTab }) {
     ["FLEET", "Fleet", "/supplier/dashboard?panel=fleet", Users, supplierData?.drivers?.length || null],
     ["ANALYTICS", "Analytics", "/supplier/dashboard?panel=analytics", BarChart3],
     ["PROFILE", "Public profile", "/supplier/dashboard?panel=profile", Globe],
+    ["SHARE", "Share kit", "/supplier/dashboard?panel=share", QrCode],
     ["ENQUIRIES", "Enquiries", "/supplier/dashboard?panel=enquiries", MessageSquare],
     ["KYB", "Compliance", "/supplier/dashboard?panel=compliance", FileCheck, isKybPending ? (supplier.kyb_status === "REJECTED" ? "Rejected" : "Action") : null],
     // Only suppliers who joined from 14 September 2026 need a subscription (ADR 017).
@@ -30,7 +31,7 @@ export default function SupplierHeaderNav({ supplierData, activeTab }) {
   ];
 
   const isCurrent = (id, path) => {
-    if (["FLEET", "KYB", "BUILDER", "ANALYTICS", "PROFILE", "ENQUIRIES", "SUBSCRIPTION"].includes(id)) return requestedPanel === (id === "BUILDER" ? "listings" : id === "KYB" ? "compliance" : id.toLowerCase());
+    if (["FLEET", "KYB", "BUILDER", "ANALYTICS", "PROFILE", "SHARE", "ENQUIRIES", "SUBSCRIPTION"].includes(id)) return requestedPanel === (id === "BUILDER" ? "listings" : id === "KYB" ? "compliance" : id.toLowerCase());
     if (id === "DASHBOARD") return location.pathname === "/supplier" || (location.pathname === "/supplier/dashboard" && !requestedPanel);
     return location.pathname === path;
   };

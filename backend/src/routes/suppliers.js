@@ -47,6 +47,7 @@ import {
   listSubscriptionPayments, quoteSubscriptionPayment, renderSubscriptionInvoice, startSubscriptionPayment, verifySubscriptionPayment,
 } from "../services/supplierPlanPaymentService.js";
 import { getSettings } from "../services/programSettingsService.js";
+import { supplierShareKit } from "../services/supplierShareKitService.js";
 import {
   verifyGstin,
   verifyPan,
@@ -119,6 +120,15 @@ function subscriptionFailure(res, req, error, fallback) {
   logger.error(fallback, { requestId: req.requestId, error });
   return res.status(500).json({ error: fallback });
 }
+
+// Share kit (docs/SHARE_KIT.md): links, QR/print URLs, embed code and scan counts.
+router.get("/:id/share-kit", (req, res) => {
+  try {
+    res.json({ success: true, shareKit: supplierShareKit(db, req.params.id, { actorId: req.user.id }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the share kit");
+  }
+});
 
 router.get("/:id/subscription", (req, res) => {
   try {

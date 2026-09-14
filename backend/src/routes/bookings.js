@@ -751,6 +751,7 @@ router.patch("/:id/status", authenticate, requireRoles("ADMIN", "STAFF"), valida
 function bookingDocumentRecord(ref) {
   return db.prepare(`
     SELECT b.*, p.title AS product_title, s.company_name AS supplier_name, s.phone AS supplier_phone,
+      s.public_slug AS supplier_public_slug, s.profile_status AS supplier_profile_status, s.kyb_status AS supplier_kyb_status,
       da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number
     FROM bookings b
     LEFT JOIN products p ON p.id = b.product_id

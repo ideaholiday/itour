@@ -31,7 +31,7 @@ Do not rebuild these. Extend them if asked.
 | Finance | Frozen commission, payout lifecycle, refund policy engine |
 | Notifications | WhatsApp, email, SMS with a durable outbox |
 | Analytics | `/admin/analytics` |
-| Supplier profiles | Public pages + directory, server-rendered SEO and sitemap, Verified badge (admin-granted), enquiries |
+| Supplier profiles | Public pages + directory, server-rendered SEO and sitemap, Verified badge (admin-granted), enquiries, share kit (QR, standee/sticker print, voucher QR, reviews widget, visit counts) |
 
 ---
 
@@ -77,9 +77,7 @@ them, so treat each as its own scoped piece of work.
 ---
 
 **3. Supplier profiles: share kit, paid plans** *(agreed with the owner, 2026-09-13)*
-Phases 1–2 are done (see DONE). Remaining, in order:
-- *Share kit*: QR codes (PNG/SVG) and printable standee/sticker PDFs for the
-  profile and review links, scan tracking, QR on vouchers, embeddable review widget.
+Phases 1–2 and the share kit are done (see DONE). Remaining:
 - *Paid plans*: Free; **Verified** ₹999 + GST/yr (pays for the yearly check — badge
   only if it passes, refund if rejected); **Spotlight** ₹2,999 + GST one-time per
   product (shows that product on the profile; locked to the product, one swap a

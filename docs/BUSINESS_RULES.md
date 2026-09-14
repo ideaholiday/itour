@@ -427,7 +427,7 @@ highest commission in use must fit the giveaway cap (§3.2), or the change is re
 
 ## 12. Supplier Profiles
 
-Who can take bookings once KYB is approved (subscriptions, waivers): [`SUPPLIER_PLANS.md`](SUPPLIER_PLANS.md).
+Subscriptions and waivers: [`SUPPLIER_PLANS.md`](SUPPLIER_PLANS.md). QR codes, printouts, widget: [`SHARE_KIT.md`](SHARE_KIT.md).
 
 Every registered supplier has a public page at `/suppliers/<slug>` that
 travelers can find on the marketplace and on Google. Code:

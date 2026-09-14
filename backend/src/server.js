@@ -118,6 +118,7 @@ import analyticsRouter from "./routes/analytics.js";
 import seoRouter from "./routes/seo.js";
 import { driverAppAssetLinks } from "./lib/androidAppLinks.js";
 import publicSuppliersRouter from "./routes/publicSuppliers.js";
+import { goRouter, shareRouter } from "./routes/shareKit.js";
 import enquiriesRouter from "./routes/enquiries.js";
 import securityTxtRouter from "./routes/securityTxt.js";
 import metricsRouter from "./routes/metrics.js";
@@ -197,6 +198,7 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/bookings`, bookingsRouter);
   app.use(`${prefix}/transfers`, transfersRouter);
   app.use(`${prefix}/public/suppliers`, publicSuppliersRouter);
+  app.use(`${prefix}/share`, shareRouter);
   app.use(`${prefix}/enquiries`, enquiriesRouter);
   app.use(`${prefix}/suppliers`, suppliersRouter);
   app.use(`${prefix}/supplier-channels`, supplierChannelsRouter);
@@ -233,6 +235,7 @@ app.use("/octo", octoRouter);
 
 app.use("/", securityTxtRouter);
 app.use("/", seoRouter);
+app.use("/", goRouter);
 
 app.get(["/api/health", "/api/v1/health"], (req, res) =>
   res.json({

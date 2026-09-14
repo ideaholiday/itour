@@ -324,6 +324,8 @@ export const api = {
     fetch("/api/affiliate/profile", { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   updateAffiliateKyc: (payload) =>
     fetch("/api/affiliate/kyc", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  supplierShareKit: (supplierId) =>
+    fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/share-kit`, { headers: authHeaders() }).then(handle),
   supplierSubscription: (supplierId) =>
     fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/subscription`, { headers: authHeaders() }).then(handle),
   supplierSubscriptionQuote: (supplierId, payload) =>
