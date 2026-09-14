@@ -12,6 +12,7 @@ import AffiliatePayoutsView from "./admin/AffiliatePayoutsView.jsx";
 import ReferralProgramView from "./admin/ReferralProgramView.jsx";
 import TeamView from "./admin/TeamView.jsx";
 import ProgramsView from "./admin/ProgramsView.jsx";
+import CouponsView from "./admin/CouponsView.jsx";
 
 export default function AdminPanel({ view }) {
   const location = useLocation();
@@ -27,6 +28,7 @@ export default function AdminPanel({ view }) {
     else if (location.pathname.includes("/referrals")) activeView = "referrals";
     else if (location.pathname.includes("/team")) activeView = "team";
     else if (location.pathname.includes("/programs")) activeView = "programs";
+    else if (location.pathname.includes("/coupons")) activeView = "coupons";
     else activeView = "overview";
   }
 
@@ -43,6 +45,7 @@ export default function AdminPanel({ view }) {
         {activeView === "referrals" && <ReferralProgramView />}
         {activeView === "team" && <TeamView />}
         {activeView === "programs" && <ProgramsView />}
+        {activeView === "coupons" && <CouponsView />}
       </AdminLayout>
     </AdminGuard>
   );

@@ -52,7 +52,7 @@ Legacy and noise files are hidden from search by `.ignore` / `.geminiignore`.
 | Understand the goal, users, scope, non-goals | [`PRODUCT.md`](docs/PRODUCT.md) |
 | Decide what to work on next | [`ROADMAP.md`](docs/ROADMAP.md) |
 | Seats, holds, rates, calendar, capacity | [`RESERVATION_ENGINE.md`](docs/RESERVATION_ENGINE.md) |
-| Pricing, commission, refunds, booking state, supplier subscriptions | [`BUSINESS_RULES.md`](docs/BUSINESS_RULES.md), [`SUPPLIER_PLANS.md`](docs/SUPPLIER_PLANS.md) |
+| Pricing, commission, refunds, booking state, coupons, supplier subscriptions | [`BUSINESS_RULES.md`](docs/BUSINESS_RULES.md), [`COUPONS.md`](docs/COUPONS.md), [`SUPPLIER_PLANS.md`](docs/SUPPLIER_PLANS.md) |
 | Schema, tables, fields | [`DATA_MODEL.md`](docs/DATA_MODEL.md) |
 | Add or change an endpoint | [`API_CONTRACTS.md`](docs/API_CONTRACTS.md) + [`SECURITY.md`](docs/SECURITY.md) |
 | Auth, RBAC, PII, dependency CVEs | [`SECURITY.md`](docs/SECURITY.md) |

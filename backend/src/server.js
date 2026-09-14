@@ -38,6 +38,7 @@ import { requestBoundary } from "./middleware/validation.js";
 import { backfillSupplierSlugs } from "./services/supplierProfileService.js";
 import { backfillLegacyReferrals, findWalletDiscrepancies, processReferralLifecycle, sendReferralNotifications } from "./services/referralService.js";
 import { processSubscriptionLifecycle, sendSubscriptionReminders, syncLaunchWaivers } from "./services/supplierSubscriptionService.js";
+import { releaseCouponRedemptions } from "./services/promoService.js";
 
 // Run pending migrations on startup
 try {
@@ -312,6 +313,9 @@ async function referralTick() {
     const drift = findWalletDiscrepancies(db);
     if (drift.length) logger.error("Wallet ledger does not match cached balances", { users: drift.slice(0, 20), count: drift.length });
     await sendReferralNotifications(db, notifications);
+    // Coupon uses from checkouts that never went ahead are given back.
+    const coupons = releaseCouponRedemptions(db);
+    if (coupons.released) logger.info("Released coupon uses", coupons);
   } catch (error) {
     logger.error("Referral lifecycle worker failed", { error });
   } finally {

@@ -166,6 +166,7 @@ function AppContent() {
             <Route path="/admin/referrals" element={<AdminPanel view="referrals" />} />
             <Route path="/admin/team" element={<AdminPanel view="team" />} />
             <Route path="/admin/programs" element={<AdminPanel view="programs" />} />
+            <Route path="/admin/coupons" element={<AdminPanel view="coupons" />} />
             <Route path="/ops" element={<OpsPanel view="live" />} />
             <Route path="/ops/live" element={<OpsPanel view="live" />} />
             <Route path="/ops/notifications" element={<OpsPanel view="notifications" />} />

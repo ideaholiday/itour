@@ -23,7 +23,8 @@ import {
   Wallet,
   Gift,
   UserCog,
-  SlidersHorizontal
+  SlidersHorizontal,
+  TicketPercent
 } from "lucide-react";
 
 export default function AdminLayout({ children }) {
@@ -106,6 +107,13 @@ export default function AdminLayout({ children }) {
       path: "/admin/referrals",
       label: "Travel & Earn",
       icon: Gift,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/coupons",
+      label: "Coupons",
+      icon: TicketPercent,
       badge: null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     },

@@ -448,6 +448,12 @@ Migration 037, ADR 017. Read and written only through `programSettingsService`.
   (`PLATFORM` | `SUPPLIER` | `PRODUCT`), `supplier_id`, `product_id`, `old_rate`
   and `new_rate` (the rate actually paid before and after), `changed_by`, `reason`,
   `notify` (1 when the affected suppliers are sent a notice), `notified_at`.
+- **`promo_codes`** (migration 040 adds): `audience` (`TRAVELER` default), `starts_at`,
+  `per_user_limit`, `first_booking_only`, `product_types_json`, `product_ids_json`,
+  `supplier_ids_json` (JSON arrays, `NULL` = any), `created_by`, `updated_at`.
+- **`coupon_redemptions`** (migration 040): `coupon_code`, `user_id`, `booking_id`
+  (unique), `discount_inr`, `status` (`ACTIVE` | `RELEASED`), `release_reason`,
+  `released_at`. COUPONS.md §3.
 - **`suppliers.subscription_exempt`** (migration 039): 1 for suppliers registered
   before 2026-09-14; they need no subscription (SUPPLIER_PLANS.md).
 - **`supplier_subscriptions`** (migration 039): `supplier_id`, `plan_code`

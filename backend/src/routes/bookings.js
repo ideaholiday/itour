@@ -22,7 +22,7 @@ import { guestNotificationPreferences, notifyBookingLogisticsEvent, notifyDispat
 import { assertBookingLocations } from "../services/locationValidationService.js";
 import { bookingLogistics, buildLogisticsSnapshot, consumeBookingHold, createBookingHold, expireBookingHolds, getBookingQuestions, getOption, getProductOptions, persistBookingLogistics, validateOptionLogistics, validateQuestionAnswers } from "../services/logisticsService.js";
 import { applyWalletCreditsToCheckout, ensureUserReferralCode } from "../services/loyaltyService.js";
-import { applyPromoCode, capCouponDiscount, priceCouponForBooking, validatePromoCode } from "../services/promoService.js";
+import { capCouponDiscount, priceCouponForBooking, redeemCoupon, validatePromoCode } from "../services/promoService.js";
 import { giveawayBudgetInr } from "../services/programSettingsService.js";
 import { recordAffiliateBooking, resolveAttribution } from "../services/affiliateService.js";
 import {
@@ -169,6 +169,7 @@ function couponPreview(req, quote, referral) {
       commissionInr: quote.commissionAmount,
       userId: req.user?.id || null,
       otherGiveawayInr: (referral.discountInr || 0) + (referral.referrerCreditInr || 0),
+      product: quote.product,
     });
     return coupon && { valid: true, code: coupon.code, description: coupon.description, discountInr: coupon.discountInr, capped: coupon.capped };
   } catch (error) {
@@ -305,6 +306,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         commissionInr: quote.commissionAmount,
         userId: existingUser?.id || null,
         otherGiveawayInr: (expectedReferral.discountInr || 0) + (expectedReferral.referrerCreditInr || 0),
+        product: quote.product,
       })
       : null;
     const requestedWalletCredit = Number(req.body.wallet_credit_inr) || 0;
@@ -405,15 +407,23 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       // left the booking INSERT unable to commit ("current transaction is
       // aborted") and every checkout returned a 500.
       if (req.body.promo_code) {
-        try {
-          db.transaction(() => applyPromoCode(db, {
-            code: req.body.promo_code,
-            bookingId,
-            userId,
-            amountInr: quote.totalAmount,
-          }))();
-        } catch (promoErr) {
-          logger.warn("Promo code application failed during booking creation", { error: promoErr.message });
+        if (expectedCoupon) {
+          // The coupon use is not best-effort: the discount was charged, so a code
+          // that has just run out rolls the whole booking back.
+          redeemCoupon(db, { code: expectedCoupon.code, bookingId, userId, discountInr: couponDiscount });
+          if (expectedCoupon.type === "AFFILIATE") {
+            try {
+              db.transaction(() => recordAffiliateBooking(db, {
+                bookingId,
+                affiliateCode: expectedCoupon.code,
+                amountInr: quote.totalAmount,
+                attributionType: "COUPON_CODE",
+                userId,
+              }))();
+            } catch (promoErr) {
+              logger.warn("Creator coupon attribution failed during booking creation", { error: promoErr.message });
+            }
+          }
         }
       } else if (req.body.visitor_id || req.body.affiliate_code) {
         // Link attribution is resolved from the server-side click record for

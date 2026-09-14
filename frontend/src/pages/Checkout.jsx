@@ -357,6 +357,7 @@ export default function Checkout() {
       const res = await api.validatePromoCode({
         code: codeToValidate,
         amountInr: totalAmount,
+        productId: id,
       });
       if (res?.promo?.valid) {
         setAppliedPromo(res.promo);

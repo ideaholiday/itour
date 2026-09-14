@@ -57,3 +57,36 @@ test("an administrator sets the giveaway cap and a product's commission, each wi
   await expect(page.getByText(/25% commission on new bookings/)).toBeVisible();
   if (process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/admin-commission.png`, fullPage: true });
 });
+
+test("an administrator creates a coupon, edits it and switches it off", async ({ page }) => {
+  await page.goto("/admin/login");
+  await page.getByPlaceholder("admin@ideaholiday.in").fill(E2E_ACCOUNTS.admin.email);
+  await page.locator('input[type="password"]').fill(E2E_ACCOUNTS.admin.password);
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(/\/admin$/);
+
+  await page.getByRole("link", { name: /Coupons/ }).click();
+  await expect(page.getByRole("heading", { name: "Coupons" })).toBeVisible();
+  await page.getByRole("button", { name: "New coupon" }).click();
+  await page.getByLabel("Code").fill("monsoon15");
+  await page.getByLabel("Discount (%)").fill("15");
+  await page.getByLabel("Most off per booking (₹, optional)").fill("750");
+  await page.getByLabel("Uses per traveler (empty = no limit)").fill("1");
+  await page.getByLabel("TOUR").check();
+  await page.getByRole("button", { name: "Create coupon" }).click();
+  await expect(page.getByText("MONSOON15 created.")).toBeVisible();
+  await expect(page.getByText(/15% off up to ₹750 · 1× per traveler · TOUR/)).toBeVisible();
+
+  const row = page.locator("li").filter({ hasText: "MONSOON15" });
+  await row.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Discount (%)").fill("12");
+  await page.getByRole("button", { name: "Save coupon" }).click();
+  await expect(page.getByText("MONSOON15 saved.")).toBeVisible();
+  await expect(row.getByText(/12% off up to ₹750/)).toBeVisible();
+
+  await row.getByRole("button", { name: "Switch off" }).click();
+  await expect(row.getByText("Off", { exact: true })).toBeVisible();
+  await row.getByRole("button", { name: "Uses" }).click();
+  await expect(page.getByText("Not used yet.")).toBeVisible();
+  if (process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/admin-coupons.png`, fullPage: true });
+});

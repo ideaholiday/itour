@@ -77,12 +77,8 @@ $$\text{Vacancies} = \text{Configured Max Capacity} - \text{Confirmed Seats} - \
    Wallet credit being spent is not counted; it was paid for when it was earned.
    Admins change the share in Admin → Programs (`giveaway.maxBookingValuePct`,
    0–50%). Every change needs a reason, is audited, and applies to new bookings.
-5. **Coupons (`promo_codes`) are charged, not only shown.** The server prices the
-   discount from its own quote (whole rupees, rounded down), cuts it to what the cap
-   leaves after the referral and creator commission, and takes it off `amount_inr`.
-   It comes out of commission, never the supplier's payout. `POST /api/bookings/quote`
-   returns the same figure checkout shows. A code that is no longer valid when the
-   booking is created refuses the booking; it is never silently dropped.
+5. **Coupons** are priced by the server, cut to the cap, charged, and come out of
+   commission. Rules: [`COUPONS.md`](COUPONS.md).
 
 ---
 

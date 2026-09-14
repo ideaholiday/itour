@@ -42,6 +42,7 @@ import { dispatchTransaction, revokeAssignment } from "../services/dispatchState
 import { adminSchemas, checkoutSchemas, profileSchemas } from "../validators/apiSchemas.js";
 import { addTeamMember, listTeam, removeTeamMember, resetTeamMemberPassword, updateTeamMember } from "../services/teamService.js";
 import { listPrograms, listSettingsAudit, updateSettings } from "../services/programSettingsService.js";
+import { createCoupon, listCouponRedemptions, listCoupons, updateCoupon } from "../services/couponService.js";
 import {
   getSubscriptionStatus, grantSubscriptionWaiver, listSupplierSubscriptions, revokeSubscription, syncLaunchWaivers,
 } from "../services/supplierSubscriptionService.js";
@@ -502,6 +503,39 @@ router.get("/commission", (req, res) => {
     res.json({ success: true, ...listCommissionOverrides(db), changes: listCommissionChanges(db, { limit: 100 }) });
   } catch (error) {
     commissionFailure(res, req, error, "Could not load commission settings");
+  }
+});
+
+// Coupons (ADR 017 Phase 2). Never deleted: bookings refer to their code.
+router.get("/coupons", (req, res) => {
+  try {
+    res.json({ success: true, coupons: listCoupons(db) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not load coupons");
+  }
+});
+
+router.post("/coupons", validateBody(adminSchemas.coupon), (req, res) => {
+  try {
+    res.status(201).json({ success: true, coupon: createCoupon(db, req.body, { actorId: req.user.id }) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not create the coupon");
+  }
+});
+
+router.patch("/coupons/:id", validateBody(adminSchemas.couponUpdate), (req, res) => {
+  try {
+    res.json({ success: true, coupon: updateCoupon(db, req.params.id, req.body, { actorId: req.user.id }) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not update the coupon");
+  }
+});
+
+router.get("/coupons/:id/redemptions", (req, res) => {
+  try {
+    res.json({ success: true, ...listCouponRedemptions(db, req.params.id) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not load the coupon's uses");
   }
 });
 

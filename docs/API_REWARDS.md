@@ -188,3 +188,13 @@ Rules: [`SUPPLIER_PLANS.md`](SUPPLIER_PLANS.md). Each change needs a `reason` (3
 - **`POST /api/admin/suppliers/:id/subscription/waiver`** `{ until: "YYYY-MM-DD" | null, reason }` → `201 { waiver, subscription }`. `400 INVALID_DATE` for a past or malformed date.
 - **`POST /api/admin/supplier-subscriptions/:id/end`** `{ reason }` → `{ subscription }`. `409 NOT_ACTIVE` if already ended.
 - A quote for an uncovered supplier's product is `409` with `code: "SUPPLIER_SUBSCRIPTION_REQUIRED"`; its listing and detail pages return `404` like an unapproved supplier's.
+
+## Coupons (`/api/admin/coupons`, requires `ADMIN`)
+
+Rules: [`COUPONS.md`](COUPONS.md).
+
+- **`GET /api/admin/coupons`** → `{ coupons: [{ id, code, description, discountType, discountValue, minOrderInr, maxDiscountInr, usageLimit, timesUsed, perUserLimit, firstBookingOnly, startsAt, expiresAt, productTypes, productIds, supplierIds, isActive, isCreatorCode, redeemedCount, discountGivenInr, createdAt, updatedAt }] }`.
+- **`POST /api/admin/coupons`** `{ code, discountType: PERCENTAGE|FIXED, discountValue, description?, minOrderInr?, maxDiscountInr?, usageLimit?, perUserLimit?, firstBookingOnly?, startsAt?, expiresAt?, productTypes?, productIds?, supplierIds?, isActive? }` → `201 { coupon }`. `400 INVALID_COUPON` / `RESERVED_CODE` (`REF-`), `409 CODE_TAKEN`.
+- **`PATCH /api/admin/coupons/:id`** (same fields, all optional) → `{ coupon }`. `400 CODE_IMMUTABLE` for a new code; `409 CREATOR_CODE` for anything but `isActive` on a creator's code.
+- **`GET /api/admin/coupons/:id/redemptions`** → `{ coupon, redemptions: [{ id, bookingId, bookingRef, userId, userName, discountInr, chargedInr, paymentStatus, bookingStatus, status, releaseReason, releasedAt, createdAt }] }`, newest first, up to 200.
+- **`POST /api/promo/validate`** also accepts `productId` (checks targeting) and returns the rule's `code` on failure: `NOT_STARTED`, `WRONG_AUDIENCE`, `SIGN_IN_REQUIRED` (401), `PER_USER_LIMIT`, `FIRST_BOOKING_ONLY`, `NOT_APPLICABLE`. `429` after 30 checks a minute. A booking refused for a coupon returns the same codes, or `409 USAGE_LIMIT` when the last use was just taken.

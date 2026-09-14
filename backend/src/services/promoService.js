@@ -1,17 +1,77 @@
 import { recordAffiliateBooking, resolveTier } from "./affiliateService.js";
 import { findReferrerByCode, referralPolicy } from "./referralService.js";
 import { giveawayBudgetInr } from "./programSettingsService.js";
+import { nanoid } from "nanoid";
 
-function promoError(message, status = 400) {
+function promoError(message, status = 400, code = undefined) {
   const error = new Error(message);
   error.status = status;
+  if (code) error.code = code;
   return error;
+}
+
+function parseList(value) {
+  if (!value) return [];
+  try {
+    const list = JSON.parse(value);
+    return Array.isArray(list) ? list.map((item) => String(item)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Runs a count query that needs migration 040; before it, nothing has been redeemed. */
+function countOrZero(database, sql, ...params) {
+  try {
+    return Number(database.prepare(sql).get(...params)?.count) || 0;
+  } catch (error) {
+    if (/no such table|does not exist/i.test(error.message)) return 0;
+    throw error;
+  }
+}
+
+/**
+ * Who and what an admin coupon can be used for (migration 040). `product` is
+ * `{ id, product_type, supplier_id }` when the code is checked for a booking; a
+ * check without one (the checkout "Apply" button) skips product targeting, and
+ * the booking quote applies it.
+ */
+function assertCouponAllowed(database, promo, { userId, product }) {
+  const code = promo.code;
+  if (String(promo.audience || "TRAVELER").toUpperCase() !== "TRAVELER") {
+    throw promoError(`Promo code ${code} cannot be used for bookings`, 400, "WRONG_AUDIENCE");
+  }
+  if (promo.starts_at && new Date(promo.starts_at.replace(" ", "T")).getTime() > Date.now()) {
+    throw promoError(`Promo code ${code} starts on ${new Date(promo.starts_at.replace(" ", "T")).toLocaleDateString("en-IN")}`, 400, "NOT_STARTED");
+  }
+  if ((promo.per_user_limit || Number(promo.first_booking_only) === 1) && !userId) {
+    throw promoError(`Sign in to use promo code ${code}`, 401, "SIGN_IN_REQUIRED");
+  }
+  if (promo.per_user_limit) {
+    const used = countOrZero(database, "SELECT COUNT(*) AS count FROM coupon_redemptions WHERE coupon_code = ? AND user_id = ? AND status = 'ACTIVE'", code, userId);
+    if (used >= Number(promo.per_user_limit)) {
+      throw promoError(`You have already used promo code ${code}${Number(promo.per_user_limit) > 1 ? ` ${promo.per_user_limit} times` : ""}`, 400, "PER_USER_LIMIT");
+    }
+  }
+  if (Number(promo.first_booking_only) === 1) {
+    const paid = countOrZero(database, "SELECT COUNT(*) AS count FROM bookings WHERE user_id = ? AND payment_status IN ('PAID', 'PARTIALLY_REFUNDED')", userId);
+    if (paid > 0) throw promoError(`Promo code ${code} is for your first booking only`, 400, "FIRST_BOOKING_ONLY");
+  }
+  if (product) {
+    const types = parseList(promo.product_types_json).map((type) => type.toUpperCase());
+    const products = parseList(promo.product_ids_json);
+    const suppliers = parseList(promo.supplier_ids_json);
+    const fits = (!types.length || types.includes(String(product.product_type || "").toUpperCase()))
+      && (!products.length || products.includes(String(product.id)))
+      && (!suppliers.length || suppliers.includes(String(product.supplier_id)));
+    if (!fits) throw promoError(`Promo code ${code} does not apply to this experience`, 400, "NOT_APPLICABLE");
+  }
 }
 
 /**
  * Validates a promo code or referral code against an order amount
  */
-export function validatePromoCode(database, { code, amountInr = 0, userId = null }) {
+export function validatePromoCode(database, { code, amountInr = 0, userId = null, product = null }) {
   const normalized = String(code || "").trim().toUpperCase();
   if (!normalized) {
     throw promoError("Enter a promo or referral code", 400);
@@ -37,6 +97,8 @@ export function validatePromoCode(database, { code, amountInr = 0, userId = null
     if (promo.usage_limit && promo.times_used >= promo.usage_limit) {
       throw promoError(`Promo code ${normalized} has reached its maximum redemption limit`, 400);
     }
+
+    assertCouponAllowed(database, promo, { userId, product });
 
     const minSpend = Number(promo.min_order_inr || 0);
     if (orderAmount < minSpend) {
@@ -116,7 +178,7 @@ export function applyPromoCode(database, { code, bookingId, userId = null, amoun
 
     database.transaction(() => {
       if (validated.type === "PROMO" || validated.type === "AFFILIATE") {
-        database.prepare("UPDATE promo_codes SET times_used = times_used + 1 WHERE code = ?").run(validated.code);
+        redeemCoupon(database, { code: validated.code, bookingId, userId, discountInr: validated.discountAmount });
         if (validated.type === "AFFILIATE" || validated.affiliateCode) {
           recordAffiliateBooking(database, {
             bookingId,
@@ -154,8 +216,8 @@ export function capCouponDiscount({ offeredInr, budgetInr, otherGiveawayInr = 0 
  * commission are paid for. Throws the promo error for a code that is not valid.
  * Traveler `REF-` codes are not coupons and return null.
  */
-export function priceCouponForBooking(database, { code, bookingValueInr, commissionInr, userId = null, otherGiveawayInr = 0 }) {
-  const promo = validatePromoCode(database, { code, amountInr: bookingValueInr, userId });
+export function priceCouponForBooking(database, { code, bookingValueInr, commissionInr, userId = null, otherGiveawayInr = 0, product = null }) {
+  const promo = validatePromoCode(database, { code, amountInr: bookingValueInr, userId, product });
   if (promo.type === "REFERRAL") return null;
   const creatorCommissionInr = promo.affiliateId
     ? Math.round((Number(bookingValueInr) || 0) * (Number(resolveTier(database, promo.affiliateId).commission_rate) || 0.1) * 100) / 100
@@ -174,4 +236,67 @@ export function priceCouponForBooking(database, { code, bookingValueInr, commiss
     creatorCommissionInr,
     capped: discountInr < Math.floor(Number(promo.discountAmount) || 0),
   };
+}
+
+/**
+ * Records that a booking used a coupon. Runs inside the booking transaction and
+ * throws when the code has just run out, so the booking is not created with a
+ * discount the code can no longer give.
+ */
+export function redeemCoupon(database, { code, bookingId, userId = null, discountInr = 0 }) {
+  const taken = database.prepare(`
+    UPDATE promo_codes SET times_used = COALESCE(times_used, 0) + 1
+    WHERE code = ? AND (usage_limit IS NULL OR usage_limit = 0 OR COALESCE(times_used, 0) < usage_limit)
+  `).run(code);
+  if (!taken.changes) throw promoError(`Promo code ${code} has just reached its limit. Remove it and try again.`, 409, "USAGE_LIMIT");
+  try {
+    database.prepare(`
+      INSERT INTO coupon_redemptions (id, coupon_code, user_id, booking_id, discount_inr) VALUES (?, ?, ?, ?, ?)
+    `).run(`cred_${nanoid(12)}`, code, userId, bookingId, Math.max(0, Number(discountInr) || 0));
+  } catch (error) {
+    // Before migration 040 there is only the counter.
+    if (!/no such table|does not exist/i.test(error.message)) throw error;
+  }
+}
+
+/**
+ * Gives coupon uses back when their booking never went ahead: an unpaid
+ * checkout whose hold lapsed, a failed payment, or a full refund. A partly
+ * refunded booking keeps its use. Run by the lifecycle job; safe to repeat.
+ */
+export function releaseCouponRedemptions(database, { now = new Date() } = {}) {
+  const at = new Date(now).toISOString().slice(0, 19).replace("T", " ");
+  let rows;
+  try {
+    rows = database.prepare(`
+      SELECT cr.id, cr.coupon_code, b.id AS booking_id, b.status, b.payment_status, b.amount_inr, b.refunded_amount, b.refund_amount_inr
+      FROM coupon_redemptions cr JOIN bookings b ON b.id = cr.booking_id
+      WHERE cr.status = 'ACTIVE' AND (
+        b.payment_status IN ('FAILED', 'EXPIRED', 'REFUNDED')
+        OR (b.status = 'cancelled' AND b.payment_status NOT IN ('PAID', 'PARTIALLY_REFUNDED', 'PAYMENT_REVIEW_REQUIRED', 'CAPTURED_REVIEW'))
+        OR (b.payment_status NOT IN ('PAID', 'REFUNDED', 'PARTIALLY_REFUNDED', 'PAYMENT_REVIEW_REQUIRED', 'CAPTURED_REVIEW')
+          AND EXISTS (SELECT 1 FROM booking_holds h WHERE h.booking_id = b.id AND (h.status = 'EXPIRED' OR h.expires_at <= ?))
+          AND NOT EXISTS (SELECT 1 FROM booking_holds h WHERE h.booking_id = b.id AND h.status = 'ACTIVE' AND h.expires_at > ?))
+        OR (b.payment_status = 'PARTIALLY_REFUNDED' AND COALESCE(b.amount_inr, 0) > 0
+          AND CASE WHEN COALESCE(b.refunded_amount, 0) >= COALESCE(b.refund_amount_inr, 0)
+            THEN COALESCE(b.refunded_amount, 0) ELSE COALESCE(b.refund_amount_inr, 0) END >= b.amount_inr)
+      )
+    `).all(at, at);
+  } catch (error) {
+    if (/no such table|does not exist/i.test(error.message)) return { released: 0 };
+    throw error;
+  }
+  let released = 0;
+  for (const row of rows) {
+    database.transaction(() => {
+      const reason = row.payment_status === "REFUNDED" || row.payment_status === "PARTIALLY_REFUNDED" ? "Booking refunded in full"
+        : row.status === "cancelled" ? "Booking cancelled before payment" : "Checkout not paid";
+      const changed = database.prepare("UPDATE coupon_redemptions SET status = 'RELEASED', release_reason = ?, released_at = ? WHERE id = ? AND status = 'ACTIVE'").run(reason, at, row.id).changes;
+      if (changed) {
+        database.prepare("UPDATE promo_codes SET times_used = CASE WHEN COALESCE(times_used, 0) > 0 THEN times_used - 1 ELSE 0 END WHERE code = ?").run(row.coupon_code);
+        released += 1;
+      }
+    })();
+  }
+  return { released };
 }
