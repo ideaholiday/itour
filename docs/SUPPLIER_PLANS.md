@@ -80,8 +80,38 @@
    else IGST 18%; with `BUSINESS_STATE` unset it is shown as one GST line —
    set it before selling.
 
-## 6. Not built yet
+## 6. Profile plans (ADR 008)
 
-- **Paid add-ons from ADR 008** (Verified check, Spotlight).
-- **Automatic renewal charges:** renewal is a new payment by the supplier, prompted
-  by the reminders in §4.
+Any KYB-approved supplier can buy these, exempt or not, through the same
+payment, coupon and invoice path as §5. Prices are the program setting
+`supplier_plans` (defaults from ADR 008, all + 18% GST): **Verified ₹999/year**,
+**Spotlight ₹2,999 one-time**, **Verified Plus ₹3,499** (first-year check plus one
+Spotlight; renews as Verified). Coupons for them use
+`audience = 'SUPPLIER_PLANS'`.
+
+1. **Verified buys the check, never the badge.** A paid (or 100%-coupon)
+   VERIFIED or VERIFIED_PLUS creates a `supplier_verifications` row
+   `PENDING_CHECKS`, `source = 'PURCHASE'`, in Admin → Verified checks. Needs KYB
+   `APPROVED`; one pending check at a time (`CHECK_PENDING`).
+2. **Passing the check** is the existing admin grant with the required checks
+   (BUSINESS_RULES §12.3): it turns the pending row `ACTIVE` for 365 days. A renewal
+   passed while a badge is still active adds the year to its end.
+3. **A rejected check is refunded** (reason required) through Cashfree: the whole
+   payment for VERIFIED; for VERIFIED_PLUS the part above the Spotlight price,
+   fixed at purchase (`check_refundable_inr`, e.g. ₹590 of ₹4,128.82) — the
+   Spotlight is kept. A failed refund is marked `FAILED` and retried from the queue.
+   Nothing is refunded for a 100%-coupon purchase.
+4. **A Spotlight** shows one of the supplier's published listings on its public
+   profile (`product_spotlights`) — the only way products appear there (§12.1).
+   It needs no renewal. A listing that stops being bookable drops off the profile
+   without ending the Spotlight. A listing can be in one Spotlight at a time.
+5. **One swap a year:** a Spotlight can move to another published listing, then not
+   again for 365 days.
+6. **Renewal reminders:** 30, 7 and 1 days before any active badge ends, unless a
+   renewal check is already pending.
+
+## 7. Not built yet
+
+- **GST credit notes** for refunded checks (format to confirm with the CA).
+- **Automatic renewal charges:** renewal is a new payment by the supplier.
+- ADR 008's optional 3-Spotlight pack and founding offer (a coupon can do the latter).

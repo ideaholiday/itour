@@ -13,6 +13,7 @@ import ReferralProgramView from "./admin/ReferralProgramView.jsx";
 import TeamView from "./admin/TeamView.jsx";
 import ProgramsView from "./admin/ProgramsView.jsx";
 import CouponsView from "./admin/CouponsView.jsx";
+import VerificationQueueView from "./admin/VerificationQueueView.jsx";
 
 export default function AdminPanel({ view }) {
   const location = useLocation();
@@ -29,6 +30,7 @@ export default function AdminPanel({ view }) {
     else if (location.pathname.includes("/team")) activeView = "team";
     else if (location.pathname.includes("/programs")) activeView = "programs";
     else if (location.pathname.includes("/coupons")) activeView = "coupons";
+    else if (location.pathname.includes("/verifications")) activeView = "verifications";
     else activeView = "overview";
   }
 
@@ -46,6 +48,7 @@ export default function AdminPanel({ view }) {
         {activeView === "team" && <TeamView />}
         {activeView === "programs" && <ProgramsView />}
         {activeView === "coupons" && <CouponsView />}
+        {activeView === "verifications" && <VerificationQueueView />}
       </AdminLayout>
     </AdminGuard>
   );

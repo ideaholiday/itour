@@ -429,6 +429,7 @@ See BUSINESS_RULES §12.
   codes); `source` `ADMIN` or `PURCHASE`; `purchase_id` (for paid plans);
   `valid_from` / `valid_until` as ISO-8601 strings compared as text;
   `decided_by`, `decision_reason`.
+- **`product_spotlights`** (migration 045): `supplier_id`, `product_id`, `payment_id`, `status` (`ACTIVE` | `ENDED`), `last_swapped_at`, `previous_product_id`. **`supplier_plan_payments`** gains `product_id`, `check_refundable_inr`, `refund_status` (`PROCESSED` | `FAILED` | `NOT_NEEDED`), `refund_amount_inr`, `refund_id`, `refunded_at`; `plan_code` is `MARKETPLACE`, `VERIFIED`, `SPOTLIGHT` or `VERIFIED_PLUS`. **`supplier_verifications.last_reminder_days`** tracks renewal reminders.
 - **`supplier_share_scans`** (migration 044): one visit through `/go/s` — `supplier_id`, `target` (`PROFILE` | `REVIEW`), `channel` (`QR` | `STANDEE` | `STICKER` | `VOUCHER` | `WIDGET` | `LINK`), `share_link_id`, `created_at`. No visitor data. SHARE_KIT.md.
 - **`supplier_enquiries`**: `enquiry_ref` (`ENQ-XXXXXXXX`), `supplier_id`,
   `user_id`, `travel_date`, `travelers`, `status` `OPEN` → `REPLIED` → `CLOSED`,

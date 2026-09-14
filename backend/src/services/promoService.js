@@ -39,7 +39,8 @@ function countOrZero(database, sql, ...params) {
 function assertCouponAllowed(database, promo, { userId, product, audience = "TRAVELER" }) {
   const code = promo.code;
   if (String(promo.audience || "TRAVELER").toUpperCase() !== audience) {
-    throw promoError(`Promo code ${code} cannot be used ${audience === "TRAVELER" ? "for bookings" : "for supplier subscriptions"}`, 400, "WRONG_AUDIENCE");
+    const uses = { TRAVELER: "for bookings", SUPPLIER_SUBSCRIPTION: "for supplier subscriptions", SUPPLIER_PLANS: "for supplier profile plans" };
+    throw promoError(`Promo code ${code} cannot be used ${uses[audience] || "here"}`, 400, "WRONG_AUDIENCE");
   }
   if (promo.starts_at && new Date(promo.starts_at.replace(" ", "T")).getTime() > Date.now()) {
     throw promoError(`Promo code ${code} starts on ${new Date(promo.starts_at.replace(" ", "T")).toLocaleDateString("en-IN")}`, 400, "NOT_STARTED");

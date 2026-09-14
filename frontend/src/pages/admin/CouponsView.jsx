@@ -179,6 +179,7 @@ export default function CouponsView() {
               <select value={form.audience} onChange={(e) => setField("audience", e.target.value)} disabled={Boolean(editing.id)} className={`${inputClass} mt-1`}>
                 <option value="TRAVELER">Traveler bookings</option>
                 <option value="SUPPLIER_SUBSCRIPTION">Supplier subscriptions</option>
+                <option value="SUPPLIER_PLANS">Supplier profile plans (Verified, Spotlight)</option>
               </select>
             </label>
             <label className="block font-semibold text-stone-700">Discount type
@@ -283,6 +284,7 @@ export default function CouponsView() {
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${coupon.isActive ? "bg-emerald-100 text-emerald-800" : "bg-stone-200 text-stone-600"}`}>{coupon.isActive ? "On" : "Off"}</span>
                     {coupon.isCreatorCode && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">Creator code</span>}
                     {coupon.audience === "SUPPLIER_SUBSCRIPTION" && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-800">Supplier subscriptions</span>}
+                    {coupon.audience === "SUPPLIER_PLANS" && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800">Supplier profile plans</span>}
                   </div>
                   <p className="mt-0.5 text-stone-600">{summary(coupon)}</p>
                   <p className="text-stone-400">Used {coupon.timesUsed}{coupon.usageLimit ? ` of ${coupon.usageLimit}` : ""} · {inr(coupon.discountGivenInr)} given{coupon.description ? ` · ${coupon.description}` : ""}</p>

@@ -29,11 +29,17 @@ function database() {
     );
     CREATE TABLE affiliates (id TEXT PRIMARY KEY, affiliate_code TEXT, status TEXT);
     CREATE TABLE bookings (id TEXT PRIMARY KEY, user_id TEXT, payment_status TEXT);
+    CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT, title TEXT, status TEXT);
+    CREATE TABLE supplier_verifications (
+      id TEXT PRIMARY KEY, supplier_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING_CHECKS', checks TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT 'ADMIN', purchase_id TEXT, valid_from TEXT, valid_until TEXT, decided_by TEXT, decision_reason TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     INSERT INTO suppliers VALUES
       ('sup_new', 'Kayak Co', 'Farah', 'farah@example.test', '+919800000011', 'Panaji', 'Goa', '30ABCDE1234F1Z5', 'APPROVED', '2026-10-01 10:00:00'),
       ('sup_old', 'Old Cabs', 'Ravi', 'ravi@example.test', '+919800000012', 'Pune', 'Maharashtra', NULL, 'APPROVED', '2026-01-01 10:00:00');
   `);
-  for (const name of ["037_program_settings.sql", "039_supplier_subscriptions.sql", "040_coupon_engine.sql", "043_supplier_plan_payments.sql"]) executeMigrationSql(db, upSql(name));
+  for (const name of ["037_program_settings.sql", "039_supplier_subscriptions.sql", "040_coupon_engine.sql", "043_supplier_plan_payments.sql", "045_supplier_profile_plans.sql"]) executeMigrationSql(db, upSql(name));
   return db;
 }
 

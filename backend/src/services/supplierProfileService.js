@@ -1,4 +1,6 @@
 import { nanoid } from "nanoid";
+import { activityPath } from "../../../shared/activityUrl.js";
+import { approvedSupplierSql } from "./supplierKybGate.js";
 import { RATED_REVIEW_SOURCES } from "./reviewService.js";
 
 /**
@@ -247,6 +249,28 @@ export function cityPath(city) {
  * The only shape a supplier leaves the server in for anonymous viewers.
  * Add a field here deliberately — never spread the supplier row.
  */
+/**
+ * Products a supplier paid to show on its profile (ADR 008 Spotlight): only
+ * listings that are published and bookable right now.
+ */
+export function profileSpotlights(database, supplierId) {
+  try {
+    return database.prepare(`
+      SELECT p.id, p.title, p.hero_image, p.price_inr, p.city FROM product_spotlights sp
+      JOIN products p ON p.id = sp.product_id
+      WHERE sp.supplier_id = ? AND sp.status = 'ACTIVE' AND p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1 AND ${approvedSupplierSql("p")}
+      ORDER BY sp.created_at ASC
+    `).all(supplierId).map((row) => ({
+      id: row.id, title: row.title, heroImage: row.hero_image || null, priceInr: row.price_inr === null ? null : Number(row.price_inr),
+      city: row.city || null, path: activityPath(row),
+    }));
+  } catch (error) {
+    // Before migrations 039/045 there are no spotlights to show.
+    if (/no such table|no such column|does not exist/i.test(error.message)) return [];
+    throw error;
+  }
+}
+
 export function publicSupplierView(database, supplier, { now = new Date() } = {}) {
   const slug = supplier.public_slug || ensurePublicSlug(database, supplier);
   return {
@@ -269,6 +293,8 @@ export function publicSupplierView(database, supplier, { now = new Date() } = {}
     sameAs: Object.values(parseObject(supplier.social_links)).filter((url) => /^https:\/\//.test(String(url))),
     badge: deriveBadge(database, supplier, now),
     rating: supplierRatingSummary(database, supplier.id),
+    // Paid Spotlights are the only products a profile shows (ADR 008).
+    spotlights: profileSpotlights(database, supplier.id),
     indexable: isProfileIndexable(supplier),
   };
 }
@@ -558,15 +584,27 @@ export function grantSupplierVerification(database, supplierId, { checks = [], r
   const missing = REQUIRED_VERIFICATION_CHECKS.filter((code) => !codes.includes(code));
   if (missing.length) throw profileError(`Complete these checks first: ${missing.map((code) => VERIFICATION_CHECKS[code]).join(", ")}`);
 
+  // A paid check waiting in the queue is the one being passed (ADR 008). A renewal
+  // bought before the badge ends adds its year to the end, so renewing early loses nothing.
+  const pending = database.prepare("SELECT id FROM supplier_verifications WHERE supplier_id = ? AND status = 'PENDING_CHECKS' AND source = 'PURCHASE' ORDER BY created_at ASC LIMIT 1").get(supplierId);
+  const current = activeVerification(database, supplierId, now);
   const validFrom = now.toISOString();
-  const validUntil = new Date(now.getTime() + VERIFICATION_VALIDITY_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const id = `sver_${nanoid(12)}`;
+  const yearFrom = pending && current ? new Date(current.valid_until) : now;
+  const validUntil = new Date(yearFrom.getTime() + VERIFICATION_VALIDITY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const id = pending?.id || `sver_${nanoid(12)}`;
   const grant = database.transaction(() => {
     database.prepare("UPDATE supplier_verifications SET status = 'EXPIRED', updated_at = datetime('now') WHERE supplier_id = ? AND status = 'ACTIVE'").run(supplierId);
-    database.prepare(`
-      INSERT INTO supplier_verifications (id, supplier_id, status, checks, source, valid_from, valid_until, decided_by, decision_reason)
-      VALUES (?, ?, 'ACTIVE', ?, 'ADMIN', ?, ?, ?, ?)
-    `).run(id, supplierId, JSON.stringify(codes), validFrom, validUntil, actorId, String(reason || "").trim() || null);
+    if (pending) {
+      database.prepare(`
+        UPDATE supplier_verifications SET status = 'ACTIVE', checks = ?, valid_from = ?, valid_until = ?, decided_by = ?, decision_reason = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(JSON.stringify(codes), validFrom, validUntil, actorId, String(reason || "").trim() || null, id);
+    } else {
+      database.prepare(`
+        INSERT INTO supplier_verifications (id, supplier_id, status, checks, source, valid_from, valid_until, decided_by, decision_reason)
+        VALUES (?, ?, 'ACTIVE', ?, 'ADMIN', ?, ?, ?, ?)
+      `).run(id, supplierId, JSON.stringify(codes), validFrom, validUntil, actorId, String(reason || "").trim() || null);
+    }
   });
   grant();
   return database.prepare("SELECT * FROM supplier_verifications WHERE id = ?").get(id);

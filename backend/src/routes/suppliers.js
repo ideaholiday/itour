@@ -44,8 +44,10 @@ import {
 import { calculateRefundQuote, createRefundRecord, finalizeRefund, getSupplierPayoutLedger, resolveCommissionRate } from "../services/financeService.js";
 import { getSubscriptionStatus } from "../services/supplierSubscriptionService.js";
 import {
-  listSubscriptionPayments, quoteSubscriptionPayment, renderSubscriptionInvoice, startSubscriptionPayment, verifySubscriptionPayment,
+  listSubscriptionPayments, listSupplierSpotlights, quotePlanPayment, quoteSubscriptionPayment, renderSubscriptionInvoice,
+  startPlanPayment, startSubscriptionPayment, swapSpotlight, verifySubscriptionPayment,
 } from "../services/supplierPlanPaymentService.js";
+import { deriveBadge } from "../services/supplierProfileService.js";
 import { getSettings } from "../services/programSettingsService.js";
 import { supplierShareKit } from "../services/supplierShareKitService.js";
 import {
@@ -133,10 +135,20 @@ router.get("/:id/share-kit", (req, res) => {
 router.get("/:id/subscription", (req, res) => {
   try {
     const { priceInr, billingPeriodMonths } = getSettings(db, "supplier_subscriptions");
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
+    const pendingCheck = db.prepare("SELECT created_at FROM supplier_verifications WHERE supplier_id = ? AND status = 'PENDING_CHECKS'").get(req.params.id);
     res.json({
       success: true,
       subscription: getSubscriptionStatus(db, req.params.id),
       plan: priceInr ? { priceInr, billingPeriodMonths, gstRatePct: 18 } : null,
+      // Profile plans (ADR 008): the Verified check, Spotlights and Verified Plus.
+      profilePlans: { ...getSettings(db, "supplier_plans"), gstRatePct: 18 },
+      verification: { badge: supplier ? deriveBadge(db, supplier) : null, checkPendingSince: pendingCheck?.created_at || null, kybStatus: supplier?.kyb_status || null },
+      spotlights: listSupplierSpotlights(db, req.params.id),
+      spotlightableProducts: db.prepare(`
+        SELECT id, title FROM products WHERE supplier_id = ? AND status = 'PUBLISHED'
+          AND id NOT IN (SELECT product_id FROM product_spotlights WHERE status = 'ACTIVE') ORDER BY title
+      `).all(req.params.id),
       payments: listSubscriptionPayments(db, req.params.id),
     });
   } catch (error) {
@@ -162,6 +174,37 @@ router.post("/:id/subscription/checkout", async (req, res) => {
     res.status(201).json({ success: true, ...result, payment: listSubscriptionPayments(db, req.params.id).find((row) => row.id === result.payment.id) });
   } catch (error) {
     subscriptionFailure(res, req, error, "Could not start the payment");
+  }
+});
+
+router.post("/:id/plans/quote", (req, res) => {
+  try {
+    res.json({ success: true, quote: quotePlanPayment(db, req.params.id, { planCode: req.body?.planCode, productId: req.body?.productId || null, couponCode: req.body?.couponCode || null }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not price the plan");
+  }
+});
+
+router.post("/:id/plans/checkout", async (req, res) => {
+  try {
+    const result = await startPlanPayment(db, req.params.id, {
+      planCode: req.body?.planCode,
+      productId: req.body?.productId || null,
+      couponCode: req.body?.couponCode || null,
+      actorId: req.user.id,
+      returnUrl: typeof req.body?.returnUrl === "string" ? req.body.returnUrl : null,
+    });
+    res.status(201).json({ success: true, ...result, payment: listSubscriptionPayments(db, req.params.id).find((row) => row.id === result.payment.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not start the payment");
+  }
+});
+
+router.post("/:id/spotlights/:spotlightId/swap", (req, res) => {
+  try {
+    res.json({ success: true, spotlight: swapSpotlight(db, req.params.id, req.params.spotlightId, { productId: String(req.body?.productId || "") }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not change the Spotlight");
   }
 });
 

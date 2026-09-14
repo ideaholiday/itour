@@ -436,9 +436,8 @@ travelers can find on the marketplace and on Google. Code:
 ### 12.1 What a profile shows, and what it never shows
 1. **Never public:** email, phone, contact name, GSTIN, PAN, bank details, the
    supplier id. `publicSupplierView` is an allow-list and is tested for this.
-2. **No products on a profile.** A paid Spotlight (not built yet) is what will
-   put a product there. Marketplace search is unaffected: KYB-approved suppliers'
-   products stay bookable there.
+2. **Only paid Spotlights put products on a profile** (SUPPLIER_PLANS.md §6).
+   Marketplace search is unaffected: KYB-approved suppliers' products stay bookable there.
 3. **Profile text refuses contact details** — phone numbers, emails, links,
    WhatsApp. Social links are collected only as schema.org `sameAs` and are not
    rendered.
@@ -467,9 +466,8 @@ travelers can find on the marketplace and on Google. Code:
    recorded when they apply.
 3. A grant lasts **365 days** and supersedes any active one. It lapses on its
    own; KYB suspension removes it immediately; an admin can revoke it with a reason.
-4. **The badge is never sold.** When paid Verified plans exist, payment buys the
-   check; the badge still appears only if the checks pass (rejected checks are
-   refunded). Today admins grant it manually after checking.
+4. **The badge is never sold.** Payment buys the check (SUPPLIER_PLANS.md §6); the
+   badge appears only if the checks pass, and rejected checks are refunded.
 
 ### 12.4 Enquiries
 1. Only signed-in travelers can enquire; a supplier cannot enquire with itself,

@@ -47,6 +47,18 @@ const PROGRAMS = {
     }).strict(),
     defaults: { launchWaiver: true, launchWaiverUntil: null, priceInr: null, billingPeriodMonths: 12 },
   },
+  supplier_plans: {
+    label: "Supplier profile plans",
+    schema: z.object({
+      /** Yearly Verified check (ADR 008), rupees before GST. Buys the check, never the badge. */
+      verifiedPriceInr: z.number().positive().max(1_000_000),
+      /** One product on the public profile, one-time. */
+      spotlightPriceInr: z.number().positive().max(1_000_000),
+      /** First-year Verified check plus one Spotlight; renews as Verified. */
+      verifiedPlusPriceInr: z.number().positive().max(1_000_000),
+    }).strict(),
+    defaults: { verifiedPriceInr: 999, spotlightPriceInr: 2999, verifiedPlusPriceInr: 3499 },
+  },
   referral: {
     label: "Share & Earn",
     schema: z.object({

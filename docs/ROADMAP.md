@@ -31,7 +31,8 @@ Do not rebuild these. Extend them if asked.
 | Finance | Frozen commission, payout lifecycle, refund policy engine |
 | Notifications | WhatsApp, email, SMS with a durable outbox |
 | Analytics | `/admin/analytics` |
-| Supplier profiles | Public pages + directory, server-rendered SEO and sitemap, Verified badge (admin-granted), enquiries, share kit (QR, standee/sticker print, voucher QR, reviews widget, visit counts) |
+| Money programs (ADR 017) | 30% commission per product, coupons, giveaway cap, Share & Earn and creator rate controls, creator earnings for travel, supplier subscriptions with waivers and payments |
+| Supplier profiles | Public pages + directory, server-rendered SEO and sitemap, Verified badge (admin-granted), enquiries, share kit (QR, standee/sticker print, voucher QR, reviews widget, visit counts), paid plans (Verified check queue with refunds, Spotlights, Verified Plus) |
 
 ---
 
@@ -75,17 +76,6 @@ own credentials and API documentation — they cannot be written honestly withou
 them, so treat each as its own scoped piece of work.
 
 ---
-
-**3. Supplier profiles: share kit, paid plans** *(agreed with the owner, 2026-09-13)*
-Phases 1–2 and the share kit are done (see DONE). Remaining:
-- *Paid plans*: Free; **Verified** ₹999 + GST/yr (pays for the yearly check — badge
-  only if it passes, refund if rejected); **Spotlight** ₹2,999 + GST one-time per
-  product (shows that product on the profile; locked to the product, one swap a
-  year); **Verified Plus** ₹3,499 + GST first year with 1 Spotlight, renews at
-  ₹999 + GST. Razorpay one-time orders with renewal reminders, GST tax invoices
-  (confirm SAC code and format with the CA), admin verification queue.
-  Tables planned: `supplier_plans`, `supplier_purchases`, `product_spotlights`;
-  `supplier_verifications.source = 'PURCHASE'` already exists.
 
 ## LATER
 

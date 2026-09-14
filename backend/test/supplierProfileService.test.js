@@ -66,7 +66,7 @@ test("the public view never carries contact, tax or bank details", () => {
   }
   assert.deepEqual(Object.keys(view).sort(), [
     "about", "badge", "businessType", "city", "cityPath", "coverUrl", "indexable", "languages", "logoUrl", "memberSince", "name",
-    "path", "rating", "sameAs", "serviceCities", "slug", "state", "tagline", "yearsInOperation",
+    "path", "rating", "sameAs", "serviceCities", "slug", "spotlights", "state", "tagline", "yearsInOperation",
   ]);
   assert.equal(view.path, "/suppliers/awadh-express-cabs");
   assert.equal(view.cityPath, "/suppliers/in/lucknow");

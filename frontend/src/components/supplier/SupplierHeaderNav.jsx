@@ -27,7 +27,7 @@ export default function SupplierHeaderNav({ supplierData, activeTab }) {
     ["ENQUIRIES", "Enquiries", "/supplier/dashboard?panel=enquiries", MessageSquare],
     ["KYB", "Compliance", "/supplier/dashboard?panel=compliance", FileCheck, isKybPending ? (supplier.kyb_status === "REJECTED" ? "Rejected" : "Action") : null],
     // Only suppliers who joined from 14 September 2026 need a subscription (ADR 017).
-    ...(supplierData?.subscription?.required ? [["SUBSCRIPTION", "Subscription", "/supplier/dashboard?panel=subscription", CreditCard, supplierData.subscription.covered ? null : "Action"]] : []),
+    ["SUBSCRIPTION", "Plans", "/supplier/dashboard?panel=subscription", CreditCard, supplierData?.subscription?.required && !supplierData.subscription.covered ? "Action" : null],
   ];
 
   const isCurrent = (id, path) => {

@@ -127,7 +127,7 @@ export function createCoupon(database, input, { actorId = null } = {}) {
   }
   const fields = normalizeFields(input);
   const audience = String(input.audience || "TRAVELER").toUpperCase();
-  if (!["TRAVELER", "SUPPLIER_SUBSCRIPTION"].includes(audience)) throw couponError("A coupon is for traveler bookings or supplier subscriptions", 400, "INVALID_COUPON");
+  if (!["TRAVELER", "SUPPLIER_SUBSCRIPTION", "SUPPLIER_PLANS"].includes(audience)) throw couponError("A coupon is for traveler bookings, supplier subscriptions or supplier profile plans", 400, "INVALID_COUPON");
   const id = `promo_${nanoid(12)}`;
   database.prepare(`
     INSERT INTO promo_codes (

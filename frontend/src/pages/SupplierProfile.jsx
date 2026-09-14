@@ -284,6 +284,23 @@ export default function SupplierProfile() {
               )}
             </section>
 
+            {supplier.spotlights?.length > 0 && (
+              <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm" aria-labelledby="spotlight-heading">
+                <h2 id="spotlight-heading" className="font-display text-lg font-bold text-stone-900">Experiences from {supplier.name}</h2>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  {supplier.spotlights.map((product) => (
+                    <Link key={product.id} to={product.path} className="overflow-hidden rounded-2xl border border-stone-200 hover:border-amber-400">
+                      {product.heroImage && <img src={product.heroImage} alt="" className="h-36 w-full object-cover" loading="lazy" />}
+                      <div className="p-3">
+                        <strong className="block text-sm text-stone-900">{product.title}</strong>
+                        <span className="text-xs text-stone-500">{[product.city, product.priceInr ? `from ₹${Number(product.priceInr).toLocaleString("en-IN")}` : null].filter(Boolean).join(" · ")}</span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm" aria-labelledby="reviews-heading">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 id="reviews-heading" className="font-display text-lg font-bold text-stone-900">Reviews</h2>

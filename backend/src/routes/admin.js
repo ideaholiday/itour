@@ -43,6 +43,7 @@ import { adminSchemas, checkoutSchemas, profileSchemas } from "../validators/api
 import { addTeamMember, listTeam, removeTeamMember, resetTeamMemberPassword, updateTeamMember } from "../services/teamService.js";
 import { listPrograms, listSettingsAudit, updateSettings } from "../services/programSettingsService.js";
 import { createCoupon, listCouponRedemptions, listCoupons, updateCoupon } from "../services/couponService.js";
+import { listVerificationQueue, rejectPurchasedVerification, retryCheckRefund } from "../services/supplierPlanPaymentService.js";
 import {
   getSubscriptionStatus, grantSubscriptionWaiver, listSupplierSubscriptions, revokeSubscription, syncLaunchWaivers,
 } from "../services/supplierSubscriptionService.js";
@@ -503,6 +504,35 @@ router.get("/commission", (req, res) => {
     res.json({ success: true, ...listCommissionOverrides(db), changes: listCommissionChanges(db, { limit: 100 }) });
   } catch (error) {
     commissionFailure(res, req, error, "Could not load commission settings");
+  }
+});
+
+// Paid Verified checks (ADR 008): pass with the existing profile-verification grant, or reject and refund.
+router.get("/verification-queue", (req, res) => {
+  try {
+    const failedRefunds = db.prepare(`
+      SELECT p.id, p.supplier_id, p.plan_code, p.refund_amount_inr, s.company_name FROM supplier_plan_payments p
+      JOIN suppliers s ON s.id = p.supplier_id WHERE p.refund_status = 'FAILED' ORDER BY p.created_at ASC
+    `).all().map((row) => ({ paymentId: row.id, supplierId: row.supplier_id, supplierName: row.company_name, planCode: row.plan_code, refundAmountInr: row.refund_amount_inr }));
+    res.json({ success: true, queue: listVerificationQueue(db), failedRefunds });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not load the verification queue");
+  }
+});
+
+router.post("/verifications/:id/reject", async (req, res) => {
+  try {
+    res.json({ success: true, ...(await rejectPurchasedVerification(db, req.params.id, { reason: req.body?.reason, actorId: req.user.id })) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not reject the check");
+  }
+});
+
+router.post("/plan-payments/:id/retry-refund", async (req, res) => {
+  try {
+    res.json({ success: true, ...(await retryCheckRefund(db, req.params.id)) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not retry the refund");
   }
 });
 

@@ -297,7 +297,7 @@ export const adminSchemas = {
   subscriptionWaiver: object({ until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), reason: text(3, 500) }),
   endSubscription: object({ reason: text(3, 500) }),
   coupon: object({
-    code: text(3, 40), audience: z.enum(["TRAVELER", "SUPPLIER_SUBSCRIPTION"]).optional(), description: optionalText(300), discountType: z.enum(["PERCENTAGE", "FIXED"]), discountValue: z.number().positive(),
+    code: text(3, 40), audience: z.enum(["TRAVELER", "SUPPLIER_SUBSCRIPTION", "SUPPLIER_PLANS"]).optional(), description: optionalText(300), discountType: z.enum(["PERCENTAGE", "FIXED"]), discountValue: z.number().positive(),
     minOrderInr: z.number().min(0).optional(), maxDiscountInr: z.number().positive().nullable().optional(),
     usageLimit: z.number().int().positive().nullable().optional(), perUserLimit: z.number().int().positive().nullable().optional(),
     firstBookingOnly: z.boolean().optional(), startsAt: optionalText(30), expiresAt: optionalText(30),
@@ -305,7 +305,7 @@ export const adminSchemas = {
     supplierIds: z.array(text(1, 160)).max(200).optional(), isActive: z.boolean().optional(),
   }),
   couponUpdate: object({
-    code: text(3, 40).optional(), audience: z.enum(["TRAVELER", "SUPPLIER_SUBSCRIPTION"]).optional(), description: optionalText(300), discountType: z.enum(["PERCENTAGE", "FIXED"]).optional(), discountValue: z.number().positive().optional(),
+    code: text(3, 40).optional(), audience: z.enum(["TRAVELER", "SUPPLIER_SUBSCRIPTION", "SUPPLIER_PLANS"]).optional(), description: optionalText(300), discountType: z.enum(["PERCENTAGE", "FIXED"]).optional(), discountValue: z.number().positive().optional(),
     minOrderInr: z.number().min(0).optional(), maxDiscountInr: z.number().positive().nullable().optional(),
     usageLimit: z.number().int().positive().nullable().optional(), perUserLimit: z.number().int().positive().nullable().optional(),
     firstBookingOnly: z.boolean().optional(), startsAt: optionalText(30), expiresAt: optionalText(30),

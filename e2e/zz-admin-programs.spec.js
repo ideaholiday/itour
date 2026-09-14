@@ -104,8 +104,8 @@ test("an administrator creates a coupon, edits it and switches it off", async ({
 
 test("a new supplier sees their subscription cover and that it isn't on sale yet", async ({ page }) => {
   await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
-  await page.getByRole("link", { name: /^Subscription/ }).first().click();
-  await expect(page.getByRole("heading", { name: "Subscription" })).toBeVisible();
+  await page.getByRole("link", { name: /^Plans/ }).first().click();
+  await expect(page.getByRole("heading", { name: "Subscription & plans" })).toBeVisible();
   await expect(page.getByText(/Subscription waived by Idea Holiday|Free launch offer/)).toBeVisible();
   await expect(page.getByText(/isn't on sale yet/)).toBeVisible();
   if (process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/supplier-subscription.png`, fullPage: true });
@@ -130,4 +130,51 @@ test("a supplier opens their share kit: QR codes load and the standee prints fro
     await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/supplier-share-kit.png`, fullPage: true });
     await standee.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/supplier-standee.png` });
   }
+});
+
+test("a supplier gets a Spotlight and a Verified check with a plan coupon; an admin rejects the check", async ({ page, browser, request }) => {
+  const adminLogin = await request.post("/api/auth/login", { data: { ...E2E_ACCOUNTS.admin, portal: "admin" } });
+  const adminToken = (await adminLogin.json()).token;
+  const coupon = await request.post("/api/admin/coupons", {
+    headers: { Authorization: `Bearer ${adminToken}` },
+    data: { code: "E2EPLANS100", audience: "SUPPLIER_PLANS", discountType: "PERCENTAGE", discountValue: 100 },
+  });
+  expect(coupon.status(), await coupon.text()).toBe(201);
+
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.getByRole("link", { name: /^Plans/ }).first().click();
+  await expect(page.getByRole("heading", { name: "Profile plans" })).toBeVisible();
+
+  await page.getByRole("button", { name: /^Spotlight/ }).click();
+  const listing = page.getByLabel("Listing to put on your profile");
+  const firstListing = await listing.locator("option").nth(1).textContent();
+  await listing.selectOption({ index: 1 });
+  await page.getByLabel("Plan coupon code").fill("E2EPLANS100");
+  await page.getByRole("button", { name: "See price" }).last().click();
+  await expect(page.getByText(/Spotlight: .* − .* coupon .* = ₹0/)).toBeVisible();
+  await page.getByRole("button", { name: "Get it with coupon" }).click();
+  await expect(page.getByText("Your coupon covers the whole price. It's done.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your Spotlights" })).toBeVisible();
+  await expect(page.getByText(firstListing.trim(), { exact: true }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: /Yearly business check for the Verified badge/ }).click();
+  await page.getByLabel("Plan coupon code").fill("E2EPLANS100");
+  await page.getByRole("button", { name: "See price" }).last().click();
+  await page.getByRole("button", { name: "Get it with coupon" }).click();
+  await expect(page.getByText(/Your Verified check is with our team/)).toBeVisible();
+  if (process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/supplier-plans.png`, fullPage: true });
+
+  const admin = await browser.newPage();
+  await admin.goto("/admin/login");
+  await admin.getByPlaceholder("admin@ideaholiday.in").fill(E2E_ACCOUNTS.admin.email);
+  await admin.locator('input[type="password"]').fill(E2E_ACCOUNTS.admin.password);
+  await admin.locator('button[type="submit"]').click();
+  await expect(admin).toHaveURL(/\/admin$/);
+  await admin.goto("/admin/verifications");
+  await expect(admin.getByRole("heading", { name: "Verified checks" })).toBeVisible();
+  await admin.getByRole("button", { name: "Reject" }).first().click();
+  await admin.getByLabel("Reason the checks did not pass").fill("Owner call not completed");
+  await admin.getByRole("button", { name: "Reject and refund" }).click();
+  await expect(admin.getByText(/check rejected\. Nothing was paid, so nothing to refund\./)).toBeVisible();
+  await admin.close();
 });

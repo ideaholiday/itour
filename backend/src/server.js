@@ -39,6 +39,7 @@ import { backfillSupplierSlugs } from "./services/supplierProfileService.js";
 import { backfillLegacyReferrals, findWalletDiscrepancies, processReferralLifecycle, sendReferralNotifications } from "./services/referralService.js";
 import { processSubscriptionLifecycle, sendSubscriptionReminders, syncLaunchWaivers } from "./services/supplierSubscriptionService.js";
 import { releaseCouponRedemptions } from "./services/promoService.js";
+import { collectVerificationReminders, sendVerificationReminders } from "./services/supplierPlanPaymentService.js";
 
 // Run pending migrations on startup
 try {
@@ -333,6 +334,7 @@ async function subscriptionTick() {
     const { expired, reminders } = processSubscriptionLifecycle(db);
     if (expired || reminders.length) logger.info("Supplier subscription lifecycle pass", { expired, reminders: reminders.length });
     await sendSubscriptionReminders(db, reminders);
+    await sendVerificationReminders(db, collectVerificationReminders(db));
   } catch (error) {
     logger.error("Supplier subscription lifecycle failed", { error });
   }
