@@ -11,6 +11,21 @@ import {
 import { getProductOptions } from "./logisticsService.js";
 import { octoReservationView } from "./reservationProviders.js";
 import logger from "../config/logger.js";
+import { approvedSupplierSql } from "./supplierKybGate.js";
+
+// Channel partners see and book only what travelers can: published products
+// whose supplier is KYB-approved.
+const SELLABLE_PRODUCT_SQL = `(status = 'PUBLISHED' OR is_published = 1) AND ${approvedSupplierSql("products")}`;
+
+function isSellableProduct(db, productId) {
+  return Boolean(db.prepare(`SELECT 1 FROM products WHERE id = ? AND ${SELLABLE_PRODUCT_SQL}`).get(productId));
+}
+
+function assertSellableProduct(db, productId) {
+  if (!isSellableProduct(db, productId)) {
+    throw Object.assign(new Error("This product is not available for booking"), { status: 409, code: "PRODUCT_NOT_BOOKABLE" });
+  }
+}
 
 function stableUnitUuid(seed) {
   const bytes = createHash("sha256").update(seed).digest().subarray(0, 16);
@@ -33,7 +48,7 @@ export function getOctoSuppliers(db) {
   const rows = db.prepare(`
     SELECT id, company_name, contact_name, email, phone, city, state
     FROM suppliers
-    WHERE is_verified = 1 OR kyb_status = 'VERIFIED'
+    WHERE UPPER(COALESCE(kyb_status, '')) = 'APPROVED'
     ORDER BY company_name ASC
   `).all();
 
@@ -146,7 +161,7 @@ export function formatOctoProduct(db, product) {
 }
 
 export function getOctoProducts(db, { supplierId } = {}) {
-  let query = "SELECT * FROM products WHERE (status = 'PUBLISHED' OR is_published = 1)";
+  let query = `SELECT * FROM products WHERE ${SELLABLE_PRODUCT_SQL}`;
   const params = [];
   if (supplierId) {
     query += " AND supplier_id = ?";
@@ -159,12 +174,13 @@ export function getOctoProducts(db, { supplierId } = {}) {
 }
 
 export function getOctoProduct(db, productId) {
-  const row = db.prepare("SELECT * FROM products WHERE id = ?").get(productId);
+  const row = db.prepare(`SELECT * FROM products WHERE id = ? AND ${SELLABLE_PRODUCT_SQL}`).get(productId);
   if (!row) return null;
   return formatOctoProduct(db, row);
 }
 
 export function getOctoAvailability(db, { productId, optionId, localDateStart, localDateEnd }) {
+  if (!isSellableProduct(db, productId)) return [];
   const dates = [];
   const start = new Date(localDateStart);
   const end = localDateEnd ? new Date(localDateEnd) : start;
@@ -268,6 +284,7 @@ export function createOctoReservation(db, input) {
   if (!productId || !optionId || !availabilityId) {
     throw Object.assign(new Error("productId, optionId, and availabilityId are required"), { status: 400 });
   }
+  assertSellableProduct(db, productId);
 
   const parts = availabilityId.split(":");
   const localDate = parts[1];
@@ -307,6 +324,8 @@ export function confirmOctoReservation(db, input) {
   const slot = db.prepare("SELECT product_id, option_id, local_date, local_time FROM native_availability_slots WHERE id = ?")
     .get(reservation.availability_slot);
   if (!slot) throw Object.assign(new Error("Reservation departure not found"), { status: 409 });
+  // The supplier may have been suspended while the hold was open.
+  assertSellableProduct(db, slot.product_id);
 
   // Bill the price frozen on the hold rather than a placeholder.
   const snapshot = (() => {

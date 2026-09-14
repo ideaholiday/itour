@@ -2,6 +2,7 @@ import db from "../db.js";
 import crypto from "crypto";
 import { cacheService } from "./cacheService.js";
 import { priorMeanRating } from "./reviewService.js";
+import { approvedSupplierSql } from "./supplierKybGate.js";
 
 const CITY_COORDINATES = {
   "delhi": { lat: 28.6139, lng: 77.2090 },
@@ -82,7 +83,7 @@ export class SearchService {
 
     const rawProducts = db.prepare(`
       SELECT id, title, city, price_inr, category FROM products
-      WHERE (is_published = 1 OR status = 'PUBLISHED')
+      WHERE (is_published = 1 OR status = 'PUBLISHED') AND ${approvedSupplierSql("products")}
         AND (LOWER(title) LIKE ? OR LOWER(city) LIKE ?)
       LIMIT 5
     `).all(`%${q}%`, `%${q}%`);
@@ -98,7 +99,7 @@ export class SearchService {
 
     const categories = db.prepare(`
       SELECT DISTINCT category FROM products
-      WHERE (is_published = 1 OR status = 'PUBLISHED')
+      WHERE (is_published = 1 OR status = 'PUBLISHED') AND ${approvedSupplierSql("products")}
         AND LOWER(category) LIKE ?
       LIMIT 4
     `).all(`%${q}%`).map(c => c.category);
@@ -148,7 +149,7 @@ export class SearchService {
     if (cached) return cached;
 
     const offset = (page - 1) * limit;
-    let whereConditions = ["(p.is_published = 1 OR p.status = 'PUBLISHED')"];
+    let whereConditions = ["(p.is_published = 1 OR p.status = 'PUBLISHED')", approvedSupplierSql("p")];
     const params = [];
 
     if (query && query.trim()) {
@@ -329,7 +330,7 @@ export class SearchService {
     });
 
     // Compute dynamic facet aggregations over the current search base
-    const baseWhere = "WHERE (p.is_published = 1 OR p.status = 'PUBLISHED')" + 
+    const baseWhere = `WHERE (p.is_published = 1 OR p.status = 'PUBLISHED') AND ${approvedSupplierSql("p")}` + 
       (query && query.trim() ? ` AND (LOWER(p.title) LIKE ? OR LOWER(p.city) LIKE ? OR LOWER(p.state) LIKE ? OR LOWER(p.short_desc) LIKE ? OR LOWER(p.category) LIKE ?)` : "");
     const baseParams = query && query.trim() ? [`%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`] : [];
 

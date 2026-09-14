@@ -5,6 +5,7 @@ import { validateBody } from "../middleware/validation.js";
 import { z } from "zod";
 import crypto from "crypto";
 import logger from "../config/logger.js";
+import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { sseService } from "../services/sseService.js";
 import { ItineraryService } from "../services/itineraryService.js";
 import { createCircuitQuote, getCircuitQuote } from "../services/circuitQuoteService.js";
@@ -360,7 +361,7 @@ router.get("/recommendations", optionalAuthenticate, (req, res) => {
     SELECT p.*, s.company_name as supplier_company_name
     FROM products p
     LEFT JOIN suppliers s ON s.id = p.supplier_id
-    WHERE (p.is_published = 1 OR p.status = 'PUBLISHED')
+    WHERE (p.is_published = 1 OR p.status = 'PUBLISHED') AND ${approvedSupplierSql("p")}
     ORDER BY CASE WHEN LOWER(p.city) = LOWER(?) THEN 1 ELSE 2 END, p.rating DESC, p.bestseller DESC
     LIMIT 6
   `).all(preferredCity);

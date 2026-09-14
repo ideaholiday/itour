@@ -3,6 +3,7 @@ import { UploadService } from "../services/uploadService.js";
 import { authenticateBearer, optionalBearer } from "../middleware/auth.js";
 import { z } from "zod";
 import logger from "../config/logger.js";
+import { kybMimeType, saveKybFile } from "../services/kybFileService.js";
 
 const router = express.Router();
 
@@ -51,6 +52,33 @@ router.post("/uploads", optionalBearer, async (req, res) => {
       });
     }
 
+    if (entityType === "KYB") {
+      // Identity documents: only the supplier themselves (or an admin) may add
+      // one, and the file is stored privately rather than in public /uploads.
+      const role = String(req.user?.role || "").toUpperCase();
+      if (!req.user) return res.status(401).json({ error: "AUTH_REQUIRED", message: "Sign in to upload KYB documents" });
+      const ownsSupplier = role === "SUPPLIER" && req.user.supplier_id && req.user.supplier_id === entityId;
+      if (!entityId || !(ownsSupplier || ["ADMIN", "STAFF"].includes(role))) {
+        return res.status(403).json({ error: "FORBIDDEN", message: "KYB documents can only be uploaded for your own supplier account" });
+      }
+      const kybMime = kybMimeType(mimeType);
+      if (!kybMime) {
+        return res.status(400).json({ error: "UNSUPPORTED_FILE_TYPE", message: "KYB documents must be a PDF, PNG, JPG or WEBP file" });
+      }
+      const stored = saveKybFile(buffer, kybMime);
+      const upload = UploadService.recordUpload({
+        userId: req.user.id || null,
+        filename: stored.filename,
+        originalName: filename,
+        mimeType: kybMime,
+        sizeBytes: buffer.length,
+        url: stored.url,
+        entityType,
+        entityId,
+      });
+      return res.status(201).json({ success: true, upload });
+    }
+
     const upload = UploadService.saveFileBuffer({
       buffer,
       originalName: filename,
@@ -77,10 +105,17 @@ router.post("/uploads", optionalBearer, async (req, res) => {
  * GET /api/uploads/:id
  * Retrieve upload metadata
  */
-router.get("/uploads/:id", (req, res) => {
+router.get("/uploads/:id", optionalBearer, (req, res) => {
   const upload = UploadService.getUploadById(req.params.id);
   if (!upload) {
     return res.status(404).json({ error: "UPLOAD_NOT_FOUND" });
+  }
+  if (String(upload.entity_type || "").toUpperCase() === "KYB") {
+    const role = String(req.user?.role || "").toUpperCase();
+    const ownsSupplier = role === "SUPPLIER" && req.user?.supplier_id && req.user.supplier_id === upload.entity_id;
+    if (!(ownsSupplier || ["ADMIN", "STAFF"].includes(role))) {
+      return res.status(404).json({ error: "UPLOAD_NOT_FOUND" });
+    }
   }
   return res.json({ upload });
 });

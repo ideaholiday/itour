@@ -22,7 +22,8 @@ import {
   verifyPan,
   verifyBankAccount,
 } from "../services/cashfreeSecureIdService.js";
-import { saveSupplierVerification } from "../services/supplierVerificationService.js";
+import { autoApproveSupplierKyb, getKybApprovalReadiness, saveSupplierVerification } from "../services/supplierVerificationService.js";
+import { hasKybFile, sendKybDocumentFile } from "../services/kybFileService.js";
 import {
   autoCreateAllSettlementBatches,
   calculateRefundQuote,
@@ -57,14 +58,15 @@ const parseJson = (value, fallback) => {
   try { return JSON.parse(value); } catch { return fallback; }
 };
 
-// Helper to parse bank details JSON string cleanly
+// Bank details as saved by the supplier; empty when none were given, never a placeholder.
 const parseBankDetails = (raw) => {
-  if (!raw) return { account_number: "N/A", ifsc: "N/A", bank_name: "N/A", upi_id: "N/A" };
+  if (!raw) return {};
   if (typeof raw === "object") return raw;
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
   } catch (e) {
-    return { account_number: "N/A", ifsc: "N/A", bank_name: "N/A", upi_id: "N/A" };
+    return {};
   }
 };
 
@@ -212,50 +214,26 @@ router.get("/suppliers", optionalAuthMiddleware, requireAdminAccess, (req, res) 
     }, { ALL: db.prepare("SELECT COUNT(*) AS count FROM suppliers").get().count });
 
     const suppliersWithDocs = suppliersList.map((sup) => {
-      const kybDocs = db.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ?").all(sup.id);
-      const bankDetails = parseBankDetails(sup.payout_bank_details);
+      // The file location stays on the server; the dossier opens files through
+      // the admin-only document route.
+      const kybDocs = db.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ? ORDER BY submitted_at DESC").all(sup.id)
+        .map(({ doc_url, ...doc }) => ({ ...doc, has_file: hasKybFile({ doc_url }) }));
       const secureIdVerifications = db.prepare(`
         SELECT * FROM supplier_kyb_verifications
         WHERE supplier_id = ?
         ORDER BY created_at DESC
         LIMIT 10
       `).all(sup.id);
-      
-      // Separate attachments for Commercial Transport License, GSTIN, PAN
-      const commercialLicense = kybDocs.find(
-        (d) => d.doc_type === "COMMERCIAL_TRANSPORT_LICENSE" || d.doc_type === "COMMERCIAL_PERMIT"
-      );
-      const gstinDoc = kybDocs.find((d) => d.doc_type === "GSTIN");
-      const panDoc = kybDocs.find((d) => d.doc_type === "PAN");
 
       return {
         ...sup,
         is_verified: Boolean(sup.is_verified || sup.kyb_status === "APPROVED"),
-        bankDetails,
+        bankDetails: parseBankDetails(sup.payout_bank_details),
         kybDocs,
+        kybReadiness: getKybApprovalReadiness(db, sup),
         secureIdVerifications,
         total_products: sup.total_products || 0,
         published_products: sup.published_products || 0,
-        attachments: {
-          commercialLicense: commercialLicense || {
-            doc_type: "COMMERCIAL_TRANSPORT_LICENSE",
-            doc_number: sup.phone ? `CTL-${sup.city.toUpperCase()}-${sup.phone.slice(-4)}` : "CTL-UP-9821",
-            doc_url: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80",
-            status: sup.kyb_status
-          },
-          gstinDoc: gstinDoc || {
-            doc_type: "GSTIN",
-            doc_number: sup.gstin || "09AAACA1234A1Z5",
-            doc_url: "https://example.com/docs/gstin_certificate.pdf",
-            status: sup.kyb_status
-          },
-          panDoc: panDoc || {
-            doc_type: "PAN",
-            doc_number: sup.pan_number || "AAACA1234A",
-            doc_url: "https://example.com/docs/pan_card.pdf",
-            status: sup.kyb_status
-          }
-        }
       };
     });
 
@@ -279,23 +257,44 @@ router.post("/suppliers/:id/kyb/auto-verify", optionalAuthMiddleware, requireAdm
       actorRole: req.user?.role || "ADMIN",
     });
 
+    const autoApproval = autoApproveSupplierKyb(db, id, {
+      notify: (payload) => queueNotification(notifySupplierVerification(payload), `KYB auto-approval notification for ${id}`),
+    });
+
     const verifications = db.prepare(`
       SELECT * FROM supplier_kyb_verifications
       WHERE supplier_id = ?
       ORDER BY created_at DESC
       LIMIT 20
     `).all(id);
+    const updatedSupplier = autoApproval.supplier || auditReport.updatedSupplier;
 
     res.json({
       success: true,
       report: auditReport,
       verifications,
-      supplier: auditReport.updatedSupplier,
-      message: "Cashfree SecureID KYB audit completed successfully.",
+      supplier: updatedSupplier,
+      kybReadiness: getKybApprovalReadiness(db, updatedSupplier),
+      kybAutoApproved: autoApproval.approved,
+      message: autoApproval.approved
+        ? "Cashfree SecureID verified the GSTIN and PAN, so the supplier was approved automatically and notified."
+        : "Cashfree SecureID KYB audit completed successfully.",
     });
   } catch (err) {
     logger.error("Admin KYB auto-verification failed", { requestId: req.requestId, error: err.message });
     res.status(500).json({ error: err.message || "Failed to execute Cashfree SecureID KYB check" });
+  }
+});
+
+// GET /api/admin/suppliers/:id/kyb/:docId/file - Open a supplier's uploaded KYB file
+router.get("/suppliers/:id/kyb/:docId/file", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
+  try {
+    const doc = db.prepare("SELECT * FROM kyb_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+    return sendKybDocumentFile(res, doc);
+  } catch (err) {
+    logger.error("Admin KYB document file failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not open the document" });
   }
 });
 

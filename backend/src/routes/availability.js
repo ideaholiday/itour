@@ -3,6 +3,7 @@ import { getReservationProvider } from "../services/reservationProviders.js";
 import { authenticate, requireRoles } from "../middleware/auth.js";
 import { Router } from "express";
 import db from "../db.js";
+import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { validateBody } from "../middleware/validation.js";
 import { bookingQuoteSchema } from "../validators/apiSchemas.js";
 import { calculateBookingQuote, publicQuote } from "../services/bookingService.js";
@@ -13,7 +14,7 @@ const router = Router();
 
 router.get("/native/:productId", (req, res) => {
   try {
-    const product = db.prepare("SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED'").get(req.params.productId);
+    const product = db.prepare(`SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND ${approvedSupplierSql("products")}`).get(req.params.productId);
     if (!product) return res.status(404).json({ error: "Product not found" });
     res.set("Cache-Control", "no-store");
     res.json({ slots: getReservationProvider().availability(db, { productId: product.id, optionId: req.query.optionId, localDate: req.query.date, promoCode: req.query.promoCode || null }) });
@@ -27,7 +28,7 @@ router.get("/native/:productId", (req, res) => {
 });
 router.post("/native/hold", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), validateBody(nativeHoldSchema), (req, res) => {
   try {
-    const product = db.prepare("SELECT p.id FROM products p JOIN suppliers s ON s.id = p.supplier_id WHERE p.id = ? AND p.status = 'PUBLISHED' AND s.kyb_status = 'APPROVED'").get(req.body.productId);
+    const product = db.prepare(`SELECT p.id FROM products p WHERE p.id = ? AND p.status = 'PUBLISHED' AND ${approvedSupplierSql("p")}`).get(req.body.productId);
     if (!product) return res.status(404).json({ error: "Product not available" });
     const hold = getReservationProvider().reserve(db, { ...req.body, ownerId: req.user.id });
     res.status(201).json({ holdId: hold.id, expiresAt: hold.utc_expires_at, status: hold.status });

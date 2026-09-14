@@ -26,6 +26,7 @@ import {
   X
 } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
+import KybDocumentViewer, { kybDocLabel } from "../KybDocumentViewer.jsx";
 
 const parseBankDetails = (raw) => {
   if (!raw) return null;
@@ -66,6 +67,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
 
   // Pre-selected doc type when clicking upload for a specific slot
   const [presetDocType, setPresetDocType] = useState("");
+  const [viewingDoc, setViewingDoc] = useState(null);
 
   const handleCopyRef = (ref) => {
     if (!ref) return;
@@ -94,7 +96,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       });
       const data = await res.json();
       if (data.success && data.verification?.valid) {
-        showToast("success", `GSTIN Verified with Cashfree: ${data.verification.legalName} (${data.verification.status})`);
+        showToast("success", data.kybAutoApproved ? data.message : `GSTIN Verified with Cashfree: ${data.verification.legalName} (${data.verification.status})`);
         if (onRefresh) onRefresh();
       } else {
         showToast("error", data.error || data.message || "GSTIN verification failed");
@@ -120,7 +122,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       });
       const data = await res.json();
       if (data.success && data.verification?.valid) {
-        showToast("success", `PAN Verified with Cashfree: ${data.verification.registeredName} (${data.verification.type})`);
+        showToast("success", data.kybAutoApproved ? data.message : `PAN Verified with Cashfree: ${data.verification.registeredName} (${data.verification.type})`);
         if (onRefresh) onRefresh();
       } else {
         showToast("error", data.error || data.message || "PAN verification failed");
@@ -171,7 +173,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       });
       const data = await res.json();
       if (data.success) {
-        showToast("success", "Full Cashfree SecureID KYB Verification completed!");
+        showToast("success", data.kybAutoApproved ? data.message : "Full Cashfree SecureID KYB Verification completed!");
         if (onRefresh) onRefresh();
       } else {
         showToast("error", data.error || "Failed to execute comprehensive verification");
@@ -402,15 +404,15 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                       </span>
 
                       {doc.doc_url && (
-                        <a
-                          href={doc.doc_url}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => setViewingDoc(doc)}
                           className="rounded-lg border border-stone-200 bg-white p-1.5 text-stone-600 hover:text-amber-800 hover:border-amber-300 transition"
                           title="View uploaded document"
+                          aria-label={`View ${kybDocLabel(doc.doc_type)}`}
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
+                        </button>
                       )}
 
                       {!isApproved && (
@@ -816,6 +818,14 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       )}
 
       {/* Modal 3: Upload Document */}
+      {viewingDoc && (
+        <KybDocumentViewer
+          fileUrl={`/api/suppliers/${supplierId}/kyb/${viewingDoc.id}/file`}
+          title={kybDocLabel(viewingDoc.doc_type)}
+          onClose={() => setViewingDoc(null)}
+        />
+      )}
+
       {uploadModalOpen && (
         <DocumentUploadModal
           isOpen={uploadModalOpen}
@@ -1250,32 +1260,34 @@ function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, onSucces
       setError("Please select a document type");
       return;
     }
+    if (!selectedFile || !filePreview) {
+      setError("Please choose the document file (PDF or image) to upload");
+      return;
+    }
 
     setLoading(true);
     setError("");
 
     try {
-      let docUrl = "https://example.com/docs/uploaded.pdf";
+      // Upload the file privately first; the KYB record points at it.
+      const uploadRes = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          data: filePreview,
+          filename: selectedFile.name,
+          mimeType: selectedFile.type || "application/pdf",
+          entityType: "KYB",
+          entityId: supplierId
+        })
+      });
 
-      // If user picked a file, upload to /api/uploads via base64
-      if (filePreview && selectedFile) {
-        const uploadRes = await fetch("/api/uploads", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify({
-            data: filePreview,
-            filename: selectedFile.name,
-            mimeType: selectedFile.type || "application/pdf",
-            entityType: "KYB",
-            entityId: supplierId
-          })
-        });
-
-        const uploadData = await uploadRes.json();
-        if (uploadData.success && uploadData.upload?.url) {
-          docUrl = uploadData.upload.url;
-        }
+      const uploadData = await uploadRes.json().catch(() => ({}));
+      if (!uploadRes.ok || !uploadData.success || !uploadData.upload?.url) {
+        setError(uploadData.message || "The file could not be uploaded. Please try again.");
+        return;
       }
+      const docUrl = uploadData.upload.url;
 
       // Now submit the KYB record
       const res = await fetch(`/api/suppliers/${supplierId}/kyb`, {
@@ -1283,7 +1295,7 @@ function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, onSucces
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           docType,
-          docNumber: docNumber.trim() || `DOC-${Date.now().toString().slice(-6)}`,
+          docNumber: docNumber.trim() || null,
           docUrl
         })
       });

@@ -21,25 +21,25 @@ Schema changes: only as a new file in `backend/migrations/` (AGENTS.md R7). Igno
 
 | Feature | Route (`backend/src/routes/`) | Main services (`backend/src/services/`) | Frontend (`frontend/src/`) |
 | :--- | :--- | :--- | :--- |
-| Product detail, pickup validation | `activities.js` | `locationValidationService`, `reviewService` | `pages/ActivityDetail.jsx` |
+| Product detail, pickup validation | `activities.js` | `locationValidationService`, `supplierKybGate`, `reviewService` | `pages/ActivityDetail.jsx` |
 | Search | `search.js` | `searchService` | `pages/Search.jsx` |
 | Transfer quotes | `transfers.js` | `locationValidationService`, `engine/transferEngine.js` | `pages/TransferSearch.jsx` |
-| Live availability, seat holds | `availability.js` (`/native/:productId`, `/native/hold`) | `nativeInventoryService`, `reservationProviders` | `pages/ActivityDetail.jsx` |
+| Live availability, seat holds | `availability.js` (`/native/:productId`, `/native/hold`) | `nativeInventoryService`, `reservationProviders`, `supplierKybGate` | `pages/ActivityDetail.jsx` |
 | Checkout, payments | `checkout.js` | `bookingService`, `razorpayService`, `cashfreeService`, `checkoutModeService`, `paymentReviewService`, `financeService` | `pages/Checkout.jsx` |
 | Bookings, vouchers, cancellation | `bookings.js`, `traveler.js` | `bookingService`, `bookingModificationService`, `guestDocumentService` | `pages/MyBookings.jsx`, `pages/BookingConfirmed.jsx` |
 | Circuit planner and grouped orders | `traveler.js` (quotes), `circuitOrders.js` | `circuitQuoteService`, `circuitOrderService`, `circuitPaymentService`, `circuitManagementService`, `circuitOrchestrationService` | `pages/CircuitPlanner.jsx`, `pages/CircuitCheckout.jsx`, `pages/CircuitManage.jsx` |
-| Supplier extranet: listings, rates, calendar, KYB | `suppliers.js` | `nativeInventoryService`, `pricingRuleService`, `availabilityService`, `supplierVerificationService`, `cashfreeSecureIdService` | `pages/SupplierPortal.jsx`, `pages/ProductBuilder.jsx`, `components/supplier/` |
+| Supplier extranet: listings, rates, calendar, KYB | `suppliers.js` | `nativeInventoryService`, `pricingRuleService`, `availabilityService`, `supplierVerificationService`, `cashfreeSecureIdService`, `kybFileService` | `pages/SupplierPortal.jsx`, `pages/ProductBuilder.jsx`, `components/supplier/` |
 | Driver dispatch, pickup OTP | `suppliers.js`, `driverTrips.js`, `ops.js` | `driverDispatchService`, `dispatchWorkflowService`, `dispatchStateService`, `dispatchNotificationService` | `components/supplier/DispatchQueue.jsx`, `pages/DriverTrip.jsx`, `pages/ops/LiveTripBoardView.jsx` |
 | Supplier assignment SLA | `ops.js`, `checkout.js` | `supplierAssignmentService`, `assignmentSlaService` | `pages/OpsPanel.jsx` |
 | Supplier profiles, directory, enquiries, SEO pages | `publicSuppliers.js`, `enquiries.js`, `seo.js` | `supplierProfileService`, `supplierEnquiryService` | `pages/SupplierProfile.jsx`, `pages/SupplierDirectory.jsx`, `components/EnquiryInbox.jsx` |
-| Admin: supplier approval, moderation, finance | `admin.js` | `supplierVerificationService`, `financeService` | `pages/admin/` |
+| Admin: supplier approval, moderation, finance | `admin.js` | `supplierVerificationService`, `kybFileService`, `financeService` | `pages/admin/` |
 | Analytics | `analytics.js` | `analyticsService` | `pages/admin/AnalyticsDashboardView.jsx` |
 | Reviews and review invites | `reviews.js` | `reviewService`, `reviewInviteService` | `pages/ReviewInvite.jsx`, `pages/MyReviews.jsx` |
 | Support cases, refunds | `support.js` | `supportCaseService`, `financeService` | `pages/ops/SupportCasesView.jsx` |
 | Notifications (email, WhatsApp, SMS) | `ops.js`, `notificationWebhooks.js` | `notificationService`, `whatsappService`, `emailService`, `smsService`, `notificationLogService` | `pages/ops/WhatsAppNotificationView.jsx` |
 | Affiliates, referrals, loyalty | `affiliate.js`, `adminAffiliates.js`, `referral.js`, `promo.js` | `affiliateService`, `referralService`, `loyaltyService`, `promoService` | `pages/AffiliateDashboardPage.jsx`, `pages/TravelAndEarn.jsx` |
 | OCTo API and channel manager | `octo.js`, `supplierChannels.js` | `octoService`, `channelManagerService`, `channels/channelRegistry.js` | `pages/supplier/SupplierChannelManagerPage.jsx` |
-| Uploads | `uploads.js` | `uploadService` | — |
+| Uploads (incl. private KYB files) | `uploads.js` | `uploadService`, `kybFileService` | `components/KybDocumentViewer.jsx` |
 | Auth | `auth.js` | `lib/passwords.js` | `lib/auth.jsx`, `pages/Login.jsx` |
 
 Frontend routes are declared in `frontend/src/App.jsx`. Portal detection (`supply.` / `admin.` hosts) is in `frontend/src/lib/domainContext.js`.

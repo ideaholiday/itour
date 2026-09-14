@@ -115,6 +115,8 @@ export function buildCspDirectives(environment = process.env) {
     connectSrc: [...new Set(connectSources)],
     frameSrc: [
       "'self'",
+      // PDF previews of private documents, fetched with the viewer's token.
+      "blob:",
       ...CASHFREE_CHECKOUT_ORIGINS,
       "https://*.cashfree.com",
       "https://api.razorpay.com",

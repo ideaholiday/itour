@@ -26,9 +26,12 @@ import {
   notifyDriverAssigned,
   notifyCircuitReschedule,
   notifyRefundProcessed,
+  notifySupplierVerification,
   queueNotification,
   sendGuestBookingNotification,
 } from "../services/notificationService.js";
+import { KYB_FILE_SCHEME, kybFileName, sendKybDocumentFile } from "../services/kybFileService.js";
+import { autoApproveSupplierKyb } from "../services/supplierVerificationService.js";
 import {
   assignDriverToBooking,
   getDispatchTimeline,
@@ -56,6 +59,23 @@ import { backfillProductLocationRules } from "../data/canonicalLocations.js";
 import { onReferralBookingCancelled, onReferralTripCompleted } from "../services/referralService.js";
 
 const router = express.Router();
+
+// Approves a pending supplier once Cashfree has verified their GSTIN and PAN,
+// and tells them by email and WhatsApp. Never fails the check that triggered it.
+function applyKybAutoApproval(req, supplierId) {
+  try {
+    const outcome = autoApproveSupplierKyb(db, supplierId, {
+      notify: (payload) => queueNotification(notifySupplierVerification(payload), `KYB auto-approval notification for ${supplierId}`),
+    });
+    if (outcome.approved) logger.info("Supplier KYB auto-approved by Cashfree SecureID", { requestId: req.requestId, supplierId });
+    return outcome;
+  } catch (error) {
+    logger.error("Supplier KYB auto-approval failed", { requestId: req.requestId, supplierId, error });
+    return { approved: false, supplier: null, identity: null };
+  }
+}
+
+const autoApprovalMessage = "Your GSTIN and PAN are verified, so your account is now approved and your published listings can be booked.";
 router.use(authenticate);
 const databaseList = (value) => JSON.stringify(value);
 
@@ -168,10 +188,20 @@ router.post("/register", validateBody(supplierSchemas.registration), (req, res) 
 router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
   try {
     const { id } = req.params;
-    const docType = req.body.docType || req.body.doc_type || "OTHER";
-    const docNumber = req.body.docNumber || req.body.doc_number || `DOC-${Date.now().toString().slice(-6)}`;
-    const docUrl = req.body.docUrl || req.body.doc_url || "https://example.com/docs/uploaded.pdf";
+    const docType = String(req.body.docType || req.body.doc_type || "OTHER").trim().toUpperCase();
+    const docNumber = String(req.body.docNumber || req.body.doc_number || "").trim() || null;
+    const docUrl = String(req.body.docUrl || req.body.doc_url || "").trim();
     const docId = `kyb_${nanoid(10)}`;
+
+    // A document is only accepted with a file this supplier uploaded as KYB,
+    // so an admin never reviews a placeholder link or someone else's file.
+    const filename = docUrl.startsWith(KYB_FILE_SCHEME) ? kybFileName(docUrl) : null;
+    const upload = filename
+      ? db.prepare("SELECT id FROM uploads WHERE filename = ? AND UPPER(COALESCE(entity_type, '')) = 'KYB' AND entity_id = ?").get(filename, id)
+      : null;
+    if (!upload) {
+      return res.status(400).json({ error: "Upload the document file (PDF or image) before submitting it." });
+    }
 
     // Check if a document of this type already exists for this supplier
     const existing = db.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ? AND doc_type = ?").get(id, docType);
@@ -181,7 +211,7 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
         `UPDATE kyb_documents
          SET doc_number = ?, doc_url = ?, status = 'PENDING', rejection_reason = NULL, review_note = NULL, submitted_at = datetime('now')
          WHERE id = ?`
-      ).run(docNumber, docUrl || existing.doc_url || "https://example.com/docs/uploaded.pdf", existing.id);
+      ).run(docNumber, docUrl, existing.id);
 
       const updatedDoc = db.prepare("SELECT * FROM kyb_documents WHERE id = ?").get(existing.id);
       return res.json({ success: true, docId: existing.id, document: updatedDoc, message: "KYB Document re-submitted for review." });
@@ -190,13 +220,25 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
     db.prepare(
       `INSERT INTO kyb_documents (id, supplier_id, doc_type, doc_number, doc_url, status, submitted_at)
        VALUES (?, ?, ?, ?, ?, 'PENDING', datetime('now'))`
-    ).run(docId, id, docType, docNumber, docUrl || "https://example.com/docs/uploaded.pdf");
+    ).run(docId, id, docType, docNumber, docUrl);
 
     const createdDoc = db.prepare("SELECT * FROM kyb_documents WHERE id = ?").get(docId);
     res.json({ success: true, docId, document: createdDoc, message: "KYB Document submitted for review." });
   } catch (err) {
     logger.error("Failed to submit KYB document", { requestId: req.requestId, error: err });
     res.status(500).json({ error: err.message || "Failed to submit KYB document" });
+  }
+});
+
+// GET /api/suppliers/:id/kyb/:docId/file - The supplier's own uploaded KYB file
+router.get("/:id/kyb/:docId/file", (req, res) => {
+  try {
+    const doc = db.prepare("SELECT * FROM kyb_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+    return sendKybDocumentFile(res, doc);
+  } catch (err) {
+    logger.error("Failed to send KYB document file", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not open the document" });
   }
 });
 
@@ -255,14 +297,16 @@ router.post("/:id/kyb/verify-gstin", validateBody(supplierSchemas.verifyGstin), 
       WHERE id = ?
     `).run(targetGstin, result.valid ? 1 : 0, result.legalName || null, result.status || null, id);
 
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
     const updatedSupplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
 
     res.json({
       success: true,
       verification: result,
       supplier: updatedSupplier,
+      kybAutoApproved: autoApproval.approved,
       message: result.valid
-        ? `GSTIN verified: ${result.legalName} (${result.status})`
+        ? `GSTIN verified: ${result.legalName} (${result.status})${autoApproval.approved ? `. ${autoApprovalMessage}` : ""}`
         : "GSTIN verification was not successful",
     });
   } catch (err) {
@@ -307,14 +351,16 @@ router.post("/:id/kyb/verify-pan", validateBody(supplierSchemas.verifyPan), asyn
       WHERE id = ?
     `).run(targetPan, result.valid ? 1 : 0, result.registeredName || null, result.type || null, id);
 
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
     const updatedSupplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
 
     res.json({
       success: true,
       verification: result,
       supplier: updatedSupplier,
+      kybAutoApproved: autoApproval.approved,
       message: result.valid
-        ? `PAN verified: ${result.registeredName} (${result.type}) - Match: ${result.nameMatchScore}%`
+        ? `PAN verified: ${result.registeredName} (${result.type}) - Match: ${result.nameMatchScore}%${autoApproval.approved ? `. ${autoApprovalMessage}` : ""}`
         : "PAN verification was not successful",
     });
   } catch (err) {
@@ -425,11 +471,16 @@ router.post("/:id/kyb/verify-all", async (req, res) => {
       actorId: req.user?.id || id,
       actorRole: req.user?.role || "SUPPLIER",
     });
+    const autoApproval = applyKybAutoApproval(req, id);
+    if (autoApproval.supplier) report.updatedSupplier = autoApproval.supplier;
 
     res.json({
       success: true,
       report,
-      message: "Comprehensive Cashfree SecureID KYB audit completed.",
+      kybAutoApproved: autoApproval.approved,
+      message: autoApproval.approved
+        ? `Comprehensive Cashfree SecureID KYB audit completed. ${autoApprovalMessage}`
+        : "Comprehensive Cashfree SecureID KYB audit completed.",
     });
   } catch (err) {
     logger.error("Comprehensive KYB failed", { requestId: req.requestId, error: err.message });
@@ -480,6 +531,14 @@ router.patch("/:id/profile", validateBody(supplierSchemas.profileUpdate), (req, 
            gstin = ?, pan_number = ?, website_url = ?, business_type = ?, years_in_operation = ?
        WHERE id = ?`
     ).run(finalCompany, finalContact, finalPhone, finalCity, finalState, finalGstin, finalPan, finalWebsite, finalBusinessType, finalYears, id);
+
+    // A new GSTIN or PAN has not been checked yet, whatever the old one showed.
+    if ((finalGstin || null) !== (supplier.gstin || null)) {
+      db.prepare("UPDATE suppliers SET gstin_verified = 0, gstin_verified_name = NULL, gstin_verified_status = NULL WHERE id = ?").run(id);
+    }
+    if ((finalPan || null) !== (supplier.pan_number || null)) {
+      db.prepare("UPDATE suppliers SET pan_verified = 0, pan_verified_name = NULL, pan_type = NULL WHERE id = ?").run(id);
+    }
 
     const updated = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     res.json({ success: true, supplier: updated, message: "Business details updated successfully." });

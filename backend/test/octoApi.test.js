@@ -26,7 +26,7 @@ function setupOctoTestDb() {
       city TEXT,
       state TEXT,
       is_verified INTEGER DEFAULT 1,
-      kyb_status TEXT DEFAULT 'VERIFIED',
+      kyb_status TEXT DEFAULT 'PENDING',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -132,7 +132,7 @@ function setupOctoTestDb() {
 
   db.prepare(`
     INSERT INTO suppliers (id, company_name, contact_name, email, phone, city, state, is_verified, kyb_status)
-    VALUES ('sup_test_01', 'Goa Adventure Club', 'Rahul Verma', 'rahul@goaadventure.com', '+919876543210', 'Goa', 'Goa', 1, 'VERIFIED')
+    VALUES ('sup_test_01', 'Goa Adventure Club', 'Rahul Verma', 'rahul@goaadventure.com', '+919876543210', 'Goa', 'Goa', 1, 'APPROVED')
   `).run();
 
   db.prepare(`
@@ -276,4 +276,43 @@ test("OCTo Service: unit items are counted by declared type, not by unit id text
 
   // An empty request still reserves a single adult seat.
   assert.deepEqual(countOctoUnits([]), { adults: 1, children: 0 });
+});
+
+test("OCTo Service: a supplier without approved KYB is neither listed nor bookable", () => {
+  const db = setupOctoTestDb();
+  db.prepare("UPDATE suppliers SET kyb_status = 'PENDING' WHERE id = 'sup_test_01'").run();
+  const futureDate = new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10);
+
+  assert.equal(getOctoSuppliers(db).length, 0);
+  assert.equal(getOctoProducts(db).length, 0);
+  assert.equal(getOctoProduct(db, "prod_test_01"), null);
+  assert.deepEqual(getOctoAvailability(db, { productId: "prod_test_01", optionId: "opt_test_01", localDateStart: futureDate }), []);
+  assert.throws(
+    () => createOctoReservation(db, {
+      productId: "prod_test_01",
+      optionId: "opt_test_01",
+      availabilityId: `opt_test_01:${futureDate}:16:00`,
+      unitItems: [{ unitId: "opt_test_01:adult" }],
+    }),
+    (error) => error.status === 409 && error.code === "PRODUCT_NOT_BOOKABLE"
+  );
+});
+
+test("OCTo Service: a hold cannot be confirmed once the supplier is suspended", () => {
+  const db = setupOctoTestDb();
+  const futureDate = new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10);
+  const reservation = createOctoReservation(db, {
+    productId: "prod_test_01",
+    optionId: "opt_test_01",
+    availabilityId: `opt_test_01:${futureDate}:16:00`,
+    unitItems: [{ unitId: "opt_test_01:adult" }],
+  });
+
+  db.prepare("UPDATE suppliers SET kyb_status = 'SUSPENDED' WHERE id = 'sup_test_01'").run();
+
+  assert.throws(
+    () => confirmOctoReservation(db, { uuid: reservation.id, contact: { fullName: "Aarav Sharma", email: "aarav@example.com" } }),
+    (error) => error.status === 409 && error.code === "PRODUCT_NOT_BOOKABLE"
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM bookings").get().n, 0);
 });

@@ -124,6 +124,7 @@ import availabilityRouter from "./routes/availability.js";
 import octoRouter from "./routes/octo.js";
 import supplierChannelsRouter from "./routes/supplierChannels.js";
 import { swaggerSpec } from "./config/swagger.js";
+import { blockPublicKybUploads } from "./services/kybFileService.js";
 
 const app = express();
 app.use(requestContext);
@@ -144,6 +145,7 @@ app.use("/api/v1", metricsRouter);
 
 // Serve uploads directory
 const uploadsDir = path.join(__dirname, "..", "uploads");
+app.use(["/uploads", "/api/uploads/files"], blockPublicKybUploads(db));
 app.use("/uploads", express.static(uploadsDir));
 app.use("/api/uploads/files", express.static(uploadsDir));
 

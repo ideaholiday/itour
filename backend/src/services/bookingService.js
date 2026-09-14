@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { computeTransferQuote, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
+import { isSupplierKybApproved } from "./supplierKybGate.js";
 
 const OTP_DIGITS = 6;
 export const MAX_OTP_ATTEMPTS = 5;
@@ -163,7 +164,8 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     error.status = 404;
     throw error;
   }
-  if (product.kyb_status && product.kyb_status !== "APPROVED") {
+  // No supplier, or a supplier without an approved KYB, cannot take bookings.
+  if (!isSupplierKybApproved(product.kyb_status)) {
     const error = new Error("This operator is not accepting bookings right now");
     error.status = 409;
     throw error;

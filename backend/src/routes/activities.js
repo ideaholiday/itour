@@ -7,6 +7,7 @@ import { validateBody } from "../middleware/validation.js";
 import { locationSchemas } from "../validators/apiSchemas.js";
 import { ensureDefaultProductOption, getBookingQuestions, getProductOptions } from "../services/logisticsService.js";
 import { priorMeanRating } from "../services/reviewService.js";
+import { approvedSupplierSql } from "../services/supplierKybGate.js";
 
 const router = Router();
 
@@ -324,7 +325,7 @@ router.get("/activities", (req, res) => {
   try {
     let sql = `SELECT p.*, qs.smoothed_rating FROM products p
       LEFT JOIN quality_scores qs ON qs.entity_type = 'PRODUCT' AND qs.entity_id = p.id
-      WHERE p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1`;
+      WHERE p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1 AND ${approvedSupplierSql("p")}`;
     const params = [];
 
     if (destination) {
@@ -426,7 +427,7 @@ router.get("/activities", (req, res) => {
 
 function sendSuggestions(req, res) {
   try {
-    const product = db.prepare("SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1").get(req.params.id);
+    const product = db.prepare(`SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1 AND ${approvedSupplierSql("products")}`).get(req.params.id);
     if (!product) return res.status(404).json({ error: "Product not found", code: "PRODUCT_NOT_FOUND", requestId: req.requestId });
     const side = String(req.query.side || req.body?.side || "PICKUP").toUpperCase();
     const query = String(req.query.q || req.body?.q || "").slice(0, 100);
@@ -449,7 +450,7 @@ router.post("/activities/:id/validate-pickup", validateBody(locationSchemas.vali
 
 router.get("/activities/:id/options", (req, res) => {
   try {
-    const product = db.prepare("SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1").get(req.params.id);
+    const product = db.prepare(`SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1 AND ${approvedSupplierSql("products")}`).get(req.params.id);
     if (!product) return res.status(404).json({ error: "Product not found" });
     const options = getProductOptions(db, product.id);
     return res.json({ success: true, options: options.length ? options : [ensureDefaultProductOption(db, product)].filter(Boolean) });
@@ -467,7 +468,7 @@ router.get("/activities/:id/options/:optionId", (req, res) => {
 // GET /api/activities/:id
 router.get("/activities/:id", (req, res) => {
   try {
-    const row = db.prepare("SELECT p.* FROM products p WHERE p.id = ? AND p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1").get(req.params.id);
+    const row = db.prepare(`SELECT p.* FROM products p WHERE p.id = ? AND p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1 AND ${approvedSupplierSql("p")}`).get(req.params.id);
     if (!row) return res.status(404).json({ error: "Product not found" });
     const product = parseProductRow(row);
     const context = getProductLocationContext(db, row.id);

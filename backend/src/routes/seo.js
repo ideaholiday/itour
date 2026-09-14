@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import db from "../db.js";
 import logger from "../config/logger.js";
+import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { activityPath } from "../../../shared/activityUrl.js";
 import {
   findDirectoryCity, isProfileVisible, profilePath, publicSupplierView, resolveProfileSlug, sitemapSupplierEntries,
@@ -351,7 +352,7 @@ router.get("/sitemap.xml", (req, res) => {
     let products = [];
     try {
       products = db
-        .prepare("SELECT id, title, created_at as updated_at, category, city as destination_name FROM products WHERE is_published = 1 ORDER BY id DESC")
+        .prepare(`SELECT id, title, created_at as updated_at, category, city as destination_name FROM products WHERE is_published = 1 AND ${approvedSupplierSql("products")} ORDER BY id DESC`)
         .all() || [];
     } catch (dbErr) {
       logger.warn("Sitemap database fallback failed", { requestId: req.requestId, error: dbErr });

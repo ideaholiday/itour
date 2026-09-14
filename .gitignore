@@ -30,3 +30,4 @@ tmp/
 observability/secrets/
 backend/uploads/*
 !backend/uploads/.gitkeep
+backend/private-uploads/
