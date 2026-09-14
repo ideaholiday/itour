@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { translateSqliteSql } from "../src/postgresSyncDb.js";
+import { PostgresSyncDatabase, translateSqliteSql } from "../src/postgresSyncDb.js";
 
 test("translates SQLite placeholders without changing question marks in strings", () => {
   assert.equal(
@@ -45,4 +45,45 @@ test("no SQL tests a bare placeholder for NULL, which PostgreSQL cannot type", a
   };
   await walk(root);
   assert.deepEqual(offenders, []);
+});
+
+/** Adapter with a fake worker: each answer is a result or an Error; records SQL and worker restarts. */
+function fakeDatabase(answers) {
+  const database = Object.create(PostgresSyncDatabase.prototype);
+  const log = { sql: [], restarts: 0 };
+  database.worker = { postMessage: ({ sql }) => log.sql.push(sql), terminate() {} };
+  database._initWorker = () => { log.restarts += 1; };
+  database._waitForResponse = () => {
+    const answer = answers.shift();
+    if (answer instanceof Error) throw answer;
+    return answer || { rows: [], rowCount: 0 };
+  };
+  return { database, log };
+}
+
+const notQueryable = () => new Error("Client has encountered a connection error and is not queryable");
+
+test("a dropped PostgreSQL connection reconnects and retries a statement that was never sent", () => {
+  const { database, log } = fakeDatabase([notQueryable(), { rows: [{ id: "p1" }], rowCount: 1 }]);
+  assert.deepEqual(database.prepare("SELECT id FROM products WHERE id = ?").get("p1"), { id: "p1" });
+  assert.equal(log.restarts, 1);
+  assert.equal(log.sql.length, 2, "retried once on the new connection");
+});
+
+test("a connection lost mid-statement reconnects without re-running the statement", () => {
+  const { database, log } = fakeDatabase([new Error("Connection terminated unexpectedly")]);
+  assert.throws(() => database.prepare("INSERT INTO bookings (id) VALUES (?)").run("b1"), /Connection terminated/);
+  assert.equal(log.restarts, 1);
+  assert.equal(log.sql.length, 1, "a write that may have reached the server is not repeated");
+});
+
+test("a connection lost inside a transaction fails the transaction and reconnects afterwards", () => {
+  const { database, log } = fakeDatabase([{ rows: [] }, notQueryable(), notQueryable(), notQueryable(), { rows: [] }]);
+  const book = database.transaction(() => database.prepare("UPDATE availability SET seats = seats - 1").run());
+  assert.throws(() => book(), /not queryable/);
+  assert.equal(log.restarts, 0, "no new connection while the transaction is open");
+  assert.deepEqual(log.sql, ["BEGIN", "UPDATE availability SET seats = seats - 1", "ROLLBACK"]);
+
+  database.prepare("SELECT 1").get();
+  assert.equal(log.restarts, 1, "the next statement outside the transaction reconnects");
 });

@@ -2,6 +2,8 @@ import { Worker } from "node:worker_threads";
 
 const RESPONSE_BUFFER_BYTES = 16 * 1024 * 1024;
 const decoder = new TextDecoder();
+const NOT_QUERYABLE = /is not queryable/i;
+const CONNECTION_LOST = /is not queryable|Connection terminated|ECONNRESET|server closed the connection|terminating connection/i;
 
 function parseConnectionString(rawValue) {
   const raw = String(rawValue || "").trim();
@@ -133,15 +135,29 @@ export class PostgresSyncDatabase {
     return payload;
   }
 
-  _execute(sql, params = []) {
+  _restartWorker() {
+    try { this.worker.terminate(); } catch {}
+    try { this._initWorker(); } catch {}
+  }
+
+  _execute(sql, params = [], retried = false) {
     const sharedBuffer = new SharedArrayBuffer(RESPONSE_BUFFER_BYTES);
     this.worker.postMessage({ sharedBuffer, sql, params });
     try {
       return this._waitForResponse(sharedBuffer);
     } catch (error) {
-      if (String(error.message || "").includes("timed out")) {
-        try { this.worker.terminate(); } catch {}
-        try { this._initWorker(); } catch {}
+      const message = String(error.message || "");
+      if (message.includes("timed out")) {
+        this._restartWorker();
+      } else if (!this.transactionDepth && CONNECTION_LOST.test(message)) {
+        // The worker's single pg.Client never reconnects by itself, so a dropped
+        // connection failed every later query until the instance restarted.
+        // Reconnect only outside a transaction: inside one, the rest of the
+        // transaction must fail rather than run on a new connection without BEGIN.
+        this._restartWorker();
+        // "not queryable" means the dead client refused the statement before
+        // sending it, so running it once more cannot apply a write twice.
+        if (!retried && NOT_QUERYABLE.test(message)) return this._execute(sql, params, true);
       }
       throw error;
     }
