@@ -25,7 +25,8 @@ export default function AdminLoginPage() {
       });
 
       login(result.token, result.user);
-      navigate("/admin", { replace: true });
+      // Staff work in Operations; the admin panel is for administrators only.
+      navigate(result.user?.role === "STAFF" ? "/ops" : "/admin", { replace: true });
     } catch (err) {
       setError(err.message || "Administrator authentication failed.");
     } finally {

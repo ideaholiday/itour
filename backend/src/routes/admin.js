@@ -39,6 +39,7 @@ import { validateBody } from "../middleware/validation.js";
 import { assignDriverToBooking } from "../services/driverDispatchService.js";
 import { dispatchTransaction, revokeAssignment } from "../services/dispatchStateService.js";
 import { adminSchemas, checkoutSchemas, profileSchemas } from "../validators/apiSchemas.js";
+import { addTeamMember, listTeam, removeTeamMember, resetTeamMemberPassword, updateTeamMember } from "../services/teamService.js";
 import {
   grantSupplierVerification, ownerProfileView, REQUIRED_VERIFICATION_CHECKS, revokeSupplierVerification,
   setProfileSuspended, VERIFICATION_CHECKS,
@@ -373,6 +374,60 @@ router.patch("/suppliers/:id/profile-status", optionalAuthMiddleware, requireAdm
     if (err.status) return res.status(err.status).json({ error: err.message });
     logger.error("Supplier profile status change failed", { requestId: req.requestId, error: err });
     return res.status(500).json({ error: "Profile status could not be saved" });
+  }
+});
+
+// Team: the ADMIN and STAFF users who run the platform and receive its alerts.
+function sendTeamError(req, res, err, fallback) {
+  if (err.status) return res.status(err.status).json({ error: err.message, code: err.code });
+  logger.error(fallback, { requestId: req.requestId, error: err });
+  return res.status(500).json({ error: fallback });
+}
+
+// GET /api/admin/team - List administrators and staff
+router.get("/team", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
+  try {
+    return res.json({ success: true, members: listTeam(db), currentUserId: req.user.id });
+  } catch (err) {
+    return sendTeamError(req, res, err, "Could not load the team");
+  }
+});
+
+// POST /api/admin/team - Add a staff member or administrator (temporary password returned once)
+router.post("/team", optionalAuthMiddleware, requireAdminAccess, validateBody(adminSchemas.teamMember), (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    return res.status(201).json({ success: true, ...addTeamMember(db, req.body) });
+  } catch (err) {
+    return sendTeamError(req, res, err, "Could not add the team member");
+  }
+});
+
+// PATCH /api/admin/team/:id - Update name, WhatsApp number or role
+router.patch("/team/:id", optionalAuthMiddleware, requireAdminAccess, validateBody(adminSchemas.teamMemberUpdate), (req, res) => {
+  try {
+    return res.json({ success: true, member: updateTeamMember(db, req.params.id, req.body, req.user) });
+  } catch (err) {
+    return sendTeamError(req, res, err, "Could not update the team member");
+  }
+});
+
+// DELETE /api/admin/team/:id - Revoke team access (the account becomes a traveler)
+router.delete("/team/:id", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
+  try {
+    return res.json({ success: true, ...removeTeamMember(db, req.params.id, req.user) });
+  } catch (err) {
+    return sendTeamError(req, res, err, "Could not remove the team member");
+  }
+});
+
+// POST /api/admin/team/:id/reset-password - Issue a new temporary password (returned once)
+router.post("/team/:id/reset-password", optionalAuthMiddleware, requireAdminAccess, (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    return res.json({ success: true, ...resetTeamMemberPassword(db, req.params.id) });
+  } catch (err) {
+    return sendTeamError(req, res, err, "Could not reset the password");
   }
 });
 

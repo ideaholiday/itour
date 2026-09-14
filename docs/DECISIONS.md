@@ -125,3 +125,16 @@ This document records significant technical and product architectural decisions.
   - Live Cashfree credentials (PG App ID, PG secret, SecureID public key) come only from Secret Manager. `deploy.sh` never reads them, or `CASHFREE_ENV`, from a local `backend/.env`.
   - Live traffic (Cloud Run or `NODE_ENV=production`) never simulates money or identity: no simulated supplier payout UTR, no simulated SecureID result.
 - **Consequences**: A failed automated supplier transfer surfaces as an error; ops pay manually and record the bank UTR. Sandbox testing belongs on local or staging, not on production.
+
+---
+
+## ADR 011: Admins Manage Staff in the Admin Panel
+- **Date**: 2026-09-14
+- **Context**: Staff could only be created by editing the database, so there was no way to add a person, fix a staff member's WhatsApp number (alerts to one were failing as undeliverable), or revoke access. Staff who signed in at the admin portal landed on a page that denied them.
+- **Decision Made**:
+  - Admin → Team lists `ADMIN` and `STAFF` users and lets an `ADMIN` add, edit, reset the password of, and remove them. Only `ADMIN` has this.
+  - Every member needs a WhatsApp-deliverable number, stored as `+<country><number>`, because all team members receive alerts.
+  - A new person gets a temporary password shown to the admin once; there is no emailed invite. An existing traveler account is promoted and keeps its password. Supplier accounts cannot be given team roles.
+  - Removing someone sets their role to `TRAVELER` rather than deleting the user, so their history stays. Nobody can remove or demote themselves, and the last administrator always remains.
+  - `STAFF` sign in at the admin portal and land in Operations (`/ops`); the admin panel stays `ADMIN`-only.
+- **Consequences**: Per-person alert preferences and self-service password change are not part of this; ask an admin to reset a password.

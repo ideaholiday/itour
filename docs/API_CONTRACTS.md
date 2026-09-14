@@ -651,6 +651,17 @@ Scoped to the caller: a traveler sees their own threads, a supplier the threads 
   or `{ "action": "REVOKE", "reason": "…" }`. `409` when KYB is not approved.
 - **`PATCH …/profile-status`**: `{ "suspended": true, "reason": "…" }` or `{ "suspended": false }`.
 
+### 10.4.1 Team (`/api/admin/team`, requires `ADMIN`)
+The `ADMIN` and `STAFF` users who run the platform; all of them receive booking and operations alerts.
+- **`GET /api/admin/team`** → `{ members: [{ id, name, email, phone, role }], currentUserId }`.
+- **`POST /api/admin/team`**: `{ "name": "…", "email": "…", "phone": "+91 98765 43210", "role": "STAFF" | "ADMIN" }` → `201`
+  `{ member, temporaryPassword, promotedExistingAccount }`. A new person gets a one-time `temporaryPassword`; an existing
+  traveler account is promoted and keeps its password (`temporaryPassword: null`). `409` if already on the team or the email
+  is a supplier account; `400` if the number is not WhatsApp-deliverable. The phone is stored as `+<country><number>`.
+- **`PATCH /api/admin/team/:id`**: any of `{ name, phone, role }`. `409` when demoting yourself or the last `ADMIN`.
+- **`DELETE /api/admin/team/:id`**: revokes team access (role becomes `TRAVELER`; the account and history stay). `409` for yourself or the last `ADMIN`.
+- **`POST /api/admin/team/:id/reset-password`** → `{ member, temporaryPassword }`; the previous password stops working.
+
 ### 10.5 Pages and sitemap (served by `routes/seo.js`)
 - **`GET /suppliers`, `/suppliers/in/:citySlug`, `/suppliers/:slug`**: the SPA's
   `index.html` with the page's title, description, canonical, robots, Open Graph

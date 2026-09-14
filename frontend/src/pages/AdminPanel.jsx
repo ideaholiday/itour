@@ -10,6 +10,7 @@ import QualityReviewsView from "./admin/QualityReviewsView.jsx";
 import AnalyticsDashboardView from "./admin/AnalyticsDashboardView.jsx";
 import AffiliatePayoutsView from "./admin/AffiliatePayoutsView.jsx";
 import ReferralProgramView from "./admin/ReferralProgramView.jsx";
+import TeamView from "./admin/TeamView.jsx";
 
 export default function AdminPanel({ view }) {
   const location = useLocation();
@@ -23,6 +24,7 @@ export default function AdminPanel({ view }) {
     else if (location.pathname.includes("/quality")) activeView = "quality";
     else if (location.pathname.includes("/creators")) activeView = "creators";
     else if (location.pathname.includes("/referrals")) activeView = "referrals";
+    else if (location.pathname.includes("/team")) activeView = "team";
     else activeView = "overview";
   }
 
@@ -37,6 +39,7 @@ export default function AdminPanel({ view }) {
         {activeView === "quality" && <QualityReviewsView />}
         {activeView === "creators" && <AffiliatePayoutsView />}
         {activeView === "referrals" && <ReferralProgramView />}
+        {activeView === "team" && <TeamView />}
       </AdminLayout>
     </AdminGuard>
   );

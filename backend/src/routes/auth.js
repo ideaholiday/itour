@@ -193,8 +193,11 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
   let portalRedirect = "/";
   if (user.role === "SUPPLIER") {
     portalRedirect = "/supplier";
-  } else if (user.role === "ADMIN" || user.role === "STAFF") {
+  } else if (user.role === "ADMIN") {
     portalRedirect = "/admin";
+  } else if (user.role === "STAFF") {
+    // Staff work in operations; the admin panel is ADMIN-only.
+    portalRedirect = "/ops";
   }
 
   res.json({

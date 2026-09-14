@@ -33,6 +33,7 @@ Schema changes: only as a new file in `backend/migrations/` (AGENTS.md R7). Igno
 | Supplier assignment SLA | `ops.js`, `checkout.js` | `supplierAssignmentService`, `assignmentSlaService` | `pages/OpsPanel.jsx` |
 | Supplier profiles, directory, enquiries, SEO pages | `publicSuppliers.js`, `enquiries.js`, `seo.js` | `supplierProfileService`, `supplierEnquiryService` | `pages/SupplierProfile.jsx`, `pages/SupplierDirectory.jsx`, `components/EnquiryInbox.jsx` |
 | Admin: supplier approval, moderation, finance | `admin.js` | `supplierVerificationService`, `kybFileService`, `financeService` | `pages/admin/` |
+| Admin: team (staff and administrators) | `admin.js` | `teamService` | `pages/admin/TeamView.jsx` |
 | Analytics | `analytics.js` | `analyticsService` | `pages/admin/AnalyticsDashboardView.jsx` |
 | Reviews and review invites | `reviews.js` | `reviewService`, `reviewInviteService` | `pages/ReviewInvite.jsx`, `pages/MyReviews.jsx` |
 | Support cases, refunds | `support.js` | `supportCaseService`, `financeService` | `pages/ops/SupportCasesView.jsx` |

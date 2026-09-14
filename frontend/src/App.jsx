@@ -124,7 +124,7 @@ function AppContent() {
                 domain.isSupplier ? (
                   userRole === "SUPPLIER" ? <SupplierDashboardPage /> : <SupplierLoginPage />
                 ) : domain.isAdmin ? (
-                  userRole === "ADMIN" || userRole === "STAFF" ? <AdminPanel view="overview" /> : <AdminLoginPage />
+                  userRole === "ADMIN" ? <AdminPanel view="overview" /> : userRole === "STAFF" ? <OpsPanel view="live" /> : <AdminLoginPage />
                 ) : (
                   <Home />
                 )
@@ -162,6 +162,7 @@ function AppContent() {
             <Route path="/admin/quality" element={<AdminPanel view="quality" />} />
             <Route path="/admin/creators" element={<AdminPanel view="creators" />} />
             <Route path="/admin/referrals" element={<AdminPanel view="referrals" />} />
+            <Route path="/admin/team" element={<AdminPanel view="team" />} />
             <Route path="/ops" element={<OpsPanel view="live" />} />
             <Route path="/ops/live" element={<OpsPanel view="live" />} />
             <Route path="/ops/notifications" element={<OpsPanel view="notifications" />} />

@@ -51,6 +51,17 @@ db.prepare(`
 );
 
 db.prepare(`
+  INSERT INTO users (id, name, email, password, phone, role)
+  VALUES (?, ?, ?, ?, ?, 'ADMIN')
+`).run(
+  "user_browser_e2e_admin",
+  "Browser E2E Admin",
+  "browser.e2e.admin@example.test",
+  hashPassword("BrowserAdmin@2026"),
+  "+919876543212",
+);
+
+db.prepare(`
   INSERT INTO staff_tasks (id, task_type, assigned_staff_name, priority, status, notes)
   VALUES (?, ?, ?, ?, ?, ?)
 `).run(

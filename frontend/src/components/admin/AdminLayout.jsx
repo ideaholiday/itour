@@ -21,7 +21,8 @@ import {
   MapPinned,
   Star,
   Wallet,
-  Gift
+  Gift,
+  UserCog
 } from "lucide-react";
 
 export default function AdminLayout({ children }) {
@@ -104,6 +105,13 @@ export default function AdminLayout({ children }) {
       path: "/admin/referrals",
       label: "Travel & Earn",
       icon: Gift,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/team",
+      label: "Team",
+      icon: UserCog,
       badge: null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     }

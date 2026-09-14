@@ -288,6 +288,8 @@ export const supplierSchemas = {
 };
 
 export const adminSchemas = {
+  teamMember: object({ name: text(2, 100), email, phone, role: z.enum(["STAFF", "ADMIN"]).default("STAFF") }),
+  teamMemberUpdate: object({ name: text(2, 100).optional(), phone: phone.optional(), role: z.enum(["STAFF", "ADMIN"]).optional() }),
   review: object({ action: text(2, 40), reason: optionalText(1_000) }),
   verification: object({ action: optionalText(40), decision: optionalText(40), reason: optionalText(1_000), commissionRate: z.coerce.number().min(0).max(100).optional() }),
   autoVerify: object({ supplierId: id.optional() }),
