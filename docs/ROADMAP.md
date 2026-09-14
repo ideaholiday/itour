@@ -41,7 +41,10 @@ Do not rebuild these. Extend them if asked.
 
 - **Phase 1 — done:** drivers share phone location from the trip link (required before "On the way"), positions stored for 30 days, real positions with Live / Delayed / Signal lost on the ops map, supplier sees the driver's last position.
 - **Phase 2 — done:** traveler tracking link and Track live in My Trips with Mappls ETA, "You're at the pickup point" prompt, missed-pickup alerts (not on the way, signal lost, running late, not moving).
-- **Phase 3 — built, not yet released:** `android-driver/` app (ADR 014). Release needs: Play Console account, upload key, privacy policy URL covering driver location, Play listing and data-safety form, `ANDROID_DRIVER_APP_SHA256` set in production, testing on real Android phones (including Xiaomi/Oppo/Vivo battery savers).
+- **Phase 3 — built, release ON HOLD:** `android-driver/` app (ADR 014).
+  - **Blocked on D-U-N-S** (applied, pending as of 2026-09-14; expected by about 2026-10-14). A Google Play organisation account needs it. Resume when the owner confirms approval.
+  - Then, in order: Play Console organisation account → privacy policy page covering driver location → upload key (kept outside the repo) → test on real Android phones (including Xiaomi/Oppo/Vivo battery savers) → Play listing, data-safety form and location foreground-service declaration → internal testing track → set `ANDROID_DRIVER_APP_SHA256` and `VITE_DRIVER_APP_URL` in production.
+  - Until then, drivers share location from the browser trip page (Phase 1–2 work as is). The app already targets API 36, which Play requires for new apps from 2026-08-31.
 
 Standing obligations that apply to every change:
 
