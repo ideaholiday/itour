@@ -1,4 +1,4 @@
-import { recordAffiliateBooking, resolveTier } from "./affiliateService.js";
+import { effectiveAffiliateRates, recordAffiliateBooking, resolveTier } from "./affiliateService.js";
 import { findReferrerByCode, referralPolicy } from "./referralService.js";
 import { giveawayBudgetInr } from "./programSettingsService.js";
 import { nanoid } from "nanoid";
@@ -219,8 +219,9 @@ export function capCouponDiscount({ offeredInr, budgetInr, otherGiveawayInr = 0 
 export function priceCouponForBooking(database, { code, bookingValueInr, commissionInr, userId = null, otherGiveawayInr = 0, product = null }) {
   const promo = validatePromoCode(database, { code, amountInr: bookingValueInr, userId, product });
   if (promo.type === "REFERRAL") return null;
-  const creatorCommissionInr = promo.affiliateId
-    ? Math.round((Number(bookingValueInr) || 0) * (Number(resolveTier(database, promo.affiliateId).commission_rate) || 0.1) * 100) / 100
+  const creator = promo.affiliateId ? database.prepare("SELECT * FROM affiliates WHERE id = ?").get(promo.affiliateId) : null;
+  const creatorCommissionInr = creator
+    ? Math.round((Number(bookingValueInr) || 0) * effectiveAffiliateRates(resolveTier(database, creator.id), creator).commissionRate * 100) / 100
     : 0;
   const discountInr = capCouponDiscount({
     offeredInr: promo.discountAmount,

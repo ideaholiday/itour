@@ -10,9 +10,50 @@ import {
   redactAffiliate,
 } from "../services/affiliateService.js";
 import logger from "../config/logger.js";
+import {
+  listAffiliateRateChanges, listAffiliateTiers, sendAffiliateRateNotices, setAffiliateRates, updateAffiliateTier,
+} from "../services/affiliateRateService.js";
 
 const router = express.Router();
 router.use(authenticate, requireRoles("ADMIN"));
+
+function rateFailure(res, req, error, fallback) {
+  if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+// Creator commission (ADR 017): tiers, per-creator rates, and their change history.
+router.get("/tiers", (req, res) => {
+  try {
+    return res.json({ success: true, ...listAffiliateTiers(db), changes: listAffiliateRateChanges(db) });
+  } catch (error) {
+    return rateFailure(res, req, error, "Could not load creator tiers");
+  }
+});
+
+router.put("/tiers/:code", (req, res) => {
+  try {
+    const { reason, ...input } = req.body || {};
+    const result = updateAffiliateTier(db, req.params.code, input, { actorId: req.user.id, reason });
+    if (result.affected.length) sendAffiliateRateNotices(db, result.affected).catch((error) => logger.error("Creator rate notices failed", { error }));
+    return res.json({ success: true, tier: result.tier, notified: result.affected.length });
+  } catch (error) {
+    return rateFailure(res, req, error, "Could not update the tier");
+  }
+});
+
+router.put("/:id/rates", (req, res) => {
+  try {
+    const { reason, ...input } = req.body || {};
+    const result = setAffiliateRates(db, req.params.id, input, { actorId: req.user.id, reason });
+    if (result.affected.length) sendAffiliateRateNotices(db, result.affected).catch((error) => logger.error("Creator rate notices failed", { error }));
+    const { affected, ...rates } = result;
+    return res.json({ success: true, ...rates, notified: affected.length });
+  } catch (error) {
+    return rateFailure(res, req, error, "Could not update the creator's rates");
+  }
+});
 
 /**
  * GET /api/admin/affiliates

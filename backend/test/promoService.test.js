@@ -16,6 +16,7 @@ describe("Traveler Promo Codes & Referral Engine", () => {
     db.prepare("DELETE FROM wallet_transactions WHERE user_id IN (?, ?)").run(user1Id, user2Id);
     db.prepare("DELETE FROM user_referrals WHERE referrer_user_id IN (?, ?) OR referred_user_id IN (?, ?)").run(user1Id, user2Id, user1Id, user2Id);
     db.prepare("DELETE FROM promo_codes WHERE code IN ('TESTPCT50', 'TESTFIX200', 'TESTEXPIRED', 'TESTINACTIVE')").run();
+    try { db.prepare("DELETE FROM coupon_redemptions WHERE booking_id = ?").run(bookingId); } catch {}
     db.prepare("DELETE FROM users WHERE id IN (?, ?)").run(user1Id, user2Id);
 
     // Insert test users

@@ -68,7 +68,7 @@ describe("Influencer & Affiliate System", () => {
 
   // Rows other suites may have left hanging off these booking ids.
   function purgeBookingDependents() {
-    for (const table of ["financial_ledger", "booking_modifications"]) {
+    for (const table of ["financial_ledger", "booking_modifications", "coupon_redemptions"]) {
       try {
         db.prepare(`DELETE FROM ${table} WHERE booking_id IN (?, ?, ?, ?)`).run(...allBookingIds);
       } catch {}

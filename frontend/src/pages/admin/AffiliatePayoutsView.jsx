@@ -130,6 +130,24 @@ export default function AffiliatePayoutsView() {
     }
   };
 
+  // A creator's own rates (ADR 017): empty uses their tier's. Must fit the giveaway cap.
+  const [rateEdit, setRateEdit] = useState(null);
+  const saveRates = async (event) => {
+    event.preventDefault();
+    try {
+      const pctOrNull = (value) => (value === "" ? null : Number(value));
+      const res = await adminFetch(`/${encodeURIComponent(rateEdit.affiliate.id)}/rates`, {
+        method: "PUT",
+        body: JSON.stringify({ commissionPct: pctOrNull(rateEdit.commissionPct), travelerDiscountPct: pctOrNull(rateEdit.travelerDiscountPct), reason: rateEdit.reason }),
+      });
+      setNotice(`${rateEdit.affiliate.channel_name}: ${res.commissionPct}% commission, ${res.travelerDiscountPct}% audience discount on new bookings.${res.notified ? " They were emailed." : ""}`);
+      setRateEdit(null);
+      load();
+    } catch (err) {
+      setError(err.message || "Could not update the creator's rates");
+    }
+  };
+
   const updateKyc = async (affiliateId, kycStatus) => {
     try {
       await adminFetch(`/${encodeURIComponent(affiliateId)}/kyc`, {
@@ -324,6 +342,27 @@ export default function AffiliatePayoutsView() {
           </div>
 
           <div className="overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm">
+            {rateEdit && (
+              <form onSubmit={saveRates} className="m-4 space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs">
+                <p className="font-bold text-stone-900">Rates for {rateEdit.affiliate.channel_name}</p>
+                <p className="text-stone-600">Both are % of booking value. Leave a field empty to use the {rateEdit.affiliate.tier_code || "STARTER"} tier's rate. Together they must fit the giveaway cap.</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label className="block font-semibold text-stone-700">Commission (%)
+                    <input type="number" min="0" max="50" step="0.5" value={rateEdit.commissionPct} onChange={(e) => setRateEdit({ ...rateEdit, commissionPct: e.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5" />
+                  </label>
+                  <label className="block font-semibold text-stone-700">Audience discount (%)
+                    <input type="number" min="0" max="50" step="0.5" value={rateEdit.travelerDiscountPct} onChange={(e) => setRateEdit({ ...rateEdit, travelerDiscountPct: e.target.value })} className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5" />
+                  </label>
+                  <label className="block font-semibold text-stone-700">Reason
+                    <input value={rateEdit.reason} onChange={(e) => setRateEdit({ ...rateEdit, reason: e.target.value })} minLength={3} maxLength={500} required className="mt-1 w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5" />
+                  </label>
+                </div>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={rateEdit.reason.trim().length < 3} className="rounded-lg bg-amber-500 px-3 py-1.5 font-bold text-stone-950 disabled:opacity-50">Save rates</button>
+                  <button type="button" onClick={() => setRateEdit(null)} className="rounded-lg bg-stone-200 px-3 py-1.5 font-bold text-stone-800">Cancel</button>
+                </div>
+              </form>
+            )}
             {affiliates.length === 0 ? (
               <div className="p-12 text-center text-xs text-stone-400">
                 {loading ? "Loading…" : "No creators found."}
@@ -339,6 +378,7 @@ export default function AffiliatePayoutsView() {
                       <th className="px-5 py-3.5 text-right">Lifetime</th>
                       <th className="px-5 py-3.5">KYC</th>
                       <th className="px-5 py-3.5">Account</th>
+                      <th className="px-5 py-3.5">Rates</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-stone-100">
@@ -385,6 +425,21 @@ export default function AffiliatePayoutsView() {
                               <option key={value} value={value}>{value}</option>
                             ))}
                           </select>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <button
+                            type="button"
+                            onClick={() => setRateEdit({
+                              affiliate,
+                              commissionPct: affiliate.commission_override_rate === null || affiliate.commission_override_rate === undefined ? "" : String(Math.round(Number(affiliate.commission_override_rate) * 10000) / 100),
+                              travelerDiscountPct: affiliate.traveler_discount_override_pct ?? "",
+                              reason: "",
+                            })}
+                            className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-semibold hover:border-amber-500"
+                          >
+                            {Math.round(Number(affiliate.commission_rate || 0) * 10000) / 100}% + {Number(affiliate.traveler_discount_pct || 0)}%
+                            {(affiliate.commission_override_rate !== null && affiliate.commission_override_rate !== undefined) || (affiliate.traveler_discount_override_pct !== null && affiliate.traveler_discount_override_pct !== undefined) ? " · own" : ""}
+                          </button>
                         </td>
                       </tr>
                     ))}

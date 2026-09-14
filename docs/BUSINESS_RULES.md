@@ -265,10 +265,10 @@ exists to stop a specific way the money goes wrong.
 7. **Suspended creators earn nothing.** Attribution requires `status = 'ACTIVE'`.
 
 ### 10.2 Commission and tiers
-1. **The rate comes from the creator's tier**, resolved at the moment of accrual
-   and frozen onto the referral row. `affiliate_tiers` ships as Starter (10%),
-   Rising (12%, at 10 completed bookings and ₹2,00,000 GMV) and Elite (15%, at
-   40 and ₹10,00,000).
+1. **The rate is the creator's own admin-set rate, else their tier's**, resolved at
+   accrual and frozen onto the referral row. Admins edit tiers (Programs) and a
+   creator's rates (Creators), with a reason; commission + audience discount must
+   fit the giveaway cap (§3.2). Seed tiers (10/12/15%) are over it until edited.
 2. **A promotion is never backdated.** Commission already accrued keeps the rate
    it was booked at. Tier is recomputed when a booking completes or reverses.
 3. **One referral per booking.** `affiliate_referrals.booking_id` is `UNIQUE`.

@@ -62,6 +62,10 @@ promo path and is credited on the code itself.
     balance (the message names how much is still clearing).
 
 ### 8.5 Admin (`/api/admin/affiliates`, requires `ADMIN`)
+- **`GET /api/admin/affiliates/tiers`** → `{ giveawayCapPct, tiers: [{ code, label, minCompletedBookings, minLifetimeGmvInr, commissionPct, travelerDiscountPct, sortOrder, overCap, creators }], changes }`.
+- **`PUT /api/admin/affiliates/tiers/:code`** `{ label?, commissionPct?, travelerDiscountPct?, minCompletedBookings?, minLifetimeGmvInr?, reason }` → `{ tier, notified }`. Re-places every creator, syncs their code's discount, emails creators whose rates moved.
+- **`PUT /api/admin/affiliates/:id/rates`** `{ commissionPct: 0–50 | null, travelerDiscountPct: 0–50 | null, reason }` → `{ affiliateId, commissionPct, travelerDiscountPct, commissionOverridden, discountOverridden, notified }`. `null` uses the tier's.
+- Both refuse `400 OVER_GIVEAWAY_CAP` when commission + discount (as % of booking) would exceed the cap, including for creators on the tier with one rate of their own.
 - **`GET /api/admin/affiliates`**: Lists creators. Filters: `status`,
   `kyc_status`, `search`.
 - **`PATCH /api/admin/affiliates/:id/status`**: `ACTIVE`, `SUSPENDED`, `REJECTED`, `PENDING`.

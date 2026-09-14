@@ -145,14 +145,17 @@ export function resolveTier(database = db, affiliateId) {
  */
 export function refreshAffiliateTier(database = db, affiliateId) {
   const tier = resolveTier(database, affiliateId);
-  const affiliate = database.prepare("SELECT affiliate_code FROM affiliates WHERE id = ?").get(affiliateId);
+  const affiliate = database.prepare("SELECT * FROM affiliates WHERE id = ?").get(affiliateId);
+  const rates = effectiveAffiliateRates(tier, affiliate);
 
   database.transaction(() => {
+    // commission_rate and traveler_discount_pct mirror what the creator gets now:
+    // their own admin-set rate, else their tier's.
     database.prepare(`
       UPDATE affiliates
       SET tier_code = ?, commission_rate = ?, traveler_discount_pct = ?, updated_at = datetime('now')
       WHERE id = ?
-    `).run(tier.code, tier.commission_rate, tier.traveler_discount_pct, affiliateId);
+    `).run(tier.code, rates.commissionRate, rates.travelerDiscountPct, affiliateId);
 
     // A tier can raise the discount the creator's audience gets, so the promo
     // code behind the coupon has to move with it.
@@ -161,11 +164,26 @@ export function refreshAffiliateTier(database = db, affiliateId) {
         UPDATE promo_codes
         SET discount_value = ?
         WHERE code = ? AND discount_type = 'PERCENTAGE'
-      `).run(tier.traveler_discount_pct, affiliate.affiliate_code);
+      `).run(rates.travelerDiscountPct, affiliate.affiliate_code);
     }
   })();
 
   return tier;
+}
+
+/**
+ * What a creator earns (fraction of booking value) and gives their audience (%
+ * of booking value): an admin-set rate when there is one (ADR 017), else the tier's.
+ */
+export function effectiveAffiliateRates(tier, affiliate) {
+  const commissionOverride = affiliate?.commission_override_rate;
+  const discountOverride = affiliate?.traveler_discount_override_pct;
+  return {
+    commissionRate: commissionOverride !== null && commissionOverride !== undefined ? Number(commissionOverride) : Number(tier?.commission_rate) || 0.10,
+    travelerDiscountPct: discountOverride !== null && discountOverride !== undefined ? Number(discountOverride) : Number(tier?.traveler_discount_pct ?? 5),
+    commissionOverridden: commissionOverride !== null && commissionOverride !== undefined,
+    discountOverridden: discountOverride !== null && discountOverride !== undefined,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -860,7 +878,7 @@ export function recordAffiliateBooking(database = db, {
   }
 
   const tier = resolveTier(database, affiliate.id);
-  const commissionRate = Number(tier.commission_rate) || Number(affiliate.commission_rate) || 0.10;
+  const commissionRate = effectiveAffiliateRates(tier, affiliate).commissionRate;
   const earningInr = round2(orderAmount * commissionRate);
   const referralId = `aff_ref_${nanoid(12)}`;
 

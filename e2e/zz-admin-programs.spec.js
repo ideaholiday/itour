@@ -33,6 +33,17 @@ test("an administrator sets the giveaway cap and a product's commission, each wi
   await referral.getByRole("button", { name: "Save Share & Earn" }).click();
   await expect(page.getByText("Share & Earn settings saved for new rewards.")).toBeVisible();
 
+  // Creator tiers ship over the cap; an admin brings one within it.
+  const tiers = page.locator("section").filter({ has: page.getByRole("heading", { name: "Creator tiers" }) });
+  await expect(tiers.getByText("Over the 8% cap").first()).toBeVisible();
+  await tiers.locator("li").filter({ hasText: "Starter" }).getByRole("button", { name: "Edit" }).click();
+  await tiers.getByLabel("Commission (% of booking)").fill("5");
+  await tiers.getByLabel("Audience discount (%)").fill("3");
+  await tiers.getByLabel("Reason").fill("Fit the cap");
+  await tiers.getByRole("button", { name: "Save tier" }).click();
+  await expect(page.getByText(/Starter tier saved\./)).toBeVisible();
+  await expect(tiers.locator("li").filter({ hasText: "Starter" }).getByText("Over the 8% cap")).toHaveCount(0);
+
   // New suppliers sell under the launch offer; an admin can waive one individually.
   await expect(page.getByRole("heading", { name: "Supplier subscriptions" })).toBeVisible();
   await expect(page.getByLabel("Launch offer on for new suppliers")).toBeChecked();

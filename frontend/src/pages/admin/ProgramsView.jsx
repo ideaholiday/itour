@@ -181,6 +181,106 @@ function ReferralSettings({ program, commissionRate, onSaved, onError }) {
   );
 }
 
+/**
+ * Creator tiers (BUSINESS_RULES §10.2). Commission and the audience discount are
+ * both % of booking value and together must fit the giveaway cap; the server
+ * refuses anything over it. Creators whose rates change are emailed.
+ */
+function CreatorTiers({ programs, onSaved, onError }) {
+  const [data, setData] = useState({ tiers: [], giveawayCapPct: 10 });
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    api.adminListAffiliateTiers().then(setData).catch((err) => onError(err.message));
+  }, [onError]);
+
+  // Reload with the program settings, so over-cap flags follow a new giveaway cap.
+  useEffect(() => {
+    load();
+  }, [load, programs]);
+
+  const save = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const { code, reason, ...fields } = editing;
+      const res = await api.adminUpdateAffiliateTier(code, {
+        label: fields.label,
+        commissionPct: Number(fields.commissionPct),
+        travelerDiscountPct: Number(fields.travelerDiscountPct),
+        minCompletedBookings: Number(fields.minCompletedBookings),
+        minLifetimeGmvInr: Number(fields.minLifetimeGmvInr),
+        reason,
+      });
+      setEditing(null);
+      onSaved(`${res.tier.label} tier saved.${res.notified ? ` ${res.notified} creator${res.notified > 1 ? "s were" : " was"} emailed.` : ""}`);
+      load();
+    } catch (err) {
+      onError(err.message || "That tier couldn't be saved");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const total = editing ? Number(editing.commissionPct) + Number(editing.travelerDiscountPct) : 0;
+  return (
+    <section className="space-y-4 rounded-2xl border border-stone-200 bg-white p-5">
+      <div>
+        <h2 className="text-sm font-bold">Creator tiers</h2>
+        <p className="mt-1 text-xs text-stone-500">
+          What creators earn and what their code takes off, both as % of booking value. Together they must fit the {data.giveawayCapPct}% giveaway cap.
+          A change applies to new bookings; commission already earned keeps its rate. Set a single creator's own rates on the Creators page.
+        </p>
+      </div>
+      <ul className="divide-y divide-stone-100">
+        {data.tiers.map((tier) => (
+          <li key={tier.code} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-xs">
+            <div>
+              <strong className="text-stone-900">{tier.label}</strong>
+              <span className="text-stone-500"> · {tier.commissionPct}% commission + {tier.travelerDiscountPct}% audience discount · from {tier.minCompletedBookings} trips and ₹{tier.minLifetimeGmvInr.toLocaleString("en-IN")} · {tier.creators} creators</span>
+              {tier.overCap && <span className="ml-2 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">Over the {data.giveawayCapPct}% cap</span>}
+            </div>
+            <button type="button" onClick={() => setEditing({ ...tier, reason: "" })} className="rounded-lg border border-stone-300 px-2.5 py-1 font-bold hover:border-amber-500">Edit</button>
+          </li>
+        ))}
+      </ul>
+      {editing && (
+        <form onSubmit={save} className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs">
+          <p className="font-bold text-stone-900">Edit {editing.code} tier</p>
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <label className="block font-semibold text-stone-700">Name
+              <input value={editing.label} onChange={(e) => setEditing({ ...editing, label: e.target.value })} maxLength={40} required className={`${inputClass} mt-1`} />
+            </label>
+            <label className="block font-semibold text-stone-700">Commission (% of booking)
+              <input type="number" min="0" max="50" step="0.5" value={editing.commissionPct} onChange={(e) => setEditing({ ...editing, commissionPct: e.target.value })} required className={`${inputClass} mt-1`} />
+            </label>
+            <label className="block font-semibold text-stone-700">Audience discount (%)
+              <input type="number" min="0" max="50" step="0.5" value={editing.travelerDiscountPct} onChange={(e) => setEditing({ ...editing, travelerDiscountPct: e.target.value })} required className={`${inputClass} mt-1`} />
+            </label>
+            <label className="block font-semibold text-stone-700">From completed trips
+              <input type="number" min="0" step="1" value={editing.minCompletedBookings} onChange={(e) => setEditing({ ...editing, minCompletedBookings: e.target.value })} required className={`${inputClass} mt-1`} />
+            </label>
+            <label className="block font-semibold text-stone-700">From lifetime bookings (₹)
+              <input type="number" min="0" step="1000" value={editing.minLifetimeGmvInr} onChange={(e) => setEditing({ ...editing, minLifetimeGmvInr: e.target.value })} required className={`${inputClass} mt-1`} />
+            </label>
+          </div>
+          <p className={total > data.giveawayCapPct ? "font-semibold text-rose-700" : "text-stone-600"}>
+            On a {inr(SAMPLE_BOOKING_INR)} booking the creator earns {inr(SAMPLE_BOOKING_INR * Number(editing.commissionPct) / 100)} and their audience gets {inr(SAMPLE_BOOKING_INR * Number(editing.travelerDiscountPct) / 100)} off: {total}% of {data.giveawayCapPct}% allowed.
+          </p>
+          <label className="block font-semibold text-stone-700">Reason
+            <input value={editing.reason} onChange={(e) => setEditing({ ...editing, reason: e.target.value })} minLength={3} maxLength={500} required className={`${inputClass} mt-1`} />
+          </label>
+          <div className="flex gap-2">
+            <button type="submit" disabled={saving || editing.reason.trim().length < 3} className="rounded-xl bg-amber-500 px-4 py-2 font-bold text-stone-950 disabled:opacity-50">Save tier</button>
+            <button type="button" onClick={() => setEditing(null)} className="rounded-xl bg-stone-200 px-4 py-2 font-bold text-stone-800">Cancel</button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
 function coverLabel(supplier) {
   if (!supplier.covered) return "Not covered: cannot take new bookings";
   const until = supplier.cover?.endsAt ? `until ${supplier.cover.endsAt.slice(0, 10)}` : "with no end date";
@@ -388,6 +488,7 @@ export default function ProgramsView() {
       {programs.filter((program) => program.key === "referral").map((program) => (
         <ReferralSettings key={program.key} program={program} commissionRate={programs.find((p) => p.key === "commission")?.settings.defaultRatePercent ?? 30} onSaved={onSaved} onError={onError} />
       ))}
+      {programs.length > 0 && <CreatorTiers programs={programs} onSaved={onSaved} onError={onError} />}
       {programs.filter((program) => program.key === "supplier_subscriptions").map((program) => (
         <SupplierSubscriptions key={program.key} program={program} onSaved={onSaved} onError={onError} />
       ))}
