@@ -7,7 +7,7 @@ const inr = (value) => `₹${Math.round(Number(value) || 0).toLocaleString("en-I
 const PRODUCT_TYPES = ["ATTRACTION", "EXPERIENCE", "TRANSFER", "TOUR", "PACKAGE"];
 
 const EMPTY = {
-  code: "", description: "", discountType: "PERCENTAGE", discountValue: "", minOrderInr: "", maxDiscountInr: "",
+  code: "", audience: "TRAVELER", description: "", discountType: "PERCENTAGE", discountValue: "", minOrderInr: "", maxDiscountInr: "",
   usageLimit: "", perUserLimit: "", firstBookingOnly: false, startsAt: "", expiresAt: "",
   productTypes: [], productIds: "", supplierIds: "", isActive: true,
 };
@@ -83,6 +83,7 @@ export default function CouponsView() {
     setNotice("");
     const { form } = editing;
     const payload = {
+      audience: form.audience,
       description: form.description || null,
       discountType: form.discountType,
       discountValue: Number(form.discountValue),
@@ -173,6 +174,12 @@ export default function CouponsView() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="block font-semibold text-stone-700">Code
               <input value={form.code} onChange={(e) => setField("code", e.target.value.toUpperCase())} disabled={Boolean(editing.id)} required minLength={3} maxLength={40} className={`${inputClass} mt-1 font-mono uppercase`} />
+            </label>
+            <label className="block font-semibold text-stone-700">For
+              <select value={form.audience} onChange={(e) => setField("audience", e.target.value)} disabled={Boolean(editing.id)} className={`${inputClass} mt-1`}>
+                <option value="TRAVELER">Traveler bookings</option>
+                <option value="SUPPLIER_SUBSCRIPTION">Supplier subscriptions</option>
+              </select>
             </label>
             <label className="block font-semibold text-stone-700">Discount type
               <select value={form.discountType} onChange={(e) => setField("discountType", e.target.value)} className={`${inputClass} mt-1`}>
@@ -275,6 +282,7 @@ export default function CouponsView() {
                     <strong className="font-mono text-sm text-stone-900">{coupon.code}</strong>
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${coupon.isActive ? "bg-emerald-100 text-emerald-800" : "bg-stone-200 text-stone-600"}`}>{coupon.isActive ? "On" : "Off"}</span>
                     {coupon.isCreatorCode && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">Creator code</span>}
+                    {coupon.audience === "SUPPLIER_SUBSCRIPTION" && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-800">Supplier subscriptions</span>}
                   </div>
                   <p className="mt-0.5 text-stone-600">{summary(coupon)}</p>
                   <p className="text-stone-400">Used {coupon.timesUsed}{coupon.usageLimit ? ` of ${coupon.usageLimit}` : ""} · {inr(coupon.discountGivenInr)} given{coupon.description ? ` · ${coupon.description}` : ""}</p>

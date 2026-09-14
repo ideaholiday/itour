@@ -83,6 +83,9 @@ export async function startTestServer(overrides = {}) {
       SUPABASE_ANON_KEY: "",
       CASHFREE_CLIENT_ID: "",
       CASHFREE_CLIENT_SECRET: "",
+      // The payment client reads these names; blank them so tests never reach the gateway with local keys.
+      CASHFREE_APP_ID: "",
+      CASHFREE_SECRET_KEY: "",
       RAZORPAY_KEY_ID: "",
       RAZORPAY_KEY_SECRET: "",
       LOG_LEVEL: "error",

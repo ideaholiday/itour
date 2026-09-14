@@ -44,6 +44,10 @@ import {
 import { calculateRefundQuote, createRefundRecord, finalizeRefund, getSupplierPayoutLedger, resolveCommissionRate } from "../services/financeService.js";
 import { getSubscriptionStatus } from "../services/supplierSubscriptionService.js";
 import {
+  listSubscriptionPayments, quoteSubscriptionPayment, renderSubscriptionInvoice, startSubscriptionPayment, verifySubscriptionPayment,
+} from "../services/supplierPlanPaymentService.js";
+import { getSettings } from "../services/programSettingsService.js";
+import {
   verifyGstin,
   verifyPan,
   verifyBankAccount,
@@ -108,6 +112,65 @@ router.get("/", requireRoles("ADMIN", "STAFF"), (req, res) => {
 });
 
 router.use("/:id", requireSupplierSelf("id"));
+
+// Supplier subscription (ADR 017): status, price, online payment and GST invoices.
+function subscriptionFailure(res, req, error, fallback) {
+  if (error.status && error.status < 500 || error.status === 502) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+router.get("/:id/subscription", (req, res) => {
+  try {
+    const { priceInr, billingPeriodMonths } = getSettings(db, "supplier_subscriptions");
+    res.json({
+      success: true,
+      subscription: getSubscriptionStatus(db, req.params.id),
+      plan: priceInr ? { priceInr, billingPeriodMonths, gstRatePct: 18 } : null,
+      payments: listSubscriptionPayments(db, req.params.id),
+    });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the subscription");
+  }
+});
+
+router.post("/:id/subscription/quote", (req, res) => {
+  try {
+    res.json({ success: true, quote: quoteSubscriptionPayment(db, req.params.id, { couponCode: req.body?.couponCode || null }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not price the subscription");
+  }
+});
+
+router.post("/:id/subscription/checkout", async (req, res) => {
+  try {
+    const result = await startSubscriptionPayment(db, req.params.id, {
+      couponCode: req.body?.couponCode || null,
+      actorId: req.user.id,
+      returnUrl: typeof req.body?.returnUrl === "string" ? req.body.returnUrl : null,
+    });
+    res.status(201).json({ success: true, ...result, payment: listSubscriptionPayments(db, req.params.id).find((row) => row.id === result.payment.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not start the payment");
+  }
+});
+
+router.post("/:id/subscription/payments/:paymentId/verify", async (req, res) => {
+  try {
+    const payment = await verifySubscriptionPayment(db, req.params.id, req.params.paymentId);
+    res.json({ success: true, status: payment.status, invoiceNumber: payment.invoice_number, subscription: getSubscriptionStatus(db, req.params.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not verify the payment");
+  }
+});
+
+router.get("/:id/subscription/payments/:paymentId/invoice", (req, res) => {
+  try {
+    res.type("html").send(renderSubscriptionInvoice(db, req.params.id, req.params.paymentId));
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the invoice");
+  }
+});
 
 // GET /api/suppliers/:id - Fetch single supplier profile with KYB, products, bookings, drivers, blocked dates & payouts
 router.get("/:id", (req, res) => {

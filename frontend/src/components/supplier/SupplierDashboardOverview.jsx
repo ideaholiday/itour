@@ -30,6 +30,7 @@ import {
 import BlockDatesModal from "./BlockDatesModal.jsx";
 import ManageFleetModal from "./ManageFleetModal.jsx";
 import SupplierListingsPanel from "./SupplierListingsPanel.jsx";
+import SupplierSubscriptionPanel from "./SupplierSubscriptionPanel.jsx";
 import SupplierRevenueCard from "./SupplierRevenueCard.jsx";
 import SupplierBookingSnapshot from "./SupplierBookingSnapshot.jsx";
 import SupplierPerformanceRing from "./SupplierPerformanceRing.jsx";
@@ -131,9 +132,9 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
     isApproved && supplierData?.subscription?.required && !supplierData.subscription.covered && {
       level: "urgent",
       title: "Subscription needed — not receiving new bookings",
-      copy: "Your free launch offer has ended. Contact the Idea Holiday team to keep selling. Bookings already made are not affected.",
-      to: "/contact-us",
-      cta: "Contact us"
+      copy: "Your listings are not taking new bookings until you subscribe. Bookings already made are not affected.",
+      to: "?panel=subscription",
+      cta: "Subscribe"
     },
     isApproved && supplierData?.subscription?.covered && supplierData.subscription.cover?.source === "LAUNCH" && {
       level: "growth",
@@ -141,6 +142,8 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
         ? `Free launch offer until ${supplierData.subscription.cover.endsAt.slice(0, 10)}`
         : "You're on the free launch offer",
       copy: "New suppliers need a subscription to take bookings. Yours is free during the launch offer; we'll remind you before it ends.",
+      to: "?panel=subscription",
+      cta: "Details"
     },
     pendingBookings.length > 0 && {
       level: "urgent",
@@ -201,6 +204,10 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
         <EnquiryInbox viewer="SUPPLIER" />
       </section>
     );
+  }
+
+  if (initialPanel === "subscription") {
+    return <SupplierSubscriptionPanel supplierId={supplier.id} onRefresh={onRefresh} />;
   }
 
   if (initialPanel === "compliance") {

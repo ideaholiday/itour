@@ -456,6 +456,7 @@ Migration 037, ADR 017. Read and written only through `programSettingsService`.
 - **`coupon_redemptions`** (migration 040): `coupon_code`, `user_id`, `booking_id`
   (unique), `discount_inr`, `status` (`ACTIVE` | `RELEASED`), `release_reason`,
   `released_at`. COUPONS.md §3.
+- **`supplier_plan_payments`** (migration 043): one row per subscription payment attempt — `supplier_id`, `period_months`, `base_inr`, `coupon_code`, `discount_inr`, `taxable_inr`, `gst_rate`, `gst_inr`, `total_inr`, `sac_code`, `status` (`PENDING` | `PAID` | `FREE` | `FAILED`), `cashfree_order_id` (unique), `payment_session_id`, `cashfree_payment_id`, `subscription_id`, `invoice_number` (unique, `IHS/<FY>/<n>`), `paid_at`.
 - **`suppliers.subscription_exempt`** (migration 039): 1 for suppliers registered
   before 2026-09-14; they need no subscription (SUPPLIER_PLANS.md).
 - **`supplier_subscriptions`** (migration 039): `supplier_id`, `plan_code`

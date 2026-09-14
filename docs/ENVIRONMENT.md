@@ -54,6 +54,7 @@ Idea Holiday utilizes environment-specific `.env` files locally and Google Secre
 | `WHATSAPP_APP_SECRET` | Optional | `<meta-app-secret>` | Webhook signature verification. |
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN`| Optional | `<meta-verify-token>` | Webhook registration handshake. |
 | `WHATSAPP_TEMPLATE_LANGUAGE` | Optional | `en_US` | Default template locale. |
+| `BUSINESS_STATE` | Optional | `<state-of-registration>` | The business's GST state, to split subscription invoice GST into CGST+SGST (same state) or IGST. Unset: one GST line. Set before selling subscriptions. |
 | `WHATSAPP_TEMPLATE_SUPPLIER_COMMISSION` | Optional | `<approved-template-name>` | Commission change notice to suppliers. Variables: `{{1}}` what (e.g. `for your listings`), `{{2}}` old rate, `{{3}}` new rate. Template not yet submitted to Meta; unset, the notice goes by email and free-text WhatsApp (delivered only inside the 24-hour window). |
 
 #### 3.1.1 Driver Dispatch Templates

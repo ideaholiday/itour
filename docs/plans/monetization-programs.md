@@ -27,15 +27,18 @@ Most of this is already built. This plan **extends** what exists and does not re
 - New affiliate tier values that fit the 10% cap (§7a).
 - Which Income Tax section the 1% TDS falls under (CA). This affects the section printed on payout statements.
 
-**Progress (2026-09-14):**
-- Built: step 1 coupon bug (migration 036); Phase 0 settings + giveaway cap
-  (037); Phase 1 30% commission per product (038); Phase 4b 1% TDS + verified PAN;
-  Phase 5 core — exemption, bookability check, launch and admin waivers, expiry
-  and reminders (039); Phase 3 Share & Earn settings (in Admin → Programs, not a
-  tab in Travel & Earn). Rules for subscriptions live in `docs/SUPPLIER_PLANS.md`.
-- Next: Phase 2 coupon engine + admin UI.
-- Waiting on the owner: new affiliate tier rates (Phase 4a), subscription price
-  (Phase 5 payment, supplier coupons). Phase 4c (spend affiliate earnings) can follow 4a.
+**Progress (2026-09-15): all phases built.**
+- Step 1 coupon bug (migration 036); Phase 0 settings + giveaway cap (037); Phase 1
+  30% commission per product (038); Phase 3 Share & Earn settings (in Admin →
+  Programs); Phase 2 coupon engine + Coupons page (040); Phase 4a creator tier and
+  personal rates (041); Phase 4b 1% TDS + verified PAN; Phase 4c "Use for travel"
+  (042); Phase 5 required subscriptions, launch and admin waivers, reminders (039)
+  and online payment with supplier coupons and GST invoices (043).
+- Rules: `docs/COUPONS.md`, `docs/SUPPLIER_PLANS.md`, BUSINESS_RULES §3.2, §10, §11.
+- Still the owner's to set in the admin panel: subscription price and billing
+  period (not for sale until then), creator tier rates within the 10% cap, launch
+  offer end date, and `BUSINESS_STATE` for the invoice GST split. Paid add-ons from
+  ADR 008 (Verified check, Spotlight) remain ROADMAP NEXT #3.
 
 ---
 

@@ -13,6 +13,7 @@ import { useAuth } from "../lib/auth.jsx";
 import { useCurrency } from "../lib/currency.jsx";
 import PickupPointPicker from "../components/PickupPointPicker.jsx";
 import { isValidTravelNumber, typedAddressAccepted } from "../lib/checkoutLocation.js";
+import { loadCashfreeSdk } from "../lib/cashfreeSdk.js";
 
 const PICKUP_TYPES = [
   { id: "HOTEL", label: "Hotel / stay", icon: "🏨", placeholder: "Hotel or property name, full address and area" },
@@ -38,47 +39,6 @@ const PAYMENT_OPTIONS = [
   }
 ];
 
-function loadCashfreeSdk() {
-  return new Promise((resolve, reject) => {
-    if (typeof window !== "undefined" && window.Cashfree) {
-      resolve(window.Cashfree);
-      return;
-    }
-    const existing = document.getElementById("cashfree-js-sdk");
-    if (existing) {
-      if (typeof window !== "undefined" && window.Cashfree) {
-        resolve(window.Cashfree);
-        return;
-      }
-      let attempts = 0;
-      const interval = setInterval(() => {
-        attempts++;
-        if (typeof window !== "undefined" && window.Cashfree) {
-          clearInterval(interval);
-          resolve(window.Cashfree);
-        } else if (attempts > 40) {
-          clearInterval(interval);
-          existing.remove();
-          loadCashfreeSdk().then(resolve).catch(reject);
-        }
-      }, 50);
-      return;
-    }
-    const script = document.createElement("script");
-    script.id = "cashfree-js-sdk";
-    script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
-    script.async = true;
-    script.onload = () => {
-      if (typeof window !== "undefined" && window.Cashfree) {
-        resolve(window.Cashfree);
-      } else {
-        reject(new Error("Cashfree SDK loaded but not initialized"));
-      }
-    };
-    script.onerror = () => reject(new Error("Failed to load Cashfree payment gateway SDK"));
-    document.body.appendChild(script);
-  });
-}
 
 function locationFromParams(params, name) {
   const address = params.get(name) || "";

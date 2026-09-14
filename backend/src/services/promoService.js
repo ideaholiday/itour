@@ -36,10 +36,10 @@ function countOrZero(database, sql, ...params) {
  * check without one (the checkout "Apply" button) skips product targeting, and
  * the booking quote applies it.
  */
-function assertCouponAllowed(database, promo, { userId, product }) {
+function assertCouponAllowed(database, promo, { userId, product, audience = "TRAVELER" }) {
   const code = promo.code;
-  if (String(promo.audience || "TRAVELER").toUpperCase() !== "TRAVELER") {
-    throw promoError(`Promo code ${code} cannot be used for bookings`, 400, "WRONG_AUDIENCE");
+  if (String(promo.audience || "TRAVELER").toUpperCase() !== audience) {
+    throw promoError(`Promo code ${code} cannot be used ${audience === "TRAVELER" ? "for bookings" : "for supplier subscriptions"}`, 400, "WRONG_AUDIENCE");
   }
   if (promo.starts_at && new Date(promo.starts_at.replace(" ", "T")).getTime() > Date.now()) {
     throw promoError(`Promo code ${code} starts on ${new Date(promo.starts_at.replace(" ", "T")).toLocaleDateString("en-IN")}`, 400, "NOT_STARTED");
@@ -53,7 +53,7 @@ function assertCouponAllowed(database, promo, { userId, product }) {
       throw promoError(`You have already used promo code ${code}${Number(promo.per_user_limit) > 1 ? ` ${promo.per_user_limit} times` : ""}`, 400, "PER_USER_LIMIT");
     }
   }
-  if (Number(promo.first_booking_only) === 1) {
+  if (Number(promo.first_booking_only) === 1 && audience === "TRAVELER") {
     const paid = countOrZero(database, "SELECT COUNT(*) AS count FROM bookings WHERE user_id = ? AND payment_status IN ('PAID', 'PARTIALLY_REFUNDED')", userId);
     if (paid > 0) throw promoError(`Promo code ${code} is for your first booking only`, 400, "FIRST_BOOKING_ONLY");
   }
@@ -71,7 +71,7 @@ function assertCouponAllowed(database, promo, { userId, product }) {
 /**
  * Validates a promo code or referral code against an order amount
  */
-export function validatePromoCode(database, { code, amountInr = 0, userId = null, product = null }) {
+export function validatePromoCode(database, { code, amountInr = 0, userId = null, product = null, audience = "TRAVELER" }) {
   const normalized = String(code || "").trim().toUpperCase();
   if (!normalized) {
     throw promoError("Enter a promo or referral code", 400);
@@ -98,7 +98,7 @@ export function validatePromoCode(database, { code, amountInr = 0, userId = null
       throw promoError(`Promo code ${normalized} has reached its maximum redemption limit`, 400);
     }
 
-    assertCouponAllowed(database, promo, { userId, product });
+    assertCouponAllowed(database, promo, { userId, product, audience });
 
     const minSpend = Number(promo.min_order_inr || 0);
     if (orderAmount < minSpend) {
@@ -119,7 +119,7 @@ export function validatePromoCode(database, { code, amountInr = 0, userId = null
 
     let affiliate = null;
     try {
-      affiliate = database.prepare("SELECT * FROM affiliates WHERE affiliate_code = ? AND status = 'ACTIVE'").get(normalized);
+      if (audience === "TRAVELER") affiliate = database.prepare("SELECT * FROM affiliates WHERE affiliate_code = ? AND status = 'ACTIVE'").get(normalized);
     } catch {}
 
     return {
@@ -140,7 +140,7 @@ export function validatePromoCode(database, { code, amountInr = 0, userId = null
 
   // 2. A traveler referral code (REF-…). Codes are matched exactly, never
   // reconstructed from user names, so only issued codes validate.
-  const referrer = findReferrerByCode(database, normalized);
+  const referrer = audience === "TRAVELER" ? findReferrerByCode(database, normalized) : null;
   if (referrer) {
     if (userId && referrer.id === userId) {
       throw promoError("You cannot use your own referral code", 400);

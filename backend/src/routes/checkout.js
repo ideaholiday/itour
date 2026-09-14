@@ -40,6 +40,7 @@ import {
 } from "../services/circuitPaymentService.js";
 import { reconcileCircuitRefund } from "../services/circuitOrchestrationService.js";
 import { onReferralBookingCancelled } from "../services/referralService.js";
+import { confirmSubscriptionPayment } from "../services/supplierPlanPaymentService.js";
 
 const router = express.Router();
 router.use(optionalAuthMiddleware);
@@ -483,6 +484,19 @@ router.post("/cashfree/webhook", (req, res) => {
       if (orderId) {
         const booking = db.prepare("SELECT * FROM bookings WHERE cashfree_order_id = ?").get(orderId);
         const circuitOrder = booking ? null : findCircuitOrderByPaymentOrderId(db, orderId);
+        // Supplier subscription orders (ADR 017): activated only from a verified payment.
+        if (!booking && !circuitOrder) {
+          try {
+            confirmSubscriptionPayment(db, {
+              orderId,
+              cashfreePaymentId: paymentId,
+              amount: payment.payment_amount ?? order.order_amount,
+              currency: payment.payment_currency || order.order_currency,
+            });
+          } catch (subscriptionError) {
+            logger.error("Supplier subscription webhook could not be applied", { orderId, error: subscriptionError });
+          }
+        }
         if (booking) {
           confirmPaidBooking(booking, {
             method: "CASHFREE",

@@ -60,6 +60,7 @@ function toView(database, row) {
     productIds: parseList(row.product_ids_json),
     supplierIds: parseList(row.supplier_ids_json),
     isActive: Number(row.is_active) === 1,
+    audience: row.audience || "TRAVELER",
     isCreatorCode: isCreatorCode(database, row.code),
     redeemedCount: Number(stats.uses),
     discountGivenInr: Math.round(Number(stats.discount) * 100) / 100,
@@ -69,7 +70,7 @@ function toView(database, row) {
 }
 
 export function listCoupons(database) {
-  return database.prepare("SELECT * FROM promo_codes WHERE COALESCE(audience, 'TRAVELER') = 'TRAVELER' ORDER BY created_at DESC, code")
+  return database.prepare("SELECT * FROM promo_codes ORDER BY created_at DESC, code")
     .all().map((row) => toView(database, row));
 }
 
@@ -125,16 +126,18 @@ export function createCoupon(database, input, { actorId = null } = {}) {
     throw couponError(`The code ${code} is already in use`, 409, "CODE_TAKEN");
   }
   const fields = normalizeFields(input);
+  const audience = String(input.audience || "TRAVELER").toUpperCase();
+  if (!["TRAVELER", "SUPPLIER_SUBSCRIPTION"].includes(audience)) throw couponError("A coupon is for traveler bookings or supplier subscriptions", 400, "INVALID_COUPON");
   const id = `promo_${nanoid(12)}`;
   database.prepare(`
     INSERT INTO promo_codes (
       id, code, description, discount_type, discount_value, min_order_inr, max_discount_inr, usage_limit, times_used,
       is_active, expires_at, audience, starts_at, per_user_limit, first_booking_only,
       product_types_json, product_ids_json, supplier_ids_json, created_by, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'TRAVELER', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, code, fields.description, fields.discount_type, fields.discount_value, fields.min_order_inr, fields.max_discount_inr, fields.usage_limit,
-    fields.is_active, fields.expires_at, fields.starts_at, fields.per_user_limit, fields.first_booking_only,
+    fields.is_active, fields.expires_at, audience, fields.starts_at, fields.per_user_limit, fields.first_booking_only,
     fields.product_types_json, fields.product_ids_json, fields.supplier_ids_json, actorId, sqlTimestamp(), sqlTimestamp(),
   );
   logger.info("Coupon created", { code, actorId });
@@ -143,6 +146,9 @@ export function createCoupon(database, input, { actorId = null } = {}) {
 
 export function updateCoupon(database, id, input, { actorId = null } = {}) {
   const current = getCouponRow(database, id);
+  if (input.audience !== undefined && String(input.audience).toUpperCase() !== (current.audience || "TRAVELER")) {
+    throw couponError("Who a coupon is for cannot be changed; create a new coupon instead", 400, "AUDIENCE_IMMUTABLE");
+  }
   if (input.code !== undefined && String(input.code).trim().toUpperCase() !== current.code) {
     throw couponError("A coupon's code cannot be changed; create a new coupon instead", 400, "CODE_IMMUTABLE");
   }

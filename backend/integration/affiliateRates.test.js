@@ -65,5 +65,5 @@ test("admins set creator tier and personal rates within the cap, and bookings us
   assert.deepEqual([referral.commission_rate, referral.earning_inr], [0.07, Math.round(total * 0.07 * 100) / 100]);
 
   const history = await requestJson(api.baseUrl, "/api/admin/affiliates/tiers", { token: adminToken });
-  assert.deepEqual(history.data.changes.map((change) => change.scope), ["AFFILIATE", "TIER"]);
+  assert.deepEqual(history.data.changes.map((change) => change.scope).sort(), ["AFFILIATE", "TIER"], "both changes are on record");
 });

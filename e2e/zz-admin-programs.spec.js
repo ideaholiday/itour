@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { E2E_ACCOUNTS } from "./helpers/marketplace.js";
+import { E2E_ACCOUNTS, loginThroughUi } from "./helpers/marketplace.js";
 
 // Runs last (zz-): it changes the giveaway cap and one product's commission.
 test("an administrator sets the giveaway cap and a product's commission, each with a reason", async ({ page }) => {
@@ -100,4 +100,13 @@ test("an administrator creates a coupon, edits it and switches it off", async ({
   await row.getByRole("button", { name: "Uses" }).click();
   await expect(page.getByText("Not used yet.")).toBeVisible();
   if (process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/admin-coupons.png`, fullPage: true });
+});
+
+test("a new supplier sees their subscription cover and that it isn't on sale yet", async ({ page }) => {
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.getByRole("link", { name: /^Subscription/ }).first().click();
+  await expect(page.getByRole("heading", { name: "Subscription" })).toBeVisible();
+  await expect(page.getByText(/Subscription waived by Idea Holiday|Free launch offer/)).toBeVisible();
+  await expect(page.getByText(/isn't on sale yet/)).toBeVisible();
+  if (process.env.E2E_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.E2E_SCREENSHOT_DIR}/supplier-subscription.png`, fullPage: true });
 });

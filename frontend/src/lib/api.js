@@ -324,6 +324,14 @@ export const api = {
     fetch("/api/affiliate/profile", { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   updateAffiliateKyc: (payload) =>
     fetch("/api/affiliate/kyc", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  supplierSubscription: (supplierId) =>
+    fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/subscription`, { headers: authHeaders() }).then(handle),
+  supplierSubscriptionQuote: (supplierId, payload) =>
+    fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/subscription/quote`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  supplierSubscriptionCheckout: (supplierId, payload) =>
+    fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/subscription/checkout`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  supplierSubscriptionVerify: (supplierId, paymentId) =>
+    fetch(`/api/suppliers/${encodeURIComponent(supplierId)}/subscription/payments/${encodeURIComponent(paymentId)}/verify`, { method: "POST", headers: authHeaders() }).then(handle),
   moveAffiliateEarningsToWallet: (payload) =>
     fetch("/api/affiliate/wallet-transfer", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   requestAffiliatePayout: (payload) =>

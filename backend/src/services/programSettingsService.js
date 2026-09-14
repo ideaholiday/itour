@@ -40,8 +40,12 @@ const PROGRAMS = {
       launchWaiver: z.boolean(),
       /** Last day of launch waivers (UTC), or null for no end date yet. */
       launchWaiverUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a date like 2027-03-31").nullable(),
+      /** Subscription price before GST, in rupees; null while the owner has not set one (not for sale). */
+      priceInr: z.number().positive().max(1_000_000).nullable(),
+      /** How long one payment covers. */
+      billingPeriodMonths: z.number().int().min(1).max(36),
     }).strict(),
-    defaults: { launchWaiver: true, launchWaiverUntil: null },
+    defaults: { launchWaiver: true, launchWaiverUntil: null, priceInr: null, billingPeriodMonths: 12 },
   },
   referral: {
     label: "Share & Earn",

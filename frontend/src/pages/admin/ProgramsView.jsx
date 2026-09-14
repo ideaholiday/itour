@@ -295,6 +295,8 @@ function coverLabel(supplier) {
 function SupplierSubscriptions({ program, onSaved, onError }) {
   const [launchWaiver, setLaunchWaiver] = useState(program.settings.launchWaiver);
   const [until, setUntil] = useState(program.settings.launchWaiverUntil || "");
+  const [price, setPrice] = useState(program.settings.priceInr ?? "");
+  const [months, setMonths] = useState(String(program.settings.billingPeriodMonths ?? 12));
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [suppliers, setSuppliers] = useState([]);
@@ -307,6 +309,8 @@ function SupplierSubscriptions({ program, onSaved, onError }) {
   useEffect(() => {
     setLaunchWaiver(program.settings.launchWaiver);
     setUntil(program.settings.launchWaiverUntil || "");
+    setPrice(program.settings.priceInr ?? "");
+    setMonths(String(program.settings.billingPeriodMonths ?? 12));
     loadSuppliers();
   }, [program, loadSuppliers]);
 
@@ -314,7 +318,10 @@ function SupplierSubscriptions({ program, onSaved, onError }) {
     event.preventDefault();
     setSaving(true);
     try {
-      const res = await api.adminUpdateProgram("supplier_subscriptions", { settings: { launchWaiver, launchWaiverUntil: until || null }, reason });
+      const res = await api.adminUpdateProgram("supplier_subscriptions", {
+        settings: { launchWaiver, launchWaiverUntil: until || null, priceInr: price === "" ? null : Number(price), billingPeriodMonths: Number(months) },
+        reason,
+      });
       setReason("");
       onSaved(res.changed ? `Launch offer ${res.settings.launchWaiver ? `is on${res.settings.launchWaiverUntil ? ` until ${res.settings.launchWaiverUntil}` : " with no end date"}` : "is off for new sign-ups"}.` : "Nothing changed.");
     } catch (err) {
@@ -362,7 +369,16 @@ function SupplierSubscriptions({ program, onSaved, onError }) {
             Launch offer ends (empty = no end date yet)
             <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} className={`${inputClass} mt-1`} />
           </label>
+          <label className="block text-xs font-semibold text-stone-700">
+            Price before GST (₹, empty = not on sale)
+            <input type="number" min="1" step="1" value={price} onChange={(e) => setPrice(e.target.value)} className={`${inputClass} mt-1`} />
+          </label>
+          <label className="block text-xs font-semibold text-stone-700">
+            One payment covers (months)
+            <input type="number" min="1" max="36" step="1" value={months} onChange={(e) => setMonths(e.target.value)} required className={`${inputClass} mt-1`} />
+          </label>
         </div>
+        <p className="text-[11px] text-stone-500">Suppliers pay the price plus 18% GST (SAC 998559) through Cashfree and get a tax invoice. Supplier coupons are made in Coupons with "For: supplier subscriptions".</p>
         <label className="block text-xs font-semibold text-stone-700">
           Reason for the change
           <input value={reason} onChange={(e) => setReason(e.target.value)} minLength={3} maxLength={500} placeholder="For example: launch offer ends with paid plans" className={`${inputClass} mt-1`} required />

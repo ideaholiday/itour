@@ -49,12 +49,39 @@
 3. The supplier portal shows the launch offer and its end date, and warns when the
    supplier is not covered.
 
-## 5. Not built yet
+## 5. Paying for a subscription
 
-- **Price and billing period:** not decided (2026-09-14).
-- **Online payment:** Cashfree one-time orders; activate only on server-verified
-  payment (`status = 'ACTIVE'`, `source = 'PURCHASE'`).
-- **GST invoice:** SAC 998559 at 18% (ADR 017).
-- **Supplier coupons:** `promo_codes` for subscriptions; a 100% coupon creates
-  `source = 'COUPON'` cover with no payment.
+1. **Price:** program setting `supplier_subscriptions.priceInr` (before GST) and
+   `billingPeriodMonths` (default 12), set by an admin in Programs. While the price
+   is empty the subscription is **not for sale** (`409 NOT_FOR_SALE`); the owner had
+   not decided it on 2026-09-15. Suppliers stay on the launch offer meanwhile.
+2. **The server prices every payment:** price − coupon = taxable value; GST 18% on
+   that (SAC 998559, ADR 017); total = taxable + GST, to the paisa.
+3. **Coupons** are `promo_codes` with `audience = 'SUPPLIER_SUBSCRIPTION'` (Admin →
+   Coupons, "For: supplier subscriptions"), applied before GST; traveler coupons are
+   refused (`WRONG_AUDIENCE`) and the reverse. Limits per supplier use
+   `per_user_limit`. A use is recorded in `coupon_redemptions` with the plan payment
+   id in `booking_id`.
+4. **Payment** is a Cashfree order (`subs_…`). The subscription becomes `ACTIVE`
+   (`source = 'PURCHASE'`) only after the server confirms the payment — the verify
+   call after checkout, or the signed Cashfree webhook — and only if the paid amount
+   equals the priced total (else `AMOUNT_MISMATCH`, nothing activated). Confirming
+   twice changes nothing. If the order cannot be created the attempt is `FAILED`
+   (`502 PAYMENT_UNAVAILABLE`).
+5. **A 100% coupon** activates the subscription at once (`status = 'FREE'`,
+   `source = 'COUPON'`) with no payment.
+6. **When paid cover starts:** now, or when the supplier's latest dated paid,
+   coupon or admin-waiver cover ends, so renewing early loses nothing. An open-ended
+   or dated launch waiver does not delay it.
+7. **Tax invoice:** each `PAID`/`FREE` payment gets a sequential number per
+   financial year (`IHS/2026-27/00001`) and an HTML invoice (seller name, GSTIN and
+   address from `BUSINESS_LEGAL_NAME`, `BUSINESS_GSTIN`, `BUSINESS_ADDRESS`).
+   GST is split CGST 9% + SGST 9% when the supplier's state equals `BUSINESS_STATE`,
+   else IGST 18%; with `BUSINESS_STATE` unset it is shown as one GST line —
+   set it before selling.
+
+## 6. Not built yet
+
 - **Paid add-ons from ADR 008** (Verified check, Spotlight).
+- **Automatic renewal charges:** renewal is a new payment by the supplier, prompted
+  by the reminders in §4.
