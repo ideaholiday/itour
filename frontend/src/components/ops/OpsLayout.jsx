@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { authHeaders } from "../../lib/api.js";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../../lib/auth.jsx";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import {
   Activity,
@@ -16,11 +17,23 @@ import {
   Layers,
   MessageSquare,
   Headphones,
-  Route
+  Route,
+  LogOut,
+  LayoutDashboard
 } from "lucide-react";
 
 export default function OpsLayout({ children }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
+  const displayName = user?.name || user?.email || "Operations";
+  const initials = displayName.split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
+
+  const signOut = () => {
+    logout();
+    navigate("/admin/login", { replace: true });
+  };
   const [metrics, setMetrics] = useState(null);
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [isRealtimeActive, setIsRealtimeActive] = useState(true);
@@ -62,6 +75,13 @@ export default function OpsLayout({ children }) {
 
   const navItems = [
     {
+      path: "/ops/live",
+      label: "Live 24h Trip Board",
+      icon: Activity,
+      badge: metrics?.totalSlaBreaches > 0 ? `${metrics.totalSlaBreaches} SLA ALERT` : null,
+      badgeColor: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse font-bold"
+    },
+    {
       path: "/ops/circuits",
       label: "Circuit Changes & Refunds",
       icon: Route,
@@ -74,13 +94,6 @@ export default function OpsLayout({ children }) {
       icon: Headphones,
       badge: null,
       badgeColor: ""
-    },
-    {
-      path: "/ops/live",
-      label: "Live 24h Trip Board",
-      icon: Activity,
-      badge: metrics?.totalSlaBreaches > 0 ? `${metrics.totalSlaBreaches} SLA ALERT` : null,
-      badgeColor: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse font-bold"
     },
     {
       path: "/ops/notifications",
@@ -158,15 +171,32 @@ export default function OpsLayout({ children }) {
               <RefreshCw className={`w-4 h-4 ${loadingMetrics ? "animate-spin text-amber-600" : ""}`} />
             </button>
 
+            {isAdmin && (
+              <Link to="/admin" className="hidden md:flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-stone-600 hover:bg-stone-100 hover:text-stone-900">
+                <LayoutDashboard className="w-3.5 h-3.5" /> Admin panel
+              </Link>
+            )}
+
             <div className="bg-[#FAF9F6] border border-stone-200 rounded-2xl px-3 py-1.5 flex items-center gap-2">
               <div className="w-7 h-7 rounded-full bg-amber-500/20 text-amber-800 font-bold flex items-center justify-center text-xs">
-                GO
+                {initials || "OP"}
               </div>
-              <div className="hidden sm:block text-left text-xs font-mono">
-                <span className="text-stone-800 block leading-tight font-bold">Ground Ops</span>
-                <span className="text-[10px] text-emerald-700 block">Status: Online</span>
+              <div className="hidden sm:block text-left text-xs">
+                <span className="text-stone-800 block leading-tight font-bold max-w-[160px] truncate">{displayName}</span>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-700 block">{isAdmin ? "Administrator" : "Operations staff"}</span>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={signOut}
+              title="Sign out"
+              aria-label="Sign out"
+              className="flex items-center gap-1.5 p-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-all text-xs font-bold"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden md:inline">Sign out</span>
+            </button>
           </div>
         </div>
 

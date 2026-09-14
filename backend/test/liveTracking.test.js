@@ -90,9 +90,9 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
     assert.ok(item, "Test booking should appear in live dispatch telemetry");
     assert.equal(item.driver_name, "Sanjay Verma");
     assert.equal(item.vehicle_number, "UP-80-AB-1234");
-    assert.ok(item.driver_telemetry);
-    assert.ok(typeof item.driver_telemetry.lat === "number");
-    assert.ok(typeof item.driver_telemetry.lng === "number");
+    // No position has been reported yet, so none is invented.
+    assert.equal(item.driver_telemetry, null);
+    assert.equal(item.has_live_gps, false);
   });
 
   it("updates driver live GPS coordinates and retrieves telemetry", () => {
@@ -115,6 +115,10 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
     const cached = getDriverCoordinates(assignment.id);
     assert.ok(cached);
     assert.equal(cached.lat, 27.1650);
+
+    const live = getLiveDispatchTelemetry(db).find((t) => t.booking_id === bookingId);
+    assert.equal(live.has_live_gps, true);
+    assert.equal(live.driver_telemetry.lat, 27.1650);
   });
 
   it("verifies valid traveler pickup OTP and blocks incorrect OTP", () => {

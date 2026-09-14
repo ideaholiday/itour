@@ -28,7 +28,10 @@ function createDriverIcon(trip, isSelected) {
   let bgClass = "bg-stone-900 border-white text-white";
   let pulseClass = "";
 
-  if (status === "EN_ROUTE") {
+  if (!trip.driver_telemetry) {
+    // No reported position: the pin sits at the pickup point and says so.
+    bgClass = "bg-white border-dashed border-stone-400 text-stone-500";
+  } else if (status === "EN_ROUTE") {
     bgClass = "bg-amber-500 border-amber-900 text-stone-950 ring-2 ring-amber-400";
     pulseClass = "animate-pulse";
   } else if (status === "ARRIVED") {
@@ -43,7 +46,7 @@ function createDriverIcon(trip, isSelected) {
   const html = `
     <div class="relative transition-all duration-300 transform cursor-pointer ${selectedRing}">
       <div class="w-9 h-9 rounded-2xl border-2 flex items-center justify-center font-bold text-sm ${bgClass} ${pulseClass}">
-        🚗
+        ${trip.driver_telemetry ? "🚗" : "📍"}
       </div>
       ${speed > 0 ? `<div class="absolute -bottom-2 -right-2 bg-stone-900 text-amber-300 border border-stone-700 px-1 py-0.2 text-[9px] font-mono font-bold rounded-md shadow-xs">${speed}k</div>` : ""}
     </div>
@@ -93,6 +96,9 @@ export default function LiveTripMapView({
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [filterStatus, setFilterStatus] = useState("ALL");
 
+  const unmappedCount = trips.filter((t) => !t.driver_telemetry && !(Number.isFinite(t.pickup_lat) && Number.isFinite(t.pickup_lng))).length;
+  const liveGpsCount = trips.filter((t) => t.driver_telemetry).length;
+
   const filteredTrips = trips.filter((t) => {
     if (filterStatus === "ALL") return true;
     const status = (t.assignment_status || "ASSIGNED").toUpperCase();
@@ -112,9 +118,9 @@ export default function LiveTripMapView({
       });
 
       L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         {
-          attribution: '&copy; <a href="https://carto.com/">CARTO</a> & Idea Holiday Ops',
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
           maxZoom: 19,
         }
       ).addTo(map);
@@ -142,8 +148,8 @@ export default function LiveTripMapView({
     const bounds = [];
 
     filteredTrips.forEach((trip) => {
-      const driverLat = trip.driver_telemetry?.lat || trip.pickup_lat;
-      const driverLng = trip.driver_telemetry?.lng || trip.pickup_lng;
+      const driverLat = trip.driver_telemetry ? trip.driver_telemetry.lat : trip.pickup_lat;
+      const driverLng = trip.driver_telemetry ? trip.driver_telemetry.lng : trip.pickup_lng;
       const isSelected = selectedTrip?.booking_id === trip.booking_id;
 
       if (typeof driverLat === "number" && typeof driverLng === "number") {
@@ -161,7 +167,7 @@ export default function LiveTripMapView({
         bounds.push([driverLat, driverLng]);
 
         // If selected or active, render pickup, drop, and path
-        if (isSelected && trip.pickup_lat && trip.pickup_lng) {
+        if (isSelected && trip.driver_telemetry && trip.pickup_lat && trip.pickup_lng) {
           const pickupMarker = L.marker([trip.pickup_lat, trip.pickup_lng], {
             icon: createLocationIcon("pickup"),
           });
@@ -234,7 +240,11 @@ export default function LiveTripMapView({
           ))}
         </div>
 
-        <div className="flex items-center gap-2 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg pointer-events-auto">
+        <div className="flex items-center gap-3 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg pointer-events-auto">
+          <span className="text-[11px] font-mono text-stone-600 dark:text-stone-300">
+            Live GPS {liveGpsCount}/{trips.length}
+            {unmappedCount > 0 && <span className="text-amber-700"> · {unmappedCount} without pickup location</span>}
+          </span>
           <button
             type="button"
             onClick={onRefresh}
@@ -271,30 +281,36 @@ export default function LiveTripMapView({
             {selectedTrip.product_title || "Experience Tour"}
           </h4>
 
-          {/* Telemetry Metrics Bar */}
-          <div className="mt-3 grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700 text-center font-mono">
-            <div>
-              <span className="block text-[9px] text-stone-400 uppercase">Speed</span>
-              <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
-                <Gauge className="w-3 h-3 text-amber-600" />
-                {selectedTrip.driver_telemetry?.speed_kmh || 0} km/h
-              </strong>
+          {/* Telemetry: only what a driver or operator actually reported */}
+          {selectedTrip.driver_telemetry ? (
+            <div className="mt-3 grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700 text-center font-mono">
+              <div>
+                <span className="block text-[9px] text-stone-400 uppercase">Speed</span>
+                <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
+                  <Gauge className="w-3 h-3 text-amber-600" />
+                  {selectedTrip.driver_telemetry.speed_kmh || 0} km/h
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[9px] text-stone-400 uppercase">Heading</span>
+                <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
+                  <Compass className="w-3 h-3 text-sky-600" />
+                  {selectedTrip.driver_telemetry.heading || 0}°
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[9px] text-stone-400 uppercase">Last fix</span>
+                <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
+                  <Clock className="w-3 h-3 text-emerald-600" />
+                  {new Date(selectedTrip.driver_telemetry.updated_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                </strong>
+              </div>
             </div>
-            <div>
-              <span className="block text-[9px] text-stone-400 uppercase">Battery</span>
-              <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
-                <BatteryCharging className="w-3 h-3 text-emerald-600" />
-                {selectedTrip.driver_telemetry?.battery_pct || 90}%
-              </strong>
-            </div>
-            <div>
-              <span className="block text-[9px] text-stone-400 uppercase">Heading</span>
-              <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
-                <Compass className="w-3 h-3 text-sky-600" />
-                {selectedTrip.driver_telemetry?.heading || 0}°
-              </strong>
-            </div>
-          </div>
+          ) : (
+            <p className="mt-3 rounded-2xl border border-dashed border-stone-300 bg-[#FAF9F6] p-2.5 text-[11px] text-stone-600">
+              No live GPS from this driver yet. The pin shows the pickup point. Call the driver to confirm where they are.
+            </p>
+          )}
 
           {/* Driver & Traveler Details */}
           <div className="mt-3 space-y-2 text-xs">

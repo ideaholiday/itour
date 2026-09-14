@@ -223,10 +223,17 @@ export default function LiveTripBoardView() {
             </button>
           </div>
 
-          <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 px-3.5 py-1.5 rounded-2xl text-xs font-mono text-emerald-900 dark:text-emerald-300 font-bold">
-            <Radio className="w-3.5 h-3.5 text-emerald-600 animate-ping" />
-            <span>LIVE GPS ACTIVE</span>
-          </div>
+          {trackingTrips.some((trip) => trip.driver_telemetry) ? (
+            <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 px-3.5 py-1.5 rounded-2xl text-xs font-mono text-emerald-900 dark:text-emerald-300 font-bold">
+              <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+              <span>LIVE GPS {trackingTrips.filter((trip) => trip.driver_telemetry).length}/{trackingTrips.length}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-stone-100 border border-stone-300 px-3.5 py-1.5 rounded-2xl text-xs font-mono text-stone-600 font-bold" title="Drivers are not sharing phone location yet">
+              <Radio className="w-3.5 h-3.5 text-stone-400" />
+              <span>NO LIVE GPS YET</span>
+            </div>
+          )}
         </div>
       </div>
 

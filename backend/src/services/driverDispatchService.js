@@ -341,56 +341,20 @@ export function getLiveDispatchTelemetry(database) {
     ORDER BY b.activity_date ASC, b.pickup_time ASC
   `).all();
 
+  const coordinate = (value) => (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value));
   return rawRows.map((row) => {
-    let telemetry = driverGpsCache.get(row.assignment_id);
-
-    // If no simulated/active GPS yet, generate sensible telemetry around pickup or city center
-    const pickupLat = row.pickup_lat || 27.1751;
-    const pickupLng = row.pickup_lng || 78.0421;
-    const dropLat = row.drop_lat || pickupLat + 0.05;
-    const dropLng = row.drop_lng || pickupLng + 0.05;
-
-    if (!telemetry) {
-      const status = (row.assignment_status || "ASSIGNED").toUpperCase();
-      let lat = pickupLat;
-      let lng = pickupLng;
-      let speed = 0;
-      let heading = 45;
-
-      if (status === "EN_ROUTE") {
-        lat = pickupLat - 0.015;
-        lng = pickupLng - 0.012;
-        speed = 38;
-        heading = 32;
-      } else if (status === "ARRIVED") {
-        lat = pickupLat;
-        lng = pickupLng;
-        speed = 0;
-        heading = 0;
-      } else if (status === "TRIP_STARTED") {
-        lat = pickupLat + (dropLat - pickupLat) * 0.4;
-        lng = pickupLng + (dropLng - pickupLng) * 0.4;
-        speed = 46;
-        heading = 78;
-      }
-
-      telemetry = {
-        lat,
-        lng,
-        speed_kmh: speed,
-        heading,
-        battery_pct: 92,
-        updated_at: new Date().toISOString(),
-      };
-    }
-
+    // Only a position a driver or operator actually reported. The map shows a
+    // trip without one at its pickup point, marked as having no live GPS, and
+    // never invents a position, speed or battery level.
+    const telemetry = (row.assignment_id && driverGpsCache.get(row.assignment_id)) || null;
     return {
       ...row,
-      pickup_lat: pickupLat,
-      pickup_lng: pickupLng,
-      drop_lat: dropLat,
-      drop_lng: dropLng,
+      pickup_lat: coordinate(row.pickup_lat),
+      pickup_lng: coordinate(row.pickup_lng),
+      drop_lat: coordinate(row.drop_lat),
+      drop_lng: coordinate(row.drop_lng),
       driver_telemetry: telemetry,
+      has_live_gps: Boolean(telemetry),
     };
   });
 }
