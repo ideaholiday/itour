@@ -202,3 +202,17 @@ This document records significant technical and product architectural decisions.
   - `--min-instances` stays at 0 (no always-on cost), so the first request after idle still waits for a cold start.
 - **Consequences**: Remapping domains reissues their managed certificates, with brief HTTPS errors during the switch. India to Tokyo is about 0.1 s each way; database reads become local.
 
+---
+
+## ADR 017: 30% Commission, a 10% Giveaway Cap, 1% Affiliate TDS, and Required Subscriptions for New Suppliers
+- **Date**: 2026-09-14
+- **Context**: The owner wants admin control over commission, coupons, Share & Earn, affiliates and supplier subscriptions, with waivers and coupons for launch. Plan: [`plans/monetization-programs.md`](plans/monetization-programs.md).
+- **Decision Made**:
+  - **Commission is 30% for every supplier, now**, for new bookings. Admins can set a different rate per product. Existing bookings keep their frozen rate. No notice is sent for this change; **any later change to a supplier's rate sends that supplier a notice**.
+  - **Giveaway cap: 10% of booking value.** Coupon discounts, the Share & Earn friend discount and referrer credit, and affiliate commission plus the affiliate traveler discount together may not exceed 10% of a booking's value, and never more than its commission. They come out of commission, never out of the supplier's payout. Admins set the cap.
+  - **Affiliate commission stays a % of booking value.** Admins set tiers and rates, within the giveaway cap.
+  - **Affiliate TDS is 1%**, withheld on every payout, including earnings moved into the wallet. **An affiliate must have a verified PAN to be paid at all**; there is no higher no-PAN rate.
+  - **Supplier subscriptions are required for suppliers who sign up from 2026-09-14.** Until a new supplier's subscription is paid, waived by an admin, or covered by a coupon, its products are not bookable. Suppliers registered before that date are exempt. This replaces ADR 008's "marketplace search and booking are unchanged" for new suppliers only; the rest of ADR 008 stands (profiles indexable once KYB is approved, the Verified badge is never sold).
+  - **Cashfree** takes supplier subscription and plan payments (not Razorpay as ADR 008 said), matching ADR 010.
+  - Supplier subscription invoices use **SAC 998559 with 18% GST** (confirmed by the owner's CA).
+- **Consequences**: Bookability becomes KYB `APPROVED` + product `PUBLISHED` + (exempt supplier, or an active or waived subscription). Confirmed bookings are honoured when a subscription lapses. Today's affiliate tiers (10–15% + 5–7% traveler discount) and the 5%/20% TDS constants in `affiliateService.js` no longer match and must change. The owner set the 1% TDS rate; which Income Tax section applies is for the CA to confirm. Subscription price and billing period, and new affiliate tier rates, are not yet set.
