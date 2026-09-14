@@ -215,10 +215,20 @@ export class BookingModificationService {
   static executeSelfServiceCancellation(database, bookingId, { reason }, actor = null) {
     const preview = this.calculateCancellationRefundPreview(database, bookingId, actor);
     const booking = database.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
+    // A second cancel would overwrite the refund state the first one recorded.
+    if (["cancelled", "completed", "in_progress"].includes(String(booking.status).toLowerCase())) {
+      throw new Error(`BOOKING_ALREADY_${String(booking.status).toUpperCase()}`);
+    }
 
     const modificationId = `mod_${crypto.randomBytes(6).toString("hex")}`;
     const requesterId = actor?.id || booking.user_id || "traveler";
-    const paymentStatus = preview.refundAmountInr > 0 ? "REFUND_INITIATED" : "REFUND_NOT_APPLICABLE";
+    // Only money actually collected can be refunded.
+    const paid = booking.payment_status === "PAID";
+    if (!paid) {
+      preview.refundAmountInr = 0;
+      preview.cancellationFeeInr = 0;
+    }
+    const paymentStatus = !paid ? booking.payment_status : preview.refundAmountInr > 0 ? "REFUND_INITIATED" : "REFUND_NOT_APPLICABLE";
 
     database.transaction(() => {
       database.prepare(`

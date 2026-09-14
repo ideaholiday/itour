@@ -39,7 +39,7 @@ Schema changes: only as a new file in `backend/migrations/` (AGENTS.md R7). Igno
 | Admin: team (staff and administrators) | `admin.js` | `teamService` | `pages/admin/TeamView.jsx` |
 | Analytics | `analytics.js` | `analyticsService` | `pages/admin/AnalyticsDashboardView.jsx` |
 | Reviews and review invites | `reviews.js` | `reviewService`, `reviewInviteService` | `pages/ReviewInvite.jsx`, `pages/MyReviews.jsx` |
-| Support cases, refunds | `support.js` | `supportCaseService`, `financeService` | `pages/ops/SupportCasesView.jsx` |
+| Support cases, refunds | `support.js`, `traveler.js` (self-cancel), `admin.js` (finance refunds) | `supportCaseService`, `financeService`, `bookingRefundService` | `pages/ops/SupportCasesView.jsx`, `components/traveler/BookingModificationModal.jsx` |
 | Notifications (email, WhatsApp, SMS) | `ops.js`, `notificationWebhooks.js` | `notificationService`, `whatsappService`, `emailService`, `smsService`, `notificationLogService` | `pages/ops/WhatsAppNotificationView.jsx` |
 | Affiliates, referrals, loyalty | `affiliate.js`, `adminAffiliates.js`, `referral.js`, `promo.js` | `affiliateService`, `referralService`, `loyaltyService`, `promoService` | `pages/AffiliateDashboardPage.jsx`, `pages/TravelAndEarn.jsx` |
 | OCTo API and channel manager | `octo.js`, `supplierChannels.js` | `octoService`, `channelManagerService`, `channels/channelRegistry.js` | `pages/supplier/SupplierChannelManagerPage.jsx` |

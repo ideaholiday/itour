@@ -14,8 +14,8 @@ import {
   runAutomatedTripReminders,
   queueNotification,
 } from "../services/notificationService.js";
-import { processRazorpayRefund } from "../services/razorpayService.js";
-import { processCashfreeRefund, initiateCashfreeTransfer } from "../services/cashfreeService.js";
+import { initiateCashfreeTransfer } from "../services/cashfreeService.js";
+import { pendingRefundQuote, sendRefundToGateway } from "../services/bookingRefundService.js";
 import {
   runComprehensiveSupplierKyb,
   verifyGstin,
@@ -712,32 +712,18 @@ router.post("/finance/refunds/:id", optionalAuthMiddleware, requireAdminAccess, 
   try {
     const booking = db.prepare("SELECT b.*, p.cancellation_policy FROM bookings b LEFT JOIN products p ON p.id = b.product_id WHERE b.id = ? OR b.ref = ?").get(req.params.id, req.params.id);
     if (!booking) return res.status(404).json({ error: "Booking not found" });
-    if (booking.payment_status !== "PAID") return res.status(409).json({ error: "Only a paid booking can be refunded" });
-    const quote = calculateRefundQuote(db, booking, { overridePercentage: req.body?.refundPercentage ?? 100 });
+    // REFUND_INITIATED: a traveler cancellation whose gateway refund never went through.
+    // Retry it for the amount fixed at cancellation, not the override percentage.
+    const owedRefund = booking.payment_status === "REFUND_INITIATED";
+    if (booking.payment_status !== "PAID" && !owedRefund) return res.status(409).json({ error: "Only a paid booking can be refunded" });
+    const quote = owedRefund
+      ? pendingRefundQuote(booking)
+      : calculateRefundQuote(db, booking, { overridePercentage: req.body?.refundPercentage ?? 100 });
     const refund = createRefundRecord(db, { booking, quote, reason: req.body?.reason, actorId: req.user.id });
     let providerResult = { refundId: "rfnd_none", status: "NO_REFUND_APPLICABLE" };
     try {
       if (quote.refundAmount > 0) {
-        if (booking.payment_method === "CASHFREE" || booking.cashfree_order_id) {
-          const orderId = booking.cashfree_order_id || booking.ref;
-          providerResult = await processCashfreeRefund({
-            orderId,
-            refundId: `rfnd_${booking.ref}_${Date.now()}`,
-            amount: quote.refundAmount,
-            reason: req.body?.reason || quote.policyTier,
-          });
-        } else if (booking.razorpay_payment_id) {
-          providerResult = await processRazorpayRefund({
-            paymentId: booking.razorpay_payment_id,
-            amount: quote.refundAmount,
-            reason: req.body?.reason || quote.policyTier,
-            idempotencyKey: refund.id,
-          });
-        } else if (booking.payment_method === "DEMO" || process.env.ENABLE_DEMO_PAYMENT === "true") {
-          providerResult = { refundId: `rfnd_demo_${Date.now()}`, status: "PROCESSED" };
-        } else {
-          throw Object.assign(new Error("Payment reference is missing; refund requires manual provider review"), { status: 409 });
-        }
+        providerResult = await sendRefundToGateway(booking, { refund, amount: quote.refundAmount, reason: req.body?.reason || quote.policyTier });
       }
     } catch (error) {
       failRefund(db, refund.id, error.message);

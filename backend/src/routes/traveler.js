@@ -11,6 +11,8 @@ import { ItineraryService } from "../services/itineraryService.js";
 import { createCircuitQuote, getCircuitQuote } from "../services/circuitQuoteService.js";
 import { itinerarySchemas } from "../validators/apiSchemas.js";
 import { BookingModificationService } from "../services/bookingModificationService.js";
+import { refundCancelledBooking } from "../services/bookingRefundService.js";
+import { notifyRefundProcessed, queueNotification } from "../services/notificationService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { subscribeNewsletter, unsubscribeNewsletter, getSubscriberStats } from "../services/newsletterService.js";
 import {
@@ -490,14 +492,27 @@ router.get("/bookings/:id/cancellation-preview", authenticate, (req, res) => {
   }
 });
 
-router.post("/bookings/:id/self-cancel", authenticate, (req, res) => {
+router.post("/bookings/:id/self-cancel", authenticate, async (req, res) => {
   try {
     const { reason } = req.body || {};
     const result = BookingModificationService.executeSelfServiceCancellation(db, req.params.id, { reason }, req.user);
+    // The cancellation stands even if the gateway refund fails; Finance retries from REFUND_INITIATED.
+    try {
+      const refund = await refundCancelledBooking(db, result.bookingId, { reason: result.cancellationReason, actorId: req.user.id });
+      if (refund) {
+        result.refund = refund;
+        result.paymentStatus = refund.paymentStatus;
+        if (refund.status === "PROCESSED") queueNotification(notifyRefundProcessed(db, refund.refundId), "Self-service cancellation refund notification");
+        else logger.error("Self-service cancellation refund failed", { bookingId: result.bookingId, refundId: refund.refundId, error: refund.error });
+      }
+    } catch (refundErr) {
+      logger.error("Self-service cancellation refund failed", { bookingId: result.bookingId, error: refundErr });
+    }
     return res.json(result);
   } catch (err) {
     logger.error("Failed to execute self-service cancellation", { error: err.message, bookingId: req.params.id });
-    const status = err.message === "UNAUTHORIZED" ? 403 : err.message === "BOOKING_NOT_FOUND" ? 404 : 400;
+    const status = err.message === "UNAUTHORIZED" ? 403 : err.message === "BOOKING_NOT_FOUND" ? 404
+      : String(err.message).startsWith("BOOKING_ALREADY_") ? 409 : 400;
     return res.status(status).json({ error: err.message || "FAILED_TO_CANCEL" });
   }
 });
