@@ -7,7 +7,7 @@ REGION="us-central1"
 SERVICE_NAME="idea-holiday-marketplace"
 # Live Cashfree credentials come only from Secret Manager, never from a local
 # backend/.env (which holds sandbox keys for development).
-DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest,ASSIGNMENT_SCHEDULER_TOKEN=idea-holiday-assignment-scheduler-token:latest,CASHFREE_APP_ID=idea-holiday-cashfree-app-id:latest,CASHFREE_SECRET_KEY=idea-holiday-cashfree-secret-key:latest,CASHFREE_SECUREID_PUBLIC_KEY=idea-holiday-cashfree-secureid-public-key:latest,WHATSAPP_APP_SECRET=idea-holiday-whatsapp-app-secret:latest,WHATSAPP_WEBHOOK_VERIFY_TOKEN=idea-holiday-whatsapp-webhook-verify-token:latest"
+DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest,ASSIGNMENT_SCHEDULER_TOKEN=idea-holiday-assignment-scheduler-token:latest,CASHFREE_APP_ID=idea-holiday-cashfree-app-id:latest,CASHFREE_SECRET_KEY=idea-holiday-cashfree-secret-key:latest,CASHFREE_SECUREID_PUBLIC_KEY=idea-holiday-cashfree-secureid-public-key:latest,WHATSAPP_APP_SECRET=idea-holiday-whatsapp-app-secret:latest,WHATSAPP_WEBHOOK_VERIFY_TOKEN=idea-holiday-whatsapp-webhook-verify-token:latest,OLA_MAPS_CLIENT_ID=idea-holiday-ola-maps-client-id:latest,OLA_MAPS_CLIENT_SECRET=idea-holiday-ola-maps-client-secret:latest"
 
 if [ -f "backend/.env" ]; then
   source backend/.env
@@ -51,17 +51,12 @@ for key in \
   WHATSAPP_TEMPLATE_DISPATCH_OPS_ALERT PUBLIC_APP_URL DOCUMENT_LINK_SECRET \
   EMAIL_NOTIFICATIONS_ENABLED EMAIL_PROVIDER BREVO_API_KEY BREVO_SENDER_NAME \
   BREVO_SENDER_EMAIL EMAIL_FROM SES_REGION SES_FROM_EMAIL \
-  BREVO_NEWSLETTER_LIST_ID NEWSLETTER_UNSUBSCRIBE_SECRET \
-  OLA_MAPS_CLIENT_ID OLA_MAPS_CLIENT_SECRET; do
+  BREVO_NEWSLETTER_LIST_ID NEWSLETTER_UNSUBSCRIBE_SECRET; do
   value="${!key:-}"
   if [ -n "$value" ]; then
     DEPLOY_ENV_VARS="${DEPLOY_ENV_VARS},${key}=${value}"
   fi
 done
-
-if [ -z "${OLA_MAPS_CLIENT_ID:-}" ] || [ -z "${OLA_MAPS_CLIENT_SECRET:-}" ]; then
-  echo "⚠️  OLA_MAPS_CLIENT_ID/SECRET are empty. Maps fall back to OpenStreetMap tiles, OSM place search and estimated ETAs."
-fi
 
 # Mappls is the legacy provider, used only with PLACES_PROVIDER=mappls or ETA_PROVIDER=mappls.
 if [ -n "$MAPPLS_API_KEY" ]; then
