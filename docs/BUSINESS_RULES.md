@@ -92,7 +92,7 @@ Suppliers define custom free-cancellation deadlines in hours (e.g., 24h, 48h, 72
 | **Between Deadline and 24 Hours** | 50% Partial Refund | 50% Retained | 50% Paid |
 | **< 24 Hours or No-Show** | 0% (Non-refundable) | 100% Retained | 100% Paid |
 
-- **Supplier SLA Breach / Cancellation**: If a supplier cancels a confirmed booking or fails to provide service, the traveler receives an immediate 100% refund, and a penalty is recorded against the supplier.
+- **Supplier SLA Breach / Cancellation**: If a supplier cancels a confirmed booking or fails to provide service, the traveler receives an immediate 100% refund, and a penalty is recorded against the supplier. A supplier cancellation refunds to the traveler's wallet first ([`REFUND_CREDIT.md`](REFUND_CREDIT.md)).
 
 ---
 
@@ -422,6 +422,10 @@ highest commission in use must fit the giveaway cap (§3.2), or the change is re
 7. **Every v1 referral was carried over** by `backfillLegacyReferrals`: rewarded
    ones as `CLEARED` (no new credit), pending ones as `ACCRUED` at the v3 rate,
    plus one `ADJUSTMENT` wherever v1 had let a balance and its ledger drift.
+
+### 11.5 Refund credit (supplier cancellations)
+A supplier cancellation refunds the traveler to the wallet first, with no cap or expiry and 10 days
+to take it back as cash: [`REFUND_CREDIT.md`](REFUND_CREDIT.md).
 
 ---
 

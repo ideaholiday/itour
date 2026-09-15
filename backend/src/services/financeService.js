@@ -169,7 +169,9 @@ export function failRefund(database, refundId, errorMessage) {
 
 export function finalizeRefund(database, { booking, refund, providerResult }) {
   const refundAmount = money(refund.refund_amount);
-  const retainedAmount = money(Number(booking.amount_inr) - refundAmount);
+  // A booking a supplier cancelled to the wallet pays the supplier nothing; what was not
+  // sent back as cash is still the traveler's refund credit, not retained money (ADR 019).
+  const retainedAmount = Number(booking.refunded_to_wallet_inr) > 0 ? 0 : money(Number(booking.amount_inr) - refundAmount);
   const commissionRate = Number(booking.commission_rate_snapshot) || (Number(booking.amount_inr) ? Number(booking.commission_amount) / Number(booking.amount_inr) * 100 : 0);
   const retainedCommission = money(retainedAmount * commissionRate / 100);
   const retainedSupplierShare = money(retainedAmount - retainedCommission);

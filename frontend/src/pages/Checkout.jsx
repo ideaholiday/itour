@@ -107,7 +107,7 @@ export default function Checkout() {
       api.getLoyaltyProfile()
         .then((res) => {
           if (res?.walletBalanceInr) setWalletBalance(Number(res.walletBalanceInr));
-          if (res?.policy?.walletMaxSharePct !== undefined) setWalletPolicy({ ...res.policy, affiliateCreditInr: Number(res.affiliateCreditInr || 0) });
+          if (res?.policy?.walletMaxSharePct !== undefined) setWalletPolicy({ ...res.policy, affiliateCreditInr: Number(res.affiliateCreditInr || 0), refundCreditInr: Number(res.refundCreditInr || 0) });
         })
         .catch(() => {});
     }
@@ -300,8 +300,8 @@ export default function Checkout() {
   const referralDiscountAmount = Number(quote?.referral?.discountInr || 0);
   const referralUnavailable = appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
   const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount - referralDiscountAmount);
-  // Referral credit is capped; creator earnings in the wallet can pay the rest (the server applies the same split).
-  const creatorCredit = Math.min(walletBalance, Number(walletPolicy.affiliateCreditInr || 0));
+  // Referral credit is capped; creator earnings and refund credit in the wallet can pay the rest (the server applies the same split).
+  const creatorCredit = Math.min(walletBalance, Number(walletPolicy.affiliateCreditInr || 0) + Number(walletPolicy.refundCreditInr || 0));
   const cappedWalletCredit = Math.floor(Math.min(walletBalance - creatorCredit, remainingBeforeWallet * Number(walletPolicy.walletMaxSharePct) / 100, Number(walletPolicy.walletMaxPerBookingInr)));
   const maxAllowedWalletCredit = Math.min(walletBalance, cappedWalletCredit + Math.floor(Math.min(creatorCredit, Math.max(0, remainingBeforeWallet - cappedWalletCredit))));
   const walletDiscountAmount = useWalletCredits ? Math.round(maxAllowedWalletCredit) : 0;
@@ -504,7 +504,11 @@ export default function Checkout() {
       const bookingRef = bookingRes.ref || bookingRes.bookingRef;
       const bookingId = bookingRes.bookingId || bookingRes.id;
 
-      if (paymentMethod === "CASHFREE") {
+      if (Number(bookingRes.amount_inr) === 0 && Number(bookingRes.wallet_credit_applied_inr) > 0) {
+        // Wallet credit paid for all of it: nothing for a gateway to charge.
+        await api.completeWalletPayment({ bookingId, bookingRef });
+        navigate(`/booking-confirmed/${bookingRef}`);
+      } else if (paymentMethod === "CASHFREE") {
         const orderRes = await api.createCashfreeOrder({
           bookingId,
           bookingRef,
@@ -1016,6 +1020,8 @@ export default function Checkout() {
                 ? "Processing your booking…"
                 : quoteLoading
                 ? "Checking price and availability…"
+                : payableTotal === 0 && walletDiscountAmount > 0
+                ? "Confirm booking · paid with wallet credit →"
                 : paymentMethod === "CASHFREE"
                 ? `Pay ₹${payableTotal.toLocaleString("en-IN")}${currency !== "INR" ? ` (~${formatPrice(payableTotal)})` : ""} via Cashfree →`
                 : "Confirm demo booking · ₹0 charged →"}

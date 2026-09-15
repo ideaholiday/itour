@@ -227,3 +227,13 @@ This document records significant technical and product architectural decisions.
   - A rejected **Verified Plus** check refunds **only the check part**: the share of what was paid above the Spotlight price, fixed at purchase (`check_refundable_inr`; ₹590 of ₹4,128.82 at launch prices). The supplier keeps the Spotlight. A rejected **Verified** check refunds the whole payment.
   - **GST credit notes** for refunded checks are not issued yet; they will be added later, in a format confirmed with the CA.
 - **Consequences**: Rules in `SUPPLIER_PLANS.md` §6. Until credit notes exist, a refunded check's tax invoice stands without one; finance handles the GST adjustment manually.
+
+## ADR 019: Supplier Cancellations Refund to the Wallet First
+- **Date**: 2026-09-15
+- **Context**: When a supplier cancelled a paid booking, the traveler was not told, and the refund was marked processed without reaching the gateway. The owner wanted the traveler refunded at once, encouraged to rebook (the same trip or another option), and still able to get the money back the way they paid.
+- **Decision Made**:
+  - **Scope: supplier cancellations only.** A traveler's own cancellation keeps refunding to the original payment method.
+  - What the traveler paid goes to their wallet as **refund credit** straight away, and they are notified by email and WhatsApp.
+  - Refund credit has **no per-booking cap and no expiry**; it can pay for a whole booking.
+  - For **10 days** after the cancellation, the traveler can send the unspent refund credit back to the **original payment method**. The refund goes to the gateway at once, with no staff approval. After 10 days it stays as credit.
+- **Consequences**: Rules in `REFUND_CREDIT.md`. Refund credit is the traveler's money, not a discount: it is kept apart from referral credit (not capped, never clawed back, spent last), and a booking credit pays for in full is confirmed without a gateway (`POST /api/checkout/wallet-payment`). The supplier of the cancelled booking is paid nothing. Refund credit restored from a cancelled rebooking comes back as credit only. Idea Holiday holds unspent refund credit as a liability until it is spent or refunded.

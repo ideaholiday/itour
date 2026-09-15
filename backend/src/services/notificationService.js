@@ -4,6 +4,7 @@ import { normalizeWhatsAppPhone, sendWhatsAppMessage, whatsAppTemplate } from ".
 import { guestDocumentLinks } from "./guestDocumentService.js";
 import logger from "../config/logger.js";
 import { issueBookingInvite } from "./reviewInviteService.js";
+import { activityPath } from "../../../shared/activityUrl.js";
 
 const clean = (value) => String(value || "").trim();
 
@@ -131,7 +132,7 @@ export async function notifyBookingConfirmed(database, bookingId) {
 
 export async function sendGuestBookingNotification(database, bookingId, requestedEventType, { eventKeySuffix = `RESEND_${Date.now()}` } = {}) {
   const booking = database.prepare(`
-    SELECT b.*, p.title AS product_title, s.company_name AS supplier_name,
+    SELECT b.*, p.title AS product_title, p.city, s.company_name AS supplier_name,
       da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number
     FROM bookings b
     LEFT JOIN products p ON p.id = b.product_id
@@ -142,7 +143,7 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
   if (!booking) throw Object.assign(new Error("Booking not found"), { status: 404 });
 
   const eventType = String(requestedEventType || "DOCUMENTS").toUpperCase();
-  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE", "SUPPLIER_CONFIRMATION_PENDING", "PICKUP_DETAILS_UPDATED", "DRIVER_ARRIVING", "AMENDMENT_RESULT"].includes(eventType)) {
+  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE", "SUPPLIER_CONFIRMATION_PENDING", "PICKUP_DETAILS_UPDATED", "DRIVER_ARRIVING", "AMENDMENT_RESULT", "BOOKING_CANCELLED"].includes(eventType)) {
     throw Object.assign(new Error("Choose a supported booking logistics notification"), { status: 400 });
   }
   if (eventType === "DRIVER_ASSIGNED" && !booking.driver_name) {
@@ -159,6 +160,27 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
   const driverInfo = booking.driver_name
     ? `Driver: ${booking.driver_name} (${booking.driver_phone || "Contact via App"})\nVehicle: ${booking.vehicle_model || "Assigned Vehicle"} [${booking.vehicle_number || "Verified"}]`
     : "Driver and vehicle details will be shared on departure morning.";
+
+  // A supplier cancellation: what was paid is in the traveler's wallet to rebook with, or to send back within the cash window (ADR 019).
+  const cancelledContent = () => {
+    const credit = database.prepare("SELECT amount_inr, cash_refundable_until FROM wallet_transactions WHERE booking_id = ? AND entry_type = 'SUPPLIER_CANCEL_CREDIT'").get(booking.id);
+    const creditInr = Number(credit?.amount_inr || 0);
+    const cashBy = credit?.cash_refundable_until ? new Date(`${credit.cash_refundable_until.replace(" ", "T")}Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : null;
+    const reason = booking.cancellation_reason || "operational constraint";
+    const bookAgainUrl = `https://ideaholiday.in${activityPath(booking.product_id, booking.product_title)}`;
+    const otherOptionsUrl = `https://ideaholiday.in/search?destination=${encodeURIComponent(booking.city || "")}`;
+    const myTripsUrl = "https://ideaholiday.in/my-bookings";
+    const refundText = creditInr > 0
+      ? `₹${creditInr} has been refunded to your Idea Holiday wallet. Use it on any booking: book the same trip again (${bookAgainUrl}) or choose another option (${otherOptionsUrl}).\nPrefer the money back to your original payment method? Request it in My Trips by ${cashBy}: ${myTripsUrl}`
+      : "No payment was collected for this booking.";
+    return {
+      subject: `Booking ${booking.ref} cancelled by the operator${creditInr > 0 ? ` — ₹${creditInr} refunded to your wallet` : ""}`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nWe're sorry: ${booking.supplier_name || "the operator"} has cancelled your booking for ${experienceName} on ${booking.activity_date}.\nReason: ${reason}.\n\n${refundText}\n\nNeed help rebooking? support@ideaholiday.in / +91 9696777391`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Cancelled by operator", creditInr > 0
+        ? `${experienceName} on ${booking.activity_date} was cancelled (${reason}). Rs ${creditInr} is refunded to your Idea Holiday wallet to book again. To get it back to your original payment method instead, request it in My Trips by ${cashBy}: ${myTripsUrl}`
+        : `${experienceName} on ${booking.activity_date} was cancelled (${reason}). No payment was collected.`]),
+    };
+  };
 
   const content = {
     BOOKING_CONFIRMED: {
@@ -208,6 +230,8 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour requested pickup/drop amendment has been recorded. Check My Trips for the latest voucher and logistics status.`,
       template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Amendment recorded", "Check My Trips for the latest voucher and logistics status."]),
     },
+    // A getter, so the wallet lookup only runs for this event.
+    get BOOKING_CANCELLED() { return cancelledContent(); },
   }[eventType];
   const results = await sendRecipientChannels({
     database,
@@ -310,7 +334,7 @@ export async function notifyDispatchStatusChanged(database, bookingId) {
   return { eventType: `DISPATCH_${status}`, bookingId, attempted: results.length, results };
 }
 
-export async function notifyRefundProcessed(database, refundId) {
+export async function notifyRefundProcessed(database, refundId, { includeSupplier = true } = {}) {
   const refund = database.prepare(`
     SELECT r.*, b.user_id, b.supplier_id, b.traveler_name, b.traveler_email, b.traveler_phone,
       s.company_name AS supplier_name, s.contact_name AS supplier_contact_name,
@@ -322,7 +346,7 @@ export async function notifyRefundProcessed(database, refundId) {
   if (!refund) throw new Error("Refund not found for notification");
   const recipients = uniqueRecipients([
     { id: refund.user_id, role: "TRAVELER", name: refund.traveler_name, email: refund.traveler_email, phone: refund.traveler_phone },
-    { id: refund.supplier_id, role: "SUPPLIER", name: refund.supplier_contact_name || refund.supplier_name, email: refund.supplier_email, phone: refund.supplier_phone },
+    ...(includeSupplier ? [{ id: refund.supplier_id, role: "SUPPLIER", name: refund.supplier_contact_name || refund.supplier_name, email: refund.supplier_email, phone: refund.supplier_phone }] : []),
   ]);
   const results = [];
   for (const recipient of recipients) {

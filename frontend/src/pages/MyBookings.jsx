@@ -27,8 +27,10 @@ import {
   TestTube2,
   Ticket,
   UserRound,
+  Wallet,
 } from "lucide-react";
 import CancellationRefundModal from "../components/checkout/CancellationRefundModal.jsx";
+import { activityPath } from "../lib/activityUrl.js";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 import ReviewModal from "../components/ReviewModal.jsx";
@@ -38,6 +40,8 @@ const today = () => new Date(new Date().toISOString().slice(0, 10) + "T00:00:00"
 const bookingDate = (booking) => new Date(`${booking.activity_date || booking.travel_date}T00:00:00`);
 const normalizedStatus = (booking) => String(booking.status || "confirmed").toLowerCase();
 const isCancelled = (booking) => normalizedStatus(booking) === "cancelled";
+// Refund credit from a supplier cancellation can go back to the payment method until this time (stored as UTC).
+const cashRefundableUntil = (booking) => booking.cash_refundable_until ? new Date(`${String(booking.cash_refundable_until).replace(" ", "T")}Z`) : null;
 const isCompleted = (booking) => normalizedStatus(booking) === "completed";
 const isUpcoming = (booking) => !isCancelled(booking) && !isCompleted(booking) && bookingDate(booking) >= today();
 const formatDate = (value) =>
@@ -77,6 +81,7 @@ export default function MyBookings() {
   const [notifications, setNotifications] = useState([]);
   const [preferences, setPreferences] = useState({ emailEnabled: true, whatsappEnabled: true });
   const [savingPreferences, setSavingPreferences] = useState(false);
+  const [refundingToSource, setRefundingToSource] = useState(null);
 
   const fetchBookings = async () => {
     if (!user) {
@@ -726,6 +731,60 @@ export default function MyBookings() {
                           </div>
                         </div>
                       )}
+
+                      {/* Supplier cancelled: the refund is in the wallet, with the option to take it back as cash */}
+                      {booking.payment_status === "REFUNDED_TO_WALLET" && Number(booking.refund_credit_inr) > 0 && (() => {
+                        const until = cashRefundableUntil(booking);
+                        const canSendBack = until && until > new Date() && Number(booking.refund_credit_unspent_inr) > 0;
+                        return (
+                          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-xs text-stone-700">
+                            <strong className="flex items-center gap-2 text-sm text-emerald-900">
+                              <Wallet className="h-4 w-4" /> ₹{Number(booking.refund_credit_inr).toLocaleString("en-IN")} refunded to your Idea Holiday wallet
+                            </strong>
+                            <p className="mt-1">
+                              The operator cancelled this trip. Use the credit on any booking: the same trip or something else.
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {booking.product_id && (
+                                <Link to={activityPath(booking.product_id, booking.product_title)} className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 px-3.5 py-2 font-bold text-white hover:bg-emerald-800">
+                                  <RefreshCw className="h-3.5 w-3.5" /> Book this trip again
+                                </Link>
+                              )}
+                              <Link to={`/search?destination=${encodeURIComponent(booking.city || "")}`} className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-700 bg-white px-3.5 py-2 font-bold text-emerald-800 hover:bg-emerald-50">
+                                <Compass className="h-3.5 w-3.5" /> See other options
+                              </Link>
+                              {canSendBack && (
+                                <button
+                                  type="button"
+                                  disabled={refundingToSource === booking.id}
+                                  onClick={async () => {
+                                    if (!window.confirm(`Send ₹${Number(booking.refund_credit_unspent_inr).toLocaleString("en-IN")} back to your original payment method? It will leave your wallet.`)) return;
+                                    setRefundingToSource(booking.id);
+                                    setError("");
+                                    try {
+                                      const result = await api.refundCreditToSource(booking.id);
+                                      setMessage(result.message);
+                                      await fetchBookings();
+                                    } catch (err) {
+                                      setError(err.message || "Could not send the refund back.");
+                                    } finally {
+                                      setRefundingToSource(null);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-700 bg-white px-3.5 py-2 font-bold text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
+                                >
+                                  <CreditCard className="h-3.5 w-3.5" /> {refundingToSource === booking.id ? "Sending…" : "Refund to my payment method instead"}
+                                </button>
+                              )}
+                            </div>
+                            {canSendBack && (
+                              <p className="mt-2 text-[11px] text-stone-500">
+                                You can send the unspent credit back until {until.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}. After that it stays in your wallet, with no expiry.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Card Action Footer */}
                       <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-stone-100 pt-4">

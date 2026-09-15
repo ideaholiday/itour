@@ -175,6 +175,36 @@ router.post("/create-order", authenticate, requireBookingOwner(), validateBody(c
   }
 });
 
+// POST /api/checkout/wallet-payment - Confirms a booking wallet credit paid for in full.
+// Refund credit is not capped (ADR 019), so a rebooking can leave nothing for a gateway to charge.
+router.post("/wallet-payment", authenticate, requireBookingOwner(), validateBody(checkoutSchemas.booking), async (req, res) => {
+  try {
+    const { bookingId, bookingRef } = req.body;
+    const booking = db.prepare("SELECT b.*, p.cancellation_policy FROM bookings b LEFT JOIN products p ON p.id = b.product_id WHERE b.id = ? OR b.ref = ?").get(bookingId || bookingRef, bookingRef || bookingId);
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+    if (!canAccessBooking(req, booking)) return res.status(403).json({ error: "You do not have access to this booking" });
+    if (booking.payment_status === "PAID") {
+      return res.json({ success: true, idempotent: true, bookingRef: booking.ref, message: "Booking was already confirmed." });
+    }
+    if (Number(booking.amount_inr) > 0 || !(Number(booking.wallet_credit_applied_inr) > 0)) {
+      return res.status(409).json({ error: "This booking still has an amount to pay" });
+    }
+    assertActiveBookingHold(booking);
+    if (!booking.pickup_location?.trim()) return res.status(400).json({ error: "Pickup location is required before payment" });
+    const confirmation = confirmPaidBooking(booking, { method: "WALLET", orderId: `wallet_${booking.ref}`, paymentId: `wallet_${booking.id}` });
+    queueNotification(notifyBookingLogisticsEvent(db, booking.id, confirmation.confirmationStatus === "PENDING_SUPPLIER" ? "SUPPLIER_CONFIRMATION_PENDING" : "BOOKING_CONFIRMED"), "Booking confirmation notification");
+    res.json({
+      success: true,
+      bookingRef: booking.ref,
+      supplierResponseDeadline: confirmation.supplierResponseDeadline,
+      message: confirmation.confirmationStatus === "CONFIRMED" ? "Your booking is confirmed." : "Paid with wallet credit. The supplier now has 10 minutes to accept the booking."
+    });
+  } catch (err) {
+    logger.error("Wallet payment failed", { requestId: req.requestId, error: err });
+    res.status(err.status || 500).json({ error: err.message || "Failed to confirm the booking", code: err.code });
+  }
+});
+
 // POST /api/checkout/demo-payment - Explicit sandbox checkout for end-to-end testing
 router.post("/demo-payment", authenticate, requireBookingOwner(), validateBody(checkoutSchemas.booking), async (req, res) => {
   try {

@@ -205,6 +205,12 @@ verified review — see BUSINESS_RULES §9.3.
   }
   ```
 
+### 2.3.1 Wallet payment and refund credit (ADR 019)
+- **`POST /api/checkout/wallet-payment`** `{ bookingId }`: confirms a booking whose `amount_inr` is 0 because wallet credit paid for all of it. `409` if anything is left to pay.
+- **`POST /api/bookings/:id/refund-to-source`**: the traveler sends the unspent refund credit of a supplier-cancelled booking back to the original payment method, within 10 days. Returns `{ amountInr, refundStatus: "PROCESSED" | "FAILED" }`. `409` after the window, when nothing is unspent, or when already done; `404` for another traveler's booking.
+- **`GET /api/bookings`** also returns `refund_credit_inr`, `refund_credit_unspent_inr` and `cash_refundable_until` for supplier-cancelled bookings.
+- **`POST /api/suppliers/:id/bookings/:bookingId/cancel`** `{ reason }` (supplier): refunds a paid booking to the traveler's wallet and notifies them. Returns `{ walletCreditInr, cashRefundableUntil }` (`null` for an unpaid booking).
+
 ### 2.4 Grouped Circuit Quotation & Orders
 - **`POST /api/itineraries/:id/quote`**: Reprices entire multi-stop itinerary and returns a 15-minute frozen quote (`quoteId`).
 - **`POST /api/circuit-orders`**: Consumes an active quote to create one parent circuit order and child bookings.

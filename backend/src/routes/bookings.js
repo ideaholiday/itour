@@ -558,10 +558,12 @@ router.get("/", authenticate, (req, res) => {
       `SELECT b.*, p.title as product_title, p.hero_image, p.city, p.state, p.product_type, s.company_name as supplier_name,
         da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number, da.assignment_status,
         da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at,
-        r.id AS review_id, r.status AS review_status
+        r.id AS review_id, r.status AS review_status,
+        wc.amount_inr AS refund_credit_inr, wc.remaining_inr AS refund_credit_unspent_inr, wc.cash_refundable_until
        FROM bookings b LEFT JOIN products p ON b.product_id = p.id LEFT JOIN suppliers s ON b.supplier_id = s.id
        LEFT JOIN driver_assignments da ON da.booking_id = b.id
        LEFT JOIN reviews r ON r.booking_id = b.id
+       LEFT JOIN wallet_transactions wc ON wc.booking_id = b.id AND wc.entry_type = 'SUPPLIER_CANCEL_CREDIT'
        WHERE b.user_id = ? OR (? != '' AND LOWER(b.traveler_email) = LOWER(?)) ORDER BY b.created_at DESC`
     ).all(actor.id || "", actor.email || "", actor.email || "");
     res.json(rows.map(travelerView));

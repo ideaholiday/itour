@@ -278,7 +278,8 @@ erDiagram
   - `traveler_name`, `traveler_email`, `traveler_phone`.
   - `activity_date`, `pickup_time`, `pickup_location`, `drop_location`.
   - `total_price`, `currency` (INR), `commission_amount`, `supplier_payout_amount`.
-  - `payment_status`: `PENDING`, `COMPLETED`, `REFUNDED`, `PARTIALLY_REFUNDED`.
+  - `payment_status`: `PENDING`, `COMPLETED`, `REFUNDED`, `PARTIALLY_REFUNDED`, `REFUNDED_TO_WALLET` (a supplier cancellation, ADR 019).
+  - `refunded_to_wallet_inr` (migration 046): what a supplier cancellation put in the traveler's wallet. A later cash refund of that credit leaves the payout at zero.
   - `booking_status`: `pending_payment`, `confirmed`, `driver_assigned`, `in_progress`, `completed`, `cancelled`.
   - `pickup_otp_hash`: SHA-256 hash of the 6-digit pickup code for constant-time verification.
   - `pickup_otp_encrypted`: AES-256-GCM ciphertext decrypted only for the traveler view.
@@ -400,7 +401,11 @@ BUSINESS_RULES §11.
   and `action` (`BLOCKED`, `HELD_FOR_REVIEW`, `LOGGED`).
 - **`wallet_transactions`**: The wallet ledger. `entry_type`:
   `REFERRAL_CLEARED`, `REFERRAL_REVERSED`, `REDEMPTION`, `REDEMPTION_RESTORED`,
-  `CLAWBACK_SETTLED`, `EXPIRY`, `ADJUSTMENT` (legacy rows carry only `type`).
+  `CLAWBACK_SETTLED`, `EXPIRY`, `ADJUSTMENT` (legacy rows carry only `type`),
+  and for refund credit (migration 046, ADR 019) `SUPPLIER_CANCEL_CREDIT`,
+  `REFUND_CASHOUT`, `REFUND_CREDIT_RESTORED`. Refund credit rows have
+  `credit_source = 'REFUND'` and `cash_refundable_until`; `refund_inr` on a
+  `REDEMPTION` is the part paid from refund credit.
   Credits have `expires_at` and an unspent `remaining_inr`; `expiry_reminded_at`
   records the reminder. `UNIQUE (booking_id, entry_type)`.
 - **`users`**: `wallet_balance_inr` is a cache of the ledger sum;

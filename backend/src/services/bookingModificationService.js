@@ -268,7 +268,8 @@ export class BookingModificationService {
         reason || "Traveler self-service cancellation"
       );
     })();
-    onReferralBookingCancelled(database, booking.id, { reason: reason || "Traveler cancelled" });
+    // Spent wallet credit comes back at the policy's refund share, even when credit paid for all of it.
+    onReferralBookingCancelled(database, booking.id, { reason: reason || "Traveler cancelled", creditShare: paid ? preview.refundPercentage / 100 : null });
 
     return {
       success: true,

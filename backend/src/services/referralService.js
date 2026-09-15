@@ -532,38 +532,43 @@ export function applyReferralToBooking(database, {
 export function walletBalances(database, userId) {
   const user = database.prepare("SELECT wallet_balance_inr FROM users WHERE id = ?").get(userId);
   const totalInr = money(user?.wallet_balance_inr);
-  let affiliateInr = 0;
-  try {
-    affiliateInr = money(database.prepare(`
-      SELECT COALESCE(SUM(remaining_inr), 0) AS amount FROM wallet_transactions
-      WHERE user_id = ? AND credit_source = 'AFFILIATE' AND remaining_inr > 0
-    `).get(userId)?.amount);
-  } catch (error) {
-    // Before migration 042 nobody has creator credit.
-    if (!/no such column|does not exist/i.test(error.message)) throw error;
-  }
-  affiliateInr = Math.min(affiliateInr, totalInr);
-  return { totalInr, affiliateInr, otherInr: money(totalInr - affiliateInr) };
+  const tracked = (source) => {
+    try {
+      return money(database.prepare(`
+        SELECT COALESCE(SUM(remaining_inr), 0) AS amount FROM wallet_transactions
+        WHERE user_id = ? AND credit_source = ? AND remaining_inr > 0
+      `).get(userId, source)?.amount);
+    } catch (error) {
+      // Before migration 042 nobody has creator or refund credit.
+      if (!/no such column|does not exist/i.test(error.message)) throw error;
+      return 0;
+    }
+  };
+  const affiliateInr = Math.min(tracked("AFFILIATE"), totalInr);
+  const refundInr = Math.min(tracked("REFUND"), money(totalInr - affiliateInr));
+  return { totalInr, affiliateInr, refundInr, otherInr: money(totalInr - affiliateInr - refundInr) };
 }
 
 /**
  * Spends credit: other credit first (soonest-expiring, then credit with no expiry
- * that isn't tracked by row), a creator's own earnings last. `maxFromOtherInr`
- * limits the other credit a booking may use (the referral wallet cap); earnings
- * pay the rest, and other credit only covers what earnings cannot. Returns how
- * much came from creator earnings.
+ * that isn't tracked by row), then a creator's own earnings, then refund credit
+ * last, so a traveler keeps the option to take refund credit back as cash for as
+ * long as possible. `maxFromOtherInr` limits the other credit a booking may use
+ * (the referral wallet cap); earnings and refund credit pay the rest, and other
+ * credit only covers what they cannot. Returns how much came from creator
+ * earnings and from refund credit.
  */
 function consumeCredits(database, userId, amountInr, balanceBeforeInr, { maxFromOtherInr = null } = {}) {
   let remaining = money(amountInr);
-  if (remaining <= 0) return 0;
-  const { affiliateInr } = walletBalances(database, userId);
+  if (remaining <= 0) return { affiliateInr: 0, refundInr: 0 };
+  const { affiliateInr, refundInr } = walletBalances(database, userId);
   const expiring = database.prepare(`
     SELECT id, remaining_inr FROM wallet_transactions
     WHERE user_id = ? AND expires_at IS NOT NULL AND remaining_inr > 0
     ORDER BY expires_at ASC, created_at ASC
   `).all(userId);
   const expiringInr = money(expiring.reduce((sum, credit) => sum + Number(credit.remaining_inr), 0));
-  let untrackedInr = Math.max(0, money(Number(balanceBeforeInr) - expiringInr - affiliateInr));
+  let untrackedInr = Math.max(0, money(Number(balanceBeforeInr) - expiringInr - affiliateInr - refundInr));
 
   const take = (rows, limitInr) => {
     let taken = 0;
@@ -586,17 +591,20 @@ function consumeCredits(database, userId, amountInr, balanceBeforeInr, { maxFrom
 
   const otherFirst = maxFromOtherInr === null ? remaining : Math.min(remaining, Math.max(0, money(maxFromOtherInr)));
   remaining = money(remaining - takeOther(otherFirst));
-  let fromAffiliate = 0;
-  if (remaining > 0 && affiliateInr > 0) {
-    const earnings = database.prepare(`
+  const takeSource = (source, available) => {
+    if (remaining <= 0 || available <= 0) return 0;
+    const rows = database.prepare(`
       SELECT id, remaining_inr FROM wallet_transactions
-      WHERE user_id = ? AND credit_source = 'AFFILIATE' AND remaining_inr > 0 ORDER BY created_at ASC, id ASC
-    `).all(userId);
-    fromAffiliate = take(earnings, remaining);
-    remaining = money(remaining - fromAffiliate);
-  }
+      WHERE user_id = ? AND credit_source = ? AND remaining_inr > 0 ORDER BY created_at ASC, id ASC
+    `).all(userId, source);
+    const taken = take(rows, remaining);
+    remaining = money(remaining - taken);
+    return taken;
+  };
+  const fromAffiliate = takeSource("AFFILIATE", affiliateInr);
+  const fromRefund = takeSource("REFUND", refundInr);
   if (remaining > 0) takeOther(remaining);
-  return fromAffiliate;
+  return { affiliateInr: fromAffiliate, refundInr: fromRefund };
 }
 
 /**
@@ -613,6 +621,7 @@ export function postWalletEntry(database, {
   expiresAt = null,
   creditSource = null,
   maxFromOtherInr = null,
+  cashRefundableUntil = null,
   now = new Date(),
 }) {
   const amount = money(amountInr);
@@ -625,25 +634,33 @@ export function postWalletEntry(database, {
   if (balanceAfter < 0) throw referralError("Wallet balance is not enough for this", 409, "INSUFFICIENT_WALLET_BALANCE");
 
   const id = `wtx_${nanoid(12)}`;
-  const tracked = amount > 0 && (expiresAt || creditSource === "AFFILIATE");
+  const tracked = amount > 0 && (expiresAt || creditSource === "AFFILIATE" || creditSource === "REFUND");
   database.prepare("UPDATE users SET wallet_balance_inr = ? WHERE id = ?").run(balanceAfter, userId);
+  const optional = [
+    ["credit_source", creditSource],
+    ["cash_refundable_until", cashRefundableUntil],
+  ].filter(([, value]) => value);
   database.prepare(`
     INSERT INTO wallet_transactions (
       id, user_id, type, entry_type, amount_inr, balance_after_inr, reference_id, booking_id, reward_id,
-      description, expires_at, remaining_inr, created_at${creditSource ? ", credit_source" : ""}
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${creditSource ? ", ?" : ""})
+      description, expires_at, remaining_inr, created_at${optional.map(([column]) => `, ${column}`).join("")}
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${optional.map(() => ", ?").join("")})
   `).run(
     id, userId, entryType, entryType, amount, balanceAfter, rewardId || bookingId, bookingId, rewardId,
-    description, expiresAt, tracked ? amount : null, sqlTimestamp(now), ...(creditSource ? [creditSource] : []),
+    description, expiresAt, tracked ? amount : null, sqlTimestamp(now), ...optional.map(([, value]) => value),
   );
 
-  let affiliateInr = 0;
-  if (amount < 0 && entryType !== "EXPIRY") {
-    affiliateInr = consumeCredits(database, userId, -amount, Number(user.wallet_balance_inr || 0), { maxFromOtherInr });
-    if (affiliateInr > 0) database.prepare("UPDATE wallet_transactions SET affiliate_inr = ? WHERE id = ?").run(affiliateInr, id);
+  let spent = { affiliateInr: 0, refundInr: 0 };
+  // Expiry and a refund-credit cash-out draw down their own credit rows.
+  if (amount < 0 && !SELF_ALLOCATED_DEBITS.has(entryType)) {
+    spent = consumeCredits(database, userId, -amount, Number(user.wallet_balance_inr || 0), { maxFromOtherInr });
+    if (spent.affiliateInr > 0) database.prepare("UPDATE wallet_transactions SET affiliate_inr = ? WHERE id = ?").run(spent.affiliateInr, id);
+    if (spent.refundInr > 0) database.prepare("UPDATE wallet_transactions SET refund_inr = ? WHERE id = ?").run(spent.refundInr, id);
   }
-  return { id, balanceAfterInr: balanceAfter, affiliateInr };
+  return { id, balanceAfterInr: balanceAfter, affiliateInr: spent.affiliateInr, refundInr: spent.refundInr };
 }
+
+const SELF_ALLOCATED_DEBITS = new Set(["EXPIRY", "REFUND_CASHOUT"]);
 
 /** A credit, netted against any clawback the user still owes from an earlier reversal. */
 function postWalletCredit(database, entry) {
@@ -748,10 +765,10 @@ export function onReferralTripCompleted(database, bookingId, { now = new Date() 
 }
 
 /** For request handlers: reverses the reward and returns spent wallet credit, never throws. */
-export function onReferralBookingCancelled(database, bookingId, { reason, now = new Date() } = {}) {
+export function onReferralBookingCancelled(database, bookingId, { reason, creditShare = null, now = new Date() } = {}) {
   try {
     const reversal = reverseReferralReward(database, bookingId, { reason, now });
-    const restored = restoreWalletCreditForBooking(database, bookingId, { now });
+    const restored = restoreWalletCreditForBooking(database, bookingId, { share: creditShare, now });
     return { reversal, restored };
   } catch (error) {
     logger.warn("Referral cancellation hook failed", { bookingId, error: error.message });
@@ -833,18 +850,30 @@ export function reverseReferralReward(database, bookingId, { reason = "Booking c
  * Gives back wallet credit spent on a booking that never went ahead: all of it
  * if the booking was never paid, otherwise the same share as the cash refund.
  */
-export function restoreWalletCreditForBooking(database, bookingId, { now = new Date() } = {}) {
+const RESTORED_ENTRY_TYPES = "'REDEMPTION_RESTORED', 'AFFILIATE_RESTORED', 'REFUND_CREDIT_RESTORED'";
+
+/**
+ * Gives back the wallet credit a cancelled booking spent, as the kind it was spent from.
+ * `share` (0–1) overrides the refunded share: pass the policy's refund percentage when
+ * the booking has no cash amount to take it from (credit paid for all of it).
+ */
+export function restoreWalletCreditForBooking(database, bookingId, { share: shareOverride = null, now = new Date() } = {}) {
   let result = null;
   database.transaction(() => {
     const booking = database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
     const applied = money(booking?.wallet_credit_applied_inr);
     if (!booking || applied <= 0) return;
-    const already = database.prepare("SELECT 1 FROM wallet_transactions WHERE booking_id = ? AND entry_type IN ('REDEMPTION_RESTORED', 'AFFILIATE_RESTORED')").get(bookingId);
+    const already = database.prepare(`SELECT 1 FROM wallet_transactions WHERE booking_id = ? AND entry_type IN (${RESTORED_ENTRY_TYPES})`).get(bookingId);
     const redeemed = database.prepare("SELECT * FROM wallet_transactions WHERE booking_id = ? AND entry_type = 'REDEMPTION'").get(bookingId);
     if (already || !redeemed) return;
 
     let share = 0;
-    if (booking.payment_status !== "PAID" && !/REFUND/.test(String(booking.payment_status || ""))) {
+    if (shareOverride !== null) {
+      share = Math.min(1, Math.max(0, Number(shareOverride) || 0));
+    } else if (booking.payment_status === "REFUNDED_TO_WALLET") {
+      // A supplier cancellation gives everything back.
+      share = 1;
+    } else if (booking.payment_status !== "PAID" && !/REFUND/.test(String(booking.payment_status || ""))) {
       share = 1;
     } else {
       const refunded = Math.max(money(booking.refunded_amount), money(booking.refund_amount_inr));
@@ -854,7 +883,9 @@ export function restoreWalletCreditForBooking(database, bookingId, { now = new D
     if (amount <= 0) return;
     // Creator earnings spent on the booking come back as creator earnings: no expiry.
     const affiliatePart = Math.min(amount, money(Math.round(money(redeemed.affiliate_inr) * share)));
-    const otherPart = money(amount - affiliatePart);
+    // Refund credit comes back as refund credit (no expiry), but it is no longer cash-refundable.
+    const refundPart = Math.min(money(amount - affiliatePart), money(Math.round(money(redeemed.refund_inr) * share)));
+    const otherPart = money(amount - affiliatePart - refundPart);
 
     if (otherPart > 0) {
       postWalletCredit(database, {
@@ -875,6 +906,17 @@ export function restoreWalletCreditForBooking(database, bookingId, { now = new D
         bookingId,
         description: `Returned ₹${affiliatePart} of your creator earnings from cancelled booking ${booking.ref || bookingId}`,
         creditSource: "AFFILIATE",
+        now,
+      });
+    }
+    if (refundPart > 0) {
+      postWalletEntry(database, {
+        userId: booking.user_id,
+        entryType: "REFUND_CREDIT_RESTORED",
+        amountInr: refundPart,
+        bookingId,
+        description: `Returned ₹${refundPart} of refund credit from cancelled booking ${booking.ref || bookingId}`,
+        creditSource: "REFUND",
         now,
       });
     }
@@ -958,7 +1000,7 @@ export function processReferralLifecycle(database, { now = new Date() } = {}) {
   // Unpaid checkouts whose hold lapsed: the reward and any wallet credit go back.
   const abandoned = database.prepare(`
     SELECT b.id FROM bookings b
-    WHERE b.payment_status NOT IN ('PAID', 'REFUNDED', 'PARTIALLY_REFUNDED', 'PAYMENT_REVIEW_REQUIRED', 'CAPTURED_REVIEW')
+    WHERE b.payment_status NOT IN ('PAID', 'REFUNDED', 'PARTIALLY_REFUNDED', 'REFUNDED_TO_WALLET', 'PAYMENT_REVIEW_REQUIRED', 'CAPTURED_REVIEW')
       AND (COALESCE(b.wallet_credit_applied_inr, 0) > 0 OR EXISTS (SELECT 1 FROM referral_rewards rr WHERE rr.booking_id = b.id AND rr.status = 'ACCRUED'))
       AND EXISTS (SELECT 1 FROM booking_holds h WHERE h.booking_id = b.id AND (h.status = 'EXPIRED' OR h.expires_at <= ?))
       AND NOT EXISTS (SELECT 1 FROM booking_holds h WHERE h.booking_id = b.id AND h.status = 'ACTIVE' AND h.expires_at > ?)
@@ -973,7 +1015,7 @@ export function processReferralLifecycle(database, { now = new Date() } = {}) {
     WHERE COALESCE(b.wallet_credit_applied_inr, 0) > 0
       AND (b.status = 'cancelled' OR b.payment_status IN ('FAILED', 'EXPIRED', 'REFUNDED', 'PARTIALLY_REFUNDED')
         OR b.id IN (${abandoned.map(() => "?").join(", ") || "''"}))
-      AND NOT EXISTS (SELECT 1 FROM wallet_transactions t WHERE t.booking_id = b.id AND t.entry_type IN ('REDEMPTION_RESTORED', 'AFFILIATE_RESTORED'))
+      AND NOT EXISTS (SELECT 1 FROM wallet_transactions t WHERE t.booking_id = b.id AND t.entry_type IN (${RESTORED_ENTRY_TYPES}))
   `).all(...abandoned.map((row) => row.id));
   for (const row of restorable) {
     if (restoreWalletCreditForBooking(database, row.id, { now })) summary.restored += 1;

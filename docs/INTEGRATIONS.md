@@ -49,7 +49,8 @@ and `whatsappService.js`.
 | `CIRCUIT_RESCHEDULE` | circuit order ref, reschedule state, reconfirmation deadline |
 
 `TRIP_STATUS` also carries the traveler logistics updates (supplier confirmation
-pending, pickup details updated, driver arriving, amendment recorded), so it
+pending, pickup details updated, driver arriving, amendment recorded, cancelled
+by the operator), so it
 must be approved and configured in production. Every call site for a key must
 pass the same number of variables; `backend/test/whatsappTemplateArity.test.js`
 fails when they differ.

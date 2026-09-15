@@ -59,7 +59,7 @@ test("a creator moves cleared earnings into their wallet, less 1% TDS, against a
 
   const credit = db.prepare("SELECT * FROM wallet_transactions WHERE user_id = 'usr_neha'").get();
   assert.deepEqual([credit.entry_type, credit.amount_inr, credit.credit_source, credit.expires_at, credit.remaining_inr], ["AFFILIATE_TRANSFER", 3465, "AFFILIATE", null, 3465]);
-  assert.deepEqual(walletBalances(db, "usr_neha"), { totalInr: 3465, affiliateInr: 3465, otherInr: 0 });
+  assert.deepEqual(walletBalances(db, "usr_neha"), { totalInr: 3465, affiliateInr: 3465, refundInr: 0, otherInr: 0 });
   assert.ok(reconcileWalletBalance(db, "usr_neha").matches);
 });
 
@@ -75,7 +75,7 @@ test("creator earnings pay past the referral wallet cap; referral credit stays w
   db.prepare("INSERT INTO bookings (id, ref, user_id, amount_inr, wallet_credit_applied_inr) VALUES ('bk_spend', 'IH-SPEND', 'usr_neha', 1070, 8930)").run();
   const spent = db.transaction(() => redeemWalletCredit(db, { userId: "usr_neha", bookingId: "bk_spend", amountInr: 8930, maxFromOtherInr: calc.maxFromOtherInr }))();
   assert.equal(spent.affiliateInr, 6930);
-  assert.deepEqual(walletBalances(db, "usr_neha"), { totalInr: 1000, affiliateInr: 0, otherInr: 1000 }, "only ₹2,000 of the ₹3,000 referral credit was used");
+  assert.deepEqual(walletBalances(db, "usr_neha"), { totalInr: 1000, affiliateInr: 0, refundInr: 0, otherInr: 1000 }, "only ₹2,000 of the ₹3,000 referral credit was used");
   assert.equal(db.prepare("SELECT affiliate_inr FROM wallet_transactions WHERE booking_id = 'bk_spend' AND entry_type = 'REDEMPTION'").get().affiliate_inr, 6930);
 
   // Cancelled before payment: each part comes back as the kind of credit it was.
@@ -84,7 +84,7 @@ test("creator earnings pay past the referral wallet cap; referral credit stays w
   const restored = db.prepare("SELECT entry_type, amount_inr, expires_at, credit_source FROM wallet_transactions WHERE booking_id = 'bk_spend' AND amount_inr > 0 ORDER BY entry_type").all();
   assert.deepEqual(restored.map((row) => [row.entry_type, row.amount_inr, row.credit_source, row.expires_at === null]),
     [["AFFILIATE_RESTORED", 6930, "AFFILIATE", true], ["REDEMPTION_RESTORED", 2000, null, false]]);
-  assert.deepEqual(walletBalances(db, "usr_neha"), { totalInr: 9930, affiliateInr: 6930, otherInr: 3000 });
+  assert.deepEqual(walletBalances(db, "usr_neha"), { totalInr: 9930, affiliateInr: 6930, refundInr: 0, otherInr: 3000 });
   assert.ok(reconcileWalletBalance(db, "usr_neha").matches);
 });
 

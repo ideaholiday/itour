@@ -25,7 +25,6 @@ import {
   notifyDispatchStatusChanged,
   notifyDriverAssigned,
   notifyCircuitReschedule,
-  notifyRefundProcessed,
   notifySupplierVerification,
   queueNotification,
   sendGuestBookingNotification,
@@ -41,7 +40,8 @@ import {
   updateDispatchStatus,
 } from "../services/driverDispatchService.js";
 
-import { calculateRefundQuote, createRefundRecord, finalizeRefund, getSupplierPayoutLedger, resolveCommissionRate } from "../services/financeService.js";
+import { getSupplierPayoutLedger, resolveCommissionRate } from "../services/financeService.js";
+import { creditSupplierCancellationToWallet } from "../services/refundCreditService.js";
 import { getSubscriptionStatus } from "../services/supplierSubscriptionService.js";
 import {
   listSubscriptionPayments, listSupplierSpotlights, quotePlanPayment, quoteSubscriptionPayment, renderSubscriptionInvoice,
@@ -1692,46 +1692,34 @@ router.post("/:id/bookings/:bookingId/cancel", optionalAuthMiddleware, requireSu
       return res.status(409).json({ error: `Cannot cancel a booking that is already ${currentStatus}.` });
     }
 
-    // Calculate refund quote
-    const isPaid = booking.payment_status === "PAID";
-    let quote = null;
-    if (isPaid) {
-      // If supplier is initiating cancellation due to operational issues, traveler typically gets 100% full refund
-      quote = calculateRefundQuote(db, booking, { overridePercentage: 100 });
-      const refundRecord = createRefundRecord(db, {
-        booking,
-        quote,
-        reason: `Supplier cancellation: ${reason}${notes ? ` - ${notes}` : ""}`,
-        actorId: req.user?.id || id,
-        idempotencyKey: `sup-cancel:${booking.id}:${Date.now()}`
-      });
-      finalizeRefund(db, { booking, refund: refundRecord, providerResult: { status: "PROCESSED" } });
+    // A supplier cancellation refunds the traveler in full, to their wallet first (ADR 019):
+    // they can rebook with it or, for 10 days, send it back to the original payment method.
+    let wallet = null;
+    if (booking.payment_status === "PAID") {
+      wallet = creditSupplierCancellationToWallet(db, { booking, reason, notes });
     } else {
       db.transaction(() => {
         db.prepare("UPDATE bookings SET status = 'cancelled', cancellation_reason = ? WHERE id = ?").run(reason, booking.id);
         db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
         db.prepare("UPDATE driver_assignments SET assignment_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
       })();
+      onReferralBookingCancelled(db, booking.id, { reason: "Cancelled by supplier" });
     }
-    onReferralBookingCancelled(db, booking.id, { reason: "Cancelled by supplier" });
 
-    try {
-      if (refundRecord?.id) {
-        queueNotification(notifyRefundProcessed(db, refundRecord.id), "Supplier cancellation refund notification");
-      }
-    } catch (notifErr) {
-      logger.warn("Supplier cancellation notification failed", { requestId: req.requestId, error: notifErr });
-    }
+    queueNotification(sendGuestBookingNotification(db, booking.id, "BOOKING_CANCELLED", { eventKeySuffix: "SUPPLIER_CANCEL" }), "Supplier cancellation traveler notification");
 
     res.json({
       success: true,
-      message: `Booking ${booking.ref} cancelled successfully.`,
+      message: wallet
+        ? `Booking ${booking.ref} cancelled. ₹${wallet.creditInr} was refunded to the traveler's wallet.`
+        : `Booking ${booking.ref} cancelled successfully.`,
       status: "cancelled",
-      refundQuote: quote
+      walletCreditInr: wallet?.creditInr ?? null,
+      cashRefundableUntil: wallet?.cashRefundableUntil ?? null
     });
   } catch (err) {
     logger.error("Supplier cancellation failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: err.message || "Failed to cancel booking" });
+    res.status(err.status || 500).json({ error: err.message || "Failed to cancel booking" });
   }
 });
 

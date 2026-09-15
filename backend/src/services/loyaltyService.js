@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import db from "../db.js";
+import { listCashRefundableCredits } from "./refundCreditService.js";
 import {
   referralPolicy,
   walletBalances,
@@ -110,6 +111,9 @@ export function getTravelerLoyaltyProfile(database = db, userId) {
     walletBalanceInr: summary.wallet.balanceInr,
     // The part of the balance that is the user's own creator earnings (no expiry, not capped at checkout).
     affiliateCreditInr: walletBalances(database, userId).affiliateInr,
+    // Refund credit from supplier cancellations (not capped at checkout, no expiry), and which of it can still go back as cash.
+    refundCreditInr: walletBalances(database, userId).refundInr,
+    cashRefundableCredits: listCashRefundableCredits(database, userId),
     expiringSoonInr: summary.wallet.expiringSoonInr,
     nextExpiryAt: summary.wallet.nextExpiryAt,
     clawbackPendingInr: summary.wallet.clawbackPendingInr,
@@ -168,9 +172,10 @@ export function applyWalletCreditsToCheckout(database = db, userId, { bookingAmo
 
   const { walletMaxShare, walletMaxPerBookingInr } = referralPolicy(database);
   // Referral credit is capped per booking; a creator's own earnings can pay the rest (ADR 017).
-  const { affiliateInr, otherInr } = walletBalances(database, userId);
+  // Refund credit from a supplier cancellation is the traveler's own money: not capped either (ADR 019).
+  const { affiliateInr, refundInr, otherInr } = walletBalances(database, userId);
   const cappedPart = Math.floor(Math.min(amount * walletMaxShare, walletMaxPerBookingInr, otherInr));
-  const affiliatePart = Math.floor(Math.min(affiliateInr, Math.max(0, amount - cappedPart)));
+  const affiliatePart = Math.floor(Math.min(affiliateInr + refundInr, Math.max(0, amount - cappedPart)));
   const maxAllowedDiscount = Math.min(Math.floor(availableBalance), cappedPart + affiliatePart);
 
   let creditToApply = requestedCreditInr !== undefined

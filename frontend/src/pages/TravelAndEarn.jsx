@@ -68,6 +68,10 @@ function faqItems(policy) {
       a: "At checkout, turn on wallet credit. It can cover up to 50% of a booking, up to ₹2,000 per booking. Credit can be spent on any tour, transfer or package, but it can't be withdrawn as cash.",
     },
     {
+      q: "What if an operator cancels my trip?",
+      a: "What you paid is refunded to your wallet straight away as refund credit. It has no limit per booking and never expires, so you can rebook the same trip or anything else. If you'd rather have the money back, you can send the unspent refund credit to your original payment method from My Trips within 10 days.",
+    },
+    {
       q: "Does credit expire?",
       a: `Credit earned under the current program expires ${policy.creditExpiryMonths} months after it reaches your wallet, and we'll remind you before it does. Credit you already had before this change keeps its original terms.`,
     },

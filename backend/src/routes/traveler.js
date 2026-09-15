@@ -12,6 +12,7 @@ import { createCircuitQuote, getCircuitQuote } from "../services/circuitQuoteSer
 import { itinerarySchemas } from "../validators/apiSchemas.js";
 import { BookingModificationService } from "../services/bookingModificationService.js";
 import { refundCancelledBooking } from "../services/bookingRefundService.js";
+import { refundCreditToSource } from "../services/refundCreditService.js";
 import { notifyRefundProcessed, queueNotification } from "../services/notificationService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { subscribeNewsletter, unsubscribeNewsletter, getSubscriberStats } from "../services/newsletterService.js";
@@ -514,6 +515,32 @@ router.post("/bookings/:id/self-cancel", authenticate, async (req, res) => {
     const status = err.message === "UNAUTHORIZED" ? 403 : err.message === "BOOKING_NOT_FOUND" ? 404
       : String(err.message).startsWith("BOOKING_ALREADY_") ? 409 : 400;
     return res.status(status).json({ error: err.message || "FAILED_TO_CANCEL" });
+  }
+});
+
+// A supplier cancelled this booking and refunded it to the wallet: send the unspent credit back
+// to the original payment method instead, within the cash window (ADR 019).
+router.post("/bookings/:id/refund-to-source", authenticate, async (req, res) => {
+  try {
+    const result = await refundCreditToSource(db, { userId: req.user.id, bookingId: req.params.id });
+    if (result.status === "PROCESSED") {
+      queueNotification(notifyRefundProcessed(db, result.refundId, { includeSupplier: false }), "Refund credit cash-out notification");
+    } else {
+      logger.error("Refund credit cash-out gateway refund failed", { bookingId: result.bookingId, refundId: result.refundId, error: result.error });
+    }
+    return res.json({
+      success: true,
+      bookingRef: result.bookingRef,
+      amountInr: result.amountInr,
+      refundStatus: result.status,
+      message: result.status === "PROCESSED"
+        ? `₹${result.amountInr} is on its way back to your original payment method.`
+        : `₹${result.amountInr} left your wallet for a refund to your original payment method. Our finance team will complete it.`,
+    });
+  } catch (err) {
+    const status = err.status && err.status < 500 ? err.status : 500;
+    if (status === 500) logger.error("Refund credit cash-out failed", { bookingId: req.params.id, error: err });
+    return res.status(status).json({ error: status === 500 ? "Could not send the refund back. Please try again." : err.message });
   }
 });
 
