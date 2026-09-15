@@ -217,3 +217,13 @@ This document records significant technical and product architectural decisions.
   - Supplier subscription invoices use **SAC 998559 with 18% GST** (confirmed by the owner's CA).
   - **Until suppliers can pay online, a launch waiver covers every new supplier for free** with no end date; an admin sets the end date in Programs when the owner decides it. The subscription price and billing period are decided later.
 - **Consequences**: Bookability becomes KYB `APPROVED` + product `PUBLISHED` + (exempt supplier, or an active or waived subscription). Confirmed bookings are honoured when a subscription lapses. Today's affiliate tiers (10–15% + 5–7% traveler discount) and the 5%/20% TDS constants in `affiliateService.js` no longer match and must change. The owner set the 1% TDS rate; which Income Tax section applies is for the CA to confirm. Subscription price and billing period, and new affiliate tier rates, are not yet set.
+
+---
+
+## ADR 018: Verified Plus Refunds Only the Check; GST Credit Notes Come Later
+- **Date**: 2026-09-15
+- **Context**: Paid profile plans (ADR 008) shipped with a refund when the Verified check is rejected. For Verified Plus, which bundles the check with a Spotlight, the owner had to choose what a rejection refunds. Refunds also raise the question of GST credit notes.
+- **Decision Made**:
+  - A rejected **Verified Plus** check refunds **only the check part**: the share of what was paid above the Spotlight price, fixed at purchase (`check_refundable_inr`; ₹590 of ₹4,128.82 at launch prices). The supplier keeps the Spotlight. A rejected **Verified** check refunds the whole payment.
+  - **GST credit notes** for refunded checks are not issued yet; they will be added later, in a format confirmed with the CA.
+- **Consequences**: Rules in `SUPPLIER_PLANS.md` §6. Until credit notes exist, a refunded check's tax invoice stands without one; finance handles the GST adjustment manually.

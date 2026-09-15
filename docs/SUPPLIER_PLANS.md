@@ -99,7 +99,7 @@ Spotlight; renews as Verified). Coupons for them use
 3. **A rejected check is refunded** (reason required) through Cashfree: the whole
    payment for VERIFIED; for VERIFIED_PLUS the part above the Spotlight price,
    fixed at purchase (`check_refundable_inr`, e.g. ₹590 of ₹4,128.82) — the
-   Spotlight is kept. A failed refund is marked `FAILED` and retried from the queue.
+   Spotlight is kept (owner decision, ADR 018). A failed refund is marked `FAILED` and retried from the queue.
    Nothing is refunded for a 100%-coupon purchase.
 4. **A Spotlight** shows one of the supplier's published listings on its public
    profile (`product_spotlights`) — the only way products appear there (§12.1).
@@ -112,6 +112,6 @@ Spotlight; renews as Verified). Coupons for them use
 
 ## 7. Not built yet
 
-- **GST credit notes** for refunded checks (format to confirm with the CA).
+- **GST credit notes** for refunded checks: deferred by the owner (ADR 018); format to confirm with the CA.
 - **Automatic renewal charges:** renewal is a new payment by the supplier.
 - ADR 008's optional 3-Spotlight pack and founding offer (a coupon can do the latter).
