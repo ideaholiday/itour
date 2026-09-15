@@ -1,10 +1,12 @@
+import { randomUUID } from "node:crypto";
+import { dispatchTransaction, scheduleKey, departureKey, enqueueDispatch, revokeAssignment } from "./dispatchStateService.js";
 import { nanoid } from "nanoid";
 import { vehicleModelSupportsCategory } from "../lib/vehicleInventory.js";
 import { normalizeWhatsAppPhone } from "./whatsappService.js";
 import { hashPickupOtp } from "./bookingService.js";
-import { processReferralRewardOnCompletion } from "./promoService.js";
-
-const driverGpsCache = new Map();
+import { markReferralTripCompleted } from "./referralService.js";
+import { onTripCompleted } from "./affiliateService.js";
+import { latestDriverLocation, recordDriverLocations, telemetryFromAssignment } from "./driverLocationService.js";
 
 export const DISPATCH_STATUS_TRANSITIONS = Object.freeze({
   ASSIGNED: ["EN_ROUTE"],
@@ -39,9 +41,9 @@ export function normalizeVehicleNumber(value) {
   return plate;
 }
 
-function bookingWithDuration(database, bookingId, supplierId) {
+export function bookingWithDuration(database, bookingId, supplierId) {
   return database.prepare(`
-    SELECT b.*, p.duration_hours, tr.duration_mins, pi.total_days
+    SELECT b.*, p.duration_hours, p.group_type, tr.duration_mins, pi.total_days
     FROM bookings b
     LEFT JOIN products p ON p.id = b.product_id
     LEFT JOIN transfer_routes tr ON tr.product_id = b.product_id
@@ -51,26 +53,28 @@ function bookingWithDuration(database, bookingId, supplierId) {
 }
 
 function timeParts(value) {
-  const match = String(value || "09:00").trim().match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
-  if (!match) return [9, 0];
+  const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
+  if (!match) throw dispatchError("A valid pickup time is required");
   let hour = Number(match[1]);
   const minute = Number(match[2]);
   const meridiem = match[3]?.toUpperCase();
   if (meridiem === "PM" && hour < 12) hour += 12;
   if (meridiem === "AM" && hour === 12) hour = 0;
-  return hour <= 23 && minute <= 59 ? [hour, minute] : [9, 0];
+  if (hour > 23 || minute > 59) throw dispatchError("A valid pickup time is required");
+  return [hour, minute];
 }
 
 export function bookingWindow(booking) {
   const [year, month, day] = String(booking.activity_date || "").split("-").map(Number);
   const [hour, minute] = timeParts(booking.pickup_time);
   if (![year, month, day].every(Number.isFinite)) throw dispatchError("Booking has an invalid travel date");
-  const start = Date.UTC(year, month - 1, day, hour, minute);
+  if (new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) !== booking.activity_date) throw dispatchError("Booking has an invalid travel date");
+  const start = Date.UTC(year, month - 1, day, hour, minute) - 330 * 60000;
   const packageHours = Number(booking.total_days) > 0 ? Number(booking.total_days) * 24 : 0;
   const productHours = Number(booking.duration_hours) > 0 ? Number(booking.duration_hours) : 0;
   const transferHours = Number(booking.duration_mins) > 0 ? Number(booking.duration_mins) / 60 : 0;
   const fallback = String(booking.product_type).toUpperCase() === "TRANSFER" ? 2 : 8;
-  const durationHours = Math.max(packageHours, productHours, transferHours, fallback);
+  const durationHours = Math.max(packageHours, productHours, transferHours) || fallback;
   return { start, end: start + durationHours * 60 * 60 * 1000, durationHours };
 }
 
@@ -82,16 +86,17 @@ export function bookingWindowsOverlap(left, right) {
 
 function assignmentConflicts(database, booking, driver) {
   const candidates = database.prepare(`
-    SELECT b.*, p.duration_hours, tr.duration_mins, pi.total_days,
-      da.driver_name, da.driver_phone, da.vehicle_number, da.assignment_status, da.supplier_driver_id
+    SELECT b.*, p.duration_hours, p.group_type, tr.duration_mins, pi.total_days,
+      da.driver_name, da.driver_phone, da.vehicle_number, da.assignment_status, da.supplier_driver_id, da.departure_key
     FROM driver_assignments da
     JOIN bookings b ON b.id = da.booking_id
     LEFT JOIN products p ON p.id = b.product_id
     LEFT JOIN transfer_routes tr ON tr.product_id = b.product_id
     LEFT JOIN package_itineraries pi ON pi.product_id = b.product_id
-    WHERE da.supplier_id = ? AND b.id <> ?
+    WHERE b.id <> ?
       AND LOWER(b.status) NOT IN ('completed', 'cancelled')
-  `).all(booking.supplier_id, booking.id);
+  `).all(booking.id);
+  const buffer = database.prepare("SELECT buffer_minutes FROM dispatch_settings WHERE supplier_id = ?").get(booking.supplier_id)?.buffer_minutes ?? 30;
   const driverPhone = normalizeWhatsAppPhone(driver.driver_phone);
   const plate = normalizeVehicleNumber(driver.vehicle_number).replace(/[^A-Z0-9]/g, "");
   return candidates.filter((candidate) => {
@@ -99,7 +104,9 @@ function assignmentConflicts(database, booking, driver) {
     const sameRosterDriver = driver.id && candidate.supplier_driver_id === driver.id;
     const samePhone = driverPhone && normalizeWhatsAppPhone(candidate.driver_phone) === driverPhone;
     const sameVehicle = String(candidate.vehicle_number || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === plate;
-    return (sameRosterDriver || samePhone || sameVehicle) && bookingWindowsOverlap(booking, candidate);
+    if (candidate.departure_key === departureKey(booking) && candidate.departure_key?.startsWith("departure:")) return false;
+    const a = bookingWindow(booking), b = bookingWindow(candidate);
+    return (sameRosterDriver || samePhone || sameVehicle) && a.start < b.end + buffer * 60000 && b.start < a.end + buffer * 60000;
   });
 }
 
@@ -123,7 +130,7 @@ export function getFleetAvailability(database, { supplierId, bookingId }) {
   const drivers = database.prepare("SELECT * FROM supplier_drivers WHERE supplier_id = ? ORDER BY driver_name").all(supplierId);
   return drivers.map((driver) => {
     const rosterStatus = String(driver.status || "AVAILABLE").toUpperCase();
-    const compatible = vehicleModelSupportsCategory(driver.vehicle_model, booking.vehicle_category);
+    const compatible = vehicleModelSupportsCategory(driver.vehicle_model, booking.vehicle_category) && Number(driver.seat_capacity) >= Number(booking.adults || 0) + Number(booking.children || 0) && Boolean(driver.driver_email);
     const conflicts = unavailableFleetStatuses.has(rosterStatus) ? [] : assignmentConflicts(database, booking, driver);
     const available = !unavailableFleetStatuses.has(rosterStatus) && compatible && conflicts.length === 0;
     const reason = unavailableFleetStatuses.has(rosterStatus)
@@ -137,11 +144,15 @@ export function getFleetAvailability(database, { supplierId, bookingId }) {
   });
 }
 
-export function assignDriverToBooking(database, { supplierId, bookingId, supplierDriverId, manualDriver, actorId }) {
+export function assignDriverToBooking(database, args) {
+  return dispatchTransaction(database, () => assignDriverLocked(database, args));
+}
+
+function assignDriverLocked(database, { supplierId, bookingId, supplierDriverId, manualDriver, actorId, automatic = false, assignmentDetails = {}, now = new Date() }) {
   const booking = bookingWithDuration(database, bookingId, supplierId);
   if (!booking) throw dispatchError("Booking was not found for this supplier", 404);
   if (String(booking.payment_status).toUpperCase() !== "PAID") throw dispatchError("A driver can be assigned only after payment is confirmed", 409);
-  const assignmentAccepted = ["SUPPLIER_ACCEPTED", "LEGACY_ASSIGNED", "MANUAL_ASSIGNED", "AUTO_REALLOCATED"];
+  const assignmentAccepted = ["SUPPLIER_ACCEPTED", "LEGACY_ASSIGNED", "MANUAL_ASSIGNED", "AUTO_REALLOCATED", "RESCHEDULE_RECONFIRMED"];
   if (!assignmentAccepted.includes(String(booking.supplier_assignment_status || "LEGACY_ASSIGNED").toUpperCase())) throw dispatchError("Accept this booking before assigning a driver", 409);
   if (!["confirmed", "driver_assigned"].includes(String(booking.status).toLowerCase())) throw dispatchError(`A driver cannot be assigned while booking is ${booking.status}`, 409);
 
@@ -151,13 +162,15 @@ export function assignDriverToBooking(database, { supplierId, bookingId, supplie
     driver = database.prepare("SELECT * FROM supplier_drivers WHERE id = ? AND supplier_id = ?").get(supplierDriverId, supplierId);
     if (!driver) throw dispatchError("Choose a driver from your own fleet", 404);
     if (unavailableFleetStatuses.has(String(driver.status || "").toUpperCase())) throw dispatchError(`This driver is ${String(driver.status).toLowerCase()} and cannot be assigned`, 409);
-    source = "FLEET";
+    source = automatic ? "AUTOMATIC" : "FLEET";
   } else {
     driver = {
       driver_name: String(manualDriver?.driverName || "").trim(),
       driver_phone: manualDriver?.driverPhone,
       vehicle_model: String(manualDriver?.vehicleModel || "Commercial AC Vehicle").trim(),
       vehicle_number: manualDriver?.vehicleNumber,
+      driver_email: manualDriver?.driverEmail,
+      seat_capacity: manualDriver?.seatCapacity,
     };
     if (!driver.driver_name) throw dispatchError("Driver name is required");
     source = "MANUAL";
@@ -170,7 +183,15 @@ export function assignDriverToBooking(database, { supplierId, bookingId, supplie
   const conflicts = assignmentConflicts(database, booking, driver);
   if (conflicts.length) throw dispatchError(`Driver or vehicle is already assigned to ${conflicts[0].ref || conflicts[0].id} during this trip`, 409);
 
+  const seats = Number(booking.adults || 0) + Number(booking.children || 0);
+  const otherSeats = database.prepare(`SELECT b.adults, b.children FROM driver_assignments da JOIN bookings b ON b.id = da.booking_id
+    WHERE da.departure_key = ? AND b.id <> ? AND LOWER(b.status) NOT IN ('cancelled', 'completed') AND da.assignment_status <> 'CANCELLED'`)
+    .all(departureKey(booking), bookingId).reduce((sum, b) => sum + Number(b.adults || 0) + Number(b.children || 0), 0);
+  if (!Number.isInteger(Number(driver.seat_capacity)) || Number(driver.seat_capacity) < seats + otherSeats || Number(driver.seat_capacity) < 1) throw dispatchError("Enter sufficient vehicle seat capacity before assigning", 409);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(driver.driver_email || ''))) throw dispatchError("Driver email is required for trip alerts", 409);
   const existing = database.prepare("SELECT * FROM driver_assignments WHERE booking_id = ?").get(bookingId);
+  if (existing && ['EN_ROUTE','ARRIVED','TRIP_STARTED','COMPLETED'].includes(existing.assignment_status)) throw dispatchError("An active trip cannot be reassigned", 409);
+  if (existing) revokeAssignment(database, booking, existing, 'Driver assignment replaced', now);
   const assignmentId = existing?.id || `drv_${nanoid(12)}`;
   database.transaction(() => {
     if (existing) {
@@ -190,22 +211,33 @@ export function assignDriverToBooking(database, { supplierId, bookingId, supplie
       `).run(assignmentId, bookingId, supplierId, driver.id || null, driver.driver_name, driver.driver_phone, driver.vehicle_model, driver.vehicle_number, source, actorId || null);
     }
     database.prepare("UPDATE bookings SET status = 'driver_assigned' WHERE id = ?").run(bookingId);
+    const minutes = database.prepare("SELECT response_minutes FROM dispatch_settings WHERE supplier_id = ?").get(supplierId)?.response_minutes ?? 30;
+    database.prepare(`UPDATE driver_assignments SET driver_email = ?, seat_capacity = ?, revision = ?, schedule_key = ?, departure_key = ?, acknowledgement = 'PENDING', response_deadline = ?, acknowledged_at = NULL WHERE id = ?`)
+      .run(driver.driver_email, Number(driver.seat_capacity), randomUUID(), scheduleKey(booking), departureKey(booking), new Date(Math.min(now.getTime() + minutes * 60000, bookingWindow(booking).start)).toISOString(), assignmentId);
     const saved = database.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignmentId);
+    enqueueDispatch(database, booking, saved, 'DRIVER_REQUEST', { now });
     event(database, saved, {
       eventType: existing ? "REASSIGNED" : "ASSIGNED",
       previousStatus: existing?.assignment_status,
       newStatus: "ASSIGNED",
       actorId,
-      details: existing ? { previousDriver: existing.driver_name, previousVehicle: existing.vehicle_number } : {},
+      details: { ...(existing ? { previousDriver: existing.driver_name, previousVehicle: existing.vehicle_number } : {}), ...assignmentDetails },
     });
   })();
   return database.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignmentId);
 }
 
-export function updateDispatchStatus(database, { supplierId, bookingId, nextStatus, actorId, note, allowTripStart = false }) {
+export function updateDispatchStatus(database, args) {
+  return dispatchTransaction(database, () => updateDispatchStatusLocked(database, args));
+}
+function updateDispatchStatusLocked(database, { supplierId, bookingId, nextStatus, actorId, note, allowTripStart = false }) {
   const normalizedNext = String(nextStatus || "").toUpperCase();
   const assignment = database.prepare("SELECT * FROM driver_assignments WHERE booking_id = ? AND supplier_id = ?").get(bookingId, supplierId);
   if (!assignment) throw dispatchError("Assign a driver before updating dispatch", 409);
+  const booking = database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
+  if (!booking || ['cancelled'].includes(String(booking.status).toLowerCase()) || booking.payment_status !== 'PAID') throw dispatchError("Booking is not available for service", 409);
+  if (assignment.schedule_key && assignment.schedule_key !== scheduleKey(booking)) throw dispatchError("Trip schedule changed; reassign the driver", 409);
+  if (assignment.acknowledgement !== 'ACCEPTED') throw dispatchError("Driver must accept this assignment first", 409);
   const current = String(assignment.assignment_status || "ASSIGNED").toUpperCase();
   if (current === normalizedNext) return { assignment, idempotent: true };
   if (normalizedNext === "TRIP_STARTED" && !allowTripStart) throw dispatchError("Verify the traveler's pickup OTP to start this trip", 409);
@@ -217,14 +249,26 @@ export function updateDispatchStatus(database, { supplierId, bookingId, nextStat
   database.transaction(() => {
     database.prepare(`UPDATE driver_assignments SET assignment_status = ?, last_status_at = datetime('now'), ${timestampColumn} = datetime('now'), notes = ? WHERE id = ?`)
       .run(normalizedNext, note?.trim() || assignment.notes || null, assignment.id);
-    if (normalizedNext === "TRIP_STARTED") database.prepare("UPDATE bookings SET status = 'in_progress' WHERE id = ?").run(bookingId);
+    if (["ARRIVED", "TRIP_STARTED", "COMPLETED"].includes(normalizedNext)) {
+      // The driver reached pickup, so a "may miss the pickup" location alert is settled.
+      database.prepare("UPDATE staff_tasks SET status = 'COMPLETED' WHERE booking_id = ? AND task_type = 'DRIVER_LOCATION_RISK' AND status = 'OPEN'").run(bookingId);
+    }
+    if (normalizedNext === "TRIP_STARTED") {
+      database.prepare("UPDATE bookings SET status = 'in_progress' WHERE id = ?").run(bookingId);
+      database.prepare("UPDATE staff_tasks SET status = 'COMPLETED' WHERE booking_id = ? AND task_type = 'PICKUP_NOT_STARTED' AND status = 'OPEN'").run(bookingId);
+    }
     if (normalizedNext === "COMPLETED") {
       database.prepare("UPDATE bookings SET status = 'completed' WHERE id = ?").run(bookingId);
+      database.prepare("UPDATE staff_tasks SET status = 'COMPLETED' WHERE booking_id = ? AND task_type IN ('TRIP_COMPLETION_OVERDUE', 'PICKUP_NOT_STARTED') AND status = 'OPEN'").run(bookingId);
       database.prepare("UPDATE payouts SET payout_status = 'SCHEDULED' WHERE booking_id = ? AND payout_status = 'PAYMENT_HELD'").run(bookingId);
       try {
-        processReferralRewardOnCompletion(database, bookingId);
+        markReferralTripCompleted(database, bookingId);
+      } catch {}
+      try {
+        onTripCompleted(database, bookingId);
       } catch {}
     }
+    enqueueDispatch(database, booking, assignment, `DISPATCH_${normalizedNext}`);
     event(database, assignment, { eventType: "STATUS_CHANGED", previousStatus: current, newStatus: normalizedNext, actorId, note });
     try {
       const logisticsEvent = { EN_ROUTE: "DRIVER_EN_ROUTE", ARRIVED: "DRIVER_ARRIVED", TRIP_STARTED: "GUEST_PICKED_UP", COMPLETED: "DROPPED_OFF" }[normalizedNext];
@@ -240,48 +284,34 @@ export function getDispatchTimeline(database, bookingId) {
 }
 
 export function verifyPickupOtp(database, bookingId, enteredOtp) {
-  const normalizedOtp = String(enteredOtp || "").trim();
-  if (!/^\d{4,6}$/.test(normalizedOtp)) {
-    throw dispatchError("Enter a valid 4-digit numeric pickup OTP", 400);
-  }
-  const booking = database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
-  if (!booking) throw dispatchError("Booking not found", 404);
-
-  const expectedHash = hashPickupOtp(booking.id, normalizedOtp);
-  const isValid = (booking.otp_hash && booking.otp_hash === expectedHash) ||
-                  (booking.otp_code && String(booking.otp_code) === normalizedOtp);
-
-  if (!isValid) {
-    throw dispatchError("Invalid pickup OTP. Please verify with traveler.", 400);
-  }
-  return { valid: true, bookingId: booking.id };
+  const result = dispatchTransaction(database, () => {
+    const booking = database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
+    if (!booking || booking.payment_status !== 'PAID' || !['confirmed','driver_assigned','in_progress'].includes(booking.status)) return { error: "Booking is not available for pickup", status: 409 };
+    if (booking.otp_verified_at) return { valid: true, bookingId };
+    if (Number(booking.otp_attempts || 0) >= 5) return { error: "Pickup code locked. Contact operations", status: 429 };
+    if (!booking.otp_hash || !booking.otp_expires_at || Date.parse(booking.otp_expires_at) < Date.now()) return { error: "Pickup code expired. Contact operations", status: 410 };
+    database.prepare("UPDATE bookings SET otp_attempts = COALESCE(otp_attempts, 0) + 1 WHERE id = ?").run(bookingId);
+    if (!/^\d{4,6}$/.test(String(enteredOtp || '')) || hashPickupOtp(booking.id, String(enteredOtp)) !== booking.otp_hash) return { error: "Invalid pickup OTP", status: 400 };
+    database.prepare("UPDATE bookings SET otp_verified_at = ? WHERE id = ?").run(new Date().toISOString(), bookingId);
+    return { valid: true, bookingId };
+  });
+  if (result.error) throw dispatchError(result.error, result.status);
+  return result;
 }
 
+/** A position typed in by operations (for a driver who can't share from their phone). */
 export function updateDriverCoordinates(database, assignmentId, coords = {}) {
   const assignment = database.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignmentId);
   if (!assignment) throw dispatchError("Driver assignment not found", 404);
-
-  const lat = Number(coords.lat);
-  const lng = Number(coords.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (!Number.isFinite(Number(coords.lat)) || !Number.isFinite(Number(coords.lng)) || coords.lat === null || coords.lng === null) {
     throw dispatchError("Valid numeric lat and lng coordinates required", 400);
   }
-
-  const telemetry = {
-    lat,
-    lng,
-    speed_kmh: Number(coords.speed_kmh || coords.speed || 0),
-    heading: Number(coords.heading || 0),
-    battery_pct: coords.battery_pct != null ? Number(coords.battery_pct) : 95,
-    updated_at: new Date().toISOString(),
-  };
-
-  driverGpsCache.set(assignment.id, telemetry);
-  return { assignmentId: assignment.id, telemetry };
+  const result = recordDriverLocations(database, { assignment }, [{ lat: coords.lat, lng: coords.lng, speed_kmh: coords.speed_kmh ?? coords.speed, heading: coords.heading }], { source: "OPS" });
+  return { assignmentId: assignment.id, telemetry: result.latest };
 }
 
-export function getDriverCoordinates(assignmentId) {
-  return driverGpsCache.get(assignmentId) || null;
+export function getDriverCoordinates(database, assignmentId) {
+  return latestDriverLocation(database, assignmentId);
 }
 
 export function getLiveDispatchTelemetry(database) {
@@ -292,7 +322,8 @@ export function getLiveDispatchTelemetry(database) {
            p.id as product_id, p.title as product_title, p.hero_image, p.category, p.city as product_city,
            s.id as supplier_id, s.company_name as supplier_name, s.phone as supplier_phone,
            da.id as assignment_id, da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number,
-           da.assignment_status, da.assigned_at, da.en_route_at, da.arrived_at, da.trip_started_at, da.last_status_at
+           da.assignment_status, da.assigned_at, da.en_route_at, da.arrived_at, da.trip_started_at, da.last_status_at,
+           da.last_lat, da.last_lng, da.last_accuracy_m, da.last_speed_kmh, da.last_heading, da.last_location_source, da.last_location_at
     FROM bookings b
     LEFT JOIN products p ON p.id = b.product_id
     LEFT JOIN suppliers s ON s.id = b.supplier_id
@@ -302,56 +333,21 @@ export function getLiveDispatchTelemetry(database) {
     ORDER BY b.activity_date ASC, b.pickup_time ASC
   `).all();
 
+  const coordinate = (value) => (value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value));
   return rawRows.map((row) => {
-    let telemetry = driverGpsCache.get(row.assignment_id);
-
-    // If no simulated/active GPS yet, generate sensible telemetry around pickup or city center
-    const pickupLat = row.pickup_lat || 27.1751;
-    const pickupLng = row.pickup_lng || 78.0421;
-    const dropLat = row.drop_lat || pickupLat + 0.05;
-    const dropLng = row.drop_lng || pickupLng + 0.05;
-
-    if (!telemetry) {
-      const status = (row.assignment_status || "ASSIGNED").toUpperCase();
-      let lat = pickupLat;
-      let lng = pickupLng;
-      let speed = 0;
-      let heading = 45;
-
-      if (status === "EN_ROUTE") {
-        lat = pickupLat - 0.015;
-        lng = pickupLng - 0.012;
-        speed = 38;
-        heading = 32;
-      } else if (status === "ARRIVED") {
-        lat = pickupLat;
-        lng = pickupLng;
-        speed = 0;
-        heading = 0;
-      } else if (status === "TRIP_STARTED") {
-        lat = pickupLat + (dropLat - pickupLat) * 0.4;
-        lng = pickupLng + (dropLng - pickupLng) * 0.4;
-        speed = 46;
-        heading = 78;
-      }
-
-      telemetry = {
-        lat,
-        lng,
-        speed_kmh: speed,
-        heading,
-        battery_pct: 92,
-        updated_at: new Date().toISOString(),
-      };
-    }
-
+    // Only a position a driver or operator actually reported. The map shows a
+    // trip without one at its pickup point, marked as having no live GPS, and
+    // never invents a position, speed or battery level.
+    const { last_lat, last_lng, last_accuracy_m, last_speed_kmh, last_heading, last_location_source, last_location_at, ...trip } = row;
+    const telemetry = telemetryFromAssignment(row);
     return {
-      ...row,
-      pickup_lat: pickupLat,
-      pickup_lng: pickupLng,
-      drop_lat: dropLat,
-      drop_lng: dropLng,
+      ...trip,
+      pickup_lat: coordinate(row.pickup_lat),
+      pickup_lng: coordinate(row.pickup_lng),
+      drop_lat: coordinate(row.drop_lat),
+      drop_lng: coordinate(row.drop_lng),
       driver_telemetry: telemetry,
+      has_live_gps: Boolean(telemetry),
     };
   });
 }

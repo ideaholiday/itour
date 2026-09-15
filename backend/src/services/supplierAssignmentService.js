@@ -1,7 +1,9 @@
 import { isCoordinateInGeoFence, isPointInPolygon, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
+import { subscriptionCoveredSql } from "./supplierKybGate.js";
 import { fleetSupportsVehicle, vehicleModelSupportsCategory } from "../lib/vehicleInventory.js";
+import { priorMeanRating } from "./reviewService.js";
 
 const ACTIVE_BOOKING_STATUSES = ["pending_payment", "confirmed", "driver_assigned", "in_progress"];
 
@@ -71,6 +73,7 @@ export function rankSupplierCandidates(rawCandidates, request) {
     const reasons = [];
     const coverage = coverageMatch(candidate.fences || [], request, candidate.productCity);
     if (normalizeText(candidate.kybStatus) !== "APPROVED") reasons.push("Supplier KYB is not approved");
+    if (candidate.subscriptionCovered === false) reasons.push("Supplier subscription is not active");
     if (candidate.wasPreviouslyDeclined) reasons.push("Supplier already declined or missed this booking");
     if (!candidate.isPublished) reasons.push("No published compatible listing");
     if (!comparableCity(candidate.productCity, request.city)) reasons.push("Listing city does not match the booked service");
@@ -102,7 +105,10 @@ export function rankSupplierCandidates(rawCandidates, request) {
     const vehicleScore = 25;
     const availabilityScore = Math.max(3, 15 - Number(candidate.activeBookings || 0) * 3);
     const priceScore = lowestPrice ? Math.round((lowestPrice / candidate.candidatePrice) * 15 * 10) / 10 : 0;
-    const ratingScore = Math.round(Math.min(5, Math.max(0, Number(candidate.rating) || 0)) * 2 * 10) / 10;
+    // Smoothed rating where the caller supplied one, so a supplier with no
+    // reviews yet is scored at the prior mean rather than as a zero-star one.
+    const qualityRating = Number(candidate.qualityRating ?? candidate.rating) || 0;
+    const ratingScore = Math.round(Math.min(5, Math.max(0, qualityRating)) * 2 * 10) / 10;
     const scoreBreakdown = {
       coverage: candidate.coverage.score,
       vehicle: vehicleScore,
@@ -129,17 +135,20 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
   const requestedRoute = isTransfer
     ? db.prepare("SELECT * FROM transfer_routes WHERE product_id = ? LIMIT 1").get(requestedProduct.id)
     : null;
-  const requestedPackage = requestedProduct.product_type === "MULTI_DAY_PACKAGE"
+  const requestedPackage = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(requestedProduct.product_type)
     ? db.prepare("SELECT * FROM package_itineraries WHERE product_id = ? LIMIT 1").get(requestedProduct.id)
     : null;
   const sql = isTransfer
     ? `
       SELECT p.id AS candidate_product_id, p.supplier_id, p.city AS product_city, p.price_inr,
              p.status AS product_status, p.is_published, s.company_name, s.kyb_status, s.rating, s.commission_rate,
+             ${subscriptionCoveredSql("s")} AS subscription_covered,
+             qs.smoothed_rating,
              tr.route_type, tr.vehicle_category AS route_vehicle_category, tr.max_passengers, tr.max_luggage,
              pi.vehicle_category AS package_vehicle_category
       FROM products p
       JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN quality_scores qs ON qs.entity_type = 'SUPPLIER' AND qs.entity_id = s.id
       LEFT JOIN transfer_routes tr ON tr.product_id = p.id
       LEFT JOIN package_itineraries pi ON pi.product_id = p.id
       WHERE p.product_type = 'TRANSFER'
@@ -147,16 +156,20 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
     : `
       SELECT p.id AS candidate_product_id, p.supplier_id, p.city AS product_city, p.price_inr,
              p.status AS product_status, p.is_published, s.company_name, s.kyb_status, s.rating, s.commission_rate,
+             ${subscriptionCoveredSql("s")} AS subscription_covered,
+             qs.smoothed_rating,
              tr.route_type, tr.vehicle_category AS route_vehicle_category, tr.max_passengers, tr.max_luggage,
              pi.vehicle_category AS package_vehicle_category
       FROM products p
       JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN quality_scores qs ON qs.entity_type = 'SUPPLIER' AND qs.entity_id = s.id
       LEFT JOIN transfer_routes tr ON tr.product_id = p.id
       LEFT JOIN package_itineraries pi ON pi.product_id = p.id
       WHERE p.id = ?
     `;
 
   const rows = isTransfer ? db.prepare(sql).all() : db.prepare(sql).all(requestedProduct.id);
+  const supplierPrior = priorMeanRating(db, "SUPPLIER");
 
   const activePlaceholders = ACTIVE_BOOKING_STATUSES.map(() => "?").join(", ");
   const candidates = rows.map((row) => {
@@ -201,8 +214,10 @@ export function findAutomaticSupplierAssignment(db, { quote, input, excludedSupp
       price: isRequestedListing ? quote.baseAmount : matchingVehicleVariant?.base_price ?? row.price_inr,
       isPublished: row.product_status === "PUBLISHED" && Number(row.is_published ?? 1) === 1,
       kybStatus: row.kyb_status,
+      subscriptionCovered: Boolean(Number(row.subscription_covered)),
       rating: row.rating,
-      commissionRate: resolveCommissionRate(db, row.supplier_id, requestedProduct.product_type),
+      qualityRating: row.smoothed_rating ?? supplierPrior,
+      commissionRate: resolveCommissionRate(db, row.supplier_id, row.candidate_product_id),
       routeType: row.route_type,
       vehicleCategory: candidateVehicleCategory,
       maxPassengers: vehicleCapacity?.maxPax ?? row.max_passengers ?? 99,

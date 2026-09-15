@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import Database from "better-sqlite3";
+import { requestJson, startTestServer } from "./helpers/serverHarness.js";
+import { saveInventoryRules } from "../src/services/nativeInventoryService.js";
+
+test("native HTTP journey holds the last seats, confirms instantly and issues a QR voucher", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+  const product = db.prepare("SELECT * FROM products WHERE product_type = 'DAY_TOUR' AND group_type = 'SHARED' AND status = 'PUBLISHED' LIMIT 1").get();
+  assert.ok(product);
+  const option = db.prepare("SELECT * FROM product_options WHERE product_id = ? LIMIT 1").get(product.id);
+  saveInventoryRules(db, product.id, option.id, { operatingDays: [0,1,2,3,4,5,6], departureTimes: ["09:00", "14:00"], capacity: 3, adultPrice: 1000, childPrice: 400, cutoffMinutes: 120, cancellationHours: 48, blackoutDates: [] });
+  const account = await requestJson(api.baseUrl, "/api/auth/signup", { body: { name: "Seat Traveler", email: "seats@example.com", password: "Integration@2026", phone: "+919876543210" } });
+  assert.equal(account.response.status, 200);
+  const token = account.data.token;
+  const date = new Date(Date.now() + 21 * 86400000).toISOString().slice(0,10);
+  const reserve = key => requestJson(api.baseUrl, "/api/availability/native/hold", { token, body: { productId: product.id, optionId: option.id, localDate: date, localTime: "09:00", adults: 2, children: 1, requestKey: key } });
+  const results = await Promise.all([reserve("first"), reserve("second")]);
+  assert.deepEqual(results.map(r => r.response.status).sort(), [201,409]);
+  const hold = results.find(r => r.response.status === 201).data;
+  const input = { product_id: product.id, product_option_id: option.id, activity_date: date, pickup_time: "09:00", pickup_location: "Calangute, Goa", adults: 2, children: 1, luggage_bags: 0, vehicle_category: "SHARED_SEAT", native_hold_id: hold.holdId };
+  const quote = await requestJson(api.baseUrl, "/api/bookings/quote", { token, body: input });
+  assert.equal(quote.response.status, 200, JSON.stringify(quote.data));
+  assert.equal(quote.data.quote.breakdown.totalAmount, 2520);
+  const created = await requestJson(api.baseUrl, "/api/bookings", { token, body: { ...input, traveler_name: "Seat Traveler", traveler_email: "seats@example.com", traveler_phone: "+919876543210", payment_method: "DEMO", client_request_id: "native-booking" } });
+  assert.equal(created.response.status, 201, JSON.stringify(created.data));
+  const paid = await requestJson(api.baseUrl, "/api/checkout/demo-payment", { token, body: { bookingId: created.data.bookingId } });
+  assert.equal(paid.response.status, 200, JSON.stringify(paid.data));
+  const booking = db.prepare("SELECT * FROM bookings WHERE id = ?").get(created.data.bookingId);
+  assert.equal(booking.confirmation_status, "CONFIRMED"); assert.equal(booking.supplier_response_status, "ACCEPTED"); assert.equal(booking.supplier_response_deadline, null);
+  assert.equal(db.prepare("SELECT status FROM native_reservations WHERE booking_id = ?").get(booking.id).status, "CONFIRMED");
+  const voucher = await requestJson(api.baseUrl, `/api/bookings/${booking.ref}/documents/voucher`, { token });
+  assert.equal(voucher.response.status, 200); assert.match(voucher.data, /Booking QR code/);
+  const slots = await requestJson(api.baseUrl, `/api/availability/native/${product.id}?date=${date}&optionId=${option.id}`);
+  assert.equal(slots.data.slots[0].vacancies, 0); assert.equal(slots.data.slots[1].vacancies, 3);
+  const invalid = await requestJson(api.baseUrl, `/api/availability/native/${product.id}?date=yyyy-mm-dd`);
+  assert.equal(invalid.response.status, 400);
+  assert.equal(invalid.data.error, "Choose a valid tour date.");
+  assert.equal(invalid.data.code, "INVALID_DATE");
+});
+
+test("signed payment failures release holds and late captures enter review without confirming seats", async t => {
+  const { createHmac } = await import("node:crypto");
+  const webhookSecret = "native-test-webhook-secret";
+  const api = await startTestServer({ RAZORPAY_WEBHOOK_SECRET: webhookSecret }); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+  const product = db.prepare("SELECT * FROM products WHERE product_type = 'DAY_TOUR' AND group_type = 'SHARED' AND status = 'PUBLISHED' LIMIT 1").get();
+  const option = db.prepare("SELECT * FROM product_options WHERE product_id = ? LIMIT 1").get(product.id);
+  saveInventoryRules(db, product.id, option.id, { operatingDays: [0,1,2,3,4,5,6], departureTimes: ["09:00", "14:00"], capacity: 3, adultPrice: 1000, childPrice: 400, cutoffMinutes: 0, cancellationHours: 48, blackoutDates: [] });
+  const account = await requestJson(api.baseUrl, "/api/auth/signup", { body: { name: "Webhook Traveler", email: "webhook@example.test", password: "Integration@2026", phone: "+919876543210" } });
+  const token = account.data.token;
+  const date = new Date(Date.now() + 21 * 86400000).toISOString().slice(0,10);
+  const input = { product_id: product.id, product_option_id: option.id, activity_date: date, pickup_time: "14:00", pickup_location: "Calangute, Goa", adults: 2, children: 1, vehicle_category: "SHARED_SEAT" };
+  const holdRequest = () => requestJson(api.baseUrl, "/api/bookings/hold", { token, body: { ...input, client_request_id: "generic-native-hold" } });
+  const held = await holdRequest(); assert.equal(held.response.status, 201, JSON.stringify(held.data));
+  const replay = await holdRequest(); assert.equal(replay.data.holdId, held.data.holdId);
+  const created = await requestJson(api.baseUrl, "/api/bookings", { token, body: { ...input, hold_id: held.data.holdId, traveler_name: "Webhook Traveler", traveler_email: "webhook@example.test", traveler_phone: "+919876543210", payment_method: "RAZORPAY" } });
+  assert.equal(created.response.status, 201, JSON.stringify(created.data));
+  db.prepare("UPDATE bookings SET razorpay_order_id = 'order_native_failure' WHERE id = ?").run(created.data.bookingId);
+  async function webhook(event, paymentId) {
+    const body = { id: `${event}:${paymentId}`, event, payload: { payment: { entity: { id: paymentId, order_id: "order_native_failure", amount: 252000, currency: "INR", status: event === "payment.captured" ? "captured" : "failed" } } } };
+    return requestJson(api.baseUrl, "/api/checkout/webhook", { body, headers: { "x-razorpay-signature": createHmac("sha256", webhookSecret).update(JSON.stringify(body)).digest("hex") } });
+  }
+  const failed = await webhook("payment.failed", "pay_failed"); assert.equal(failed.response.status, 200);
+  assert.equal(db.prepare("SELECT status FROM native_reservations WHERE id = ?").get(held.data.holdId).status, "CANCELLED");
+  const late = await webhook("payment.captured", "pay_late"); assert.equal(late.response.status, 200, JSON.stringify(late.data));
+  assert.equal(late.data.status, "review");
+  assert.equal(db.prepare("SELECT payment_status FROM bookings WHERE id = ?").get(created.data.bookingId).payment_status, "PAYMENT_REVIEW_REQUIRED");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM staff_tasks WHERE booking_id = ? AND task_type = 'PAYMENT_REVIEW_REQUIRED'").get(created.data.bookingId).n, 1);
+  await webhook("payment.captured", "pay_late");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM staff_tasks WHERE booking_id = ? AND task_type = 'PAYMENT_REVIEW_REQUIRED'").get(created.data.bookingId).n, 1);
+  const slots = await requestJson(api.baseUrl, `/api/availability/native/${product.id}?date=${date}`);
+  assert.equal(slots.data.slots[1].vacancies, 3);
+});

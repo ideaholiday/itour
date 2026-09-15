@@ -1,7 +1,10 @@
+import { sendSupplierSms, smsConfiguration } from "./smsService.js";
 import { sendEmail, sendSupplierNotification } from "./emailService.js";
 import { normalizeWhatsAppPhone, sendWhatsAppMessage, whatsAppTemplate } from "./whatsappService.js";
 import { guestDocumentLinks } from "./guestDocumentService.js";
 import logger from "../config/logger.js";
+import { issueBookingInvite } from "./reviewInviteService.js";
+import { activityPath } from "../../../shared/activityUrl.js";
 
 const clean = (value) => String(value || "").trim();
 
@@ -25,7 +28,7 @@ export function guestNotificationPreferences(database, userId) {
   }
 }
 
-async function sendRecipientChannels({ database, eventType, eventKeyPrefix, recipient, subject, emailText, whatsappText, whatsappTemplate, metadata }) {
+export async function sendRecipientChannels({ database, eventType, eventKeyPrefix, recipient, subject, emailText, emailHtml, whatsappText, whatsappTemplate, metadata }) {
   const tasks = [];
   const preferences = recipient.role === "TRAVELER" ? guestNotificationPreferences(database, recipient.id) : { emailEnabled: true, whatsappEnabled: true };
   if (recipient.email && preferences.emailEnabled) {
@@ -38,8 +41,9 @@ async function sendRecipientChannels({ database, eventType, eventKeyPrefix, reci
       eventKey: `${eventKeyPrefix}:EMAIL:${clean(recipient.email).toLowerCase()}`,
       subject,
       text: emailText,
+      html: emailHtml,
       metadata,
-    }, { database }));
+    }, { database }).then((result) => ({ channel: "EMAIL", recipientRole: recipient.role, ...result })));
   }
   if (recipient.phone && preferences.whatsappEnabled) {
     tasks.push(sendWhatsAppMessage({
@@ -52,7 +56,7 @@ async function sendRecipientChannels({ database, eventType, eventKeyPrefix, reci
       text: whatsappText || emailText,
       template: whatsappTemplate,
       metadata,
-    }, { database }));
+    }, { database }).then((result) => ({ channel: "WHATSAPP", recipientRole: recipient.role, ...result })));
   }
   return Promise.all(tasks);
 }
@@ -91,10 +95,10 @@ export async function notifyBookingConfirmed(database, bookingId) {
     let subject = `Booking ${booking.ref} confirmed`;
     let message = `Hello ${recipient.name || "there"},\n\n${common}\n\nView the latest details in Idea Holiday.`;
     if (recipient.role === "TRAVELER") {
-      message = `Hello ${recipient.name || "Traveler"},\n\nYour payment is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}\n\nYour supplier is confirming the booking. Your private pickup OTP is available only in My Trips.`;
+      message = `Hello ${recipient.name || "Traveler"},\n\nYour payment is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}\n\n${booking.confirmation_type === "INSTANT" ? "Your booking is confirmed. Show your voucher when you arrive." : "Your supplier is confirming the booking."} Your private pickup OTP is available only in My Trips.`;
     } else if (recipient.role === "SUPPLIER") {
-      subject = `Action required: accept booking ${booking.ref}`;
-      message = `Hello ${recipient.name || "Partner"},\n\nA paid booking has been assigned to you. ${common}\nPickup: ${booking.pickup_location}\nRespond before ${booking.supplier_response_deadline || "the supplier SLA deadline"}.`;
+      subject = booking.confirmation_type === "INSTANT" ? `Confirmed booking ${booking.ref}` : `Action required: accept booking ${booking.ref}`;
+      message = `Hello ${recipient.name || "Partner"},\n\nA paid booking has been assigned to you. ${common}\nPickup: ${booking.pickup_location}\n${booking.confirmation_type === "INSTANT" ? "This booking is automatically confirmed against your seat inventory. No acceptance is required." : `Respond before ${booking.supplier_response_deadline || "the supplier SLA deadline"}.`}`;
     } else {
       subject = `New paid booking ${booking.ref}`;
       message = `${common}\nSupplier: ${booking.supplier_name || "Pending"}\nTraveler: ${booking.traveler_name}\nMonitor supplier acceptance and dispatch in Operations.`;
@@ -102,7 +106,9 @@ export async function notifyBookingConfirmed(database, bookingId) {
     const template = recipient.role === "TRAVELER"
       ? whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, booking.product_title || booking.product_type, booking.activity_date, booking.pickup_time, booking.pickup_location, documents.voucherUrl, documents.invoiceUrl])
       : recipient.role === "SUPPLIER"
-        ? whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_SUPPLIER_ASSIGNMENT, [booking.ref, booking.product_title || booking.product_type, booking.activity_date, booking.pickup_location, booking.supplier_response_deadline])
+        ? booking.confirmation_type === "INSTANT"
+          ? whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_OPS_ALERT, [booking.ref, "Booking automatically confirmed. View guests in your supplier portal."])
+          : whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_SUPPLIER_ASSIGNMENT, [booking.ref, booking.product_title || booking.product_type, booking.activity_date, booking.pickup_location, booking.supplier_response_deadline])
         : whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_OPS_ALERT, [booking.ref, "New paid booking"]);
     results.push(...await sendRecipientChannels({
       database,
@@ -116,12 +122,17 @@ export async function notifyBookingConfirmed(database, bookingId) {
       metadata: { bookingId: booking.id, bookingRef: booking.ref },
     }));
   }
+  if (supplier.phone && smsConfiguration().enabled) {
+    results.push(await sendSupplierSms({ to: supplier.phone, supplierId: supplier.id,
+      text: `${common} ${booking.confirmation_type === "INSTANT" ? "Automatically confirmed. View guests in your supplier portal." : "Please review the assignment in your supplier portal."}`,
+      eventKey: `${booking.id}:BOOKING_CONFIRMED:SUPPLIER:SMS`, metadata: { bookingId: booking.id, bookingRef: booking.ref } }, { database }));
+  }
   return { eventType, bookingId, attempted: results.length, results };
 }
 
 export async function sendGuestBookingNotification(database, bookingId, requestedEventType, { eventKeySuffix = `RESEND_${Date.now()}` } = {}) {
   const booking = database.prepare(`
-    SELECT b.*, p.title AS product_title, s.company_name AS supplier_name,
+    SELECT b.*, p.title AS product_title, p.city, s.company_name AS supplier_name,
       da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number
     FROM bookings b
     LEFT JOIN products p ON p.id = b.product_id
@@ -132,7 +143,7 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
   if (!booking) throw Object.assign(new Error("Booking not found"), { status: 404 });
 
   const eventType = String(requestedEventType || "DOCUMENTS").toUpperCase();
-  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE", "SUPPLIER_CONFIRMATION_PENDING", "PICKUP_DETAILS_UPDATED", "DRIVER_ARRIVING", "AMENDMENT_RESULT"].includes(eventType)) {
+  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE", "SUPPLIER_CONFIRMATION_PENDING", "PICKUP_DETAILS_UPDATED", "DRIVER_ARRIVING", "AMENDMENT_RESULT", "BOOKING_CANCELLED"].includes(eventType)) {
     throw Object.assign(new Error("Choose a supported booking logistics notification"), { status: 400 });
   }
   if (eventType === "DRIVER_ASSIGNED" && !booking.driver_name) {
@@ -149,6 +160,27 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
   const driverInfo = booking.driver_name
     ? `Driver: ${booking.driver_name} (${booking.driver_phone || "Contact via App"})\nVehicle: ${booking.vehicle_model || "Assigned Vehicle"} [${booking.vehicle_number || "Verified"}]`
     : "Driver and vehicle details will be shared on departure morning.";
+
+  // A supplier cancellation: what was paid is in the traveler's wallet to rebook with, or to send back within the cash window (ADR 019).
+  const cancelledContent = () => {
+    const credit = database.prepare("SELECT amount_inr, cash_refundable_until FROM wallet_transactions WHERE booking_id = ? AND entry_type = 'SUPPLIER_CANCEL_CREDIT'").get(booking.id);
+    const creditInr = Number(credit?.amount_inr || 0);
+    const cashBy = credit?.cash_refundable_until ? new Date(`${credit.cash_refundable_until.replace(" ", "T")}Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) : null;
+    const reason = booking.cancellation_reason || "operational constraint";
+    const bookAgainUrl = `https://ideaholiday.in${activityPath(booking.product_id, booking.product_title)}`;
+    const otherOptionsUrl = `https://ideaholiday.in/search?destination=${encodeURIComponent(booking.city || "")}`;
+    const myTripsUrl = "https://ideaholiday.in/my-bookings";
+    const refundText = creditInr > 0
+      ? `₹${creditInr} has been refunded to your Idea Holiday wallet. Use it on any booking: book the same trip again (${bookAgainUrl}) or choose another option (${otherOptionsUrl}).\nPrefer the money back to your original payment method? Request it in My Trips by ${cashBy}: ${myTripsUrl}`
+      : "No payment was collected for this booking.";
+    return {
+      subject: `Booking ${booking.ref} cancelled by the operator${creditInr > 0 ? ` — ₹${creditInr} refunded to your wallet` : ""}`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nWe're sorry: ${booking.supplier_name || "the operator"} has cancelled your booking for ${experienceName} on ${booking.activity_date}.\nReason: ${reason}.\n\n${refundText}\n\nNeed help rebooking? support@ideaholiday.in / +91 9696777391`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Cancelled by operator", creditInr > 0
+        ? `${experienceName} on ${booking.activity_date} was cancelled (${reason}). Rs ${creditInr} is refunded to your Idea Holiday wallet to book again. To get it back to your original payment method instead, request it in My Trips by ${cashBy}: ${myTripsUrl}`
+        : `${experienceName} on ${booking.activity_date} was cancelled (${reason}). No payment was collected.`]),
+    };
+  };
 
   const content = {
     BOOKING_CONFIRMED: {
@@ -168,7 +200,7 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     },
     PRE_TRIP_REMINDER: {
       subject: `Trip Reminder: Your ${experienceName} is tomorrow (${booking.ref})`,
-      message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour upcoming experience is tomorrow!\n\nBooking: ${booking.ref}\nExperience: ${experienceName}\nTravel Date: ${booking.activity_date}\nPickup Time: ${booking.pickup_time || "09:00 AM"}\nPickup Location: ${booking.pickup_location}\n\n${driverInfo}\n\nNeed assistance? 24/7 Helpline: +91 9336757106 / support@ideaholiday.in\n\nHave a memorable journey!\nIdea Holiday Team`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour upcoming experience is tomorrow!\n\nBooking: ${booking.ref}\nExperience: ${experienceName}\nTravel Date: ${booking.activity_date}\nPickup Time: ${booking.pickup_time || "09:00 AM"}\nPickup Location: ${booking.pickup_location}\n\n${driverInfo}\n\nNeed assistance? 24/7 Helpline: +91 9696777391 / +91 9336757106 / support@ideaholiday.in\n\nHave a memorable journey!\nIdea Holiday Team`,
       template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_REMINDER, [booking.ref, experienceName, booking.activity_date, booking.pickup_location]),
     },
     POST_TRIP_REVIEW_INVITE: {
@@ -179,23 +211,27 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     SUPPLIER_CONFIRMATION_PENDING: {
       subject: `Supplier confirmation pending for ${booking.ref}`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nPayment is received for ${experienceName}, but the supplier is still confirming availability. We will update you before ${booking.supplier_response_deadline || "the service"}.\nPickup requested: ${booking.pickup_location || "Pending"}.`,
-      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+      // Status updates use the generic TRIP_STATUS template: reusing BOOKING_CONFIRMED sent the wrong
+      // variable count (Meta rejects it) and told the traveler the booking was confirmed.
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Supplier confirmation pending", `Payment received for ${experienceName}. The supplier is confirming availability; we will update you before ${booking.supplier_response_deadline || "your trip"}.`]),
     },
     PICKUP_DETAILS_UPDATED: {
       subject: `Pickup details updated for ${booking.ref}`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour pickup details for ${experienceName} have been updated.\nPickup: ${booking.pickup_time || "Time TBC"}, ${booking.pickup_location || "See your voucher"}.\nDrop-off: ${booking.drop_location || "See your voucher"}.`,
-      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Pickup details updated", `Pickup: ${booking.pickup_time || "Time TBC"}, ${booking.pickup_location || "see your voucher"}. Drop-off: ${booking.drop_location || "see your voucher"}.`]),
     },
     DRIVER_ARRIVING: {
       subject: `Your driver is arriving (${booking.ref})`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour driver is on the way to ${booking.pickup_location || "your pickup point"}. Please keep your phone reachable.`,
-      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_DRIVER_ASSIGNED, [booking.ref, booking.driver_name, booking.driver_phone, booking.vehicle_model, booking.vehicle_number, booking.pickup_time, booking.pickup_location]),
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Driver arriving", `Your driver is on the way to ${booking.pickup_location || "your pickup point"}. Please keep your phone reachable.`]),
     },
     AMENDMENT_RESULT: {
       subject: `Booking logistics amendment ${booking.ref}`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour requested pickup/drop amendment has been recorded. Check My Trips for the latest voucher and logistics status.`,
-      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, experienceName, booking.activity_date, booking.pickup_time, booking.pickup_location]),
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Amendment recorded", "Check My Trips for the latest voucher and logistics status."]),
     },
+    // A getter, so the wallet lookup only runs for this event.
+    get BOOKING_CANCELLED() { return cancelledContent(); },
   }[eventType];
   const results = await sendRecipientChannels({
     database,
@@ -298,7 +334,7 @@ export async function notifyDispatchStatusChanged(database, bookingId) {
   return { eventType: `DISPATCH_${status}`, bookingId, attempted: results.length, results };
 }
 
-export async function notifyRefundProcessed(database, refundId) {
+export async function notifyRefundProcessed(database, refundId, { includeSupplier = true } = {}) {
   const refund = database.prepare(`
     SELECT r.*, b.user_id, b.supplier_id, b.traveler_name, b.traveler_email, b.traveler_phone,
       s.company_name AS supplier_name, s.contact_name AS supplier_contact_name,
@@ -310,7 +346,7 @@ export async function notifyRefundProcessed(database, refundId) {
   if (!refund) throw new Error("Refund not found for notification");
   const recipients = uniqueRecipients([
     { id: refund.user_id, role: "TRAVELER", name: refund.traveler_name, email: refund.traveler_email, phone: refund.traveler_phone },
-    { id: refund.supplier_id, role: "SUPPLIER", name: refund.supplier_contact_name || refund.supplier_name, email: refund.supplier_email, phone: refund.supplier_phone },
+    ...(includeSupplier ? [{ id: refund.supplier_id, role: "SUPPLIER", name: refund.supplier_contact_name || refund.supplier_name, email: refund.supplier_email, phone: refund.supplier_phone }] : []),
   ]);
   const results = [];
   for (const recipient of recipients) {
@@ -529,59 +565,14 @@ export async function notifyProductPublished(database, productId) {
 }
 
 export async function notifyUpcomingTripReminder(database, bookingId) {
-  const booking = database.prepare(`
-    SELECT b.*, p.title AS product_title, s.company_name AS supplier_name,
-      s.contact_name AS supplier_contact_name, s.phone AS supplier_phone,
-      da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number
-    FROM bookings b
-    LEFT JOIN products p ON p.id = b.product_id
-    LEFT JOIN suppliers s ON s.id = b.supplier_id
-    LEFT JOIN driver_assignments da ON da.booking_id = b.id AND da.assignment_status != 'CANCELLED'
-    WHERE b.id = ? OR b.ref = ?
-  `).get(bookingId, bookingId);
-  if (!booking) throw new Error("Booking not found for trip reminder");
-
-  const traveler = {
-    id: booking.user_id,
-    role: "TRAVELER",
-    name: booking.traveler_name,
-    email: booking.traveler_email,
-    phone: booking.traveler_phone,
-  };
-
-  const experienceName = booking.product_title || booking.product_type;
-  const driverInfo = booking.driver_name
-    ? `Driver: ${booking.driver_name} (${booking.driver_phone || "Contact via App"})\nVehicle: ${booking.vehicle_model || "Assigned Vehicle"} [${booking.vehicle_number || "Verified"}]`
-    : "Driver and vehicle details will be shared on departure morning.";
-
-  const emailText = `Hello ${booking.traveler_name || "Traveler"},\n\nYour upcoming experience is tomorrow!\n\nBooking: ${booking.ref}\nExperience: ${experienceName}\nTravel Date: ${booking.activity_date}\nPickup Time: ${booking.pickup_time || "09:00 AM"}\nPickup Location: ${booking.pickup_location}\n\n${driverInfo}\n\nNeed assistance? 24/7 Helpline: +91 9336757106 / support@ideaholiday.in\n\nHave a memorable journey!\nIdea Holiday Team`;
-
-  const whatsappText = `Hello ${booking.traveler_name || "Traveler"} 👋\n\n⏰ Reminder: Your trip is coming up tomorrow!\n\n📋 *Booking:* ${booking.ref}\n🌴 *Tour:* ${experienceName}\n📅 *Date:* ${booking.activity_date} at ${booking.pickup_time || "09:00 AM"}\n📍 *Pickup:* ${booking.pickup_location}\n\n🚗 *Assigned Vehicle / Driver:*\n${driverInfo}\n\nHave a wonderful trip with Idea Holiday!`;
-
-  const results = await sendRecipientChannels({
-    database,
-    eventType: "PRE_TRIP_REMINDER",
-    eventKeyPrefix: `${booking.id}:PRE_TRIP_REMINDER:24H`,
-    recipient: traveler,
-    subject: `Trip Reminder: Your ${experienceName} is tomorrow (${booking.ref})`,
-    emailText,
-    whatsappText,
-    whatsappTemplate: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_REMINDER, [
-      booking.ref,
-      experienceName,
-      booking.activity_date,
-      booking.pickup_location,
-    ]),
-    metadata: { bookingId: booking.id, bookingRef: booking.ref, activityDate: booking.activity_date },
-  });
-
-  return {
-    eventType: "PRE_TRIP_REMINDER",
-    bookingId: booking.id,
-    bookingRef: booking.ref,
-    recipient: traveler.email || traveler.phone,
-    results,
-  };
+  const { scheduleKey } = await import('./dispatchStateService.js');
+  const { deliverDispatchNotification } = await import('./dispatchNotificationService.js');
+  const booking = database.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
+  if (!booking || booking.payment_status !== 'PAID' || !['confirmed','driver_assigned'].includes(booking.status)) throw Object.assign(new Error('Booking is not available for a trip reminder'), { status: 409 });
+  const assignment = database.prepare("SELECT * FROM driver_assignments WHERE booking_id = ? AND acknowledgement = 'ACCEPTED' AND assignment_status <> 'CANCELLED'").get(booking.id);
+  const revision = assignment?.revision || 'unassigned';
+  const result = await deliverDispatchNotification(database, { id: `${booking.id}:${scheduleKey(booking)}:${revision}:PRE_TRIP_REMINDER`, booking_id: booking.id, revision, event_type: 'PRE_TRIP_REMINDER', payload: '{}' });
+  return { eventType: 'PRE_TRIP_REMINDER', bookingId: booking.id, bookingRef: booking.ref, recipient: booking.traveler_email || booking.traveler_phone, results: result.results };
 }
 
 export async function notifyPostTripReviewRequest(database, bookingId) {
@@ -603,11 +594,24 @@ export async function notifyPostTripReviewRequest(database, bookingId) {
   };
 
   const experienceName = booking.product_title || booking.product_type;
-  const reviewUrl = `https://ideaholiday.in/my-reviews?bookingRef=${encodeURIComponent(booking.ref)}`;
 
-  const emailText = `Hello ${booking.traveler_name || "Traveler"},\n\nWe hope you had a wonderful journey with ${experienceName}!\n\nYour feedback helps fellow travelers and local operators in India.\n\nRate your trip and share photos here:\n${reviewUrl}\n\nThank you for choosing Idea Holiday!`;
+  // A single-use token, so the traveler reviews in one tap without signing in.
+  // If one was already issued (a resend, say) its plaintext is gone, so fall
+  // back to the signed-in route rather than inventing a second live link.
+  let reviewUrl = `${String(process.env.PUBLIC_APP_URL || "https://ideaholiday.in").replace(/\/+$/, "")}/my-reviews?bookingRef=${encodeURIComponent(booking.ref)}`;
+  try {
+    const issued = issueBookingInvite(database, { bookingId: booking.id, channel: "EMAIL" });
+    if (issued.url) reviewUrl = issued.url;
+  } catch (error) {
+    logger.warn("Review invite token could not be issued; falling back to the signed-in review page", {
+      bookingId: booking.id, error: error.message,
+    });
+  }
 
-  const whatsappText = `Hello ${booking.traveler_name || "Traveler"} ⭐\n\nHow was your recent ${experienceName} trip?\n\nHelp other travelers by sharing your honest review and vacation photos:\n👉 ${reviewUrl}\n\nThank you for traveling with Idea Holiday!`;
+  const reportUrl = `${String(process.env.PUBLIC_APP_URL || "https://ideaholiday.in").replace(/\/+$/, "")}/bookings?report=${encodeURIComponent(booking.ref)}`;
+  const emailText = `Hello ${booking.traveler_name || "Traveler"},\n\nWe hope you had a wonderful journey with ${experienceName}!\n\nYour feedback helps fellow travelers and local operators in India.\n\nRate your trip and share photos here:\n${reviewUrl}\n\nSomething went wrong on this trip? Tell us here and we will look into it before the operator is paid:\n${reportUrl}\n\nThank you for choosing Idea Holiday!`;
+
+  const whatsappText = `Hello ${booking.traveler_name || "Traveler"} ⭐\n\nHow was your recent ${experienceName} trip?\n\nHelp other travelers by sharing your honest review and vacation photos:\n👉 ${reviewUrl}\n\nHad a problem? Report it here:\n${reportUrl}\n\nThank you for traveling with Idea Holiday!`;
 
   const results = await sendRecipientChannels({
     database,
@@ -635,33 +639,34 @@ export async function notifyPostTripReviewRequest(database, bookingId) {
 }
 
 export async function runAutomatedTripReminders(database) {
-  const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
-  const dayAfterTomorrow = new Date(Date.now() + 48 * 3600 * 1000).toISOString().slice(0, 10);
-
-  const upcomingBookings = database.prepare(`
-    SELECT b.id, b.ref, b.activity_date
-    FROM bookings b
-    WHERE b.status IN ('confirmed', 'CONFIRMED', 'paid', 'PAID')
-      AND b.activity_date BETWEEN ? AND ?
-      AND NOT EXISTS (
-        SELECT 1 FROM notification_deliveries nd 
-        WHERE nd.event_type = 'PRE_TRIP_REMINDER' 
-          AND nd.event_key LIKE b.id || ':PRE_TRIP_REMINDER%'
-      )
-  `).all(tomorrow, dayAfterTomorrow);
-
+  const { processDispatchSchedule, processDispatchOutbox } = await import('./dispatchWorkflowService.js');
+  const { deliverDispatchNotification } = await import('./dispatchNotificationService.js');
+  processDispatchSchedule(database);
   const preTripResults = [];
-  for (const b of upcomingBookings) {
-    try {
-      const res = await notifyUpcomingTripReminder(database, b.id);
-      preTripResults.push(res);
-    } catch (err) {
-      logger.error("Pre-trip reminder failed for booking", { bookingId: b.id, error: err.message });
+  await processDispatchOutbox(database, async (db, job) => {
+    const result = await deliverDispatchNotification(db, job);
+    if (job.event_type === 'PRE_TRIP_REMINDER' && result.results.every(r => r.success)) {
+      const booking = db.prepare('SELECT ref FROM bookings WHERE id = ?').get(job.booking_id);
+      preTripResults.push({ bookingRef: booking.ref });
     }
-  }
+    return result;
+  });
 
-  const pastSevenDays = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const post = await sendPendingPostTripReviewInvites(database);
+  return {
+    scannedAt: new Date().toISOString(),
+    preTripRemindersSent: preTripResults.length,
+    postTripReviewInvitesSent: post.sent.length,
+    preTripBookings: preTripResults.map((r) => r.bookingRef),
+    postTripBookings: post.sent.map((r) => r.bookingRef),
+  };
+}
+
+// Review and "report a problem" invites for trips completed in the last 7 days, once each.
+// Runs from Cloud Scheduler as well as the admin button.
+export async function sendPendingPostTripReviewInvites(database, { now = new Date() } = {}) {
+  const pastSevenDays = new Date(now.getTime() - 7 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const yesterday = new Date(now.getTime() - 1 * 24 * 3600 * 1000).toISOString().slice(0, 10);
 
   const completedBookings = database.prepare(`
     SELECT b.id, b.ref, b.activity_date
@@ -685,13 +690,7 @@ export async function runAutomatedTripReminders(database) {
     }
   }
 
-  return {
-    scannedAt: new Date().toISOString(),
-    preTripRemindersSent: preTripResults.length,
-    postTripReviewInvitesSent: postTripResults.length,
-    preTripBookings: preTripResults.map((r) => r.bookingRef),
-    postTripBookings: postTripResults.map((r) => r.bookingRef),
-  };
+  return { checked: completedBookings.length, sent: postTripResults };
 }
 
 export async function notifyCircuitReschedule(database, orderId, requestedState = "REQUESTED") {

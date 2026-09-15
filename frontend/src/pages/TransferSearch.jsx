@@ -264,7 +264,7 @@ export default function TransferSearch() {
                         <div className="flex items-center justify-between text-amber-900 font-bold">
                           <span>🏢 {option.supplier.name}</span>
                           <span className="text-[10px] bg-amber-200/60 text-amber-900 font-mono px-2 py-0.5 rounded font-bold">
-                            ⭐ {option.supplier.rating || 4.9}
+                            {option.supplier.rating ? `⭐ ${Number(option.supplier.rating).toFixed(1)}` : "New partner"}
                           </span>
                         </div>
                         <div className="text-[11px] text-stone-600 mt-1 flex items-center gap-1 font-mono">

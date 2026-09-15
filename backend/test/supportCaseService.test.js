@@ -22,6 +22,7 @@ function supportDatabase() {
     CREATE TABLE support_case_evidence (id TEXT PRIMARY KEY, case_id TEXT, submitted_by TEXT, submitted_role TEXT, evidence_url TEXT, display_name TEXT, note TEXT, created_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE support_case_events (id TEXT PRIMARY KEY, case_id TEXT, actor_id TEXT, actor_role TEXT, event_type TEXT, previous_status TEXT, next_status TEXT, note TEXT, metadata TEXT DEFAULT '{}', created_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE staff_tasks (id TEXT PRIMARY KEY, task_type TEXT, booking_id TEXT, assigned_staff_name TEXT, priority TEXT, status TEXT, notes TEXT);
+    CREATE TABLE payouts (id TEXT PRIMARY KEY, booking_id TEXT, supplier_id TEXT, net_payout REAL, payout_status TEXT, settlement_batch_id TEXT);
     INSERT INTO users VALUES ('guest_1', 'Goa Guest', 'guest@example.com');
     INSERT INTO suppliers VALUES ('supplier_1', 'Goa Tours');
     INSERT INTO products VALUES ('product_1', 'Goa private tour', 'FLEXIBLE_24H');
@@ -73,5 +74,41 @@ test("operations status changes are recorded in the immutable case timeline", ()
   assert.equal(updated.status, "UNDER_REVIEW");
   assert.equal(updated.assigned_to, "Safety Team");
   assert.equal(updated.events.at(-1).event_type, "STATUS_CHANGED");
+  database.close();
+});
+
+test("a problem reported after a completed trip holds the payout until every problem case is closed", () => {
+  const database = supportDatabase();
+  database.prepare("UPDATE bookings SET status = 'completed' WHERE id = 'booking_1'").run();
+  database.prepare("INSERT INTO payouts VALUES ('payout_1', 'booking_1', 'supplier_1', 8200, 'SCHEDULED', NULL)").run();
+  const booking = database.prepare("SELECT b.*, p.cancellation_policy FROM bookings b JOIN products p ON p.id = b.product_id").get();
+  const traveler = { id: "guest_1", role: "TRAVELER", name: "Goa Guest" };
+  const complaint = createSupportCase(database, { booking, actor: traveler, caseType: "COMPLAINT", category: "SERVICE_QUALITY", description: "The driver skipped two of the promised stops." });
+  const payout = () => database.prepare("SELECT payout_status FROM payouts WHERE id = 'payout_1'").get().payout_status;
+  assert.equal(payout(), "ISSUE_HOLD");
+  assert.ok(complaint.events.some((event) => event.event_type === "PAYOUT_HELD"));
+  const safety = createSupportCase(database, { booking, actor: traveler, caseType: "SAFETY", description: "The vehicle was driven dangerously on the highway." });
+  const ops = { id: "staff_1", role: "STAFF" };
+  updateSupportCase(database, supportCase(database, complaint.id), { actor: ops, status: "RESOLVED", resolution: "Supplier apologised." });
+  assert.equal(payout(), "ISSUE_HOLD", "another problem case is still open");
+  const closed = updateSupportCase(database, supportCase(database, safety.id), { actor: ops, status: "REJECTED", resolution: "Dashcam shows safe driving." });
+  assert.equal(payout(), "SCHEDULED");
+  assert.ok(closed.events.some((event) => event.event_type === "PAYOUT_RELEASED"));
+  database.close();
+});
+
+test("payouts are not held for trips still to run, other request types, or payouts already batched", () => {
+  const database = supportDatabase();
+  database.prepare("INSERT INTO payouts VALUES ('payout_1', 'booking_1', 'supplier_1', 8200, 'SCHEDULED', NULL)").run();
+  const booking = () => database.prepare("SELECT b.*, p.cancellation_policy FROM bookings b JOIN products p ON p.id = b.product_id").get();
+  const traveler = { id: "guest_1", role: "TRAVELER" };
+  createSupportCase(database, { booking: booking(), actor: traveler, caseType: "COMPLAINT", description: "Pickup point on the voucher looks wrong." });
+  assert.equal(database.prepare("SELECT payout_status FROM payouts").get().payout_status, "SCHEDULED");
+  database.prepare("UPDATE bookings SET status = 'completed'").run();
+  createSupportCase(database, { booking: booking(), actor: traveler, caseType: "OTHER", description: "Please send an invoice with my company name." });
+  assert.equal(database.prepare("SELECT payout_status FROM payouts").get().payout_status, "SCHEDULED");
+  database.prepare("UPDATE payouts SET payout_status = 'BATCHED', settlement_batch_id = 'batch_1'").run();
+  createSupportCase(database, { booking: booking(), actor: traveler, caseType: "SAFETY", description: "Seat belts in the rear seats were not working." });
+  assert.equal(database.prepare("SELECT payout_status FROM payouts").get().payout_status, "BATCHED");
   database.close();
 });

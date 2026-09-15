@@ -1,6 +1,8 @@
+import { activityPath } from "../../lib/activityUrl.js";
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../../lib/mapTiles.js";
 import { Link } from "react-router-dom";
 import { Star, MapPin, X, ArrowRight, ShieldCheck } from "lucide-react";
 import { useCurrency } from "../../lib/currency.jsx";
@@ -66,15 +68,7 @@ export default function SearchMapView({
         scrollWheelZoom: true,
       });
 
-      // Carto Voyager tile layer (clean, modern map styling)
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-        {
-          attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
-          maxZoom: 18,
-          subdomains: "abcd",
-        }
-      ).addTo(map);
+      addBaseTiles(map, { maxZoom: 18 });
 
       const markersGroup = L.featureGroup().addTo(map);
       markersGroupRef.current = markersGroup;
@@ -160,8 +154,10 @@ export default function SearchMapView({
               </h4>
               <div className="flex items-center gap-2 text-[11px] text-stone-500">
                 <div className="flex items-center gap-0.5 text-amber-600 font-bold">
-                  <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
-                  <span>{Number(selectedProduct.rating || 4.8).toFixed(1)}</span>
+                  {selectedProduct.rating ? <>
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-500" />
+                    <span>{Number(selectedProduct.rating).toFixed(1)}</span>
+                  </> : <span className="text-stone-500">New</span>}
                 </div>
                 <span>·</span>
                 <span className="font-mono font-black text-stone-900 dark:text-stone-100">
@@ -176,7 +172,7 @@ export default function SearchMapView({
               <ShieldCheck className="w-3 h-3 text-emerald-600" /> Verified Tour
             </span>
             <Link
-              to={`/activity/${selectedProduct.id}`}
+              to={activityPath(selectedProduct)}
               className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 dark:text-amber-400 hover:underline"
             >
               <span>View Details</span>

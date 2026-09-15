@@ -72,7 +72,7 @@ export default function SupplierDashboardPage() {
       <div className="max-w-7xl mx-auto space-y-6">
         <SupplierHeaderNav
           supplierData={supplierData}
-          activeTab={panel === "fleet" ? "FLEET" : panel === "compliance" ? "KYB" : panel === "listings" ? "BUILDER" : "DASHBOARD"}
+          activeTab={panel === "fleet" ? "FLEET" : panel === "compliance" ? "KYB" : panel === "listings" ? "BUILDER" : panel === "profile" ? "PROFILE" : panel === "enquiries" ? "ENQUIRIES" : "DASHBOARD"}
         />
 
         {/* KYB Status Banner — hidden on compliance tab (already shown there) */}

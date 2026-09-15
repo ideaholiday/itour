@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
+import SupplierPublicProfileEditor from "./SupplierPublicProfileEditor.jsx";
+import EnquiryInbox from "../EnquiryInbox.jsx";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
@@ -28,6 +30,8 @@ import {
 import BlockDatesModal from "./BlockDatesModal.jsx";
 import ManageFleetModal from "./ManageFleetModal.jsx";
 import SupplierListingsPanel from "./SupplierListingsPanel.jsx";
+import SupplierSubscriptionPanel from "./SupplierSubscriptionPanel.jsx";
+import SupplierShareKitPanel from "./SupplierShareKitPanel.jsx";
 import SupplierRevenueCard from "./SupplierRevenueCard.jsx";
 import SupplierBookingSnapshot from "./SupplierBookingSnapshot.jsx";
 import SupplierPerformanceRing from "./SupplierPerformanceRing.jsx";
@@ -74,8 +78,13 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
   const fulfillment = bookings.length ? Math.round((completed.length / (bookings.filter((booking) => booking.status !== "cancelled").length || 1)) * 100) : 100;
   const instantProducts = products.filter((product) => product.is_instant_booking !== 0).length;
   const listingAverage = products.length ? Math.round(products.reduce((sum, product) => sum + productScore(product), 0) / products.length) : 0;
+  // A partner without reviews is scored at a neutral assumption rather than
+  // penalised, and rather than shown a rating nobody gave. NEUTRAL_RATING is a
+  // scoring input only — every display below says "no reviews yet" instead.
+  const NEUTRAL_RATING = 4.5;
+  const ratingValue = Number(supplier.rating) || null;
   const performanceScore = Math.round(
-    (Number(supplier.rating || 4.8) / 5) * 35 +
+    ((ratingValue ?? NEUTRAL_RATING) / 5) * 35 +
     Math.min(1, fulfillment / 95) * 25 +
     (products.length ? instantProducts / products.length : 0) * 20 +
     (listingAverage / 100) * 20
@@ -119,6 +128,23 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
         : "Our admin team is reviewing your business documents. You'll be notified by email.",
       to: "?panel=compliance",
       cta: "View compliance"
+    },
+    // ADR 017: suppliers who signed up from 2026-09-14 need a subscription to take bookings.
+    isApproved && supplierData?.subscription?.required && !supplierData.subscription.covered && {
+      level: "urgent",
+      title: "Subscription needed — not receiving new bookings",
+      copy: "Your listings are not taking new bookings until you subscribe. Bookings already made are not affected.",
+      to: "?panel=subscription",
+      cta: "Subscribe"
+    },
+    isApproved && supplierData?.subscription?.covered && supplierData.subscription.cover?.source === "LAUNCH" && {
+      level: "growth",
+      title: supplierData.subscription.cover.endsAt
+        ? `Free launch offer until ${supplierData.subscription.cover.endsAt.slice(0, 10)}`
+        : "You're on the free launch offer",
+      copy: "New suppliers need a subscription to take bookings. Yours is free during the launch offer; we'll remind you before it ends.",
+      to: "?panel=subscription",
+      cta: "Details"
     },
     pendingBookings.length > 0 && {
       level: "urgent",
@@ -165,6 +191,30 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
     }
   };
 
+  if (initialPanel === "profile") {
+    return <SupplierPublicProfileEditor supplierId={supplier.id} products={products} />;
+  }
+
+  if (initialPanel === "enquiries") {
+    return (
+      <section className="space-y-4">
+        <div>
+          <h2 className="font-display text-xl font-bold text-stone-900">Enquiries</h2>
+          <p className="mt-1 text-sm text-stone-600">Questions travelers sent from your public profile. A quick, helpful reply is the best way to win the booking.</p>
+        </div>
+        <EnquiryInbox viewer="SUPPLIER" />
+      </section>
+    );
+  }
+
+  if (initialPanel === "share") {
+    return <SupplierShareKitPanel supplierId={supplier.id} />;
+  }
+
+  if (initialPanel === "subscription") {
+    return <SupplierSubscriptionPanel supplierId={supplier.id} onRefresh={onRefresh} />;
+  }
+
   if (initialPanel === "compliance") {
     return (
       <SupplierCompliancePanel
@@ -201,7 +251,7 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
       trend: [4, 6, 8, 5, 9, 7, activeBookings.length || 5],
     },
     ratings: {
-      avg: Number(supplier.rating || 4.8),
+      avg: ratingValue,
       completion_rate: fulfillment,
       cancellation_rate: 100 - fulfillment,
     },
@@ -352,7 +402,7 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
           [CircleDollarSign, "Net revenue", money(revenue), `${money(paid)} paid out`, "text-emerald-600"],
           [CalendarCheck, "Active bookings", activeBookings.length, `${pendingBookings.length} awaiting confirmation`, "text-amber-600"],
           [TrendingUp, "Fulfillment rate", `${fulfillment}%`, `${completed.length} completed trips`, "text-amber-800"],
-          [Star, "Partner score", performanceScore, `${supplier.rating || 4.9} traveler rating`, "text-amber-600"]
+          [Star, "Partner score", performanceScore, ratingValue ? `${ratingValue.toFixed(1)} traveler rating` : "No verified reviews yet", "text-amber-600"]
         ].map(([Icon, label, value, note, color]) => (
           <article key={label} className="group rounded-3xl border border-stone-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-400">
             <div className="flex items-center justify-between">
@@ -463,7 +513,7 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
               <span className="text-[10px] text-stone-500">Next payout</span>
             </div>
             <div>
-              <strong className="block text-sm font-bold text-stone-900">{supplier.commission_rate || 18}%</strong>
+              <strong className="block text-sm font-bold text-stone-900">{supplier.commission_rate_effective ?? supplier.commission_rate}%</strong>
               <span className="text-[10px] text-stone-500">Commission</span>
             </div>
           </div>
@@ -651,15 +701,15 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
               <Star className="h-5 w-5 fill-amber-500 text-amber-500" />
             </span>
             <div>
-              <strong className="text-2xl font-bold text-stone-900">{supplier.rating || 4.9}</strong>
-              <span className="ml-2 text-xs text-stone-500">traveler rating</span>
+              <strong className="text-2xl font-bold text-stone-900">{ratingValue ? ratingValue.toFixed(1) : "—"}</strong>
+              <span className="ml-2 text-xs text-stone-500">{ratingValue ? "traveler rating" : "no verified reviews yet"}</span>
             </div>
           </div>
           <h2 className="mt-6 font-display text-2xl font-bold text-stone-900">Quality signals</h2>
           <p className="mt-2 text-xs text-stone-500">Calculated from your current bookings and published listings.</p>
           <div className="mt-5 space-y-4">
             {[
-              ["Traveler rating", Math.round((Number(supplier.rating || 4.9) / 5) * 100)],
+              ["Traveler rating", ratingValue ? Math.round((ratingValue / 5) * 100) : 0],
               ["Trip fulfillment", fulfillment],
               ["Listing completeness", listingAverage],
               ["Instant bookability", products.length ? Math.round((instantProducts / products.length) * 100) : 0]

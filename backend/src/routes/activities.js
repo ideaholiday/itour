@@ -1,10 +1,13 @@
 import { Router } from "express";
+import { isProfileVisible, profilePath } from "../services/supplierProfileService.js";
 import db from "../db.js";
 import logger from "../config/logger.js";
-import { getPickupSuggestions, getProductLocationContext, validatePickupPoint } from "../services/locationValidationService.js";
+import { filterPickupSuggestions, getProductLocationContext, loadPickupSuggestionSource, validatePickupPoint } from "../services/locationValidationService.js";
 import { validateBody } from "../middleware/validation.js";
 import { locationSchemas } from "../validators/apiSchemas.js";
 import { ensureDefaultProductOption, getBookingQuestions, getProductOptions } from "../services/logisticsService.js";
+import { priorMeanRating } from "../services/reviewService.js";
+import { approvedSupplierSql } from "../services/supplierKybGate.js";
 
 const router = Router();
 
@@ -86,9 +89,18 @@ function parseProductRows(rows = []) {
   if (supplierIds.length > 0) {
     try {
       const placeholders = supplierIds.map(() => "?").join(",");
-      const allSuppliers = db.prepare(`SELECT id, company_name, rating, kyb_status FROM suppliers WHERE id IN (${placeholders})`).all(...supplierIds);
+      const allSuppliers = db.prepare(`SELECT id, company_name, rating, kyb_status, public_slug, profile_status FROM suppliers WHERE id IN (${placeholders})`).all(...supplierIds);
+      let verifiedIds = new Set();
+      try {
+        verifiedIds = new Set(db.prepare(`SELECT DISTINCT supplier_id FROM supplier_verifications WHERE status = 'ACTIVE' AND valid_until > ? AND supplier_id IN (${placeholders})`)
+          .all(new Date().toISOString(), ...supplierIds).map((row) => row.supplier_id));
+      } catch {}
       for (const s of allSuppliers) {
-        supplierMap.set(s.id, s);
+        supplierMap.set(s.id, {
+          ...s,
+          verified: verifiedIds.has(s.id) && String(s.kyb_status || "").toUpperCase() === "APPROVED",
+          profilePath: s.public_slug && isProfileVisible(s) ? profilePath(s.public_slug) : null,
+        });
       }
     } catch (e) {}
   }
@@ -98,7 +110,7 @@ function parseProductRows(rows = []) {
   if (productIds.length > 0) {
     try {
       const placeholders = productIds.map(() => "?").join(",");
-      const allQuality = db.prepare(`SELECT entity_id, review_count, average_rating, score_100, tier FROM quality_scores WHERE entity_type = 'PRODUCT' AND entity_id IN (${placeholders})`).all(...productIds);
+      const allQuality = db.prepare(`SELECT entity_id, review_count, average_rating, smoothed_rating, score_100, tier FROM quality_scores WHERE entity_type = 'PRODUCT' AND entity_id IN (${placeholders})`).all(...productIds);
       for (const q of allQuality) {
         qualityMap.set(q.entity_id, q);
       }
@@ -173,9 +185,14 @@ function parseProductRows(rows = []) {
       durationHours: row.duration_hours,
       priceInr: row.price_inr,
       strikePriceInr: row.strike_price_inr,
-      rating: verifiedQuality?.review_count ? verifiedQuality.average_rating : (row.rating || 4.8),
-      review_count: verifiedQuality?.review_count ?? row.review_count ?? 12,
-      reviewCount: verifiedQuality?.review_count ?? row.review_count ?? 12,
+      // A listing shows the rating its verified reviews earned, or none at all:
+      // `rating: null` with `isNewListing` is how an unreviewed product reads.
+      rating: verifiedQuality?.review_count ? verifiedQuality.average_rating : (row.review_count ? row.rating : null),
+      review_count: verifiedQuality?.review_count ?? row.review_count ?? 0,
+      reviewCount: verifiedQuality?.review_count ?? row.review_count ?? 0,
+      // Ranking input, not a display value — see RATING_PRIOR_WEIGHT.
+      smoothedRating: verifiedQuality?.smoothed_rating ?? null,
+      isNewListing: !(verifiedQuality?.review_count || row.review_count),
       qualityScore: verifiedQuality?.score_100 || null,
       qualityTier: verifiedQuality?.tier || "NEW",
       bestseller: Boolean(row.bestseller),
@@ -186,8 +203,10 @@ function parseProductRows(rows = []) {
       inclusions: safeJsonParse(row.inclusions, []),
       exclusions: safeJsonParse(row.exclusions, []),
       itinerary: safeJsonParse(row.itinerary, []),
-      supplierName: supplier ? supplier.company_name : "Idea Holiday Verified Supplier",
-      supplierRating: supplier ? supplier.rating : 4.8,
+      supplierName: supplier ? supplier.company_name : "Local operator",
+      supplierRating: supplier?.rating ?? null,
+      supplierVerified: Boolean(supplier?.verified),
+      supplierProfilePath: supplier?.profilePath || null,
       pricingVariants: pricing,
       transferRoute,
       transferMeta: transferRoute ? {
@@ -304,7 +323,9 @@ router.get("/activities", (req, res) => {
   }
 
   try {
-    let sql = `SELECT p.* FROM products p WHERE p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1`;
+    let sql = `SELECT p.*, qs.smoothed_rating FROM products p
+      LEFT JOIN quality_scores qs ON qs.entity_type = 'PRODUCT' AND qs.entity_id = p.id
+      WHERE p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1 AND ${approvedSupplierSql("p")}`;
     const params = [];
 
     if (destination) {
@@ -370,10 +391,21 @@ router.get("/activities", (req, res) => {
       params.push(`%${qTrim}%`, `%${qTrim}%`, `%${qTrim}%`, `%${qTrim}%`, `%${qTrim}%`);
     }
 
+    // Rank on the smoothed rating, so a listing with no reviews sits at the
+    // category mean rather than below every rated one. Display still shows the
+    // real average, or nothing at all.
+    const priorMean = priorMeanRating(db, "PRODUCT");
+    const rankRating = "COALESCE(qs.smoothed_rating, ?)";
+
     if (sort === "price_asc") sql += " ORDER BY p.price_inr ASC";
     else if (sort === "price_desc") sql += " ORDER BY p.price_inr DESC";
-    else if (sort === "rating") sql += " ORDER BY p.rating DESC";
-    else sql += " ORDER BY p.bestseller DESC, p.rating DESC";
+    else if (sort === "rating") {
+      sql += ` ORDER BY ${rankRating} DESC, COALESCE(p.review_count, 0) DESC`;
+      params.push(priorMean);
+    } else {
+      sql += ` ORDER BY p.bestseller DESC, ${rankRating} DESC`;
+      params.push(priorMean);
+    }
 
     const rows = db.prepare(sql).all(...params);
     const result = parseProductRows(rows);
@@ -393,13 +425,32 @@ router.get("/activities", (req, res) => {
   }
 });
 
+// Suggestions fire on every keystroke; the product's location rules and the
+// canonical locations are read once a minute per product, then filtered in memory.
+// Booking validation always reads the database directly.
+const SUGGESTION_SOURCE_TTL_MS = 60_000;
+const SUGGESTION_SOURCE_MAX_ENTRIES = 500;
+const suggestionSourceCache = new Map();
+
+function pickupSuggestionSource(productId) {
+  const now = Date.now();
+  const cached = suggestionSourceCache.get(productId);
+  if (cached && cached.expiresAt > now) return cached.source;
+  const product = db.prepare(`SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1 AND ${approvedSupplierSql("products")}`).get(productId);
+  const source = product ? loadPickupSuggestionSource(db, productId) : null;
+  if (!source) return null;
+  if (suggestionSourceCache.size >= SUGGESTION_SOURCE_MAX_ENTRIES) suggestionSourceCache.delete(suggestionSourceCache.keys().next().value);
+  suggestionSourceCache.set(productId, { source, expiresAt: now + SUGGESTION_SOURCE_TTL_MS });
+  return source;
+}
+
 function sendSuggestions(req, res) {
   try {
-    const product = db.prepare("SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1").get(req.params.id);
-    if (!product) return res.status(404).json({ error: "Product not found", code: "PRODUCT_NOT_FOUND", requestId: req.requestId });
+    const source = pickupSuggestionSource(req.params.id);
+    if (!source) return res.status(404).json({ error: "Product not found", code: "PRODUCT_NOT_FOUND", requestId: req.requestId });
     const side = String(req.query.side || req.body?.side || "PICKUP").toUpperCase();
     const query = String(req.query.q || req.body?.q || "").slice(0, 100);
-    const suggestions = getPickupSuggestions(db, req.params.id, side, query);
+    const suggestions = filterPickupSuggestions(source, side, query);
     res.json({ success: true, suggestions });
   } catch (error) {
     logger.error("Product pickup suggestions failed", { requestId: req.requestId, error });
@@ -418,7 +469,7 @@ router.post("/activities/:id/validate-pickup", validateBody(locationSchemas.vali
 
 router.get("/activities/:id/options", (req, res) => {
   try {
-    const product = db.prepare("SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1").get(req.params.id);
+    const product = db.prepare(`SELECT id FROM products WHERE id = ? AND status = 'PUBLISHED' AND COALESCE(is_published, 1) = 1 AND ${approvedSupplierSql("products")}`).get(req.params.id);
     if (!product) return res.status(404).json({ error: "Product not found" });
     const options = getProductOptions(db, product.id);
     return res.json({ success: true, options: options.length ? options : [ensureDefaultProductOption(db, product)].filter(Boolean) });
@@ -436,7 +487,7 @@ router.get("/activities/:id/options/:optionId", (req, res) => {
 // GET /api/activities/:id
 router.get("/activities/:id", (req, res) => {
   try {
-    const row = db.prepare("SELECT p.* FROM products p WHERE p.id = ? AND p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1").get(req.params.id);
+    const row = db.prepare(`SELECT p.* FROM products p WHERE p.id = ? AND p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1 AND ${approvedSupplierSql("p")}`).get(req.params.id);
     if (!row) return res.status(404).json({ error: "Product not found" });
     const product = parseProductRow(row);
     const context = getProductLocationContext(db, row.id);

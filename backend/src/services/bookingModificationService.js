@@ -1,3 +1,6 @@
+import { moveNativeReservation } from "./nativeInventoryService.js";
+import { onBookingCancelled } from "./affiliateService.js";
+import { onReferralBookingCancelled } from "./referralService.js";
 import crypto from "crypto";
 
 export class BookingModificationService {
@@ -107,6 +110,7 @@ export class BookingModificationService {
     const requesterId = actor?.id || booking.user_id || "traveler";
 
     database.transaction(() => {
+      moveNativeReservation(database, booking, newDate, targetTime);
       database.prepare(`
         UPDATE bookings
         SET
@@ -211,10 +215,20 @@ export class BookingModificationService {
   static executeSelfServiceCancellation(database, bookingId, { reason }, actor = null) {
     const preview = this.calculateCancellationRefundPreview(database, bookingId, actor);
     const booking = database.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
+    // A second cancel would overwrite the refund state the first one recorded.
+    if (["cancelled", "completed", "in_progress"].includes(String(booking.status).toLowerCase())) {
+      throw new Error(`BOOKING_ALREADY_${String(booking.status).toUpperCase()}`);
+    }
 
     const modificationId = `mod_${crypto.randomBytes(6).toString("hex")}`;
     const requesterId = actor?.id || booking.user_id || "traveler";
-    const paymentStatus = preview.refundAmountInr > 0 ? "REFUND_INITIATED" : "REFUND_NOT_APPLICABLE";
+    // Only money actually collected can be refunded.
+    const paid = booking.payment_status === "PAID";
+    if (!paid) {
+      preview.refundAmountInr = 0;
+      preview.cancellationFeeInr = 0;
+    }
+    const paymentStatus = !paid ? booking.payment_status : preview.refundAmountInr > 0 ? "REFUND_INITIATED" : "REFUND_NOT_APPLICABLE";
 
     database.transaction(() => {
       database.prepare(`
@@ -233,6 +247,11 @@ export class BookingModificationService {
         database.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
       } catch {}
 
+      // Void any pending affiliate referral earning
+      try {
+        onBookingCancelled(database, booking.id);
+      } catch {}
+
       // Log in booking_modifications
       database.prepare(`
         INSERT INTO booking_modifications (
@@ -249,6 +268,8 @@ export class BookingModificationService {
         reason || "Traveler self-service cancellation"
       );
     })();
+    // Spent wallet credit comes back at the policy's refund share, even when credit paid for all of it.
+    onReferralBookingCancelled(database, booking.id, { reason: reason || "Traveler cancelled", creditShare: paid ? preview.refundPercentage / 100 : null });
 
     return {
       success: true,

@@ -3,7 +3,9 @@ import { Star, ShieldCheck, Award } from "lucide-react";
 import Card, { CardHeader, CardTitle, CardContent } from "../ui/Card";
 
 export function SupplierPerformanceRing({ stats }) {
-  const rating = stats?.ratings?.avg || 4.8;
+  // Null until travelers leave verified reviews — shown as such, not as a number.
+  const rating = Number(stats?.ratings?.avg) || null;
+  const reviewCount = Number(stats?.ratings?.total_reviews || 0);
   const completionRate = stats?.ratings?.completion_rate || 98;
   const cancellationRate = stats?.ratings?.cancellation_rate || 1.2;
 
@@ -64,11 +66,17 @@ export function SupplierPerformanceRing({ stats }) {
           {/* Key Metrics */}
           <div className="space-y-2.5">
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 text-amber-500">
-                <Star className="w-4 h-4 fill-amber-500" />
-                <span className="text-base font-bold text-stone-900 dark:text-stone-100 font-mono">{rating}</span>
-              </div>
-              <span className="text-xs text-stone-500">Avg Rating</span>
+              {rating ? (
+                <>
+                  <div className="flex items-center gap-1 text-amber-500">
+                    <Star className="w-4 h-4 fill-amber-500" />
+                    <span className="text-base font-bold text-stone-900 dark:text-stone-100 font-mono">{rating.toFixed(1)}</span>
+                  </div>
+                  <span className="text-xs text-stone-500">Avg Rating{reviewCount ? ` · ${reviewCount} reviews` : ""}</span>
+                </>
+              ) : (
+                <span className="text-xs text-stone-500">No verified reviews yet</span>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

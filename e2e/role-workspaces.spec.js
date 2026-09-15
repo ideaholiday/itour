@@ -33,7 +33,7 @@ test("operations reviews its task queue and approves a controlled refund dispute
   await loginThroughUi(page, E2E_ACCOUNTS.operations, "/ops/tasks");
   await expect(page.getByRole("heading", { name: "Operations Task Queue & Resolution Audit Log" })).toBeVisible();
   await expect(page.getByText("BROWSER_E2E_REVIEW", { exact: true })).toBeVisible();
-  await expect(page.getByText("Browser E2E Operations", { exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Browser E2E Operations", exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: /Support & Disputes/i }).click();
   await expect(page.getByRole("heading", { name: "Case resolution desk" })).toBeVisible();

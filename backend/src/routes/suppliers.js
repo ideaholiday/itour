@@ -1,3 +1,16 @@
+import { z } from "zod";
+import { confirmDriverByPhone, dispatchReadiness, effectiveDispatchSettings, listDispatchExceptions, processDispatchSchedule, TRIP_ISSUE_TASK_TYPES } from "../services/dispatchWorkflowService.js";
+import { dispatchTransaction } from "../services/dispatchStateService.js";
+import {
+  getInventoryRules, saveInventoryRules,
+  listPriceSchedules, savePriceSchedule, deletePriceSchedule,
+  listSlotOverrides, saveSlotOverride, deleteSlotOverride,
+  saveSlotOverrideRange, deleteSlotOverrideRange,
+  listResources, saveResource, deleteResource,
+  listPromotions, savePromotion, deletePromotion,
+} from "../services/nativeInventoryService.js";
+import { getProductOptions, ensureDefaultProductOption } from "../services/logisticsService.js";
+import { activityPath } from "../../../shared/activityUrl.js";
 import express from "express";
 import db, { databaseInfo } from "../db.js";
 import { canTransitionBooking } from "../services/bookingService.js";
@@ -12,10 +25,12 @@ import {
   notifyDispatchStatusChanged,
   notifyDriverAssigned,
   notifyCircuitReschedule,
-  notifyRefundProcessed,
+  notifySupplierVerification,
   queueNotification,
   sendGuestBookingNotification,
 } from "../services/notificationService.js";
+import { KYB_FILE_SCHEME, kybFileName, sendKybDocumentFile } from "../services/kybFileService.js";
+import { autoApproveSupplierKyb } from "../services/supplierVerificationService.js";
 import {
   assignDriverToBooking,
   getDispatchTimeline,
@@ -25,7 +40,16 @@ import {
   updateDispatchStatus,
 } from "../services/driverDispatchService.js";
 
-import { calculateRefundQuote, createRefundRecord, finalizeRefund, getSupplierPayoutLedger } from "../services/financeService.js";
+import { getSupplierPayoutLedger, resolveCommissionRate } from "../services/financeService.js";
+import { cancelBookingBySupplier, cancelDeparture, checkInBooking, departureManifest, manifestCsv, setAttendance } from "../services/supplierDepartureService.js";
+import { getSubscriptionStatus } from "../services/supplierSubscriptionService.js";
+import {
+  listSubscriptionPayments, listSupplierSpotlights, quotePlanPayment, quoteSubscriptionPayment, renderSubscriptionInvoice,
+  startPlanPayment, startSubscriptionPayment, swapSpotlight, verifySubscriptionPayment,
+} from "../services/supplierPlanPaymentService.js";
+import { deriveBadge } from "../services/supplierProfileService.js";
+import { getSettings } from "../services/programSettingsService.js";
+import { supplierShareKit } from "../services/supplierShareKitService.js";
 import {
   verifyGstin,
   verifyPan,
@@ -34,14 +58,34 @@ import {
   runComprehensiveSupplierKyb,
 } from "../services/cashfreeSecureIdService.js";
 import { nanoid } from "nanoid";
-import { validateBody } from "../middleware/validation.js";
-import { bookingSchemas, supplierSchemas } from "../validators/apiSchemas.js";
+import { validateBody, validateQuery } from "../middleware/validation.js";
+import { bookingSchemas, profileSchemas, supplierSchemas } from "../validators/apiSchemas.js";
+import { ensurePublicSlug, ownerProfileView, updateSupplierProfile } from "../services/supplierProfileService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { backfillProductOptions } from "../services/logisticsService.js";
+import { backfillProductLocationRules } from "../data/canonicalLocations.js";
+import { onReferralBookingCancelled, onReferralTripCompleted } from "../services/referralService.js";
 
 const router = express.Router();
+
+// Approves a pending supplier once Cashfree has verified their GSTIN and PAN,
+// and tells them by email and WhatsApp. Never fails the check that triggered it.
+function applyKybAutoApproval(req, supplierId) {
+  try {
+    const outcome = autoApproveSupplierKyb(db, supplierId, {
+      notify: (payload) => queueNotification(notifySupplierVerification(payload), `KYB auto-approval notification for ${supplierId}`),
+    });
+    if (outcome.approved) logger.info("Supplier KYB auto-approved by Cashfree SecureID", { requestId: req.requestId, supplierId });
+    return outcome;
+  } catch (error) {
+    logger.error("Supplier KYB auto-approval failed", { requestId: req.requestId, supplierId, error });
+    return { approved: false, supplier: null, identity: null };
+  }
+}
+
+const autoApprovalMessage = "Your GSTIN and PAN are verified, so your account is now approved and your published listings can be booked.";
 router.use(authenticate);
-const databaseList = (value) => databaseInfo.engine === "postgres" ? value : JSON.stringify(value);
+const databaseList = (value) => JSON.stringify(value);
 
 function requireSupplierAccess(req, res, next) {
   const role = String(req.user?.role || "").toUpperCase();
@@ -72,6 +116,115 @@ router.get("/", requireRoles("ADMIN", "STAFF"), (req, res) => {
 
 router.use("/:id", requireSupplierSelf("id"));
 
+// Supplier subscription (ADR 017): status, price, online payment and GST invoices.
+function subscriptionFailure(res, req, error, fallback) {
+  if (error.status && error.status < 500 || error.status === 502) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+// Share kit (docs/SHARE_KIT.md): links, QR/print URLs, embed code and scan counts.
+router.get("/:id/share-kit", (req, res) => {
+  try {
+    res.json({ success: true, shareKit: supplierShareKit(db, req.params.id, { actorId: req.user.id }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the share kit");
+  }
+});
+
+router.get("/:id/subscription", (req, res) => {
+  try {
+    const { priceInr, billingPeriodMonths } = getSettings(db, "supplier_subscriptions");
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
+    const pendingCheck = db.prepare("SELECT created_at FROM supplier_verifications WHERE supplier_id = ? AND status = 'PENDING_CHECKS'").get(req.params.id);
+    res.json({
+      success: true,
+      subscription: getSubscriptionStatus(db, req.params.id),
+      plan: priceInr ? { priceInr, billingPeriodMonths, gstRatePct: 18 } : null,
+      // Profile plans (ADR 008): the Verified check, Spotlights and Verified Plus.
+      profilePlans: { ...getSettings(db, "supplier_plans"), gstRatePct: 18 },
+      verification: { badge: supplier ? deriveBadge(db, supplier) : null, checkPendingSince: pendingCheck?.created_at || null, kybStatus: supplier?.kyb_status || null },
+      spotlights: listSupplierSpotlights(db, req.params.id),
+      spotlightableProducts: db.prepare(`
+        SELECT id, title FROM products WHERE supplier_id = ? AND status = 'PUBLISHED'
+          AND id NOT IN (SELECT product_id FROM product_spotlights WHERE status = 'ACTIVE') ORDER BY title
+      `).all(req.params.id),
+      payments: listSubscriptionPayments(db, req.params.id),
+    });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the subscription");
+  }
+});
+
+router.post("/:id/subscription/quote", (req, res) => {
+  try {
+    res.json({ success: true, quote: quoteSubscriptionPayment(db, req.params.id, { couponCode: req.body?.couponCode || null }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not price the subscription");
+  }
+});
+
+router.post("/:id/subscription/checkout", async (req, res) => {
+  try {
+    const result = await startSubscriptionPayment(db, req.params.id, {
+      couponCode: req.body?.couponCode || null,
+      actorId: req.user.id,
+      returnUrl: typeof req.body?.returnUrl === "string" ? req.body.returnUrl : null,
+    });
+    res.status(201).json({ success: true, ...result, payment: listSubscriptionPayments(db, req.params.id).find((row) => row.id === result.payment.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not start the payment");
+  }
+});
+
+router.post("/:id/plans/quote", (req, res) => {
+  try {
+    res.json({ success: true, quote: quotePlanPayment(db, req.params.id, { planCode: req.body?.planCode, productId: req.body?.productId || null, couponCode: req.body?.couponCode || null }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not price the plan");
+  }
+});
+
+router.post("/:id/plans/checkout", async (req, res) => {
+  try {
+    const result = await startPlanPayment(db, req.params.id, {
+      planCode: req.body?.planCode,
+      productId: req.body?.productId || null,
+      couponCode: req.body?.couponCode || null,
+      actorId: req.user.id,
+      returnUrl: typeof req.body?.returnUrl === "string" ? req.body.returnUrl : null,
+    });
+    res.status(201).json({ success: true, ...result, payment: listSubscriptionPayments(db, req.params.id).find((row) => row.id === result.payment.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not start the payment");
+  }
+});
+
+router.post("/:id/spotlights/:spotlightId/swap", (req, res) => {
+  try {
+    res.json({ success: true, spotlight: swapSpotlight(db, req.params.id, req.params.spotlightId, { productId: String(req.body?.productId || "") }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not change the Spotlight");
+  }
+});
+
+router.post("/:id/subscription/payments/:paymentId/verify", async (req, res) => {
+  try {
+    const payment = await verifySubscriptionPayment(db, req.params.id, req.params.paymentId);
+    res.json({ success: true, status: payment.status, invoiceNumber: payment.invoice_number, subscription: getSubscriptionStatus(db, req.params.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not verify the payment");
+  }
+});
+
+router.get("/:id/subscription/payments/:paymentId/invoice", (req, res) => {
+  try {
+    res.type("html").send(renderSubscriptionInvoice(db, req.params.id, req.params.paymentId));
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the invoice");
+  }
+});
+
 // GET /api/suppliers/:id - Fetch single supplier profile with KYB, products, bookings, drivers, blocked dates & payouts
 router.get("/:id", (req, res) => {
   try {
@@ -91,8 +244,9 @@ router.get("/:id", (req, res) => {
     const bookings = db.prepare(`
       SELECT b.*, p.title as product_title, p.hero_image, p.city, p.is_instant_booking, p.cancellation_policy,
              da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number, da.assignment_status,
-             da.supplier_driver_id, da.assignment_source, da.assigned_at, da.last_status_at,
-             da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at
+             da.supplier_driver_id, da.acknowledgement, da.response_deadline, da.driver_email, da.assignment_source, da.assigned_at, da.last_status_at,
+             da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at,
+             da.last_lat AS driver_last_lat, da.last_lng AS driver_last_lng, da.last_accuracy_m AS driver_last_accuracy_m, da.last_location_at AS driver_last_location_at
       FROM bookings b
       LEFT JOIN products p ON b.product_id = p.id
       LEFT JOIN driver_assignments da ON b.id = da.booking_id
@@ -113,10 +267,11 @@ router.get("/:id", (req, res) => {
 
     res.json({
       success: true,
-      supplier,
+      supplier: { ...supplier, commission_rate_effective: resolveCommissionRate(db, supplier.id) },
+      subscription: getSubscriptionStatus(db, supplier.id),
       kybDocs,
       geoFences,
-      products,
+      products: products.map((product) => ({ ...product, commission_rate_effective: resolveCommissionRate(db, supplier.id, product.id) })),
       bookings,
       drivers,
       blockedDates,
@@ -139,6 +294,7 @@ router.post("/register", validateBody(supplierSchemas.registration), (req, res) 
       `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, gstin, pan_number, kyb_status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`
     ).run(id, id, companyName, contactName, email, phone, city, state, gstin || null, panNumber || null);
+    ensurePublicSlug(db, { id, company_name: companyName, city });
 
     res.json({ success: true, supplierId: id, message: "Supplier registered successfully! KYB verification pending." });
   } catch (err) {
@@ -151,10 +307,20 @@ router.post("/register", validateBody(supplierSchemas.registration), (req, res) 
 router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
   try {
     const { id } = req.params;
-    const docType = req.body.docType || req.body.doc_type || "OTHER";
-    const docNumber = req.body.docNumber || req.body.doc_number || `DOC-${Date.now().toString().slice(-6)}`;
-    const docUrl = req.body.docUrl || req.body.doc_url || "https://example.com/docs/uploaded.pdf";
+    const docType = String(req.body.docType || req.body.doc_type || "OTHER").trim().toUpperCase();
+    const docNumber = String(req.body.docNumber || req.body.doc_number || "").trim() || null;
+    const docUrl = String(req.body.docUrl || req.body.doc_url || "").trim();
     const docId = `kyb_${nanoid(10)}`;
+
+    // A document is only accepted with a file this supplier uploaded as KYB,
+    // so an admin never reviews a placeholder link or someone else's file.
+    const filename = docUrl.startsWith(KYB_FILE_SCHEME) ? kybFileName(docUrl) : null;
+    const upload = filename
+      ? db.prepare("SELECT id FROM uploads WHERE filename = ? AND UPPER(COALESCE(entity_type, '')) = 'KYB' AND entity_id = ?").get(filename, id)
+      : null;
+    if (!upload) {
+      return res.status(400).json({ error: "Upload the document file (PDF or image) before submitting it." });
+    }
 
     // Check if a document of this type already exists for this supplier
     const existing = db.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ? AND doc_type = ?").get(id, docType);
@@ -164,7 +330,7 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
         `UPDATE kyb_documents
          SET doc_number = ?, doc_url = ?, status = 'PENDING', rejection_reason = NULL, review_note = NULL, submitted_at = datetime('now')
          WHERE id = ?`
-      ).run(docNumber, docUrl || existing.doc_url || "https://example.com/docs/uploaded.pdf", existing.id);
+      ).run(docNumber, docUrl, existing.id);
 
       const updatedDoc = db.prepare("SELECT * FROM kyb_documents WHERE id = ?").get(existing.id);
       return res.json({ success: true, docId: existing.id, document: updatedDoc, message: "KYB Document re-submitted for review." });
@@ -173,13 +339,25 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
     db.prepare(
       `INSERT INTO kyb_documents (id, supplier_id, doc_type, doc_number, doc_url, status, submitted_at)
        VALUES (?, ?, ?, ?, ?, 'PENDING', datetime('now'))`
-    ).run(docId, id, docType, docNumber, docUrl || "https://example.com/docs/uploaded.pdf");
+    ).run(docId, id, docType, docNumber, docUrl);
 
     const createdDoc = db.prepare("SELECT * FROM kyb_documents WHERE id = ?").get(docId);
     res.json({ success: true, docId, document: createdDoc, message: "KYB Document submitted for review." });
   } catch (err) {
     logger.error("Failed to submit KYB document", { requestId: req.requestId, error: err });
     res.status(500).json({ error: err.message || "Failed to submit KYB document" });
+  }
+});
+
+// GET /api/suppliers/:id/kyb/:docId/file - The supplier's own uploaded KYB file
+router.get("/:id/kyb/:docId/file", (req, res) => {
+  try {
+    const doc = db.prepare("SELECT * FROM kyb_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+    return sendKybDocumentFile(res, doc);
+  } catch (err) {
+    logger.error("Failed to send KYB document file", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not open the document" });
   }
 });
 
@@ -238,14 +416,16 @@ router.post("/:id/kyb/verify-gstin", validateBody(supplierSchemas.verifyGstin), 
       WHERE id = ?
     `).run(targetGstin, result.valid ? 1 : 0, result.legalName || null, result.status || null, id);
 
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
     const updatedSupplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
 
     res.json({
       success: true,
       verification: result,
       supplier: updatedSupplier,
+      kybAutoApproved: autoApproval.approved,
       message: result.valid
-        ? `GSTIN verified: ${result.legalName} (${result.status})`
+        ? `GSTIN verified: ${result.legalName} (${result.status})${autoApproval.approved ? `. ${autoApprovalMessage}` : ""}`
         : "GSTIN verification was not successful",
     });
   } catch (err) {
@@ -290,14 +470,16 @@ router.post("/:id/kyb/verify-pan", validateBody(supplierSchemas.verifyPan), asyn
       WHERE id = ?
     `).run(targetPan, result.valid ? 1 : 0, result.registeredName || null, result.type || null, id);
 
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
     const updatedSupplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
 
     res.json({
       success: true,
       verification: result,
       supplier: updatedSupplier,
+      kybAutoApproved: autoApproval.approved,
       message: result.valid
-        ? `PAN verified: ${result.registeredName} (${result.type}) - Match: ${result.nameMatchScore}%`
+        ? `PAN verified: ${result.registeredName} (${result.type}) - Match: ${result.nameMatchScore}%${autoApproval.approved ? `. ${autoApprovalMessage}` : ""}`
         : "PAN verification was not successful",
     });
   } catch (err) {
@@ -408,11 +590,16 @@ router.post("/:id/kyb/verify-all", async (req, res) => {
       actorId: req.user?.id || id,
       actorRole: req.user?.role || "SUPPLIER",
     });
+    const autoApproval = applyKybAutoApproval(req, id);
+    if (autoApproval.supplier) report.updatedSupplier = autoApproval.supplier;
 
     res.json({
       success: true,
       report,
-      message: "Comprehensive Cashfree SecureID KYB audit completed.",
+      kybAutoApproved: autoApproval.approved,
+      message: autoApproval.approved
+        ? `Comprehensive Cashfree SecureID KYB audit completed. ${autoApprovalMessage}`
+        : "Comprehensive Cashfree SecureID KYB audit completed.",
     });
   } catch (err) {
     logger.error("Comprehensive KYB failed", { requestId: req.requestId, error: err.message });
@@ -464,11 +651,41 @@ router.patch("/:id/profile", validateBody(supplierSchemas.profileUpdate), (req, 
        WHERE id = ?`
     ).run(finalCompany, finalContact, finalPhone, finalCity, finalState, finalGstin, finalPan, finalWebsite, finalBusinessType, finalYears, id);
 
+    // A new GSTIN or PAN has not been checked yet, whatever the old one showed.
+    if ((finalGstin || null) !== (supplier.gstin || null)) {
+      db.prepare("UPDATE suppliers SET gstin_verified = 0, gstin_verified_name = NULL, gstin_verified_status = NULL WHERE id = ?").run(id);
+    }
+    if ((finalPan || null) !== (supplier.pan_number || null)) {
+      db.prepare("UPDATE suppliers SET pan_verified = 0, pan_verified_name = NULL, pan_type = NULL WHERE id = ?").run(id);
+    }
+
     const updated = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     res.json({ success: true, supplier: updated, message: "Business details updated successfully." });
   } catch (err) {
     logger.error("Failed to update supplier profile", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to update supplier profile" });
+  }
+});
+
+// GET /api/suppliers/:id/public-profile - The supplier's own view of their public profile
+router.get("/:id/public-profile", (req, res) => {
+  try {
+    return res.json({ success: true, ...ownerProfileView(db, req.params.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Supplier public profile lookup failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not load your public profile" });
+  }
+});
+
+// PATCH /api/suppliers/:id/public-profile - Edit tagline, about, images, languages, cities, links, visibility
+router.patch("/:id/public-profile", validateBody(profileSchemas.update), (req, res) => {
+  try {
+    return res.json({ success: true, ...updateSupplierProfile(db, req.params.id, req.body) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Supplier public profile update failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not save your public profile" });
   }
 });
 
@@ -688,7 +905,7 @@ router.post("/:id/products/v2", (req, res) => {
           VALUES (?,?,?,?,?,?,?,?,?,?)`);
         itineraryItems.forEach((item, i) => ins.run(
           `itin_${nanoid(10)}`, productId,
-          Number(item.dayNumber)||1, String(item.timeLabel||`Step ${i+1}`),
+          Number.isFinite(Number(item.dayNumber)) ? Number(item.dayNumber) : 1, String(item.timeLabel||`Step ${i+1}`),
           String(item.title||""), String(item.description||""),
           item.location||null, item.durationText||null, item.icon||"📍", i));
       }
@@ -742,12 +959,19 @@ router.post("/:id/products/v2", (req, res) => {
           Number(t.pricePerPersonPerNightInr)||0,
           t.isRecommended?1:0, i));
       }
+      // Required booking data belongs to the same transaction as publication.
+      backfillProductLocationRules(db, productId);
+      backfillProductOptions(db, productId);
     })();
 
+    const createdProduct = db.prepare("SELECT id,title,product_type,product_sub_type,city,price_inr,status,is_published FROM products WHERE id=?").get(productId);
+
     return res.status(201).json({
-      success: true, productId,
+      success: true,
+      productId,
+      url: activityPath(createdProduct || { id: productId, title }),
       message: `${normType} product created successfully`,
-      product: db.prepare("SELECT id,title,product_type,product_sub_type,city,price_inr,status FROM products WHERE id=?").get(productId),
+      product: createdProduct,
     });
   } catch (err) {
     logger.error("Product v2 creation failed", { error: err.message });
@@ -1074,6 +1298,7 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
       success: true,
       is_published: isPublished,
       status,
+      url: activityPath(product),
       message: isPublished ? "Listing is live in marketplace search." : "Listing moved to draft and removed from marketplace search."
     });
   } catch (err) {
@@ -1082,23 +1307,52 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
   }
 });
 
+const dispatchSettingsSchema = z.object({ automaticEnabled: z.boolean(), leadHours: z.number().int().min(24).max(168).default(48), responseMinutes: z.number().int().min(5).max(120).default(30), maxAttempts: z.number().int().min(1).max(10).default(3), bufferMinutes: z.number().int().min(0).max(240).default(30) }).strict();
+router.get("/:id/dispatch", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  const settings = effectiveDispatchSettings(db, req.params.id);
+  const readiness = dispatchReadiness(db, req.params.id);
+  const tasks = listDispatchExceptions(db, { supplierId: req.params.id });
+  const tripIssues = listDispatchExceptions(db, { supplierId: req.params.id, taskTypes: TRIP_ISSUE_TASK_TYPES });
+  const deliveries = db.prepare("SELECT o.booking_id, o.event_type, o.status, o.last_error, o.attempts FROM dispatch_outbox o JOIN bookings b ON b.id = o.booking_id WHERE b.supplier_id = ? ORDER BY o.available_at DESC LIMIT 100").all(req.params.id);
+  res.json({ success: true, settings, readiness, tasks, tripIssues, deliveries });
+});
+router.put("/:id/dispatch", optionalAuthMiddleware, requireSupplierAccess, validateBody(dispatchSettingsSchema), (req, res) => {
+  const v = req.body;
+  dispatchTransaction(db, () => {
+    db.prepare(`INSERT INTO dispatch_settings (supplier_id, automatic_enabled, lead_hours, response_minutes, max_attempts, buffer_minutes) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (supplier_id) DO UPDATE SET automatic_enabled = excluded.automatic_enabled, lead_hours = excluded.lead_hours, response_minutes = excluded.response_minutes, max_attempts = excluded.max_attempts, buffer_minutes = excluded.buffer_minutes`)
+      .run(req.params.id, v.automaticEnabled ? 1 : 0, v.leadHours, v.responseMinutes, v.maxAttempts, v.bufferMinutes);
+  });
+  res.json({ success: true });
+});
+router.patch("/:id/drivers/:driverId/contact", optionalAuthMiddleware, requireSupplierAccess, validateBody(z.object({ driverEmail: z.string().email(), seatCapacity: z.number().int().min(1).max(100), dispatchPriority: z.number().int().min(0).max(100).default(0) }).strict()), (req, res) => {
+  const result = dispatchTransaction(db, () => db.prepare("UPDATE supplier_drivers SET driver_email = ?, seat_capacity = ?, dispatch_priority = ? WHERE id = ? AND supplier_id = ?")
+    .run(req.body.driverEmail, req.body.seatCapacity, req.body.dispatchPriority, req.params.driverId, req.params.id));
+  res.status(result.changes ? 200 : 404).json({ success: Boolean(result.changes) });
+});
+
 // POST /api/suppliers/:id/assign-driver - Dispatch driver and vehicle to booking
 router.post("/:id/assign-driver", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.assignment), (req, res) => {
   try {
     const { id } = req.params;
-    const { bookingId, supplierDriverId, driverName, driverPhone, vehicleModel, vehicleNumber } = req.body;
+    const { bookingId, supplierDriverId, driverName, driverPhone, driverEmail, seatCapacity, vehicleModel, vehicleNumber, confirmedByPhone, note } = req.body;
     if (!bookingId) return res.status(400).json({ error: "Booking is required" });
+    const phoneConfirmed = confirmedByPhone === true || confirmedByPhone === "true" || confirmedByPhone === 1;
+    if (phoneConfirmed && String(note || "").trim().length < 3) return res.status(400).json({ error: "Add a note about the phone confirmation (who you spoke to and when)" });
     const assignment = assignDriverToBooking(db, {
       supplierId: id,
       bookingId,
       supplierDriverId,
-      manualDriver: { driverName, driverPhone, vehicleModel, vehicleNumber },
+      manualDriver: { driverName, driverPhone, driverEmail, seatCapacity, vehicleModel, vehicleNumber },
       actorId: req.user?.id,
     });
 
-    queueNotification(notifyDriverAssigned(db, bookingId), "Driver assignment notification");
-
-    res.json({ success: true, assignment, assignmentId: assignment.id, message: `Driver ${assignment.driver_name} assigned successfully.` });
+    // Assignment transaction writes the durable driver request; traveler details follow acknowledgement.
+    if (phoneConfirmed) {
+      const confirmed = confirmDriverByPhone(db, { bookingId, supplierId: id, actorId: req.user?.id, note });
+      return res.json({ success: true, assignment: confirmed, assignmentId: confirmed.id, message: `Driver ${confirmed.driver_name} assigned and confirmed by phone. The traveler has been notified.` });
+    }
+    res.json({ success: true, assignment, assignmentId: assignment.id, message: `Driver ${assignment.driver_name} assigned. Waiting for the driver to accept.` });
   } catch (err) {
     logger.error("Driver assignment failed", { requestId: req.requestId, error: err });
     res.status(err.status || 500).json({ error: err.message || "Failed to assign driver" });
@@ -1172,6 +1426,23 @@ router.post("/:id/bookings/:bookingId/notifications/resend", optionalAuthMiddlew
     return res.json({ success: true, ...result });
   } catch (error) {
     return res.status(error.status || 500).json({ error: error.message || "Guest notification could not be sent" });
+  }
+});
+
+// GET /api/suppliers/:id/bookings/:bookingId/dispatch-timeline - Assignment and trip history for one booking
+router.get("/:id/bookings/:bookingId/dispatch-timeline", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  const booking = db.prepare("SELECT id FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
+  if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
+  res.json({ success: true, timeline: getDispatchTimeline(db, booking.id) });
+});
+
+// POST /api/suppliers/:id/bookings/:bookingId/confirm-driver - Record a driver's acceptance taken by phone
+router.post("/:id/bookings/:bookingId/confirm-driver", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.confirmDriver), (req, res) => {
+  try {
+    const assignment = confirmDriverByPhone(db, { bookingId: req.params.bookingId, supplierId: req.params.id, actorId: req.user?.id, note: req.body.note });
+    res.json({ success: true, assignment, message: `${assignment.driver_name} confirmed by phone. The traveler has been notified.` });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : "Driver confirmation failed" });
   }
 });
 
@@ -1254,7 +1525,7 @@ router.get("/:id/drivers/availability", optionalAuthMiddleware, requireSupplierA
 router.post("/:id/drivers", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.driver), (req, res) => {
   try {
     const { id } = req.params;
-    const { driverName, driverPhone, vehicleModel, vehicleNumber, licenseNumber } = req.body;
+    const { driverName, driverPhone, driverEmail, seatCapacity, dispatchPriority, vehicleModel, vehicleNumber, licenseNumber } = req.body;
     if (!driverName?.trim() || !driverPhone || !vehicleNumber) {
       return res.status(400).json({ error: "Driver Name, Phone and Vehicle Number are required." });
     }
@@ -1270,6 +1541,7 @@ router.post("/:id/drivers", optionalAuthMiddleware, requireSupplierAccess, valid
        VALUES (?, ?, ?, ?, ?, ?, ?, 4.9, 'AVAILABLE')`
     ).run(driverId, id, driverName.trim(), phone, vehicleModel || "Commercial Cab", plate, licenseNumber?.trim() || null);
 
+    db.prepare("UPDATE supplier_drivers SET driver_email = ?, seat_capacity = ?, dispatch_priority = ? WHERE id = ?").run(driverEmail || null, seatCapacity || 0, dispatchPriority || 0, driverId);
     res.json({ success: true, driverId, message: `Driver ${driverName} added to fleet.` });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || "Failed to add driver to fleet" });
@@ -1301,7 +1573,7 @@ router.patch("/:id/bookings/:bookingId/dispatch-status", optionalAuthMiddleware,
       note: req.body?.note,
       actorId: req.user?.id,
     });
-    queueNotification(notifyDispatchStatusChanged(db, req.params.bookingId), "Dispatch status notification");
+    // Status notifications are delivered from the transaction-owned dispatch outbox.
     res.json({ success: true, assignment: result.assignment, timeline: getDispatchTimeline(db, req.params.bookingId), message: `Dispatch updated to ${result.assignment.assignment_status.replaceAll("_", " ").toLowerCase()}.` });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || "Failed to update dispatch" });
@@ -1420,45 +1692,80 @@ router.post("/:id/bookings/:bookingId/cancel", optionalAuthMiddleware, requireSu
       return res.status(409).json({ error: `Cannot cancel a booking that is already ${currentStatus}.` });
     }
 
-    // Calculate refund quote
-    const isPaid = booking.payment_status === "PAID";
-    let quote = null;
-    if (isPaid) {
-      // If supplier is initiating cancellation due to operational issues, traveler typically gets 100% full refund
-      quote = calculateRefundQuote(db, booking, { overridePercentage: 100 });
-      const refundRecord = createRefundRecord(db, {
-        booking,
-        quote,
-        reason: `Supplier cancellation: ${reason}${notes ? ` - ${notes}` : ""}`,
-        actorId: req.user?.id || id,
-        idempotencyKey: `sup-cancel:${booking.id}:${Date.now()}`
-      });
-      finalizeRefund(db, { booking, refund: refundRecord, providerResult: { status: "PROCESSED" } });
-    } else {
-      db.transaction(() => {
-        db.prepare("UPDATE bookings SET status = 'cancelled', cancellation_reason = ? WHERE id = ?").run(reason, booking.id);
-        db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
-        db.prepare("UPDATE driver_assignments SET assignment_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
-      })();
-    }
+    // A supplier cancellation refunds the traveler in full, to their wallet first (ADR 019):
+    // they can rebook with it or, for 10 days, send it back to the original payment method.
+    const wallet = cancelBookingBySupplier(db, { booking, reason, notes });
 
-    try {
-      if (refundRecord?.id) {
-        queueNotification(notifyRefundProcessed(db, refundRecord.id), "Supplier cancellation refund notification");
-      }
-    } catch (notifErr) {
-      logger.warn("Supplier cancellation notification failed", { requestId: req.requestId, error: notifErr });
-    }
+    queueNotification(sendGuestBookingNotification(db, booking.id, "BOOKING_CANCELLED", { eventKeySuffix: "SUPPLIER_CANCEL" }), "Supplier cancellation traveler notification");
 
     res.json({
       success: true,
-      message: `Booking ${booking.ref} cancelled successfully.`,
+      message: wallet
+        ? `Booking ${booking.ref} cancelled. ₹${wallet.creditInr} was refunded to the traveler's wallet.`
+        : `Booking ${booking.ref} cancelled successfully.`,
       status: "cancelled",
-      refundQuote: quote
+      walletCreditInr: wallet?.creditInr ?? null,
+      cashRefundableUntil: wallet?.cashRefundableUntil ?? null
     });
   } catch (err) {
     logger.error("Supplier cancellation failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: err.message || "Failed to cancel booking" });
+    res.status(err.status || 500).json({ error: err.message || "Failed to cancel booking" });
+  }
+});
+
+// Day-of-operations (docs/SUPPLIER_OPERATIONS.md): voucher check-in, no-shows,
+// the guest list for a departure, and cancelling a whole departure.
+
+// POST /api/suppliers/:id/check-in - Check a traveler in from a scanned voucher QR or typed reference
+router.post("/:id/check-in", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.checkIn), (req, res) => {
+  try {
+    const result = checkInBooking(db, { supplierId: req.params.id, code: req.body.code, actorId: req.user?.id, allowOtherDate: req.body.allowOtherDate === true });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not check this traveler in");
+  }
+});
+
+// PATCH /api/suppliers/:id/bookings/:bookingId/attendance - Mark checked in, no-show, or clear
+router.patch("/:id/bookings/:bookingId/attendance", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.attendance), (req, res) => {
+  try {
+    const booking = setAttendance(db, { supplierId: req.params.id, bookingId: req.params.bookingId, status: req.body.status, actorId: req.user?.id });
+    res.json({ success: true, booking });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not update attendance");
+  }
+});
+
+// GET /api/suppliers/:id/manifest?productId=&date=&time=&format=csv - Guest list for one departure
+router.get("/:id/manifest", optionalAuthMiddleware, requireSupplierAccess, validateQuery(supplierSchemas.manifestQuery), (req, res) => {
+  try {
+    const { productId, date, time, format } = req.query;
+    const manifest = departureManifest(db, { supplierId: req.params.id, productId, date, time: time || null });
+    if (format === "csv") {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="manifest_${date}${time ? `_${time.replace(":", "")}` : ""}.csv"`);
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(manifestCsv(manifest));
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ success: true, manifest });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the guest list");
+  }
+});
+
+// POST /api/suppliers/:id/products/:productId/departures/cancel - Cancel every booking on a departure and close it
+router.post("/:id/products/:productId/departures/cancel", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.departureCancel), (req, res) => {
+  try {
+    const { date, time, reason, notes, dryRun } = req.body;
+    const result = cancelDeparture(db, { supplierId: req.params.id, productId: req.params.productId, date, time: time || null, reason, notes: notes || null, dryRun: dryRun === true });
+    for (const booking of result.cancelled) {
+      queueNotification(sendGuestBookingNotification(db, booking.id, "BOOKING_CANCELLED", { eventKeySuffix: "SUPPLIER_CANCEL" }), "Departure cancellation traveler notification");
+    }
+    if (!result.dryRun) logger.info("Supplier cancelled a departure", { requestId: req.requestId, supplierId: req.params.id, productId: req.params.productId, date, time: time || null, bookings: result.cancelled.length });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not cancel the departure");
   }
 });
 
@@ -1470,6 +1777,13 @@ router.patch("/:id/bookings/:bookingId/status", optionalAuthMiddleware, requireS
     const booking = db.prepare("SELECT * FROM bookings WHERE id = ? AND supplier_id = ?").get(bookingId, id);
     if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
     if (nextStatus === "in_progress") return res.status(409).json({ error: "Verify the traveler's pickup OTP to start this trip" });
+    // A dispatched trip completes through the dispatch workflow, so the traveler, audit trail,
+    // payout and open trip tasks all see it.
+    const dispatched = db.prepare("SELECT id FROM driver_assignments WHERE booking_id = ? AND assignment_status <> 'CANCELLED'").get(bookingId);
+    if (nextStatus === "completed" && dispatched) {
+      const result = updateDispatchStatus(db, { supplierId: id, bookingId, nextStatus: "COMPLETED", actorId: req.user?.id, note: req.body.reason || "Marked complete by supplier" });
+      return res.json({ success: true, status: "completed", assignment: result.assignment, message: "Booking status updated to completed" });
+    }
     if (!canTransitionBooking(booking.status, nextStatus)) return res.status(409).json({ error: `Cannot move booking from ${booking.status} to ${nextStatus}` });
     db.transaction(() => {
       db.prepare("UPDATE bookings SET status = ? WHERE id = ? AND supplier_id = ?").run(nextStatus, bookingId, id);
@@ -1479,9 +1793,11 @@ router.patch("/:id/bookings/:bookingId/status", optionalAuthMiddleware, requireS
       }
       if (nextStatus === "cancelled") db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(bookingId);
     })();
+    if (nextStatus === "completed") onReferralTripCompleted(db, bookingId);
+    if (nextStatus === "cancelled") onReferralBookingCancelled(db, bookingId, { reason: "Cancelled by supplier" });
     res.json({ success: true, status: nextStatus, message: `Booking status updated to ${nextStatus}` });
   } catch (err) {
-    res.status(500).json({ error: "Failed to update booking status" });
+    res.status(err.status && err.status < 500 ? err.status : 500).json({ error: err.status && err.status < 500 ? err.message : "Failed to update booking status" });
   }
 });
 
@@ -1513,8 +1829,10 @@ router.get("/:id/dashboard-stats", optionalAuthMiddleware, requireSupplierAccess
       WHERE supplier_id = ? AND activity_date >= ? AND status != 'cancelled'
     `).get(id, monthStart);
 
-    // Supplier rating & completion
+    // Supplier rating & completion. Both numbers come from verified reviews:
+    // a supplier with none sees no rating, not a flattering placeholder.
     const supplier = db.prepare("SELECT rating FROM suppliers WHERE id = ?").get(id);
+    const supplierQuality = db.prepare("SELECT review_count, average_rating FROM quality_scores WHERE entity_type = 'SUPPLIER' AND entity_id = ?").get(id);
     const bookingCounts = db.prepare(`
       SELECT 
         COUNT(*) as total_all,
@@ -1564,8 +1882,8 @@ router.get("/:id/dashboard-stats", optionalAuthMiddleware, requireSupplierAccess
         growth_pct: 14.8,
       },
       ratings: {
-        avg: supplier?.rating || 4.8,
-        total_reviews: 42,
+        avg: supplierQuality?.review_count ? supplierQuality.average_rating : (supplier?.rating ?? null),
+        total_reviews: Number(supplierQuality?.review_count || 0),
         completion_rate: completionRate,
         cancellation_rate: cancellationRate,
       },
@@ -1635,6 +1953,133 @@ router.delete("/:id/products/:productId/media/:mediaId", optionalAuthMiddleware,
 });
 
 // --- INVENTORY CALENDAR & CAPACITY ---
+router.get("/:id/products/:productId/inventory", requireSupplierAccess, (req, res) => {
+  const product = db.prepare("SELECT * FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+  if (!product) return res.status(404).json({ error: "Product not found" });
+  let options = getProductOptions(db, product.id);
+  if (!options || options.length === 0) {
+    try {
+      ensureDefaultProductOption(db, product);
+      options = getProductOptions(db, product.id);
+    } catch (e) {
+      logger.warn("Failed to ensure default product option for inventory", { productId: product.id, error: e.message });
+    }
+  }
+  res.json({ options: (options || []).map(option => ({ ...option, inventory: getInventoryRules(db, product.id, option.id) || null })) });
+});
+router.put("/:id/products/:productId/inventory/:optionId", requireSupplierAccess, (req, res) => {
+  try {
+    const product = db.prepare("SELECT id, product_type FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    if (product.product_type === "TRANSFER") return res.status(400).json({ error: "Seat inventory is for experiences. Transfers use vehicle availability." });
+    const rules = saveInventoryRules(db, product.id, req.params.optionId, req.body);
+    res.json({ success: true, rules });
+  } catch (error) { res.status(error.status || 400).json({ error: error.message, code: error.code }); }
+});
+
+// --- SEASONAL RATES & CALENDAR OVERRIDES (Reservation engine v2) ---
+// Both are scoped to a product the calling supplier owns, like the rest of the
+// extranet; see docs/RESERVATION_ENGINE_V2_PLAN.md.
+function ownedProduct(req, res) {
+  const product = db.prepare("SELECT id, product_type FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+  if (!product) { res.status(404).json({ error: "Product not found" }); return null; }
+  return product;
+}
+function inventoryFailure(res, error) {
+  const validationIssue = error?.name === "ZodError" || Array.isArray(error?.issues);
+  return res.status(validationIssue ? 400 : error.status || 400).json({
+    error: validationIssue ? "Check the submitted dates, prices and capacity." : error.message,
+    code: validationIssue ? "VALIDATION_ERROR" : error.code,
+  });
+}
+
+router.get("/:id/products/:productId/inventory/:optionId/rates", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ rates: listPriceSchedules(db, product.id, req.params.optionId) });
+});
+router.post("/:id/products/:productId/inventory/:optionId/rates", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.status(201).json({ success: true, rate: savePriceSchedule(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/rates/:rateId", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deletePriceSchedule(db, product.id, req.params.optionId, req.params.rateId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+router.get("/:id/products/:productId/inventory/:optionId/promotions", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ promotions: listPromotions(db, product.id, req.params.optionId) });
+});
+router.post("/:id/products/:productId/inventory/:optionId/promotions", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.status(201).json({ success: true, promotion: savePromotion(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/promotions/:promotionId", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deletePromotion(db, product.id, req.params.optionId, req.params.promotionId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+router.get("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ overrides: listSlotOverrides(db, product.id, req.params.optionId, { from: req.query.from, to: req.query.to }) });
+});
+router.put("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, override: saveSlotOverride(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.put("/:id/products/:productId/inventory/:optionId/calendar/range", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...saveSlotOverrideRange(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/calendar/range", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try {
+    res.json({ success: true, ...deleteSlotOverrideRange(db, product.id, req.params.optionId, {
+      from: req.query.from, to: req.query.to, localTime: req.query.localTime || "",
+    }) });
+  } catch (error) { inventoryFailure(res, error); }
+});
+
+router.delete("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deleteSlotOverride(db, product.id, req.params.optionId, req.query.localDate, req.query.localTime || "") }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+// --- SHARED RESOURCES (one vehicle or guide across several options) ---
+router.get("/:id/resources", requireSupplierAccess, (req, res) => {
+  res.json({ resources: listResources(db, req.params.id) });
+});
+router.post("/:id/resources", requireSupplierAccess, (req, res) => {
+  try { res.status(201).json({ success: true, resource: saveResource(db, req.params.id, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.put("/:id/resources/:resourceId", requireSupplierAccess, (req, res) => {
+  try { res.json({ success: true, resource: saveResource(db, req.params.id, req.body, req.params.resourceId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/resources/:resourceId", requireSupplierAccess, (req, res) => {
+  try { res.json({ success: true, ...deleteResource(db, req.params.id, req.params.resourceId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
 router.get("/:id/products/:productId/availability", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
   const { productId } = req.params;
   const availability = db.prepare("SELECT * FROM product_availability WHERE product_id = ?").all(productId);
@@ -1728,6 +2173,8 @@ router.post("/:id/products/:productId/clone", optionalAuthMiddleware, requireSup
     original.group_type, original.hero_image, original.images, original.inclusions, original.exclusions, original.itinerary
   );
 
+  backfillProductLocationRules(db);
+  backfillProductOptions(db);
   return res.status(201).json({ success: true, clonedProductId: newId, title: newTitle });
 });
 

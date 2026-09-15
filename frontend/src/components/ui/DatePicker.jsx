@@ -41,7 +41,7 @@ export function DatePicker({
           id={inputId}
           type="date"
           value={value}
-          onChange={onChange}
+          onChange={(event) => onChange?.(event.target.value)}
           min={min}
           max={max}
           required={required}

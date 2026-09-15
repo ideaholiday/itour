@@ -5,11 +5,14 @@ const BLOCKED_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 function assertSafeValue(value, path = [], depth = 0, state = { nodes: 0 }) {
   state.nodes += 1;
   if (state.nodes > 5_000) throw new Error("Request contains too many values");
-  if (depth > 10) throw new Error("Request nesting is too deep");
   if (typeof value === "string" && value.length > 100_000) {
     throw new Error(`Value at ${path.join(".") || "request"} is too long`);
   }
   if (!value || typeof value !== "object") return;
+  // Depth counts containers only. Meta's failed-delivery status nests a
+  // string at entry[].changes[].value.statuses[].errors[].error_data.details
+  // (11 levels); rejecting it dropped WhatsApp delivery failures with a 400.
+  if (depth > 16) throw new Error("Request nesting is too deep");
   if (Array.isArray(value)) {
     if (value.length > 1_000) throw new Error(`Array at ${path.join(".") || "request"} is too large`);
     value.forEach((item, index) => assertSafeValue(item, [...path, index], depth + 1, state));

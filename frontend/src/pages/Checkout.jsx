@@ -1,3 +1,4 @@
+import { activityPath } from "../lib/activityUrl.js";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
@@ -5,11 +6,14 @@ import {
   LockKeyhole, MapPin, Navigation, ShieldCheck, Sparkles, Tag, TestTube2,
   UserRound, Users, Wallet
 } from "lucide-react";
-import { api } from "../lib/api.js";
+import { api, authHeaders } from "../lib/api.js";
+import { getBookingAttributionFields, getStoredAffiliateCode, getStoredTravelerReferralCode } from "../lib/affiliateAttribution.js";
 import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 import { useCurrency } from "../lib/currency.jsx";
 import PickupPointPicker from "../components/PickupPointPicker.jsx";
+import { isValidTravelNumber, typedAddressAccepted } from "../lib/checkoutLocation.js";
+import { loadCashfreeSdk } from "../lib/cashfreeSdk.js";
 
 const PICKUP_TYPES = [
   { id: "HOTEL", label: "Hotel / stay", icon: "🏨", placeholder: "Hotel or property name, full address and area" },
@@ -35,47 +39,6 @@ const PAYMENT_OPTIONS = [
   }
 ];
 
-function loadCashfreeSdk() {
-  return new Promise((resolve, reject) => {
-    if (typeof window !== "undefined" && window.Cashfree) {
-      resolve(window.Cashfree);
-      return;
-    }
-    const existing = document.getElementById("cashfree-js-sdk");
-    if (existing) {
-      if (typeof window !== "undefined" && window.Cashfree) {
-        resolve(window.Cashfree);
-        return;
-      }
-      let attempts = 0;
-      const interval = setInterval(() => {
-        attempts++;
-        if (typeof window !== "undefined" && window.Cashfree) {
-          clearInterval(interval);
-          resolve(window.Cashfree);
-        } else if (attempts > 40) {
-          clearInterval(interval);
-          existing.remove();
-          loadCashfreeSdk().then(resolve).catch(reject);
-        }
-      }, 50);
-      return;
-    }
-    const script = document.createElement("script");
-    script.id = "cashfree-js-sdk";
-    script.src = "https://sdk.cashfree.com/js/v3/cashfree.js";
-    script.async = true;
-    script.onload = () => {
-      if (typeof window !== "undefined" && window.Cashfree) {
-        resolve(window.Cashfree);
-      } else {
-        reject(new Error("Cashfree SDK loaded but not initialized"));
-      }
-    };
-    script.onerror = () => reject(new Error("Failed to load Cashfree payment gateway SDK"));
-    document.body.appendChild(script);
-  });
-}
 
 function locationFromParams(params, name) {
   const address = params.get(name) || "";
@@ -92,6 +55,12 @@ export default function Checkout() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  useEffect(() => { fetch("/api/checkout/config").then(response => response.json()).then(config => setDemoEnabled(Boolean(config.demoEnabled))).catch(() => {}); }, []);
+  const [holdAttempt, setHoldAttempt] = useState(0);
+  const [nativeHold, setNativeHold] = useState(null);
+  const [nativeHoldError, setNativeHoldError] = useState("");
+  const [clockNow, setClockNow] = useState(Date.now());
   const [activity, setActivity] = useState(null);
   const [loadingError, setLoadingError] = useState("");
   const [travelerName, setTravelerName] = useState(user?.name || "");
@@ -121,7 +90,14 @@ export default function Checkout() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
 
+  // A traveler referral code is priced by the server quote, never in the browser.
+  const referralCodeForQuote = appliedPromo?.type === "REFERRAL" ? appliedPromo.code : null;
+  // So is a coupon: the quote returns the discount the booking will actually charge.
+  const promoCodeForQuote = appliedPromo && appliedPromo.type !== "REFERRAL" ? appliedPromo.code : null;
+
   const [walletBalance, setWalletBalance] = useState(0);
+  // Admin-set wallet limits (Share & Earn settings); the server applies the same ones.
+  const [walletPolicy, setWalletPolicy] = useState({ walletMaxSharePct: 50, walletMaxPerBookingInr: 2000 });
   const [useWalletCredits, setUseWalletCredits] = useState(false);
 
   const [addonCalculation, setAddonCalculation] = useState({ addons: [], totalAddonsInr: 0 });
@@ -131,6 +107,7 @@ export default function Checkout() {
       api.getLoyaltyProfile()
         .then((res) => {
           if (res?.walletBalanceInr) setWalletBalance(Number(res.walletBalanceInr));
+          if (res?.policy?.walletMaxSharePct !== undefined) setWalletPolicy({ ...res.policy, affiliateCreditInr: Number(res.affiliateCreditInr || 0), refundCreditInr: Number(res.refundCreditInr || 0) });
         })
         .catch(() => {});
     }
@@ -143,6 +120,31 @@ export default function Checkout() {
   const vehicle = params.get("vehicle") || "SEDAN";
   const variant = params.get("variant") || "Standard Booking";
   const optionId = params.get("option") || activity?.options?.[0]?.id || null;
+  useEffect(() => {
+    if (!activity || !user?.id || !optionId) return;
+    let active = true;
+    setNativeHold(null); setNativeHoldError("");
+    const key = `native-checkout:${user.id}:${id}:${optionId}:${date}:${pickupTime}:${adults}:${children}`;
+    let requestKey = sessionStorage.getItem(key);
+    if (!requestKey) { requestKey = crypto.randomUUID(); sessionStorage.setItem(key, requestKey); }
+    fetch(`/api/availability/native/${encodeURIComponent(id)}?date=${encodeURIComponent(date)}&optionId=${encodeURIComponent(optionId)}`, { cache: "no-store" })
+      .then(response => response.json()).then(async data => {
+        if (!data.slots?.length || !active) return;
+        const response = await fetch("/api/availability/native/hold", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ productId: id, optionId, localDate: date, localTime: pickupTime, adults, children, requestKey }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not reserve seats");
+        if (active) setNativeHold(result);
+      }).catch(error => { if (active) setNativeHoldError(error.message); });
+    return () => { active = false; };
+  }, [activity, user?.id, id, optionId, date, pickupTime, adults, children, holdAttempt]);
+  useEffect(() => { const timer = setInterval(() => setClockNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const nativeSecondsLeft = nativeHold ? Math.max(0, Math.ceil((Date.parse(nativeHold.expiresAt) - clockNow) / 1000)) : null;
+  const retrySeatHold = () => {
+    sessionStorage.removeItem(`native-checkout:${user.id}:${id}:${optionId}:${date}:${pickupTime}:${adults}:${children}`);
+    setHoldAttempt(attempt => attempt + 1);
+  };
+
+
   const hotelTierId = params.get("hotelTier") || null;
   const ticketTiersParam = params.get("ticketTiers") || ""; // format: "tierId:count,tierId2:count2"
   const addonsParam = params.get("addons") || "";
@@ -192,7 +194,7 @@ export default function Checkout() {
             setDropPoint({ address: meta.destName, lat: meta.destLat, lng: meta.destLng, mapplsPin: "", confirmed: true });
           }
         }
-        if ((data?.productType || data?.product_type) === "MULTI_DAY_PACKAGE") {
+        if (["PACKAGE", "MULTI_DAY_PACKAGE"].includes(data?.productType || data?.product_type)) {
           const itineraryDays = data?.packageItinerary?.dayWiseDetails || [];
           const nights = Number(data?.packageItinerary?.total_nights || Math.max(0, itineraryDays.length - 1));
           setPackageHotels(Array.from({ length: nights }, (_, index) => ({
@@ -222,15 +224,24 @@ export default function Checkout() {
   }, [activity, joiningMethod, vehicle]);
 
   const pickupOption = PICKUP_TYPES.find((option) => option.id === pickupType) || PICKUP_TYPES[0];
-  const isShared = activity && (vehicle === "SHARED_SEAT" || activity.groupType === "SHARED" || activity.group_type === "SHARED");
+  const productSubType = activity?.productSubType || activity?.product_sub_type || "";
+  const isShared = activity && (vehicle === "SHARED_SEAT" || productSubType === "SIC" || productSubType === "TICKET_SIC" || activity.groupType === "SHARED" || activity.group_type === "SHARED");
   const productType = activity?.productType || activity?.product_type || "DAY_TOUR";
   const isTransfer = productType === "TRANSFER";
-  const isPackage = productType === "MULTI_DAY_PACKAGE";
+  const isPackage = productType === "PACKAGE" || productType === "MULTI_DAY_PACKAGE";
+  const requiresFlight = isTransfer && (
+    productSubType === "AIRPORT_RAILWAY" ||
+    String(activity?.transferMeta?.routeType || "").toUpperCase().includes("AIRPORT")
+  );
   const isArrivalTransfer = isTransfer && String(activity?.transferMeta?.serviceDirection || "ARRIVAL").toUpperCase() !== "DEPARTURE";
   const pickupRule = activity?.locationRules?.find((rule) => rule.side === "PICKUP");
   const dropRule = activity?.locationRules?.find((rule) => rule.side === "DROP");
-  const pickupIsFixed = pickupRule?.mode === "FIXED_LOCATION" || (isTransfer && isArrivalTransfer);
-  const dropIsFixed = dropRule?.mode === "FIXED_LOCATION" || (isTransfer && !isArrivalTransfer);
+  // A terminal is only locked when the listing actually names it. Listings
+  // without a route row would otherwise leave an empty, read-only pickup that
+  // no traveler can fill in, and the booking could never be submitted.
+  const pickupIsFixed = Boolean(activity?.transferMeta?.originName) && (pickupRule?.mode === "FIXED_LOCATION" || (isTransfer && isArrivalTransfer));
+  const dropIsFixed = Boolean(activity?.transferMeta?.destName) && (dropRule?.mode === "FIXED_LOCATION" || (isTransfer && !isArrivalTransfer));
+  const travelNumberLabel = productSubType === "AIRPORT_RAILWAY" ? "Flight / train number" : "Flight number";
 
   const destinationSearchContext = [
     isPackage ? activity?.packageItinerary?.start_city : "",
@@ -269,13 +280,30 @@ export default function Checkout() {
     (pickupPoint.address.trim().length >= 3)
   );
   const travelerReady = Boolean(travelerName.trim() && travelerPhone.trim() && travelerEmail.trim());
-  const dropReady = (!isTransfer && !isPackage) || Boolean(dropLocation.trim().length >= 3 && dropPoint.confirmed);
-  const flightReady = !isTransfer || Boolean(/^[A-Z0-9]{2}[- ]?\d{1,4}$/i.test(flightNumber.trim()) && flightTime);
+  // A hotel typed by hand (no map pin) is bookable wherever the server accepts
+  // it; operations confirm the exact spot.
+  const dropTypedAccepted = typedAddressAccepted(dropRule, dropLocation);
+  const dropReady = (!isTransfer && !isPackage) || Boolean(
+    dropLocation.trim().length >= 3 && (dropPoint.confirmed || dropTypedAccepted)
+  );
+  const dropCityHint = !dropPoint.confirmed && dropLocation.trim().length >= 3 && !dropTypedAccepted && dropRule?.mode !== "FIXED_LOCATION"
+    ? `Add the city to your address (for example "${dropLocation.trim()}, ${dropRule?.allowedCity || activity?.city || "city"}"), or pick a suggestion or set the pin on the map.`
+    : "";
+  const flightNumberValid = isValidTravelNumber(flightNumber);
+  const flightReady = !requiresFlight || Boolean(flightNumberValid && flightTime);
   const packageHotelsReady = !isPackage || packageHotels.every((hotel) => hotel.point.confirmed && hotel.point.address.trim().length >= 3);
+  const ticketSelections = useMemo(() => Object.fromEntries(
+    ticketTiersParsed.map(({ tierId, count }) => [tierId, count])
+  ), [ticketTiersParam]);
 
-  const discountAmount = appliedPromo ? Number(appliedPromo.discountAmount || 0) : 0;
-  const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount);
-  const maxAllowedWalletCredit = Math.min(walletBalance, remainingBeforeWallet * 0.5, 2000);
+  const discountAmount = promoCodeForQuote && quote?.coupon?.valid ? Number(quote.coupon.discountInr || 0) : 0;
+  const referralDiscountAmount = Number(quote?.referral?.discountInr || 0);
+  const referralUnavailable = appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
+  const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount - referralDiscountAmount);
+  // Referral credit is capped; creator earnings and refund credit in the wallet can pay the rest (the server applies the same split).
+  const creatorCredit = Math.min(walletBalance, Number(walletPolicy.affiliateCreditInr || 0) + Number(walletPolicy.refundCreditInr || 0));
+  const cappedWalletCredit = Math.floor(Math.min(walletBalance - creatorCredit, remainingBeforeWallet * Number(walletPolicy.walletMaxSharePct) / 100, Number(walletPolicy.walletMaxPerBookingInr)));
+  const maxAllowedWalletCredit = Math.min(walletBalance, cappedWalletCredit + Math.floor(Math.min(creatorCredit, Math.max(0, remainingBeforeWallet - cappedWalletCredit))));
   const walletDiscountAmount = useWalletCredits ? Math.round(maxAllowedWalletCredit) : 0;
   const payableTotal = Math.max(0, remainingBeforeWallet - walletDiscountAmount);
 
@@ -292,6 +320,7 @@ export default function Checkout() {
       const res = await api.validatePromoCode({
         code: codeToValidate,
         amountInr: totalAmount,
+        productId: id,
       });
       if (res?.promo?.valid) {
         setAppliedPromo(res.promo);
@@ -309,7 +338,7 @@ export default function Checkout() {
 
   // Auto-validate promo code if passed in URL
   useEffect(() => {
-    const initialCode = params.get("promo") || params.get("ref");
+    const initialCode = params.get("promo") || params.get("ref") || getStoredAffiliateCode() || getStoredTravelerReferralCode();
     if (initialCode && totalAmount > 0 && !appliedPromo) {
       handleApplyPromo(initialCode);
     }
@@ -323,37 +352,47 @@ export default function Checkout() {
       api.getBookingQuote({
         product_id: id,
         product_option_id: optionId,
+        native_hold_id: nativeHold?.holdId,
+        pickup_time: pickupTime,
         activity_date: date,
         adults,
         children,
         luggage_bags: luggage,
         vehicle_category: vehicle,
         variant_name: variant,
-        pickup_lat: pickupPoint.lat,
-        pickup_lng: pickupPoint.lng,
-        drop_lat: dropPoint.lat,
-        drop_lng: dropPoint.lng,
-        pickup_location: pickupPoint.address,
-        drop_location: dropPoint.address,
+        pickup_lat: pickupPoint.confirmed ? pickupPoint.lat : null,
+        pickup_lng: pickupPoint.confirmed ? pickupPoint.lng : null,
+        drop_lat: dropPoint.confirmed ? dropPoint.lat : null,
+        drop_lng: dropPoint.confirmed ? dropPoint.lng : null,
+        // Don't send a still-being-typed address to the quote/validation
+        // endpoint — it isn't a location yet, just keystrokes, and sending it
+        // makes the backend validate (and reject) an unconfirmed address on
+        // every character typed. Only pass it once the point is confirmed.
+        pickup_location: pickupPoint.confirmed ? pickupPoint.address : "",
+        drop_location: dropPoint.confirmed ? dropPoint.address : "",
         flight_number: flightNumber.trim() || null,
-        flight_arrival_time: isArrivalTransfer ? flightTime || null : null,
-        flight_departure_time: !isArrivalTransfer ? flightTime || null : null,
-        transfer_arrival_mode: isArrivalTransfer ? "AIR" : null,
-        transfer_departure_mode: !isArrivalTransfer ? "AIR" : null,
+        flight_arrival_time: requiresFlight && isArrivalTransfer ? flightTime || null : null,
+        flight_departure_time: requiresFlight && !isArrivalTransfer ? flightTime || null : null,
+        transfer_arrival_mode: requiresFlight && isArrivalTransfer ? "AIR" : undefined,
+        transfer_departure_mode: requiresFlight && !isArrivalTransfer ? "AIR" : undefined,
         pickup_location_ref: pickupPoint.mapplsPin || null,
         drop_location_ref: dropPoint.mapplsPin || null,
         custom_pickup: false,
-        booking_question_answers: {
+        booking_question_answers: requiresFlight ? {
           TRANSFER_ARRIVAL_MODE: isArrivalTransfer ? "AIR" : null,
           TRANSFER_DEPARTURE_MODE: !isArrivalTransfer ? "AIR" : null,
           FLIGHT_NUMBER: flightNumber.trim() || null,
           FLIGHT_ARRIVAL_TIME: isArrivalTransfer ? flightTime || null : null,
           FLIGHT_DEPARTURE_TIME: !isArrivalTransfer ? flightTime || null : null,
-        },
+        } : {},
         package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
         hotel_tier_id: hotelTierId,
+        ticket_selections: Object.keys(ticketSelections).length ? ticketSelections : undefined,
         origin_state: params.get("originState"),
-        dest_state: params.get("destState")
+        dest_state: params.get("destState"),
+        referral_code: referralCodeForQuote,
+        promo_code: promoCodeForQuote,
+        ...getBookingAttributionFields(),
       }).then((data) => {
         setQuote(data.quote);
         if (data.quote && activity) {
@@ -365,7 +404,7 @@ export default function Checkout() {
       }).finally(() => setQuoteLoading(false));
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, packageHotels, params]);
+  }, [activity, id, date, adults, children, luggage, vehicle, variant, optionId, pickupPoint.lat, pickupPoint.lng, pickupPoint.address, dropPoint.lat, dropPoint.lng, dropPoint.address, flightNumber, flightTime, isArrivalTransfer, requiresFlight, packageHotels, params, ticketSelections, pickupTime, nativeHold?.holdId, referralCodeForQuote, promoCodeForQuote]);
 
   const progress = useMemo(() => [
     { label: "Traveler", ready: travelerReady, icon: UserRound },
@@ -376,18 +415,22 @@ export default function Checkout() {
   const handleSubmitBooking = async (event) => {
     event.preventDefault();
     setError("");
+    if (!travelerReady) {
+      setError("Add the traveler's full name, mobile number and email.");
+      return;
+    }
     if (!pickupReady) {
       setError(isTransfer ? "Select and confirm the exact pickup point, then choose the ready time." : "Choose how you will join the experience and add the requested details.");
       document.getElementById("pickup-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (!dropReady) {
-      setError("Select the drop-off from Mappls and confirm its exact point on the map.");
+      setError(dropCityHint || (isTransfer ? "Enter your hotel or drop-off address, or set its point on the map." : "Select the drop-off and confirm its exact point on the map."));
       document.getElementById("dropoff-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (!flightReady) {
-      setError("Enter a valid flight number and scheduled flight time before continuing.");
+      setError(`Enter a valid ${travelNumberLabel.toLowerCase()} (for example 6E-2134${productSubType === "AIRPORT_RAILWAY" ? " or 12004" : ""}) and the scheduled time before continuing.`);
       document.getElementById("pickup-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
@@ -400,15 +443,19 @@ export default function Checkout() {
       return;
     }
 
+    if (nativeHoldError || nativeHold && nativeSecondsLeft === 0 || quote.nativeSlot && !nativeHold) {
+      setError(nativeHoldError || "Your seat hold expired or is not ready. Return to the experience to start a new checkout."); return;
+    }
     setProcessing(true);
     try {
       const bookingRes = await api.createBooking({
         product_id: id,
         activity_id: id,
         product_option_id: optionId,
+        native_hold_id: nativeHold?.holdId,
+        pickup_time: pickupTime,
         activity_date: date,
         pickup_type: isTransfer || joiningMethod === "PICKUP" ? pickupType : joiningMethod === "MEET" ? "MEETING_POINT" : "PROVIDE_LATER",
-        pickup_time: pickupTime,
         pickup_location: pickupLocation.trim(),
         pickup_instructions: pickupInstructions.trim(),
         pickup_lat: pickupPoint.lat,
@@ -417,27 +464,33 @@ export default function Checkout() {
         drop_lat: dropPoint.lat,
         drop_lng: dropPoint.lng,
         flight_number: flightNumber.trim() || null,
-        flight_arrival_time: isArrivalTransfer ? flightTime || null : null,
-        flight_departure_time: !isArrivalTransfer ? flightTime || null : null,
-        transfer_arrival_mode: isArrivalTransfer ? "AIR" : null,
-        transfer_departure_mode: !isArrivalTransfer ? "AIR" : null,
+        flight_arrival_time: requiresFlight && isArrivalTransfer ? flightTime || null : null,
+        flight_departure_time: requiresFlight && !isArrivalTransfer ? flightTime || null : null,
+        transfer_arrival_mode: requiresFlight && isArrivalTransfer ? "AIR" : undefined,
+        transfer_departure_mode: requiresFlight && !isArrivalTransfer ? "AIR" : undefined,
         pickup_location_ref: pickupPoint.mapplsPin || null,
         drop_location_ref: dropPoint.mapplsPin || null,
         custom_pickup: false,
-        booking_question_answers: {
+        booking_question_answers: requiresFlight ? {
           TRANSFER_ARRIVAL_MODE: isArrivalTransfer ? "AIR" : null,
           TRANSFER_DEPARTURE_MODE: !isArrivalTransfer ? "AIR" : null,
           FLIGHT_NUMBER: flightNumber.trim() || null,
           FLIGHT_ARRIVAL_TIME: isArrivalTransfer ? flightTime || null : null,
           FLIGHT_DEPARTURE_TIME: !isArrivalTransfer ? flightTime || null : null,
-        },
+        } : {},
         terminal_gate: terminalGate.trim() || null,
         package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
         origin_state: params.get("originState"),
         special_requests: specialRequests.trim(),
-        promo_code: appliedPromo?.code || null,
+        promo_code: promoCodeForQuote,
+        referral_code: referralCodeForQuote,
+        // Lets the server match this booking to the referral click that brought
+        // the traveler here, so the creator is actually paid for the link.
+        ...getBookingAttributionFields(),
+        wallet_credit_inr: useWalletCredits ? walletDiscountAmount : 0,
         selected_addons: addonCalculation.addons,
         hotel_tier_id: hotelTierId,
+        ticket_selections: Object.keys(ticketSelections).length ? ticketSelections : undefined,
         adults, children, luggage_bags: luggage,
         vehicle_category: vehicle,
         variant_name: variant,
@@ -451,7 +504,11 @@ export default function Checkout() {
       const bookingRef = bookingRes.ref || bookingRes.bookingRef;
       const bookingId = bookingRes.bookingId || bookingRes.id;
 
-      if (paymentMethod === "CASHFREE") {
+      if (Number(bookingRes.amount_inr) === 0 && Number(bookingRes.wallet_credit_applied_inr) > 0) {
+        // Wallet credit paid for all of it: nothing for a gateway to charge.
+        await api.completeWalletPayment({ bookingId, bookingRef });
+        navigate(`/booking-confirmed/${bookingRef}`);
+      } else if (paymentMethod === "CASHFREE") {
         const orderRes = await api.createCashfreeOrder({
           bookingId,
           bookingRef,
@@ -510,7 +567,7 @@ export default function Checkout() {
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900">
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
-        <Link to={`/activity/${id}`} className="inline-flex items-center gap-2 text-xs font-bold text-stone-600 hover:text-amber-700"><ArrowLeft className="h-4 w-4" /> Back to experience</Link>
+        <Link to={activityPath(id, activity?.title)} className="inline-flex items-center gap-2 text-xs font-bold text-stone-600 hover:text-amber-700"><ArrowLeft className="h-4 w-4" /> Back to experience</Link>
 
         <header className="mt-5 overflow-hidden rounded-[2rem] border border-stone-200 bg-white p-6 shadow-md sm:p-8">
           <div className="flex flex-col gap-5">
@@ -529,6 +586,10 @@ export default function Checkout() {
               )}
             </div>
 
+            {quote?.nativeSlot && <p className="text-sm text-stone-700">Free cancellation until {quote.nativeSlot.cancellationHours} hours before departure. After that, this booking is non-refundable.</p>}
+            {nativeHold && <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">{nativeSecondsLeft > 0 ? `Seats reserved for ${Math.floor(nativeSecondsLeft / 60)}:${String(nativeSecondsLeft % 60).padStart(2, "0")}. Complete payment before the hold expires.` : "Seat hold expired. Return to the experience and start a new checkout."}</p>}
+            {nativeHoldError && <p role="alert" className="text-red-700">{nativeHoldError}</p>}
+            {(nativeHoldError || nativeHold && nativeSecondsLeft === 0) && <button type="button" onClick={retrySeatHold} className="rounded-lg border border-emerald-800 px-4 py-2 text-emerald-900">Check availability and reserve again</button>}
             {/* Visual 3-step progress bar */}
             <div className="flex items-center gap-0">
               {progress.map(({ label, ready, icon: Icon }, index) => (
@@ -638,8 +699,41 @@ export default function Checkout() {
               {/* Transfer Details Form */}
               {isTransfer && (
                 <div className="space-y-4">
-                  {/* Arrival Transfer Route */}
-                  {isArrivalTransfer ? (
+                  {!requiresFlight ? (
+                    <>
+                      <div className="rounded-2xl border border-emerald-300 bg-emerald-50/40 p-4 space-y-3">
+                        <label className="text-xs font-bold text-emerald-950">Pickup address</label>
+                        <PickupPointPicker
+                          value={pickupPoint}
+                          nearbyLocation={dropPoint}
+                          searchContext={destinationSearchContext}
+                          onChange={setPickupPoint}
+                          placeholder="Enter the pickup hotel, home or complete address..."
+                          productId={id}
+                          validationSide="PICKUP"
+                        />
+                        <label className="block text-xs font-bold text-stone-700">
+                          Pickup time
+                          <input type="time" required value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} className="mt-1 w-full rounded-xl border border-stone-300 bg-white p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" />
+                        </label>
+                      </div>
+                      <div id="dropoff-details" className="rounded-2xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
+                        <label className="text-xs font-bold text-indigo-950">Drop-off address</label>
+                        <PickupPointPicker
+                          value={dropPoint}
+                          nearbyLocation={pickupPoint}
+                          searchContext={destinationSearchContext}
+                          onChange={setDropPoint}
+                          placeholder="Enter the destination hotel, home or complete address..."
+                          label=""
+                          kind="dropoff"
+                          markerLabel="B"
+                          productId={id}
+                          validationSide="DROP"
+                        />
+                      </div>
+                    </>
+                  ) : isArrivalTransfer ? (
                     <>
                       {/* Pickup Hub (Airport / Station) */}
                       <div className="rounded-2xl border border-stone-200 bg-white p-4 space-y-3">
@@ -656,18 +750,18 @@ export default function Checkout() {
                           readOnly={pickupIsFixed}
                           aria-readonly={pickupIsFixed}
                           onChange={(e) => !pickupIsFixed && setPickupPoint((prev) => ({ ...prev, address: e.target.value }))}
-                          placeholder="Airport or railway station terminal..."
-                          className="w-full rounded-xl border border-stone-300 bg-stone-100 p-3 text-xs text-stone-900 font-semibold outline-none"
+                          placeholder={pickupIsFixed ? "Airport or railway station terminal..." : `Arrival airport or railway station, e.g. ${activity?.city || "city"} airport`}
+                          className={`w-full rounded-xl border border-stone-300 p-3 text-xs text-stone-900 font-semibold outline-none ${pickupIsFixed ? "bg-stone-100" : "bg-[#FAF9F6] focus:border-amber-500 focus:bg-white"}`}
                         />
                         {pickupIsFixed && <p className="text-[11px] font-bold text-amber-800">🔒 Fixed pickup point — travelers cannot override this terminal.</p>}
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="text-xs font-bold text-stone-700">
-                            Flight Number <span className="text-rose-600">*</span>
+                            {travelNumberLabel} <span className="text-rose-600">*</span>
                             <input
                               required
                               value={flightNumber}
                               onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
-                              placeholder="e.g. 6E-2134 (IndiGo) or AI-864"
+                              placeholder={productSubType === "AIRPORT_RAILWAY" ? "e.g. 6E-2134 or train 12004" : "e.g. 6E-2134 (IndiGo) or AI-864"}
                               className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 focus:border-amber-500 focus:bg-white outline-none"
                             />
                           </label>
@@ -682,6 +776,7 @@ export default function Checkout() {
                             />
                           </label>
                         </div>
+                        {flightNumber.trim() && !flightNumberValid && <p role="alert" className="text-[11px] font-semibold text-rose-700">Use the {travelNumberLabel.toLowerCase()} only, for example 6E-2134{productSubType === "AIRPORT_RAILWAY" ? " or train 12004" : ""}.</p>}
                         <label className="block text-xs font-bold text-stone-700">Terminal / gate <span className="font-normal text-stone-500">(optional)</span><input value={terminalGate} onChange={(e) => setTerminalGate(e.target.value)} placeholder="e.g. Terminal 1, Gate A" className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
                         <p className="rounded-xl bg-amber-50 p-2.5 text-[11px] font-semibold text-amber-900">Includes {activity?.transferMeta?.freeWaitingMins || 60} minutes free waiting after flight arrival.</p>
                       </div>
@@ -708,6 +803,9 @@ export default function Checkout() {
                           productId={id}
                           validationSide="DROP"
                         />
+                        {dropCityHint
+                          ? <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-[11px] font-semibold text-amber-900">{dropCityHint}</p>
+                          : !dropPoint.confirmed && dropReady && <p className="rounded-xl border border-emerald-200 bg-white p-2.5 text-[11px] text-emerald-900">✓ We'll use this address as typed and confirm the exact spot with you. Setting the pin on the map helps your driver find it faster.</p>}
                         <div className="rounded-xl bg-white border border-emerald-200 p-2.5 text-[11px] text-emerald-900 leading-relaxed">
                           ✨ <strong>Any Hotel or Address Covered:</strong> Your chauffeur will meet you with your nameboard at the terminal and drive you directly to this location.
                         </div>
@@ -737,12 +835,12 @@ export default function Checkout() {
                         />
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="text-xs font-bold text-stone-700">
-                            Departure Flight / Train Number
+                            Departure {travelNumberLabel}
                             <input
                               required
                               value={flightNumber}
                               onChange={(e) => setFlightNumber(e.target.value.toUpperCase())}
-                              placeholder="e.g. 6E-5021 (IndiGo)"
+                              placeholder={productSubType === "AIRPORT_RAILWAY" ? "e.g. 6E-5021 or train 12004" : "e.g. 6E-5021 (IndiGo)"}
                               className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 focus:border-amber-500 focus:bg-white outline-none"
                             />
                           </label>
@@ -757,6 +855,7 @@ export default function Checkout() {
                             />
                           </label>
                         </div>
+                        {flightNumber.trim() && !flightNumberValid && <p role="alert" className="text-[11px] font-semibold text-rose-700">Use the {travelNumberLabel.toLowerCase()} only, for example 6E-5021{productSubType === "AIRPORT_RAILWAY" ? " or train 12004" : ""}.</p>}
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="text-xs font-bold text-stone-700">Scheduled departure time <span className="text-rose-600">*</span><input type="time" required value={flightTime} onChange={(e) => setFlightTime(e.target.value)} className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
                           <label className="text-xs font-bold text-stone-700">Terminal / gate <span className="font-normal text-stone-500">(optional)</span><input value={terminalGate} onChange={(e) => setTerminalGate(e.target.value)} placeholder="e.g. Terminal 3" className="mt-1 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] p-2.5 text-xs text-stone-900 outline-none focus:border-amber-500" /></label>
@@ -854,9 +953,9 @@ export default function Checkout() {
             </section>
 
             <section className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
-              <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-100 text-emerald-800"><LockKeyhole className="h-5 w-5" /></span><div><h2 className="font-serif text-xl font-bold text-stone-900">Choose payment method</h2><p className="text-xs text-stone-500">Select Cashfree for live sandbox testing or Demo for instant bypass.</p></div></div>
+              <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-100 text-emerald-800"><LockKeyhole className="h-5 w-5" /></span><div><h2 className="font-serif text-xl font-bold text-stone-900">Choose payment method</h2><p className="text-xs text-stone-500">Your seats are confirmed after secure payment verification.</p></div></div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {PAYMENT_OPTIONS.map((option) => {
+                {PAYMENT_OPTIONS.filter(option => option.id !== "DEMO" || demoEnabled).map((option) => {
                   const Icon = option.icon;
                   const selected = paymentMethod === option.id;
                   return (
@@ -914,13 +1013,15 @@ export default function Checkout() {
 
             <button
               type="submit"
-              disabled={processing || quoteLoading || !quote || !travelerReady || !pickupReady || !dropReady}
+              disabled={processing || quoteLoading || !quote}
               className="w-full rounded-2xl bg-amber-500 hover:bg-amber-400 px-6 py-4 text-sm font-black text-stone-950 shadow-md shadow-amber-500/20 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {processing
                 ? "Processing your booking…"
                 : quoteLoading
                 ? "Checking price and availability…"
+                : payableTotal === 0 && walletDiscountAmount > 0
+                ? "Confirm booking · paid with wallet credit →"
                 : paymentMethod === "CASHFREE"
                 ? `Pay ₹${payableTotal.toLocaleString("en-IN")}${currency !== "INR" ? ` (~${formatPrice(payableTotal)})` : ""} via Cashfree →`
                 : "Confirm demo booking · ₹0 charged →"}
@@ -1018,6 +1119,15 @@ export default function Checkout() {
                     </div>
                   )}
 
+                  {referralDiscountAmount > 0 && (
+                    <div className="flex justify-between items-center text-emerald-700 font-bold bg-emerald-50 p-2 rounded-xl border border-emerald-200">
+                      <span className="flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5" /> Friend discount{quote.referral.referrerFirstName ? ` from ${quote.referral.referrerFirstName}` : ""}
+                      </span>
+                      <span>−{formatPrice(referralDiscountAmount)}</span>
+                    </div>
+                  )}
+
                     {/* Promo Code Input Box */}
                   <div className="pt-2 border-t border-stone-100 space-y-2">
                     {appliedPromo ? (
@@ -1052,6 +1162,23 @@ export default function Checkout() {
                     )}
                     {promoError && (
                       <p className="text-[10px] font-mono text-rose-600">{promoError}</p>
+                    )}
+                    {promoCodeForQuote && quote?.coupon && !quote.coupon.valid && (
+                      <p className="text-[10px] font-mono text-rose-600">{quote.coupon.error}</p>
+                    )}
+                    {promoCodeForQuote && quote?.coupon?.valid && quote.coupon.capped && (
+                      <p className="text-[10px] font-mono text-stone-500">
+                        {discountAmount > 0
+                          ? `This code takes ${formatPrice(discountAmount)} off this booking, the most offers can give on it.`
+                          : "This booking already has the most discount offers can give, so this code adds nothing."}
+                      </p>
+                    )}
+                    {referralUnavailable && (
+                      <p className="text-[10px] font-mono text-stone-500">
+                        {quote.referral.reason === "FIRST_TRIP_USED"
+                          ? "The friend discount applies to your first trip only."
+                          : "This referral can't be used on this account. You can still book at the regular price."}
+                      </p>
                     )}
                   </div>
 

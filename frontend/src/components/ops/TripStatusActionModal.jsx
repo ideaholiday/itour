@@ -73,41 +73,6 @@ export default function TripStatusActionModal({
     }
   };
 
-  const handleSimulateGps = async () => {
-    if (!trip.assignment_id) {
-      setError("No active driver assignment ID to update GPS");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const currentLat = trip.driver_telemetry?.lat || trip.pickup_lat || 27.1751;
-      const currentLng = trip.driver_telemetry?.lng || trip.pickup_lng || 78.0421;
-      const newLat = currentLat + (Math.random() - 0.5) * 0.005;
-      const newLng = currentLng + (Math.random() - 0.5) * 0.005;
-
-      const res = await api.updateDriverLocation({
-        assignmentId: trip.assignment_id,
-        lat: newLat,
-        lng: newLng,
-        speed_kmh: Math.floor(Math.random() * 20) + 30,
-        heading: Math.floor(Math.random() * 360),
-        battery_pct: 90
-      });
-
-      if (res.success) {
-        setSuccessMessage("Simulated live GPS ping broadcasted!");
-        setTimeout(() => {
-          if (onStatusUpdated) onStatusUpdated();
-        }, 800);
-      }
-    } catch (err) {
-      setError(err.message || "Failed to simulate GPS update");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
       <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative">
@@ -243,21 +208,6 @@ export default function TripStatusActionModal({
             </button>
           )}
 
-          {/* Quick GPS Telemetry Simulator */}
-          <div className="pt-3 border-t border-stone-200 dark:border-stone-800 flex items-center justify-between">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleSimulateGps}
-              className="text-[11px] font-mono text-stone-500 hover:text-amber-800 dark:hover:text-amber-400 flex items-center gap-1.5 transition"
-            >
-              <Navigation className="w-3.5 h-3.5 text-amber-600" />
-              Simulate Live GPS Ping
-            </button>
-            <span className="text-[10px] text-stone-400 font-mono">
-              Last Ping: {new Date().toLocaleTimeString()}
-            </span>
-          </div>
         </div>
       </div>
     </div>

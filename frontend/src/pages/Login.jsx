@@ -4,6 +4,7 @@ import { Gift, Sparkles } from "lucide-react";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 import GoogleAuthButton from "../components/GoogleAuthButton.jsx";
+import { clearStoredTravelerReferral, getStoredTravelerReferralCode, getVisitorId } from "../lib/affiliateAttribution.js";
 
 export default function Login({ initialMode = "login" }) {
   const location = useLocation();
@@ -19,8 +20,16 @@ export default function Login({ initialMode = "login" }) {
       sessionStorage.setItem("ih_ref_code", refCodeParam);
       return refCodeParam;
     }
-    return sessionStorage.getItem("ih_ref_code") || "";
+    return sessionStorage.getItem("ih_ref_code") || getStoredTravelerReferralCode() || "";
   });
+  const [referrerName, setReferrerName] = useState("");
+
+  useEffect(() => {
+    if (!referralCode) return;
+    api.getPublicReferralInfo(referralCode)
+      .then((info) => setReferrerName(info?.valid ? info.referrerName : ""))
+      .catch(() => setReferrerName(""));
+  }, [referralCode]);
   const [form, setForm] = useState({ name: "", email: "", password: "", phone: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -69,9 +78,14 @@ export default function Login({ initialMode = "login" }) {
         email: form.email.trim(),
         name: form.name.trim(),
         ...(mode === "signup" && referralCode ? { referralCode } : {}),
+        ...(mode === "signup" && getVisitorId() ? { visitorId: getVisitorId() } : {}),
       };
       const fn = mode === "login" ? api.login : api.signup;
       const result = await fn(payload);
+      if (mode === "signup") {
+        sessionStorage.removeItem("ih_ref_code");
+        clearStoredTravelerReferral();
+      }
       login(result.token, result.user);
       navigate(getRedirectTarget(result.user), { replace: true });
     } catch (err) {
@@ -113,9 +127,9 @@ export default function Login({ initialMode = "login" }) {
           <div className="mb-5 flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-300/80 p-3.5 text-amber-900 shadow-xs">
             <Gift className="h-5 w-5 text-amber-600 shrink-0" />
             <div className="text-xs">
-              <span className="font-bold block">Referral Discount Activated! 🎉</span>
+              <span className="font-bold block">{referrerName ? `${referrerName} invited you` : "You were invited by a friend"}</span>
               <span className="text-amber-800">
-                Code <strong className="font-mono font-bold bg-amber-200/70 px-1.5 py-0.5 rounded">{referralCode}</strong> applied. ₹250 welcome gift ready.
+                Sign up with code <strong className="font-mono font-bold bg-amber-200/70 px-1.5 py-0.5 rounded">{referralCode}</strong> and your first trip gets a friend discount, shown at checkout.
               </span>
             </div>
           </div>

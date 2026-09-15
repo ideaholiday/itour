@@ -9,6 +9,10 @@ export const E2E_ACCOUNTS = Object.freeze({
     email: "browser.e2e.ops@example.test",
     password: "BrowserOps@2026",
   },
+  admin: {
+    email: "browser.e2e.admin@example.test",
+    password: "BrowserAdmin@2026",
+  },
 });
 
 function futureDate(days = 14) {

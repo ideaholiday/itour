@@ -1,11 +1,16 @@
+import { assignDriverToBooking, getFleetAvailability } from "../services/driverDispatchService.js";
+import { confirmDriverByPhone, listDispatchExceptions, operationsTripOverride, processDispatchSchedule, processDispatchOutbox, TRIP_ISSUE_TASK_TYPES } from "../services/dispatchWorkflowService.js";
+import { deliverDispatchNotification } from "../services/dispatchNotificationService.js";
+import { smsConfiguration } from "../services/smsService.js";
 import express from "express";
 import db from "../db.js";
-import { sendWhatsAppMessage, sendWhatsAppVoucher, whatsAppProviderConfiguration } from "../services/whatsappService.js";
+import { sendWhatsAppMessage, sendWhatsAppVoucher, whatsAppProviderConfiguration, whatsAppTemplate } from "../services/whatsappService.js";
 import { emailProviderConfiguration, sendEmail } from "../services/emailService.js";
 import { withoutPickupOtpSecrets } from "../services/bookingService.js";
 import { processExpiredSupplierAssignments } from "../services/assignmentSlaService.js";
 import { processExpiredCircuitReconfirmations } from "../services/circuitOrchestrationService.js";
-import { notifyCircuitReschedule, queueNotification, sendGuestBookingNotification } from "../services/notificationService.js";
+import { notifyBookingConfirmed, notifyCircuitReschedule, queueNotification, sendGuestBookingNotification, sendPendingPostTripReviewInvites } from "../services/notificationService.js";
+import { processReservationOutbox } from "../services/reservationOutboxService.js";
 import {
   getLiveDispatchTelemetry,
   updateDriverCoordinates,
@@ -17,12 +22,13 @@ import { authenticate, optionalAuthMiddleware, requireRoles, requireSchedulerOrR
 import logger from "../config/logger.js";
 import { validateBody } from "../middleware/validation.js";
 import { opsSchemas } from "../validators/apiSchemas.js";
+import { driverLocationTrail, latestDriverLocation, purgeExpiredDriverLocations } from "../services/driverLocationService.js";
 
 const router = express.Router();
 const opsAccess = requireRoles("ADMIN", "STAFF");
 
 router.use((req, res, next) => {
-  if (req.path === "/process-assignment-timeouts") return next();
+  if (["/process-assignment-timeouts", "/process-driver-dispatch", "/process-reservation-outbox", "/process-post-trip-invites"].includes(req.path)) return next();
   return authenticate(req, res, (error) => error ? next(error) : opsAccess(req, res, next));
 });
 
@@ -75,13 +81,15 @@ router.get("/live-trips", (req, res) => {
       const hasDriver = Boolean(b.driver_name && b.driver_name !== "Driver Pending Assignment");
       const status = (b.assignment_status || "UNASSIGNED").toUpperCase();
 
-      // SLA Alert logic: If pickup is within 60 mins (or mocked active unassigned), highlight red SLA alert
-      // We check if driver is missing
+      // SLA Alert logic: If pickup is within 60 mins and no driver is assigned, highlight red SLA alert.
       const isUnassigned = !hasDriver || status === "UNASSIGNED";
+      const isLive = !["cancelled", "completed"].includes(String(b.status || "").toLowerCase());
 
-      // Mock minutes until pickup for demo (35 mins to 120 mins)
-      const minutesToPickup = isUnassigned ? 45 : 120;
-      const slaAlert = isUnassigned && minutesToPickup <= 60;
+      // Minutes until pickup, computed from the booking's actual activity date/time (IST).
+      // A negative value means the pickup time has already passed with no driver assigned.
+      const pickupAt = b.activity_date ? Date.parse(`${b.activity_date}T${b.pickup_time || "09:00"}:00+05:30`) : NaN;
+      const minutesToPickup = Number.isFinite(pickupAt) ? Math.round((pickupAt - Date.now()) / 60000) : null;
+      const slaAlert = isLive && isUnassigned && minutesToPickup !== null && minutesToPickup <= 60;
 
       if (slaAlert) totalSlaBreaches++;
 
@@ -91,8 +99,12 @@ router.get("/live-trips", (req, res) => {
         slaAlert,
         minutesToPickup,
         slaText: slaAlert
-          ? `🚨 SLA BREACH: Trip in ${minutesToPickup} mins — No Driver Assigned!`
-          : `Pickup in ${minutesToPickup} mins`,
+          ? minutesToPickup < 0
+            ? `🚨 SLA BREACH: Pickup was ${Math.abs(minutesToPickup)} mins ago — No Driver Assigned!`
+            : `🚨 SLA BREACH: Trip in ${minutesToPickup} mins — No Driver Assigned!`
+          : minutesToPickup === null
+            ? "Pickup time not confirmed"
+            : `Pickup in ${minutesToPickup} mins`,
         mapsLink: b.pickup_lat && b.pickup_lng
           ? `https://maps.google.com/?q=${b.pickup_lat},${b.pickup_lng}`
           : `https://maps.google.com/?q=${encodeURIComponent(b.pickup_location || "Lucknow Airport")}`
@@ -146,52 +158,91 @@ router.post("/process-assignment-timeouts", optionalAuthMiddleware, requireSched
       success: true,
       assignments: processExpiredSupplierAssignments(db, { limit }),
       circuitReconfirmations,
+      // Driver positions are kept for 30 days (ADR 012).
+      locationRetention: purgeExpiredDriverLocations(db),
     });
   } catch (err) {
     return res.status(500).json({ error: "Assignment timeouts could not be processed" });
   }
 });
 
-// POST /api/ops/fallback-override - Manual Driver Dispatch / Ground Ops Fallback
+router.post("/process-driver-dispatch", optionalAuthMiddleware, requireSchedulerOrRoles("ADMIN", "STAFF"), validateBody(opsSchemas.scheduler), async (req, res) => {
+  try { const schedule = processDispatchSchedule(db); const delivery = await processDispatchOutbox(db, deliverDispatchNotification); res.json({ success: true, schedule, delivery }); }
+  catch (err) { res.status(500).json({ error: "Driver dispatch processing failed" }); }
+});
+// Cloud Scheduler drains booking confirmations here, because Cloud Run throttles the in-process timer between requests.
+router.post("/process-reservation-outbox", optionalAuthMiddleware, requireSchedulerOrRoles("ADMIN", "STAFF"), validateBody(opsSchemas.scheduler), async (req, res) => {
+  try { res.json({ success: true, delivery: await processReservationOutbox(db, notifyBookingConfirmed, { limit: req.body?.limit || 50 }) }); }
+  catch (err) {
+    logger.error("Reservation outbox processing failed", { error: err });
+    res.status(500).json({ error: "Reservation outbox processing failed" });
+  }
+});
+router.post("/process-post-trip-invites", optionalAuthMiddleware, requireSchedulerOrRoles("ADMIN", "STAFF"), validateBody(opsSchemas.scheduler), async (req, res) => {
+  try {
+    const result = await sendPendingPostTripReviewInvites(db);
+    res.json({ success: true, checked: result.checked, sent: result.sent.map((item) => item.bookingRef) });
+  } catch (err) {
+    logger.error("Post-trip invite processing failed", { error: err });
+    res.status(500).json({ error: "Post-trip invite processing failed" });
+  }
+});
+router.get("/dispatch-queue", (req, res) => {
+  const tasks = listDispatchExceptions(db);
+  const tripIssues = listDispatchExceptions(db, { taskTypes: TRIP_ISSUE_TASK_TYPES });
+  const deliveries = db.prepare("SELECT booking_id, event_type, status, attempts, last_error FROM dispatch_outbox ORDER BY available_at DESC LIMIT 100").all();
+  res.json({ success: true, tasks, tripIssues, deliveries });
+});
+// Operations can see the booking supplier's fleet with availability reasons before taking over.
+router.get("/bookings/:bookingId/fleet-availability", (req, res) => {
+  try {
+    const b = db.prepare("SELECT id, supplier_id FROM bookings WHERE id = ? OR ref = ?").get(req.params.bookingId, req.params.bookingId);
+    if (!b?.supplier_id) return res.status(404).json({ error: "Booking or its supplier was not found" });
+    const drivers = getFleetAvailability(db, { supplierId: b.supplier_id, bookingId: b.id })
+      .sort((x, y) => Number(y.available) - Number(x.available) || String(x.driver_name).localeCompare(String(y.driver_name)));
+    res.json({ success: true, drivers });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : "Fleet availability failed" }); }
+});
+
+router.get("/bookings/:bookingId/dispatch-timeline", (req, res) => {
+  const b = db.prepare("SELECT id FROM bookings WHERE id = ? OR ref = ?").get(req.params.bookingId, req.params.bookingId);
+  if (!b) return res.status(404).json({ error: "Booking not found" });
+  res.json({ success: true, timeline: getDispatchTimeline(db, b.id) });
+});
+
+router.post("/bookings/:bookingId/trip-override", validateBody(opsSchemas.tripOverride), (req, res) => {
+  try {
+    const assignment = operationsTripOverride(db, { bookingId: req.params.bookingId, action: req.body.action, actorId: req.user.id, note: req.body.note });
+    res.json({ success: true, assignment, message: req.body.action === "START" ? "Trip started without the pickup OTP. The traveler and supplier have been notified." : "Trip marked complete. The supplier payout is scheduled." });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : "Trip update failed" }); }
+});
+
+router.post("/bookings/:bookingId/confirm-driver", validateBody(opsSchemas.confirmDriver), (req, res) => {
+  try {
+    const assignment = confirmDriverByPhone(db, { bookingId: req.params.bookingId, actorId: req.user.id, note: req.body.note });
+    res.json({ success: true, assignment, message: `${assignment.driver_name} confirmed by phone. The traveler has been notified.` });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : "Driver confirmation failed" }); }
+});
+
+// Emergency assignments use the same validation and audit history as supplier dispatch:
+// a driver from the booking supplier's fleet, or an outside driver, optionally confirmed by phone.
 router.post("/fallback-override", validateBody(opsSchemas.fallback), (req, res) => {
   try {
-    const { bookingId, fallbackDriverName, fallbackDriverPhone, fallbackVehicleModel, fallbackVehicleNumber, notes } = req.body;
-
-    const booking = db.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
-    if (!booking) return res.status(404).json({ error: "Booking not found" });
-
-    // Delete existing driver assignment if any
-    db.prepare("DELETE FROM driver_assignments WHERE booking_id = ?").run(booking.id);
-
-    const assignmentId = `drv_fallback_${Date.now()}`;
-    db.prepare(
-      `INSERT INTO driver_assignments (id, booking_id, supplier_id, driver_name, driver_phone, vehicle_model, vehicle_number, assignment_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'FALLBACK_TRIGGERED')`
-    ).run(
-      assignmentId,
-      booking.id,
-      booking.supplier_id || "sup_lucknow_cabs",
-      fallbackDriverName || "Ground Ops Fallback Driver",
-      fallbackDriverPhone || "+919811009988",
-      fallbackVehicleModel || "Backup Commercial Cab",
-      fallbackVehicleNumber || "UP-32-T-9999"
-    );
-
-    // Log staff task
-    db.prepare(
-      `INSERT INTO staff_tasks (id, task_type, booking_id, assigned_staff_name, priority, status, notes)
-       VALUES (?, 'FALLBACK_DISPATCH', ?, 'Ground Operations Staff', 'CRITICAL', 'RESOLVED', ?)`
-    ).run(`task_${Date.now()}`, booking.id, notes || `Fallback driver ${fallbackDriverName} (${fallbackVehicleNumber}) dispatched.`);
-
-    res.json({
-      success: true,
-      message: `Emergency fallback driver ${fallbackDriverName} assigned to trip #${booking.ref}!`,
-      assignmentId
-    });
-  } catch (err) {
-    logger.error("Fallback dispatch override failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: "Failed to execute fallback dispatch" });
-  }
+    const v = req.body;
+    if (!v.notes?.trim()) return res.status(400).json({ error: "An override reason is required" });
+    const b = db.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(v.bookingId, v.bookingId);
+    if (!b) return res.status(404).json({ error: "Booking not found" });
+    const phoneConfirmed = v.confirmedByPhone === true || v.confirmedByPhone === "true" || v.confirmedByPhone === 1;
+    const assignment = assignDriverToBooking(db, { supplierId: b.supplier_id, bookingId: b.id, actorId: req.user.id,
+      supplierDriverId: v.supplierDriverId,
+      manualDriver: { driverName: v.fallbackDriverName, driverPhone: v.fallbackDriverPhone, driverEmail: v.fallbackDriverEmail, seatCapacity: v.seatCapacity, vehicleModel: v.fallbackVehicleModel, vehicleNumber: v.fallbackVehicleNumber } });
+    db.prepare("UPDATE driver_assignment_events SET note = ? WHERE assignment_id = ? AND event_type IN ('ASSIGNED','REASSIGNED') AND new_status = 'ASSIGNED'").run(v.notes, assignment.id);
+    if (phoneConfirmed) {
+      const confirmed = confirmDriverByPhone(db, { bookingId: b.id, actorId: req.user.id, note: v.notes });
+      return res.json({ success: true, assignment: confirmed, message: `${confirmed.driver_name} assigned to ${b.ref} and confirmed by phone. The traveler has been notified.` });
+    }
+    res.json({ success: true, assignment, message: `${assignment.driver_name} assigned to ${b.ref}. Waiting for the driver to accept from the trip link.` });
+  } catch (err) { res.status(err.status || 500).json({ error: err.status ? err.message : "Driver assignment failed" }); }
 });
 
 // POST /api/ops/emergency-reallocate - 15 km Radius Emergency Vendor Ping & Auto-Reallocation
@@ -281,21 +332,39 @@ router.post("/send-whatsapp", optionalAuthMiddleware, requireOpsAccess, validate
          WHERE b.id = ? OR b.ref = ?`
       )
       .get(lookup, lookup) : null;
-    const booking = savedBooking || req.body;
-    if (!booking.customerPhone && !booking.traveler_phone) return res.status(400).json({ error: "Choose a booking or enter a recipient phone number" });
+    const recipientPhone = req.body.customerPhone || req.body.phone || savedBooking?.traveler_phone;
+    if (!recipientPhone) return res.status(400).json({ error: "Choose a booking or enter a recipient phone number" });
+
+    const booking = savedBooking ? {
+      ...savedBooking,
+      customerPhone: recipientPhone,
+      customerName: req.body.customerName || savedBooking.traveler_name,
+      driverName: req.body.driverName || savedBooking.driver_name,
+      driverPhone: req.body.driverPhone || savedBooking.driver_phone,
+      vehicleModel: req.body.vehicleModel || savedBooking.vehicle_model,
+      vehicleNumber: req.body.vehicleNumber || savedBooking.vehicle_number,
+      pickupLocation: req.body.pickupLocation || savedBooking.pickup_location,
+      pickupTime: req.body.pickupTime || savedBooking.pickup_time,
+      pickupLat: req.body.pickupLat ?? savedBooking.pickup_lat,
+      pickupLng: req.body.pickupLng ?? savedBooking.pickup_lng,
+      bookingRef: savedBooking.ref || req.body.bookingRef,
+    } : {
+      ...req.body,
+      customerPhone: recipientPhone,
+    };
 
     const result = await sendWhatsAppVoucher({
-      bookingRef: booking.ref || booking.bookingRef,
-      customerName: booking.traveler_name || booking.customerName,
-      customerPhone: booking.traveler_phone || booking.customerPhone,
-      driverName: booking.driver_name || booking.driverName,
-      driverPhone: booking.driver_phone || booking.driverPhone,
-      vehicleModel: booking.vehicle_model || booking.vehicleModel,
-      vehicleNumber: booking.vehicle_number || booking.vehicleNumber,
-      pickupLocation: booking.pickup_location || booking.pickupLocation,
-      pickupTime: booking.pickup_time || booking.pickupTime,
-      pickupLat: booking.pickup_lat ?? booking.pickupLat,
-      pickupLng: booking.pickup_lng ?? booking.pickupLng,
+      bookingRef: booking.ref || booking.bookingRef || "IH-VOUCHER",
+      customerName: booking.customerName || booking.traveler_name,
+      customerPhone: booking.customerPhone,
+      driverName: booking.driverName || booking.driver_name,
+      driverPhone: booking.driverPhone || booking.driver_phone,
+      vehicleModel: booking.vehicleModel || booking.vehicle_model,
+      vehicleNumber: booking.vehicleNumber || booking.vehicle_number,
+      pickupLocation: booking.pickupLocation || booking.pickup_location,
+      pickupTime: booking.pickupTime || booking.pickup_time,
+      pickupLat: booking.pickupLat ?? booking.pickup_lat,
+      pickupLng: booking.pickupLng ?? booking.pickup_lng,
     }, { database: db });
 
     res.status(result.success ? 200 : result.skipped ? 503 : 502).json(result);
@@ -341,8 +410,9 @@ router.get("/notification-health", optionalAuthMiddleware, requireOpsAccess, (_r
   res.json({
     success: true,
     providers: {
+      sms: smsConfiguration(),
       email: { provider: email.provider, enabled: email.enabled, configured: email.configured, region: email.region, fromEmail: email.fromEmail },
-      whatsapp: { provider: whatsapp.provider, enabled: whatsapp.enabled, configured: whatsapp.configured, apiVersion: whatsapp.apiVersion },
+      whatsapp: { provider: whatsapp.provider, enabled: whatsapp.enabled, configured: whatsapp.configured, appId: whatsapp.appId, apiVersion: whatsapp.apiVersion },
     },
   });
 });
@@ -356,10 +426,16 @@ router.post("/notifications/test", optionalAuthMiddleware, requireOpsAccess, val
     eventType: "PROVIDER_TEST",
     eventKey: `PROVIDER_TEST:${channel}:${Date.now()}`,
   };
+  const testMessageText = req.body.text || "WhatsApp Cloud API is connected to Idea Holiday.";
+  const testTemplate = req.body.template
+    ? whatsAppTemplate(req.body.template, req.body.templateValues || ["TEST", testMessageText])
+    : whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_OPS_ALERT, ["TEST", testMessageText])
+      || { name: "hello_world", languageCode: "en_US" };
+
   const result = channel === "EMAIL"
     ? await sendEmail({ ...common, to: req.body.to, subject: req.body.subject || "Idea Holiday email configuration test", text: req.body.text || "Amazon SES is connected to Idea Holiday." }, { database: db })
     : channel === "WHATSAPP"
-      ? await sendWhatsAppMessage({ ...common, to: req.body.to, text: req.body.text || "WhatsApp Cloud API is connected to Idea Holiday." }, { database: db })
+      ? await sendWhatsAppMessage({ ...common, to: req.body.to, text: testMessageText, template: testTemplate }, { database: db })
       : { success: false, status: "FAILED", error: "Choose EMAIL or WHATSAPP" };
   res.status(result.success ? 200 : result.skipped ? 503 : 400).json(result);
 });
@@ -404,6 +480,18 @@ router.post("/tasks/:id/update", validateBody(opsSchemas.task), (req, res) => {
     res.json({ success: true, message: `Task status set to ${status || "RESOLVED"}` });
   } catch (err) {
     res.status(500).json({ error: "Failed to update staff task" });
+  }
+});
+
+// GET /api/ops/live-tracking/:assignmentId/trail - A trip's recent driver positions, oldest first
+router.get("/live-tracking/:assignmentId/trail", (req, res) => {
+  try {
+    const exists = db.prepare("SELECT id FROM driver_assignments WHERE id = ?").get(req.params.assignmentId);
+    if (!exists) return res.status(404).json({ error: "Driver assignment not found" });
+    res.json({ success: true, location: latestDriverLocation(db, exists.id), trail: driverLocationTrail(db, exists.id, { limit: req.query.limit }) });
+  } catch (err) {
+    logger.error("Driver trail lookup failed", { requestId: req.requestId, error: err });
+    res.status(500).json({ error: "Could not load the driver trail" });
   }
 });
 

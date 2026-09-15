@@ -92,12 +92,12 @@ export function seedCanonicalLocations(db) {
     INSERT INTO canonical_locations (
       id, name, short_name, iata_code, location_type, city, state, country,
       lat, lng, radius_km, aliases, is_active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'India', ?, ?, ?, '[]', TRUE)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'India', ?, ?, ?, '[]', '1')
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name, short_name = excluded.short_name,
       iata_code = excluded.iata_code, location_type = excluded.location_type,
       city = excluded.city, state = excluded.state, lat = excluded.lat,
-      lng = excluded.lng, radius_km = excluded.radius_km, is_active = TRUE
+      lng = excluded.lng, radius_km = excluded.radius_km, is_active = '1'
   `);
   const sync = db.transaction(() => {
     for (const row of CANONICAL_LOCATIONS) insert.run(...row);
@@ -105,8 +105,8 @@ export function seedCanonicalLocations(db) {
   sync();
 }
 
-export function backfillProductLocationRules(db) {
-  const products = db.prepare("SELECT * FROM products").all();
+export function backfillProductLocationRules(db, productId = null) {
+  const products = productId ? db.prepare("SELECT * FROM products WHERE id = ?").all(productId) : db.prepare("SELECT * FROM products").all();
   const existing = new Set(db.prepare("SELECT product_id || ':' || rule_side AS key FROM product_location_rules").all().map((row) => row.key));
   const insert = db.prepare(`
     INSERT INTO product_location_rules (
@@ -114,7 +114,7 @@ export function backfillProductLocationRules(db) {
       allowed_location_types, center_lat, center_lng, radius_km,
       allowed_state, allowed_city, polygon_coordinates, error_message,
       suggestion, is_active
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, TRUE)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, '1')
     ON CONFLICT(product_id, rule_side) DO NOTHING
   `);
   const sync = db.transaction(() => {
@@ -144,16 +144,18 @@ export function backfillProductLocationRules(db) {
           );
         }
       } else {
-        const pkg = product.product_type === "MULTI_DAY_PACKAGE"
+        const isPackage = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(product.product_type);
+        const isTour = ["TOUR", "DAY_TOUR"].includes(product.product_type);
+        const pkg = isPackage
           ? db.prepare("SELECT * FROM package_itineraries WHERE product_id = ? LIMIT 1").get(product.id) : null;
         for (const side of ["PICKUP", "DROP"]) {
           if (existing.has(`${product.id}:${side}`)) continue;
-          const city = product.product_type === "MULTI_DAY_PACKAGE"
+          const city = isPackage
             ? (side === "PICKUP" ? pkg?.start_city : pkg?.end_city) || product.city : product.city;
-          const types = product.product_type === "MULTI_DAY_PACKAGE" ? ["AIRPORT", "RAILWAY_STATION"] : [];
+          const types = isPackage ? ["AIRPORT", "RAILWAY_STATION"] : [];
           insert.run(
             `plr_auto_${product.id}_${side.toLowerCase()}`, product.id, side, "CITY_ANYWHERE", null,
-            JSON.stringify(types), null, null, product.product_type === "DAY_TOUR" ? 80 : null,
+            JSON.stringify(types), null, null, isTour ? 80 : null,
             product.state, city,
             `This ${side === "PICKUP" ? "pickup" : "drop-off"} is outside ${city}.`,
             `Choose a valid ${side === "PICKUP" ? "pickup" : "drop-off"} point in ${city}.`,

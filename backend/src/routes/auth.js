@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { ensureLaunchWaiver } from "../services/supplierSubscriptionService.js";
 import { nanoid } from "nanoid";
 import jwt from "jsonwebtoken";
 import db from "../db.js";
@@ -7,7 +8,8 @@ import { authenticate } from "../middleware/auth.js";
 import logger from "../config/logger.js";
 import { validateBody } from "../middleware/validation.js";
 import { authSchemas } from "../validators/apiSchemas.js";
-import { recordReferralSignup } from "../services/loyaltyService.js";
+import { establishReferralRelationship } from "../services/referralService.js";
+import { ensurePublicSlug } from "../services/supplierProfileService.js";
 
 const router = Router();
 const SECRET = process.env.JWT_SECRET
@@ -29,6 +31,7 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   const password = String(req.body.password || "");
   const phone = normalizeText(req.body.phone) || null;
   const referralCode = normalizeText(req.body.referralCode || req.body.ref);
+  const visitorId = normalizeText(req.body.visitorId) || null;
 
   if (!name || !email || !password) return res.status(400).json({ error: "name, email, password required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -45,16 +48,20 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   db.prepare("INSERT INTO users (id,name,email,password,phone) VALUES (?,?,?,?,?)")
     .run(id, name, email, hashPassword(password), phone);
 
-  if (referralCode) {
-    try {
-      recordReferralSignup(db, { newUserId: id, referralCode });
-    } catch (refErr) {
-      logger.warn("Referral tracking error on signup", { error: refErr.message, referralCode });
+  let referral = null;
+  try {
+    if (visitorId) db.prepare("UPDATE users SET signup_visitor_id = ? WHERE id = ?").run(visitorId.slice(0, 120), id);
+    // A typed code wins; with none, the referral link this browser opened is used.
+    if (referralCode || visitorId) {
+      const result = establishReferralRelationship(db, { referredUserId: id, referralCode: referralCode || null, visitorId, source: "SIGNUP_LINK" });
+      referral = result.established ? { referred: true } : null;
     }
+  } catch (refErr) {
+    logger.warn("Referral tracking error on signup", { error: refErr.message, referralCode });
   }
 
   const token = jwt.sign({ id, email, name, role: "TRAVELER" }, SECRET, { expiresIn: "30d" });
-  res.json({ token, user: { id, name, email, phone, role: "TRAVELER" } });
+  res.json({ token, user: { id, name, email, phone, role: "TRAVELER" }, referral });
 });
 
 router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, res) => {
@@ -104,6 +111,9 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
         `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, kyb_status, is_verified)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0)`
       ).run(supplierId, supplierId, companyName, contactName, email, phone, city, state);
+      ensurePublicSlug(db, { id: supplierId, company_name: companyName, city });
+      // A supplier signing up now needs a subscription; the launch waiver covers it for free (ADR 017).
+      ensureLaunchWaiver(db, supplierId);
 
       db.prepare(
         "INSERT INTO users (id, name, email, password, phone, role) VALUES (?, ?, ?, ?, ?, 'SUPPLIER')"
@@ -165,12 +175,33 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
     db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashPassword(password), user.id);
   }
 
-  const supplier = user.role === "SUPPLIER" ? db.prepare("SELECT id FROM suppliers WHERE LOWER(email) = ?").get(user.email.toLowerCase()) : null;
+  const portal = String(req.body.portal || req.headers["x-portal-type"] || req.query.portal || "").trim().toLowerCase();
+
+  // Enforce portal-specific role access when specified
+  if (portal === "admin" && user.role !== "ADMIN" && user.role !== "STAFF") {
+    return res.status(403).json({ error: "Access denied. Admin portal is restricted to platform administrators." });
+  }
+
+  if (portal === "supplier" && user.role !== "SUPPLIER") {
+    return res.status(403).json({ error: "Access restricted to registered suppliers. Please sign in with your supplier credentials or register on supply.ideaholiday.in." });
+  }
+
+  const supplier = user.role === "SUPPLIER" ? db.prepare("SELECT id, company_name, kyb_status, is_verified FROM suppliers WHERE LOWER(email) = ?").get(user.email.toLowerCase()) : null;
   const token = jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role, supplier_id: supplier?.id || null },
     SECRET,
     { expiresIn: "30d" }
   );
+
+  let portalRedirect = "/";
+  if (user.role === "SUPPLIER") {
+    portalRedirect = "/supplier";
+  } else if (user.role === "ADMIN") {
+    portalRedirect = "/admin";
+  } else if (user.role === "STAFF") {
+    // Staff work in operations; the admin panel is ADMIN-only.
+    portalRedirect = "/ops";
+  }
 
   res.json({
     token,
@@ -181,7 +212,9 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
       phone: user.phone,
       role: user.role,
       supplier_id: supplier?.id || null
-    }
+    },
+    supplier: supplier || null,
+    portalRedirect
   });
 });
 

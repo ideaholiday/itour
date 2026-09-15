@@ -1,7 +1,12 @@
+import { demoPaymentsEnabled } from "../services/checkoutModeService.js";
+import { processReservationOutbox } from "../services/reservationOutboxService.js";
+import { quarantineBookingPayment } from "../services/paymentReviewService.js";
+import { confirmNativeReservation, releaseNativeReservation } from "../services/nativeInventoryService.js";
 import express from "express";
 import db from "../db.js";
 import {
   createRazorpayOrder,
+  getRazorpayPayment,
   processRazorpayRefund,
   verifyRazorpaySignature,
   verifyRazorpayWebhookSignature
@@ -34,9 +39,12 @@ import {
   findCircuitOrderByPaymentOrderId,
 } from "../services/circuitPaymentService.js";
 import { reconcileCircuitRefund } from "../services/circuitOrchestrationService.js";
+import { onReferralBookingCancelled } from "../services/referralService.js";
+import { confirmSubscriptionPayment } from "../services/supplierPlanPaymentService.js";
 
 const router = express.Router();
 router.use(optionalAuthMiddleware);
+router.get("/config", (_req, res) => { res.set("Cache-Control", "no-store"); res.json({ demoEnabled: demoPaymentsEnabled() }); });
 
 function canAccessBooking(req, booking) {
   const actor = req.user;
@@ -48,30 +56,35 @@ function canAccessBooking(req, booking) {
 }
 
 function assertActiveBookingHold(booking) {
-  try {
-    expireBookingHolds(db);
-    const hold = db.prepare("SELECT * FROM booking_holds WHERE booking_id = ? AND status = 'ACTIVE' ORDER BY created_at DESC LIMIT 1").get(booking.id);
-    if (!hold) return null; // legacy bookings created before logistics holds
-    if (new Date(hold.expires_at).getTime() <= Date.now()) {
-      const error = new Error("This booking hold has expired. Recheck availability before paying"); error.status = 409; error.code = "HOLD_EXPIRED"; throw error;
-    }
-    return hold;
-  } catch (error) {
-    if (error.code === "HOLD_EXPIRED") throw error;
-    return null;
+  if (booking.payment_status === "PAID") return null;
+  const hold = db.prepare("SELECT * FROM booking_holds WHERE booking_id = ? ORDER BY created_at DESC LIMIT 1").get(booking.id);
+  if (hold && (hold.status === "EXPIRED" || new Date(hold.expires_at).getTime() <= Date.now())) {
+    throw Object.assign(new Error("This booking hold has expired. Recheck availability before paying"), { status: 409, code: "HOLD_EXPIRED" });
   }
+  return hold;
 }
 
-function confirmPaidBooking(booking, { method, orderId, paymentId, signature, cashfreeOrderId, cashfreePaymentId }) {
+function confirmPaidBooking(booking, { method, orderId, paymentId, signature, cashfreeOrderId, cashfreePaymentId, amount, currency }) {
   if (booking.payment_status === "PAID") {
     return { otp: null, alreadyPaid: true, supplierResponseDeadline: booking.supplier_response_deadline || null };
+  }
+  if (booking.payment_status === "PAYMENT_REVIEW_REQUIRED") throw Object.assign(new Error("Payment is awaiting operations review"), { status: 409, code: "PAYMENT_REVIEW_REQUIRED" });
+  if (amount !== undefined && (Math.round(Number(amount) * 100) !== Math.round(Number(booking.amount_inr) * 100) || currency && currency !== "INR")) {
+    quarantineBookingPayment(db, booking, { method, orderId, paymentId, reason: "PAYMENT_AMOUNT_MISMATCH" });
+    throw Object.assign(new Error("Captured payment does not match the booking; operations will review it"), { status: 409, code: "PAYMENT_REVIEW_REQUIRED" });
   }
   const pickupOtp = activatePickupOtp(booking);
   const confirmationType = String(booking.confirmation_type || "INSTANT_THEN_MANUAL").toUpperCase();
   const confirmationStatus = confirmationType === "INSTANT" ? "CONFIRMED" : "PENDING_SUPPLIER";
   const usesRazorpayReference = ["RAZORPAY", "DEMO"].includes(method);
   let supplierResponseDeadline = null;
-  db.transaction(() => {
+  try { db.transaction(() => {
+    db.prepare("UPDATE bookings SET id = id WHERE id = ?").run(booking.id);
+    const latest = db.prepare("SELECT * FROM bookings WHERE id = ?").get(booking.id);
+    if (latest.payment_status === "PAID") return;
+    if (latest.status !== "pending_payment" || latest.payment_status !== "PENDING") throw Object.assign(new Error("Booking is not awaiting payment"), { status: 409 });
+    assertActiveBookingHold(latest);
+    confirmNativeReservation(db, latest);
     db.prepare(
       `UPDATE bookings SET payment_method = ?, payment_status = 'PAID', status = 'confirmed', confirmation_status = ?,
        razorpay_order_id = ?, razorpay_payment_id = ?, razorpay_signature = ?,
@@ -94,16 +107,28 @@ function confirmPaidBooking(booking, { method, orderId, paymentId, signature, ca
     db.prepare("UPDATE payouts SET payout_status = 'PAYMENT_HELD' WHERE booking_id = ? AND payout_status = 'PENDING_PAYMENT'").run(booking.id);
     try { db.prepare("UPDATE booking_holds SET status = 'CONSUMED', consumed_at = CURRENT_TIMESTAMP WHERE booking_id = ? AND status = 'ACTIVE'").run(booking.id); } catch {}
     try { db.prepare("INSERT INTO booking_logistics_events (id, booking_id, event_type, status, payload) VALUES (?, ?, ?, ?, ?)").run(`ble_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, booking.id, confirmationStatus === "PENDING_SUPPLIER" ? "SUPPLIER_CONFIRMATION_PENDING" : "PICKUP_LOCATION_VERIFIED", confirmationStatus, JSON.stringify({ confirmationType })); } catch {}
-    supplierResponseDeadline = beginSupplierAcceptance(db, booking.id);
-  })();
+    if (confirmationType === "INSTANT") {
+      db.prepare("UPDATE bookings SET supplier_assignment_status = 'SUPPLIER_ACCEPTED', supplier_response_status = 'ACCEPTED', supplier_response_deadline = NULL, supplier_responded_at = CURRENT_TIMESTAMP WHERE id = ?").run(booking.id);
+      db.prepare("UPDATE supplier_assignment_attempts SET response_status = 'ACCEPTED' WHERE booking_id = ? AND decision = 'SELECTED'").run(booking.id);
+    } else supplierResponseDeadline = beginSupplierAcceptance(db, booking.id);
+  })(); } catch (error) {
+    if (error.code === "HOLD_EXPIRED" && method !== "DEMO") {
+      quarantineBookingPayment(db, booking, { method, orderId, paymentId, reason: "PAYMENT_CAPTURED_AFTER_EXPIRY" });
+      throw Object.assign(new Error("Seats expired before payment confirmation; operations will review the captured payment"), { status: 409, code: "PAYMENT_REVIEW_REQUIRED" });
+    }
+    throw error;
+  }
   recordPaymentCapture(db, { ...booking, payment_method: method }, paymentId || orderId);
+  const nativeReservation = db.prepare("SELECT id FROM native_reservations WHERE booking_id = ?").get(booking.id);
+  queueNotification(nativeReservation ? processReservationOutbox(db, notifyBookingConfirmed) : notifyBookingConfirmed(db, booking.id), "Payment booking confirmation");
   return { ...pickupOtp, supplierResponseDeadline, confirmationStatus };
 }
 
 function queueCircuitConfirmations(result) {
   if (!result?.success || result.idempotent) return;
   for (const booking of result.bookings) {
-    queueNotification(notifyBookingConfirmed(db, booking.bookingId), `Circuit booking ${booking.bookingRef} confirmation`);
+    const nativeReservation = db.prepare("SELECT id FROM native_reservations WHERE booking_id = ?").get(booking.bookingId);
+    queueNotification(nativeReservation ? processReservationOutbox(db, notifyBookingConfirmed) : notifyBookingConfirmed(db, booking.bookingId), `Circuit booking ${booking.bookingRef} confirmation`);
   }
 }
 
@@ -150,10 +175,40 @@ router.post("/create-order", authenticate, requireBookingOwner(), validateBody(c
   }
 });
 
+// POST /api/checkout/wallet-payment - Confirms a booking wallet credit paid for in full.
+// Refund credit is not capped (ADR 019), so a rebooking can leave nothing for a gateway to charge.
+router.post("/wallet-payment", authenticate, requireBookingOwner(), validateBody(checkoutSchemas.booking), async (req, res) => {
+  try {
+    const { bookingId, bookingRef } = req.body;
+    const booking = db.prepare("SELECT b.*, p.cancellation_policy FROM bookings b LEFT JOIN products p ON p.id = b.product_id WHERE b.id = ? OR b.ref = ?").get(bookingId || bookingRef, bookingRef || bookingId);
+    if (!booking) return res.status(404).json({ error: "Booking not found" });
+    if (!canAccessBooking(req, booking)) return res.status(403).json({ error: "You do not have access to this booking" });
+    if (booking.payment_status === "PAID") {
+      return res.json({ success: true, idempotent: true, bookingRef: booking.ref, message: "Booking was already confirmed." });
+    }
+    if (Number(booking.amount_inr) > 0 || !(Number(booking.wallet_credit_applied_inr) > 0)) {
+      return res.status(409).json({ error: "This booking still has an amount to pay" });
+    }
+    assertActiveBookingHold(booking);
+    if (!booking.pickup_location?.trim()) return res.status(400).json({ error: "Pickup location is required before payment" });
+    const confirmation = confirmPaidBooking(booking, { method: "WALLET", orderId: `wallet_${booking.ref}`, paymentId: `wallet_${booking.id}` });
+    queueNotification(notifyBookingLogisticsEvent(db, booking.id, confirmation.confirmationStatus === "PENDING_SUPPLIER" ? "SUPPLIER_CONFIRMATION_PENDING" : "BOOKING_CONFIRMED"), "Booking confirmation notification");
+    res.json({
+      success: true,
+      bookingRef: booking.ref,
+      supplierResponseDeadline: confirmation.supplierResponseDeadline,
+      message: confirmation.confirmationStatus === "CONFIRMED" ? "Your booking is confirmed." : "Paid with wallet credit. The supplier now has 10 minutes to accept the booking."
+    });
+  } catch (err) {
+    logger.error("Wallet payment failed", { requestId: req.requestId, error: err });
+    res.status(err.status || 500).json({ error: err.message || "Failed to confirm the booking", code: err.code });
+  }
+});
+
 // POST /api/checkout/demo-payment - Explicit sandbox checkout for end-to-end testing
 router.post("/demo-payment", authenticate, requireBookingOwner(), validateBody(checkoutSchemas.booking), async (req, res) => {
   try {
-    const demoPaymentEnabled = process.env.DEMO_PAYMENT_ONLY !== "false" || process.env.ENABLE_DEMO_PAYMENT !== "false";
+    const demoPaymentEnabled = demoPaymentsEnabled();
     if (!demoPaymentEnabled) {
       return res.status(403).json({ error: "Demo payment is disabled in this environment" });
     }
@@ -183,11 +238,11 @@ router.post("/demo-payment", authenticate, requireBookingOwner(), validateBody(c
       paymentId,
       orderId,
       supplierResponseDeadline: confirmation.supplierResponseDeadline,
-      message: "Demo payment approved. The assigned supplier now has 10 minutes to accept the booking."
+      message: confirmation.confirmationStatus === "CONFIRMED" ? "Your booking is confirmed." : "Demo payment approved. The assigned supplier now has 10 minutes to accept the booking."
     });
   } catch (err) {
     logger.error("Demo payment failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: "Failed to complete demo payment" });
+    res.status(err.status || 500).json({ error: err.message || "Failed to complete demo payment", code: err.code });
   }
 });
 
@@ -219,14 +274,15 @@ router.post("/verify", authenticate, requireBookingOwner(), validateBody(checkou
     const booking = db.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId || bookingRef, bookingRef || bookingId);
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     if (!canAccessBooking(req, booking)) return res.status(403).json({ error: "You do not have access to this booking" });
-    assertActiveBookingHold(booking);
     if (booking.payment_status === "PAID") return res.json({ success: true, idempotent: true, bookingRef: booking.ref, paymentId: booking.razorpay_payment_id, orderId: booking.razorpay_order_id, message: "Payment was already verified." });
     if (!booking.razorpay_order_id || booking.razorpay_order_id !== razorpay_order_id) return res.status(400).json({ error: "Payment order does not match this booking" });
 
     const paymentId = razorpay_payment_id || `pay_${Date.now()}`;
     const orderId = razorpay_order_id || `order_${Date.now()}`;
 
-    const confirmation = confirmPaidBooking(booking, { method: "RAZORPAY", orderId, paymentId, signature: razorpay_signature });
+    const payment = await getRazorpayPayment(paymentId);
+    if (payment.order_id !== orderId || payment.status !== "captured") return res.status(409).json({ error: "Payment has not been captured for this order" });
+    const confirmation = confirmPaidBooking(booking, { method: "RAZORPAY", orderId, paymentId, signature: razorpay_signature, amount: Number(payment.amount) / 100, currency: payment.currency });
     queueNotification(notifyBookingLogisticsEvent(db, booking.id, confirmation.confirmationStatus === "PENDING_SUPPLIER" ? "SUPPLIER_CONFIRMATION_PENDING" : "BOOKING_CONFIRMED"), "Booking confirmation notification");
 
     res.json({
@@ -239,7 +295,7 @@ router.post("/verify", authenticate, requireBookingOwner(), validateBody(checkou
     });
   } catch (err) {
     logger.error("Razorpay payment verification failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: "Failed to verify payment" });
+    res.status(err.status || 500).json({ error: err.message || "Failed to verify payment", code: err.code });
   }
 });
 
@@ -255,10 +311,10 @@ router.post("/cashfree/create-order", authenticate, requireBookingOwner(), valid
 
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     if (!canAccessBooking(req, booking)) return res.status(403).json({ error: "You do not have access to this booking" });
-    assertActiveBookingHold(booking);
     if (booking.payment_status === "PAID") return res.status(409).json({ error: "Booking is already paid" });
     if (booking.status !== "pending_payment") return res.status(409).json({ error: "Booking is not awaiting payment" });
 
+    assertActiveBookingHold(booking);
     // If order already created and active, return existing payment session
     if (booking.cashfree_order_id && booking.payment_session_id) {
       return res.json({
@@ -287,6 +343,9 @@ router.post("/cashfree/create-order", authenticate, requireBookingOwner(), valid
         phone: booking.traveler_phone || "9999999999",
       },
       returnUrl: returnUrl || `${process.env.PUBLIC_APP_URL || "http://localhost:3000"}/checkout/verify?order_id={order_id}&bookingRef=${encodeURIComponent(booking.ref)}`,
+      // Server-to-server confirmation for travelers whose tab closes after
+      // paying. Cashfree only accepts an https notify_url.
+      notifyUrl: /^https:\/\//.test(process.env.PUBLIC_APP_URL || "") ? `${process.env.PUBLIC_APP_URL.replace(/\/$/, "")}/api/checkout/cashfree/webhook` : undefined,
       notes: {
         bookingId: booking.id,
         bookingRef: booking.ref,
@@ -327,7 +386,6 @@ router.post("/cashfree/verify", authenticate, requireBookingOwner(), validateBod
 
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     if (!canAccessBooking(req, booking)) return res.status(403).json({ error: "You do not have access to this booking" });
-    assertActiveBookingHold(booking);
 
     if (booking.payment_status === "PAID") {
       return res.json({
@@ -341,12 +399,15 @@ router.post("/cashfree/verify", authenticate, requireBookingOwner(), validateBod
     }
 
     const orderToQuery = targetOrderId || booking.cashfree_order_id;
+    if (orderToQuery !== booking.cashfree_order_id) return res.status(400).json({ error: "Payment order does not match this booking" });
     if (!orderToQuery) {
       return res.status(400).json({ error: "Cashfree order ID is missing" });
     }
 
     // Query Cashfree for payment status
     let isPaid = false;
+    let paidAmount;
+    let paidCurrency;
     let paymentId = `cf_pay_${Date.now()}`;
 
     try {
@@ -357,10 +418,12 @@ router.post("/cashfree/verify", authenticate, requireBookingOwner(), validateBod
 
       if (successfulPayment) {
         isPaid = true;
+        paidAmount = successfulPayment.payment_amount; paidCurrency = successfulPayment.payment_currency;
         paymentId = String(successfulPayment.cf_payment_id || successfulPayment.payment_id || paymentId);
       } else {
         const cfOrder = await getCashfreeOrder(orderToQuery);
         if (cfOrder.order_status === "PAID") {
+          paidAmount = cfOrder.order_amount; paidCurrency = cfOrder.order_currency;
           isPaid = true;
         }
       }
@@ -369,6 +432,7 @@ router.post("/cashfree/verify", authenticate, requireBookingOwner(), validateBod
       // If error from Cashfree sandbox during local tests, check order status
       const cfOrder = await getCashfreeOrder(orderToQuery).catch(() => null);
       if (cfOrder && cfOrder.order_status === "PAID") {
+        paidAmount = cfOrder.order_amount; paidCurrency = cfOrder.order_currency;
         isPaid = true;
       }
     }
@@ -386,6 +450,7 @@ router.post("/cashfree/verify", authenticate, requireBookingOwner(), validateBod
       cashfreeOrderId: orderToQuery,
       cashfreePaymentId: paymentId,
       signature: "cashfree_verified",
+      amount: Number(paidAmount), currency: paidCurrency,
     });
 
     queueNotification(notifyBookingLogisticsEvent(db, booking.id, confirmation.confirmationStatus === "PENDING_SUPPLIER" ? "SUPPLIER_CONFIRMATION_PENDING" : "BOOKING_CONFIRMED"), "Booking confirmation notification");
@@ -400,7 +465,7 @@ router.post("/cashfree/verify", authenticate, requireBookingOwner(), validateBod
     });
   } catch (err) {
     logger.error("Cashfree payment verification failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: err.message || "Failed to verify Cashfree payment" });
+    res.status(err.status || 500).json({ error: err.message || "Failed to verify Cashfree payment", code: err.code });
   }
 });
 
@@ -449,6 +514,19 @@ router.post("/cashfree/webhook", (req, res) => {
       if (orderId) {
         const booking = db.prepare("SELECT * FROM bookings WHERE cashfree_order_id = ?").get(orderId);
         const circuitOrder = booking ? null : findCircuitOrderByPaymentOrderId(db, orderId);
+        // Supplier subscription orders (ADR 017): activated only from a verified payment.
+        if (!booking && !circuitOrder) {
+          try {
+            confirmSubscriptionPayment(db, {
+              orderId,
+              cashfreePaymentId: paymentId,
+              amount: payment.payment_amount ?? order.order_amount,
+              currency: payment.payment_currency || order.order_currency,
+            });
+          } catch (subscriptionError) {
+            logger.error("Supplier subscription webhook could not be applied", { orderId, error: subscriptionError });
+          }
+        }
         if (booking) {
           confirmPaidBooking(booking, {
             method: "CASHFREE",
@@ -457,6 +535,7 @@ router.post("/cashfree/webhook", (req, res) => {
             cashfreeOrderId: orderId,
             cashfreePaymentId: paymentId,
             signature: "cashfree_webhook_verified",
+            amount: payment.payment_amount ?? order.order_amount, currency: payment.payment_currency || order.order_currency,
           });
         } else if (circuitOrder) {
           const result = confirmCircuitOrderPayment(db, {
@@ -465,6 +544,7 @@ router.post("/cashfree/webhook", (req, res) => {
             paymentOrderId: orderId,
             paymentId,
             signature: "cashfree_webhook_verified",
+            amount: payment.payment_amount ?? order.order_amount, currency: payment.payment_currency || order.order_currency,
             amount: payment.payment_amount ?? order.order_amount,
             eventKey: eventId,
           });
@@ -479,6 +559,10 @@ router.post("/cashfree/webhook", (req, res) => {
         );
       }
     } else {
+      if (["PAYMENT_FAILED_WEBHOOK", "PAYMENT_USER_DROPPED_WEBHOOK", "PAYMENT_FAILED", "ORDER_FAILED"].includes(eventType)) {
+        const failedBooking = db.prepare("SELECT id FROM bookings WHERE cashfree_order_id = ? AND payment_status = 'PENDING'").get(orderId);
+        if (failedBooking) releaseNativeReservation(db, failedBooking.id);
+      }
       const circuitOrder = orderId ? findCircuitOrderByPaymentOrderId(db, orderId) : null;
       if (circuitOrder && ["PAYMENT_FAILED_WEBHOOK", "PAYMENT_USER_DROPPED_WEBHOOK", "PAYMENT_FAILED", "ORDER_FAILED"].includes(eventType)) {
         failCircuitOrderPayment(db, {
@@ -500,6 +584,7 @@ router.post("/cashfree/webhook", (req, res) => {
 
     res.json({ status: "ok" });
   } catch (err) {
+    if (err.code === "PAYMENT_REVIEW_REQUIRED") return res.json({ status: "review", code: err.code });
     logger.error("Cashfree webhook processing failed", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Cashfree webhook processing error" });
   }
@@ -534,7 +619,7 @@ router.post("/webhook", (req, res) => {
       if (payment) {
         const booking = db.prepare("SELECT * FROM bookings WHERE razorpay_order_id = ?").get(payment.order_id);
         const circuitOrder = booking ? null : findCircuitOrderByPaymentOrderId(db, payment.order_id);
-        if (booking) confirmPaidBooking(booking, { method: "RAZORPAY", orderId: payment.order_id, paymentId: payment.id, signature: "webhook_verified" });
+        if (booking) confirmPaidBooking(booking, { method: "RAZORPAY", orderId: payment.order_id, paymentId: payment.id, signature: "webhook_verified", amount: Number(payment.amount) / 100, currency: payment.currency });
         if (circuitOrder) {
           const result = confirmCircuitOrderPayment(db, {
             orderId: circuitOrder.id,
@@ -553,6 +638,8 @@ router.post("/webhook", (req, res) => {
       }
     } else if (event.event === "payment.failed") {
       const payment = event.payload?.payment?.entity;
+      const failedBooking = payment?.order_id ? db.prepare("SELECT id FROM bookings WHERE razorpay_order_id = ? AND payment_status = 'PENDING'").get(payment.order_id) : null;
+      if (failedBooking) releaseNativeReservation(db, failedBooking.id);
       const circuitOrder = payment?.order_id ? findCircuitOrderByPaymentOrderId(db, payment.order_id) : null;
       if (circuitOrder) {
         failCircuitOrderPayment(db, {
@@ -573,6 +660,7 @@ router.post("/webhook", (req, res) => {
 
     res.json({ status: "ok" });
   } catch (err) {
+    if (err.code === "PAYMENT_REVIEW_REQUIRED") return res.json({ status: "review", code: err.code });
     res.status(500).json({ error: "Webhook error" });
   }
 });
@@ -673,6 +761,7 @@ router.post("/cancel-booking", authenticate, requireBookingOwner(), validateBody
           WHERE booking_id = ?
         `).run(booking.id);
       })();
+      onReferralBookingCancelled(db, booking.id, { reason: cancellationReason });
     }
 
     res.json({

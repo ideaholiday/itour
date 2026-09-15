@@ -201,9 +201,27 @@ export default function AboutPage() {
           Idea Holiday Private Limited · Registered in India
         </p>
         <p className="mt-1">
-          Corporate Office: Idea Holiday Hub, India · Official Domain:{" "}
+          Locations: Mumbai · Vapi · Lucknow · Moradabad · Official Domain:{" "}
           <a href="https://ideaholiday.in" className="font-bold text-neel underline">
             ideaholiday.in
+          </a>
+        </p>
+        <p className="mt-2 text-stone-600">
+          Call:{" "}
+          <a href="tel:+919696777391" className="font-mono text-stone-700 hover:text-amber-800 underline">
+            +91 9696777391
+          </a>
+          ,{" "}
+          <a href="tel:+919336757106" className="font-mono text-stone-700 hover:text-amber-800 underline">
+            +91 9336757106
+          </a>
+          {" "}· Email:{" "}
+          <a href="mailto:info@ideaholiday.in" className="text-stone-700 hover:text-amber-800 underline">
+            info@ideaholiday.in
+          </a>
+          {" · "}
+          <a href="mailto:support@ideaholiday.in" className="text-stone-700 hover:text-amber-800 underline">
+            support@ideaholiday.in
           </a>
         </p>
       </section>

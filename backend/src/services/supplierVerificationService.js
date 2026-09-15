@@ -1,16 +1,124 @@
+import { hasKybFile } from "./kybFileService.js";
+import { resolveCommissionRate } from "./financeService.js";
+
 const ALLOWED_ACTIONS = new Set(["APPROVED", "REJECTED", "SUSPENDED"]);
+
+export const KYB_APPROVAL_SOURCES = Object.freeze({
+  ADMIN: "ADMIN",
+  CASHFREE_SECUREID: "CASHFREE_SECUREID",
+});
+
+// Documents a supplier must upload before an admin can approve them by hand.
+export const REQUIRED_KYB_DOCUMENTS = Object.freeze([
+  { docType: "COMMERCIAL_TRANSPORT_LICENSE", label: "Commercial Transport License / Permit", acceptedTypes: ["COMMERCIAL_TRANSPORT_LICENSE", "COMMERCIAL_PERMIT"] },
+  { docType: "PAN", label: "PAN Card", acceptedTypes: ["PAN"] },
+]);
 
 export const UPDATE_SUPPLIER_VERIFICATION_SQL = `
   UPDATE suppliers
   SET kyb_status = ?,
       is_verified = ?,
       commission_rate = ?,
-      commission_override_rate = COALESCE(?, commission_override_rate)
+      commission_override_rate = COALESCE(?, commission_override_rate),
+      kyb_approval_source = COALESCE(?, kyb_approval_source),
+      kyb_approved_at = COALESCE(?, kyb_approved_at)
   WHERE id = ?
 `;
 
 function verificationError(message, status = 400) {
   return Object.assign(new Error(message), { status });
+}
+
+function sqlTimestamp(date = new Date()) {
+  return date.toISOString().replace("T", " ").slice(0, 19);
+}
+
+function parseJson(value) {
+  if (value && typeof value === "object") return value;
+  try { return JSON.parse(value); } catch { return {}; }
+}
+
+const normalizeId = (value) => String(value || "").trim().toUpperCase();
+
+// Simulated SecureID answers mark anything valid. They are already refused in
+// production by the Cashfree client; this keeps them from approving anyone there.
+const simulatedResultsCount = () => process.env.NODE_ENV !== "production";
+
+// The newest Cashfree check of this exact number, so a check of an old GSTIN
+// or PAN never vouches for the one on file now.
+function latestCheck(database, supplierId, type, inputKey, number) {
+  if (!number) return null;
+  const rows = database.prepare(`
+    SELECT status, input_data, response_data, created_at
+    FROM supplier_kyb_verifications
+    WHERE supplier_id = ? AND verification_type = ?
+    ORDER BY created_at DESC
+    LIMIT 25
+  `).all(supplierId, type);
+  const row = rows.find((candidate) => normalizeId(parseJson(candidate.input_data)[inputKey]) === number);
+  if (!row) return null;
+  const response = parseJson(row.response_data);
+  return {
+    valid: String(row.status).toUpperCase() === "VALID" && response.valid !== false,
+    simulated: Boolean(response.simulated),
+    name: response.legalName || response.registeredName || null,
+    checkedAt: row.created_at,
+  };
+}
+
+/**
+ * Whether Cashfree SecureID has verified this supplier's current GSTIN and PAN,
+ * and the GSTIN is registered to that PAN (characters 3–12 of a GSTIN are the PAN).
+ */
+export function getCashfreeIdentityStatus(database, supplier) {
+  const gstinNumber = normalizeId(supplier?.gstin);
+  const panNumber = normalizeId(supplier?.pan_number);
+  const gstin = latestCheck(database, supplier.id, "GSTIN", "gstin", gstinNumber);
+  const pan = latestCheck(database, supplier.id, "PAN", "pan", panNumber);
+  const allowSimulated = simulatedResultsCount();
+
+  const reasons = [];
+  if (!gstinNumber) reasons.push("No GSTIN on file");
+  else if (!gstin) reasons.push("GSTIN has not been checked with Cashfree SecureID");
+  else if (!gstin.valid) reasons.push("Cashfree SecureID could not verify the GSTIN as active");
+  else if (gstin.simulated && !allowSimulated) reasons.push("GSTIN check was simulated, not a real Cashfree result");
+
+  if (!panNumber) reasons.push("No PAN on file");
+  else if (!pan) reasons.push("PAN has not been checked with Cashfree SecureID");
+  else if (!pan.valid) reasons.push("Cashfree SecureID could not verify the PAN");
+  else if (pan.simulated && !allowSimulated) reasons.push("PAN check was simulated, not a real Cashfree result");
+
+  const panMatchesGstin = Boolean(gstinNumber && panNumber && gstinNumber.slice(2, 12) === panNumber);
+  if (gstinNumber && panNumber && !panMatchesGstin) reasons.push("The GSTIN is not registered to this PAN");
+
+  return {
+    verified: reasons.length === 0,
+    gstin: { number: gstinNumber || null, verified: Boolean(gstin?.valid), legalName: gstin?.name || null, checkedAt: gstin?.checkedAt || null, simulated: Boolean(gstin?.simulated) },
+    pan: { number: panNumber || null, verified: Boolean(pan?.valid), registeredName: pan?.name || null, checkedAt: pan?.checkedAt || null, simulated: Boolean(pan?.simulated) },
+    panMatchesGstin,
+    reasons,
+  };
+}
+
+/**
+ * What an admin needs to decide on a supplier: which required documents have a
+ * real uploaded file, and whether Cashfree has verified their GSTIN and PAN.
+ * An admin may approve once either is complete.
+ */
+export function getKybApprovalReadiness(database, supplier) {
+  const documents = database.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ?").all(supplier.id);
+  const requiredDocuments = REQUIRED_KYB_DOCUMENTS.map((required) => {
+    const uploaded = documents.find((doc) => required.acceptedTypes.includes(normalizeId(doc.doc_type)) && hasKybFile(doc));
+    return { docType: required.docType, label: required.label, uploaded: Boolean(uploaded), documentId: uploaded?.id || null };
+  });
+  const missingDocuments = requiredDocuments.filter((doc) => !doc.uploaded).map((doc) => doc.label);
+  const identity = getCashfreeIdentityStatus(database, supplier);
+  return {
+    requiredDocuments,
+    missingDocuments,
+    identity,
+    canApprove: missingDocuments.length === 0 || identity.verified,
+  };
 }
 
 export function saveSupplierVerification(database, {
@@ -32,6 +140,17 @@ export function saveSupplierVerification(database, {
   const supplier = database.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
   if (!supplier) throw verificationError("Supplier not found", 404);
 
+  if (action === "APPROVED") {
+    const readiness = getKybApprovalReadiness(database, supplier);
+    if (!readiness.canApprove) {
+      throw verificationError(
+        `This supplier cannot be approved yet. Missing: ${readiness.missingDocuments.join(", ")}. `
+        + "Ask them to upload these, or to verify their GSTIN and PAN with Cashfree SecureID.",
+        409,
+      );
+    }
+  }
+
   const hasCommissionOverride = commissionRate !== undefined
     && commissionRate !== null
     && String(commissionRate).trim() !== "";
@@ -49,6 +168,8 @@ export function saveSupplierVerification(database, {
       action === "APPROVED" ? 1 : 0,
       resolvedCommission,
       hasCommissionOverride ? resolvedCommission : null,
+      action === "APPROVED" ? KYB_APPROVAL_SOURCES.ADMIN : null,
+      action === "APPROVED" ? sqlTimestamp() : null,
       supplierId,
     );
 
@@ -69,6 +190,41 @@ export function saveSupplierVerification(database, {
     supplier: database.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId),
     action,
     reason,
-    commissionRate: resolvedCommission,
+    // What the supplier actually pays, which the approval notice quotes.
+    commissionRate: resolveCommissionRate(database, supplierId),
   };
+}
+
+export const AUTO_APPROVAL_REASON = "Your GSTIN and PAN were verified with Cashfree SecureID. Your published listings can now be booked.";
+
+/**
+ * Approves a pending supplier on its own once Cashfree SecureID has verified
+ * their GSTIN and PAN. A supplier an admin rejected or suspended is left alone:
+ * only an admin can reverse that decision.
+ *
+ * `notify` receives the same payload as a manual approval notification.
+ */
+export function autoApproveSupplierKyb(database, supplierId, { notify } = {}) {
+  const supplier = database.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
+  if (!supplier) return { approved: false, supplier: null, identity: null };
+
+  const status = normalizeId(supplier.kyb_status) || "PENDING";
+  if (status !== "PENDING") return { approved: false, supplier, identity: null };
+
+  const identity = getCashfreeIdentityStatus(database, supplier);
+  if (!identity.verified) return { approved: false, supplier, identity };
+
+  // The status condition keeps two checks finishing together from approving twice.
+  const result = database.prepare(`
+    UPDATE suppliers
+    SET kyb_status = 'APPROVED', is_verified = 1, kyb_approval_source = ?, kyb_approved_at = ?
+    WHERE id = ? AND UPPER(COALESCE(kyb_status, 'PENDING')) IN ('PENDING', '')
+  `).run(KYB_APPROVAL_SOURCES.CASHFREE_SECUREID, sqlTimestamp(), supplierId);
+
+  const updated = database.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
+  const approved = Number(result.changes) > 0;
+  if (approved && notify) {
+    notify({ supplier: updated, action: "APPROVED", reason: AUTO_APPROVAL_REASON, commissionRate: updated.commission_rate });
+  }
+  return { approved, supplier: updated, identity };
 }

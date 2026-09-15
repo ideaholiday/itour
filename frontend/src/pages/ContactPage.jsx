@@ -22,21 +22,31 @@ import ContentPageLayout from "../components/ContentPageLayout.jsx";
 const channels = [
   {
     icon: Phone,
-    title: "24/7 Operations Room",
+    title: "24/7 Operations Helpline",
     subtitle: "Active trip & emergency assistance",
-    contact: "+91 1800-IDEA (Toll Free)",
-    action: "tel:+911800433200",
+    contact: "+91 9696777391 / +91 9336757106",
+    action: "tel:+919696777391",
     actionLabel: "Call 24/7 Operations",
     sla: "Immediate / < 5 mins",
     highlight: true,
   },
   {
+    icon: Headphones,
+    title: "Customer Support Desk",
+    subtitle: "Trip assistance, cancellations & help",
+    contact: "support@ideaholiday.in",
+    action: "mailto:support@ideaholiday.in",
+    actionLabel: "Email Support Desk",
+    sla: "Response within 2 hours",
+    highlight: false,
+  },
+  {
     icon: Mail,
-    title: "Traveler & Booking Desk",
+    title: "General & Booking Desk",
     subtitle: "Reservations, changes & vouchers",
     contact: "info@ideaholiday.in",
     action: "mailto:info@ideaholiday.in",
-    actionLabel: "Email Support Desk",
+    actionLabel: "Email Info Desk",
     sla: "Response within 2 hours",
     highlight: false,
   },
@@ -48,16 +58,6 @@ const channels = [
     action: "mailto:partners@ideaholiday.in",
     actionLabel: "Contact B2B Team",
     sla: "Response within 4 business hours",
-    highlight: false,
-  },
-  {
-    icon: ShieldAlert,
-    title: "Grievance & Compliance",
-    subtitle: "Statutory Consumer & Legal Officer",
-    contact: "grievance@ideaholiday.in",
-    action: "mailto:grievance@ideaholiday.in",
-    actionLabel: "Reach Grievance Officer",
-    sla: "Acknowledgment within 24 hours",
     highlight: false,
   },
 ];
@@ -342,26 +342,51 @@ export default function ContactPage() {
           {/* Registered Office Details */}
           <div className="rounded-3xl border border-stone-200 bg-white p-7 shadow-sm sm:p-8">
             <h3 className="font-display text-lg font-bold text-stone-900">
-              Corporate Headquarters & Hub
+              Corporate Office & Regional Hubs
             </h3>
-            <div className="mt-4 space-y-3 text-sm text-stone-600">
+            <div className="mt-4 space-y-3.5 text-sm text-stone-600">
               <div className="flex items-start gap-3">
                 <MapPin className="mt-1 h-4 w-4 shrink-0 text-amber-600" />
                 <div>
                   <strong className="text-stone-900 font-bold">Idea Holiday Private Limited</strong>
-                  <p className="text-xs text-stone-500">
-                    Corporate Hub, New Delhi / Pan-India Network
+                  <p className="mt-1 text-xs font-semibold text-amber-900/80">
+                    Locations: Mumbai · Vapi · Lucknow · Moradabad
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <Clock className="h-4 w-4 text-amber-600" />
+                <Phone className="h-4 w-4 shrink-0 text-amber-600" />
+                <div className="text-xs text-stone-700">
+                  <span className="font-semibold text-stone-900">Call: </span>
+                  <a href="tel:+919696777391" className="font-mono font-medium hover:text-amber-700">
+                    +91 9696777391
+                  </a>
+                  <span className="mx-1">,</span>
+                  <a href="tel:+919336757106" className="font-mono font-medium hover:text-amber-700">
+                    +91 9336757106
+                  </a>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Mail className="h-4 w-4 shrink-0 text-amber-600" />
+                <div className="text-xs text-stone-700">
+                  <a href="mailto:info@ideaholiday.in" className="font-medium hover:text-amber-700">
+                    info@ideaholiday.in
+                  </a>
+                  <span className="mx-1.5 text-stone-400">·</span>
+                  <a href="mailto:support@ideaholiday.in" className="font-medium hover:text-amber-700">
+                    support@ideaholiday.in
+                  </a>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Clock className="h-4 w-4 shrink-0 text-amber-600" />
                 <span className="text-xs text-stone-500">
                   Corporate Office Hours: 09:00 - 19:00 IST (Mon–Sat)
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <Headphones className="h-4 w-4 text-emerald-600" />
+                <Headphones className="h-4 w-4 shrink-0 text-emerald-600" />
                 <span className="text-xs font-bold text-emerald-800">
                   Traveler Operations Room: 24 Hours / 7 Days a Week
                 </span>

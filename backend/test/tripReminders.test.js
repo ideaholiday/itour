@@ -12,8 +12,11 @@ describe("WhatsApp & Email Automated Trip Reminders", () => {
   const testDriverId = "drv_remind_01";
   const testBookingUpcoming = "bk_remind_upcoming_01";
   const testBookingCompleted = "bk_remind_completed_01";
-  const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
-  const threeDaysAgo = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  // Reminders word the day in India time (UTC+5:30), so build dates the same way;
+  // UTC dates make this fail between 00:00 and 05:30 IST.
+  const istNow = Date.now() + 330 * 60 * 1000;
+  const tomorrow = new Date(istNow + 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const threeDaysAgo = new Date(istNow - 3 * 24 * 3600 * 1000).toISOString().slice(0, 10);
 
   before(() => {
     // Safe foreign-key order cleanup
@@ -25,6 +28,7 @@ describe("WhatsApp & Email Automated Trip Reminders", () => {
     db.prepare("DELETE FROM payout_batches WHERE supplier_id = ?").run(testSupplierId);
     db.prepare("DELETE FROM payouts WHERE booking_id IN (?, ?) OR supplier_id = ?").run(testBookingUpcoming, testBookingCompleted, testSupplierId);
     db.prepare("DELETE FROM supplier_drivers WHERE supplier_id = ?").run(testSupplierId);
+    db.prepare("DELETE FROM booking_modifications WHERE booking_id IN (?, ?)").run(testBookingUpcoming, testBookingCompleted);
     db.prepare("DELETE FROM bookings WHERE id IN (?, ?) OR supplier_id = ?").run(testBookingUpcoming, testBookingCompleted, testSupplierId);
     db.prepare("DELETE FROM suppliers WHERE id = ?").run(testSupplierId);
 

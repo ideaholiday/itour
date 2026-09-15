@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../lib/mapTiles.js";
 import { Crosshair, LocateFixed, MapPin, Navigation, Route } from "lucide-react";
 
 const LOCATIONS = [
@@ -31,7 +32,7 @@ export default function MapPicker({ originName = "Lucknow Airport (LKO)", origin
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
     const map = L.map(mapContainer.current).setView([originLat, originLng], 12);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+    addBaseTiles(map);
     const addMarker = (kind, point, label, color) => {
       const marker = L.marker([point.lat, point.lng], { draggable: interactive, icon: pinIcon(label, color), keyboard: true }).addTo(map);
       marker.bindTooltip(`${kind === "pickup" ? "Pickup" : "Drop-off"} — drag to adjust`);

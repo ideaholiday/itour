@@ -461,13 +461,13 @@ export function UserProfile() {
           <div className="bg-gradient-to-r from-amber-500 to-amber-600 rounded-3xl p-6 text-stone-950 shadow-sm relative overflow-hidden">
             <div className="relative z-10 max-w-lg space-y-2">
               <span className="bg-stone-950 text-white text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full uppercase">
-                GIVE ₹250, GET ₹250
+                FRIENDS SAVE, YOU EARN
               </span>
               <h3 className="text-2xl font-serif font-bold text-stone-950">
                 Invite Friends to Idea Holiday
               </h3>
               <p className="text-xs text-stone-900/80 font-medium leading-relaxed">
-                Share your unique invite link with fellow travelers. Your friends get an instant ₹250 discount on their first booking, and you earn up to ₹500 wallet credit when their trip completes!
+                Share your invite link. Friends who sign up with it get a discount on their first trip, and you earn wallet credit on every trip they take for 24 months.
               </p>
               <div className="pt-2">
                 <Link
@@ -537,7 +537,7 @@ export function UserProfile() {
           {/* Quick WhatsApp Share Button */}
           <a
             href={`https://api.whatsapp.com/send?text=${encodeURIComponent(
-              `Hey! Plan your next India vacation, tour, or airport cab with Idea Holiday. Use my referral code ${referralData?.referralCode || ""} to get an instant ₹250 discount on your first booking: ${referralData?.referralLink || "https://ideaholiday.com"}`
+              `I plan my trips in India with Idea Holiday. Sign up with my link and your first trip gets a friend discount: ${referralData?.referralLink || "https://ideaholiday.com"}`
             )}`}
             target="_blank"
             rel="noopener noreferrer"
@@ -555,11 +555,11 @@ export function UserProfile() {
               </span>
             </div>
             <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-4 shadow-xs">
-              <span className="text-[10px] font-mono text-stone-500 uppercase block">Pending Rewards</span>
+              <span className="text-[10px] font-mono text-stone-500 uppercase block">Clearing</span>
               <span className="text-2xl font-serif font-bold text-amber-600 dark:text-amber-400 mt-1 block">
-                ₹{(referralData?.pendingCredits || 0).toLocaleString("en-IN")}
+                ₹{(referralData?.clearingCredits || 0).toLocaleString("en-IN")}
               </span>
-              <span className="text-[10px] text-stone-400">Releases on trip completion</span>
+              <span className="text-[10px] text-stone-400">Spendable 7 days after each trip</span>
             </div>
             <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-4 shadow-xs">
               <span className="text-[10px] font-mono text-stone-500 uppercase block">Friends Joined</span>
@@ -574,28 +574,32 @@ export function UserProfile() {
             <h4 className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase font-mono">
               Invited Friends Activity
             </h4>
-            {!referralData?.referrals || referralData.referrals.length === 0 ? (
+            {!referralData?.rewards || referralData.rewards.length === 0 ? (
               <div className="p-8 text-center border border-dashed border-stone-200 dark:border-stone-800 rounded-2xl text-xs text-stone-500">
-                You haven't referred any friends yet. Share your code to start earning travel credits!
+                {referralData?.friendsInvitedCount
+                  ? "Your friends haven't booked a trip yet. Rewards appear here when they do."
+                  : "No friends have joined yet. Share your link to start earning travel credit."}
               </div>
             ) : (
               <div className="space-y-2">
-                {referralData.referrals.map((item) => (
+                {referralData.rewards.map((item) => (
                   <div
                     key={item.id}
                     className="flex items-center justify-between p-3.5 rounded-2xl border border-stone-200 dark:border-stone-800 bg-[#FAF9F6] dark:bg-stone-900/40 text-xs font-mono"
                   >
                     <div>
-                      <strong className="text-stone-900 dark:text-stone-100 block">{item.referredName}</strong>
-                      <span className="text-[10px] text-stone-500">{item.bookingRef} &bull; {new Date(item.createdAt).toLocaleDateString("en-IN")}</span>
+                      <strong className="text-stone-900 dark:text-stone-100 block">{item.friendFirstName}'s {item.isFirstTrip ? "first trip" : "trip"}</strong>
+                      <span className="text-[10px] text-stone-500">{item.tripDate ? new Date(item.tripDate).toLocaleDateString("en-IN") : ""}</span>
                     </div>
                     <div className="text-right">
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        item.status === "REWARDED"
+                        item.stage === "CREDITED"
                           ? "bg-emerald-100 text-emerald-900 border border-emerald-300"
-                          : "bg-amber-100 text-amber-900 border border-amber-300"
+                          : item.stage === "REVERSED"
+                            ? "bg-rose-100 text-rose-900 border border-rose-300"
+                            : "bg-amber-100 text-amber-900 border border-amber-300"
                       }`}>
-                        {item.status} (+₹{item.rewardInr})
+                        {{ CREDITED: "In wallet", CLEARING: "Clearing", UPCOMING_TRIP: "Trip coming up", IN_REVIEW: "Being checked", REVERSED: "Refunded" }[item.stage] || item.stage} · ₹{item.amountInr}
                       </span>
                     </div>
                   </div>

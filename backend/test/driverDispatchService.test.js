@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import { executeMigrationSql } from "../src/services/migrationRunner.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
@@ -13,7 +15,8 @@ import {
 function database() {
   const db = new Database(":memory:");
   db.exec(`
-    CREATE TABLE products (id TEXT PRIMARY KEY, duration_hours REAL);
+    CREATE TABLE suppliers (id TEXT PRIMARY KEY);
+    CREATE TABLE products (id TEXT PRIMARY KEY, duration_hours REAL, group_type TEXT);
     CREATE TABLE transfer_routes (product_id TEXT, duration_mins INTEGER);
     CREATE TABLE package_itineraries (product_id TEXT, total_days INTEGER);
     CREATE TABLE bookings (
@@ -38,9 +41,13 @@ function database() {
       note TEXT, actor_id TEXT, details TEXT, created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE TABLE payouts (booking_id TEXT, payout_status TEXT);
+    CREATE TABLE staff_tasks (id TEXT PRIMARY KEY, task_type TEXT, booking_id TEXT, product_id TEXT, assigned_staff_name TEXT, priority TEXT, status TEXT, notes TEXT, created_at TEXT DEFAULT (datetime('now')));
   `);
-  db.prepare("INSERT INTO products VALUES ('product-1', 2)").run();
+  db.prepare("INSERT INTO products VALUES ('product-1', 2, 'PRIVATE')").run();
   db.prepare("INSERT INTO supplier_drivers VALUES ('driver-1', 'supplier-1', 'Ravi Kumar', '+919876543210', 'Swift Dzire Sedan', 'GA-03-AB-1234', 'AVAILABLE')").run();
+  executeMigrationSql(db, fs.readFileSync(new URL('../migrations/026_driver_dispatch_workflow.sql', import.meta.url), 'utf8').split('-- @down')[0]);
+  db.exec("ALTER TABLE bookings ADD COLUMN adults INTEGER DEFAULT 1; ALTER TABLE bookings ADD COLUMN children INTEGER DEFAULT 0");
+  db.prepare("UPDATE supplier_drivers SET driver_email = 'driver@example.test', seat_capacity = 4").run();
   return db;
 }
 
@@ -54,7 +61,7 @@ function addBooking(db, id, time, overrides = {}) {
     status: "confirmed",
     ...overrides,
   };
-  db.prepare("INSERT INTO bookings VALUES (?, ?, 'supplier-1', 'product-1', 'TRANSFER', ?, ?, ?, ?, ?, ?)")
+  db.prepare("INSERT INTO bookings (id, ref, supplier_id, product_id, product_type, activity_date, pickup_time, vehicle_category, payment_status, supplier_assignment_status, status) VALUES (?, ?, 'supplier-1', 'product-1', 'TRANSFER', ?, ?, ?, ?, ?, ?)")
     .run(id, booking.ref, booking.date, time, booking.category, booking.payment, booking.assignment, booking.status);
 }
 
@@ -92,6 +99,7 @@ test("enforces dispatch order and requires the OTP path to start a trip", () => 
   const db = database();
   addBooking(db, "booking-1", "09:00");
   assignDriverToBooking(db, { supplierId: "supplier-1", bookingId: "booking-1", supplierDriverId: "driver-1" });
+  db.prepare("UPDATE driver_assignments SET acknowledgement = 'ACCEPTED'").run();
   assert.throws(() => updateDispatchStatus(db, { supplierId: "supplier-1", bookingId: "booking-1", nextStatus: "TRIP_STARTED" }), /pickup OTP/i);
   updateDispatchStatus(db, { supplierId: "supplier-1", bookingId: "booking-1", nextStatus: "EN_ROUTE" });
   updateDispatchStatus(db, { supplierId: "supplier-1", bookingId: "booking-1", nextStatus: "ARRIVED" });

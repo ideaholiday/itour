@@ -4,6 +4,8 @@ import { calculateRefundQuote } from "./financeService.js";
 const CASE_TYPES = new Set(["CANCELLATION", "COMPLAINT", "REFUND_DISPUTE", "SAFETY", "OTHER"]);
 const CASE_STATUSES = new Set(["OPEN", "UNDER_REVIEW", "AWAITING_GUEST", "AWAITING_SUPPLIER", "APPROVED", "REJECTED", "RESOLVED", "CLOSED"]);
 const PRIORITIES = new Set(["LOW", "NORMAL", "HIGH", "URGENT"]);
+export const PAYOUT_HOLD_CASE_TYPES = new Set(["COMPLAINT", "SAFETY", "REFUND_DISPUTE"]);
+const CLOSED_CASE_STATUSES = ["REJECTED", "RESOLVED", "CLOSED"];
 const clean = (value, max = 2000) => String(value || "").trim().slice(0, max);
 const supportError = (message, status = 400) => Object.assign(new Error(message), { status });
 const plusHours = (hours) => new Date(Date.now() + hours * 3_600_000).toISOString();
@@ -67,6 +69,13 @@ export function createSupportCase(database, { booking, actor, caseType, category
       .run(`evt_${nanoid(12)}`, id, actor.id || null, String(actor.role || "TRAVELER").toUpperCase(), title, JSON.stringify({ bookingRef: booking.ref, policyQuote: quote }));
     database.prepare("INSERT INTO staff_tasks (id, task_type, booking_id, assigned_staff_name, priority, status, notes) VALUES (?, 'SUPPORT_CASE', ?, 'Customer Support', ?, 'OPEN', ?)")
       .run(`task_${nanoid(12)}`, booking.id, priority === "URGENT" ? "CRITICAL" : priority, `${caseRef}: ${title}`);
+    // A problem reported after the trip holds the supplier payout until the case is closed,
+    // but only while the payout has not already gone into a settlement batch.
+    if (PAYOUT_HOLD_CASE_TYPES.has(type) && String(booking.status).toLowerCase() === "completed") {
+      const held = database.prepare("UPDATE payouts SET payout_status = 'ISSUE_HOLD' WHERE booking_id = ? AND payout_status = 'SCHEDULED' AND settlement_batch_id IS NULL").run(booking.id).changes;
+      if (held) database.prepare("INSERT INTO support_case_events (id, case_id, actor_id, actor_role, event_type, next_status, note, metadata) VALUES (?, ?, ?, ?, 'PAYOUT_HELD', 'OPEN', ?, '{}')")
+        .run(`evt_${nanoid(12)}`, id, actor.id || null, String(actor.role || "TRAVELER").toUpperCase(), "Supplier payout held while this case is open");
+    }
   })();
   return supportCaseDetails(database, id, { includeInternal: true });
 }
@@ -116,6 +125,13 @@ export function updateSupportCase(database, item, { actor, status, priority, ass
       .run(nextStatus, nextPriority, clean(assignedTo, 120) || item.assigned_to, note, nextStatus, item.id);
     database.prepare("INSERT INTO support_case_events (id, case_id, actor_id, actor_role, event_type, previous_status, next_status, note, metadata) VALUES (?, ?, ?, ?, 'STATUS_CHANGED', ?, ?, ?, ?)")
       .run(`evt_${nanoid(12)}`, item.id, actor.id, String(actor.role).toUpperCase(), item.status, nextStatus, note, JSON.stringify({ priority: nextPriority, assignedTo }));
+    // Release a held payout once no problem case for the booking is still open.
+    if (CLOSED_CASE_STATUSES.includes(nextStatus)) {
+      const stillOpen = database.prepare(`SELECT 1 FROM support_cases WHERE booking_id = ? AND id <> ? AND case_type IN ('COMPLAINT','SAFETY','REFUND_DISPUTE') AND status NOT IN ('REJECTED','RESOLVED','CLOSED') LIMIT 1`).get(item.booking_id, item.id);
+      const released = stillOpen ? 0 : database.prepare("UPDATE payouts SET payout_status = 'SCHEDULED' WHERE booking_id = ? AND payout_status = 'ISSUE_HOLD'").run(item.booking_id).changes;
+      if (released) database.prepare("INSERT INTO support_case_events (id, case_id, actor_id, actor_role, event_type, previous_status, next_status, note, metadata) VALUES (?, ?, ?, ?, 'PAYOUT_RELEASED', ?, ?, ?, '{}')")
+        .run(`evt_${nanoid(12)}`, item.id, actor.id, String(actor.role).toUpperCase(), item.status, nextStatus, "Supplier payout released to the settlement schedule");
+    }
   })();
   return supportCaseDetails(database, item.id, { includeInternal: true });
 }

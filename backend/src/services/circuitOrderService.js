@@ -1,8 +1,10 @@
+import { getInventoryRules, reserveNativeInventory, attachNativeReservation } from "./nativeInventoryService.js";
 import { nanoid } from "nanoid";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
+import { isSupplierSubscriptionCovered } from "./supplierKybGate.js";
 
-const HOLD_VALIDITY_MS = 15 * 60 * 1000;
+const HOLD_VALIDITY_MS = 10 * 60 * 1000;
 const ACTIVE_ORDER_STATUS = "PENDING_PAYMENT";
 
 function orderError(message, status = 400, code = "CIRCUIT_ORDER_ERROR", details = undefined) {
@@ -287,7 +289,8 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
       if (!product || product.status !== "PUBLISHED" || Number(product.is_published ?? 1) !== 1) {
         throw orderError(`${line.productTitle || "Circuit item"} is no longer published`, 409, "PRODUCT_UNAVAILABLE");
       }
-      if (product.kyb_status !== "APPROVED" || String(product.supplier_id) !== String(line.supplierId)) {
+      if (product.kyb_status !== "APPROVED" || String(product.supplier_id) !== String(line.supplierId)
+        || !isSupplierSubscriptionCovered(database, product.supplier_id)) {
         throw orderError(`${line.productTitle || product.title} is no longer available from the quoted supplier`, 409, "SUPPLIER_UNAVAILABLE");
       }
 
@@ -317,7 +320,7 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
       const orderItemId = `coi_${nanoid(14)}`;
       const bookingId = `bk_${nanoid(12)}`;
       const bookingRef = `IH-${nanoid(7).toUpperCase()}`;
-      const commissionRate = resolveCommissionRate(database, product.supplier_id, product.product_type);
+      const commissionRate = resolveCommissionRate(database, product.supplier_id, product.id);
       const commissionAmount = money(totalAmount * commissionRate / 100);
       const supplierPayout = money(totalAmount - commissionAmount);
       const location = String(line.location || product.city || product.destination_name || "Supplier meeting point").trim();
@@ -343,6 +346,15 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
         totalAmount, taxesAmount, commissionAmount, commissionRate, supplierPayout,
         "Reserved from an owned, ready circuit quote", product.id,
       );
+      const nativeRules = getInventoryRules(database, product.id);
+      if (nativeRules) {
+        const hold = reserveNativeInventory(database, { productId: product.id, optionId: nativeRules.option_id,
+          localDate: line.activityDate, localTime: linePickupTime, adults: Number(line.adults ?? quote.adults_count),
+          children: Number(line.children ?? quote.children_count), ownerId: userId, requestKey: `circuit:${orderId}:${line.itemId}` });
+        database.prepare("UPDATE bookings SET product_option_id = ?, confirmation_type = 'INSTANT', logistics_snapshot = ? WHERE id = ?")
+          .run(nativeRules.option_id, JSON.stringify({ nativeCancellationHours: Number(nativeRules.cancellation_hours) }), bookingId);
+        attachNativeReservation(database, hold.id, database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId), userId);
+      }
       database.prepare(`
         INSERT INTO circuit_order_items (
           id, circuit_order_id, quote_line_item_id, booking_id, sequence_number, product_id,

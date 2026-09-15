@@ -1,3 +1,5 @@
+import DispatchQueue, { ConfirmByPhone } from "./DispatchQueue.jsx";
+import DispatchTimeline from "./DispatchTimeline.jsx";
 import React, { useEffect, useState, useMemo } from "react";
 import {
   Search,
@@ -49,18 +51,41 @@ const CANCEL_REASONS = [
   "Other operational constraint"
 ];
 
+// The driver's last shared position (ADR 012): the supplier sees it for the whole trip.
+function DriverLocationLine({ booking, onRefresh }) {
+  if (!booking.driver_last_location_at || booking.driver_last_lat == null || booking.driver_last_lng == null) {
+    return ["EN_ROUTE", "ARRIVED", "TRIP_STARTED"].includes(booking.assignment_status)
+      ? <span className="block text-[10px] font-semibold text-amber-700">No live location from the driver yet</span>
+      : null;
+  }
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(booking.driver_last_location_at)) / 60000));
+  const stale = minutes > 5;
+  return (
+    <span className={`flex flex-wrap items-center gap-1.5 text-[10px] font-semibold ${stale ? "text-rose-700" : "text-emerald-800"}`}>
+      <span>{stale ? "Last location" : "● Live location"} {minutes < 1 ? "just now" : `${minutes} min ago`}{booking.driver_last_accuracy_m ? ` · ±${Math.round(booking.driver_last_accuracy_m)} m` : ""}</span>
+      <a className="underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${booking.driver_last_lat},${booking.driver_last_lng}`} onClick={(event) => event.stopPropagation()}>Open in Maps</a>
+      {onRefresh && <button type="button" className="underline" onClick={(event) => { event.stopPropagation(); onRefresh(); }}>Refresh</button>}
+    </span>
+  );
+}
+
 export default function SupplierBookingManager({ supplierData, loading, onRefresh }) {
   const [activeFilter, setActiveFilter] = useState("ALL"); // ALL, PENDING, IN_PROGRESS, COMPLETED, CANCELLED
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("NEWEST");
   const [selectedBooking, setSelectedBooking] = useState(null);
 
+  const [customDriverEmail, setCustomDriverEmail] = useState("");
+  const [customSeatCapacity, setCustomSeatCapacity] = useState(4);
   // Driver Assignment State
   const [isAssigningDriver, setIsAssigningDriver] = useState(false);
   const [selectedDriverId, setSelectedDriverId] = useState("");
   const [customDriverName, setCustomDriverName] = useState("");
   const [customDriverPhone, setCustomDriverPhone] = useState("");
   const [customVehicleNum, setCustomVehicleNum] = useState("");
+  const [customVehicleModel, setCustomVehicleModel] = useState("");
+  const [assignConfirmedByPhone, setAssignConfirmedByPhone] = useState(false);
+  const [assignPhoneNote, setAssignPhoneNote] = useState("");
   const [assignSuccessMsg, setAssignSuccessMsg] = useState("");
   const [fleetOptions, setFleetOptions] = useState([]);
   const [dispatchMessage, setDispatchMessage] = useState("");
@@ -226,18 +251,23 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
     try {
       let payload = { bookingId: selectedBooking.id };
       if (selectedDriverId === "CUSTOM") {
-        if (!customDriverName || !customDriverPhone || !customVehicleNum) {
-          throw new Error("Please complete the emergency manual assignment fields.");
+        if (!customDriverName || !customDriverPhone || !customVehicleNum || !customVehicleModel) {
+          throw new Error("Please complete the outside driver fields, including the vehicle model.");
         }
         payload = {
           ...payload,
           driverName: customDriverName,
           driverPhone: customDriverPhone,
+          driverEmail: customDriverEmail,
+          seatCapacity: Number(customSeatCapacity),
           vehicleNumber: customVehicleNum,
-          vehicleModel: selectedBooking.vehicle_category || "Standard Vehicle"
+          vehicleModel: customVehicleModel
         };
       } else {
         payload.supplierDriverId = selectedDriverId;
+      }
+      if (assignConfirmedByPhone) {
+        payload = { ...payload, confirmedByPhone: true, note: assignPhoneNote };
       }
 
       const res = await fetch(`/api/suppliers/${s.id}/assign-driver`, {
@@ -249,7 +279,9 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Driver could not be assigned");
       if (data.success) {
-        setAssignSuccessMsg("Driver assigned successfully.");
+        setAssignSuccessMsg(data.message || "Assignment sent. Waiting for driver acknowledgement.");
+        setAssignConfirmedByPhone(false);
+        setAssignPhoneNote("");
         setSelectedBooking({
           ...selectedBooking,
           ...data.assignment,
@@ -411,6 +443,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
 
   return (
     <div className="space-y-6">
+      <DispatchQueue supplierId={s.id} onSelect={id => setSelectedBooking(bookings.find(b => b.id === id))} />
       {/* Header and Filter Tabs */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -556,9 +589,12 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                             {b.cancellation_reason || "Refunded / Cancelled"}
                           </span>
                         ) : hasDriver ? (
-                          <span className="text-stone-700 font-medium flex items-center gap-1">
-                            <Car className="h-3 w-3 text-stone-400" /> {b.driver_name} ({b.vehicle_number || "Assigned"})
-                          </span>
+                          <>
+                            <span className="text-stone-700 font-medium flex items-center gap-1">
+                              <Car className="h-3 w-3 text-stone-400" /> {b.driver_name} ({b.vehicle_number || "Assigned"})
+                            </span>
+                            <DriverLocationLine booking={b} />
+                          </>
                         ) : (
                           <span className="text-amber-700 font-bold text-[10px]">⚠️ Driver unassigned</span>
                         )}
@@ -854,6 +890,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     </span>
                   )}
                 </div>
+                {selectedBooking.driver_name && <div className="mt-2"><DriverLocationLine booking={selectedBooking} onRefresh={onRefresh} /></div>}
 
                 <form onSubmit={handleAssignDriverSubmit} className="mt-3 space-y-3">
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -865,12 +902,25 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                         className="mt-1 w-full rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs font-bold text-stone-800 focus:border-amber-500 focus:outline-none"
                       >
                         <option value="">-- Choose available driver --</option>
-                        {fleetOptions.map((dr) => (
-                          <option key={dr.id} value={dr.id}>
-                            {dr.driver_name} · {dr.vehicle_number} ({dr.vehicle_category || "Standard"})
-                          </option>
-                        ))}
-                        <option value="CUSTOM">⚡ Emergency Manual Assignment</option>
+                        {fleetOptions.some((dr) => dr.available) && (
+                          <optgroup label="Available for this trip">
+                            {fleetOptions.filter((dr) => dr.available).map((dr) => (
+                              <option key={dr.id} value={dr.id}>
+                                {dr.driver_name} · {dr.vehicle_model} · {dr.vehicle_number} · {dr.seat_capacity} seats
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {fleetOptions.some((dr) => !dr.available) && (
+                          <optgroup label="Not available">
+                            {fleetOptions.filter((dr) => !dr.available).map((dr) => (
+                              <option key={dr.id} value={dr.id} disabled>
+                                {dr.driver_name} · {dr.vehicle_number} · {dr.reason || (!dr.driver_email ? "Add driver email in fleet" : "Unavailable")}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <option value="CUSTOM">⚡ Outside driver (not in your fleet)</option>
                       </select>
                     </div>
 
@@ -891,6 +941,15 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                             onChange={(e) => setCustomDriverPhone(e.target.value)}
                             className="rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs text-stone-900"
                           />
+                          <label className="text-xs">Driver email<input type="email" required value={customDriverEmail} onChange={e => setCustomDriverEmail(e.target.value)} className="w-full rounded border p-2" /></label>
+                          <label className="text-xs">Vehicle seats<input type="number" min="1" max="100" required value={customSeatCapacity} onChange={e => setCustomSeatCapacity(e.target.value)} className="w-full rounded border p-2" /></label>
+                          <input
+                            type="text"
+                            placeholder={`Vehicle model (must suit ${selectedBooking.vehicle_category || "booked category"})`}
+                            value={customVehicleModel}
+                            onChange={(e) => setCustomVehicleModel(e.target.value)}
+                            className="rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs text-stone-900"
+                          />
                           <input
                             type="text"
                             placeholder="Vehicle Number (e.g. UP32AB1234)"
@@ -903,6 +962,26 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     )}
                   </div>
 
+                  {selectedDriverId && (
+                    <div className="space-y-2 rounded-xl border border-stone-100 bg-stone-50 p-2">
+                      <label className="flex items-start gap-2 text-xs text-stone-700">
+                        <input type="checkbox" checked={assignConfirmedByPhone} onChange={(e) => setAssignConfirmedByPhone(e.target.checked)} className="mt-0.5" />
+                        <span>I spoke to the driver and they accepted. Notify the traveler now instead of waiting for the driver to accept from the link.</span>
+                      </label>
+                      {assignConfirmedByPhone && (
+                        <input
+                          required
+                          minLength={3}
+                          maxLength={500}
+                          value={assignPhoneNote}
+                          onChange={(e) => setAssignPhoneNote(e.target.value)}
+                          placeholder="Who confirmed, and when? e.g. Called Ravi at 18:05"
+                          className="w-full rounded-xl border border-stone-200 bg-white p-2 text-xs text-stone-900"
+                        />
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between pt-1">
                     <button
                       type="submit"
@@ -913,7 +992,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                       Confirm Driver Assignment
                     </button>
 
-                    {selectedBooking.driver_name && selectedBooking.status !== "completed" && (
+                    {selectedBooking.driver_name && selectedBooking.assignment_status === "TRIP_STARTED" && (
                       <button
                         type="button"
                         onClick={() => handleDispatchStatus("COMPLETED")}
@@ -927,7 +1006,26 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                 </form>
 
                 {dispatchMessage && <p className="mt-2 text-xs font-bold text-amber-900">{dispatchMessage}</p>}
+                <p className="text-xs">Driver acknowledgement: {selectedBooking.acknowledgement || "Not requested"}</p>
+                {selectedBooking.acknowledgement === "PENDING" && selectedBooking.assignment_status !== "CANCELLED" && (
+                  <div className="mt-2">
+                    <ConfirmByPhone
+                      url={`/api/suppliers/${s.id}/bookings/${encodeURIComponent(selectedBooking.id)}/confirm-driver`}
+                      onDone={(message) => {
+                        setAssignSuccessMsg(message);
+                        setSelectedBooking({ ...selectedBooking, acknowledgement: "ACCEPTED" });
+                        if (onRefresh) onRefresh();
+                      }}
+                    />
+                  </div>
+                )}
                 {assignSuccessMsg && <p className="mt-2 text-xs font-bold text-emerald-900">{assignSuccessMsg}</p>}
+                <details className="mt-3 border-t border-stone-100 pt-3">
+                  <summary className="cursor-pointer text-[10px] font-black uppercase tracking-wider text-stone-700">Driver & trip timeline</summary>
+                  <div className="mt-2">
+                    <DispatchTimeline key={`${selectedBooking.id}:${selectedBooking.acknowledgement}:${selectedBooking.assignment_status}`} url={`/api/suppliers/${s.id}/bookings/${encodeURIComponent(selectedBooking.id)}/dispatch-timeline`} />
+                  </div>
+                </details>
               </div>
             )}
 

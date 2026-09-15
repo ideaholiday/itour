@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
+import { applySupplierSubscriptionMigration } from "./fixtures/supplierSubscriptions.js";
 import {
   CIRCUIT_ORDER_HOLD_VALIDITY_MS,
   consumeCircuitQuote,
@@ -167,6 +168,7 @@ function testDatabase() {
     .run("product_1", "PROD-1", "Heritage Walk");
   database.prepare("INSERT INTO products VALUES (?, 'supplier_1', ?, ?, 'DAY_TOUR', 'Goa', 'Goa', 'PUBLISHED', 1, 'FLEXIBLE_24H')")
     .run("product_2", "PROD-2", "Island Tour");
+  applySupplierSubscriptionMigration(database);
   return database;
 }
 

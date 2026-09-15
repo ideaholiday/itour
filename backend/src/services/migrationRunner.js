@@ -116,13 +116,70 @@ function splitSqlStatements(sql) {
   return statements;
 }
 
-function executeMigrationSql(db, sql) {
+/**
+ * Applies one migration's SQL, translating `ADD COLUMN IF NOT EXISTS` for SQLite.
+ * Exported so tests can build fixtures through the same path production uses.
+ */
+function withoutLeadingComments(statement) {
+  let sql = statement;
+  for (;;) {
+    const trimmed = sql.replace(/^\s+/, "");
+    if (trimmed.startsWith("--")) sql = trimmed.includes("\n") ? trimmed.slice(trimmed.indexOf("\n") + 1) : "";
+    else if (trimmed.startsWith("/*") && trimmed.includes("*/")) sql = trimmed.slice(trimmed.indexOf("*/") + 2);
+    else return trimmed;
+  }
+}
+
+/**
+ * SQLite has no `ALTER COLUMN ... DROP NOT NULL`. Removing a NOT NULL
+ * constraint does not change the on-disk format, so SQLite's documented
+ * procedure is to edit the stored CREATE TABLE text in place — which, unlike a
+ * table rebuild, works inside the migration transaction and leaves foreign keys
+ * from other tables untouched. A column that is already nullable is a no-op.
+ */
+function sqliteDropNotNull(db, tableName, columnName) {
+  const column = db.prepare(`PRAGMA table_info("${tableName}")`).all()
+    .find((item) => item.name.toLowerCase() === columnName.toLowerCase());
+  if (!column) throw new Error(`Cannot drop NOT NULL: ${tableName}.${columnName} does not exist`);
+  if (!column.notnull) return;
+
+  const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName);
+  const definition = new RegExp(`([(,]\\s*["\`]?${column.name}["\`]?\\s[^,]*?)\\s+NOT\\s+NULL`, "i");
+  const rewritten = sql.replace(definition, "$1");
+  if (rewritten === sql) throw new Error(`Cannot drop NOT NULL: ${tableName}.${columnName} definition not recognised`);
+
+  const schemaVersion = db.pragma("schema_version", { simple: true });
+  db.unsafeMode(true);
+  try {
+    db.pragma("writable_schema = ON");
+    db.prepare("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = ?").run(rewritten, tableName);
+    db.pragma(`schema_version = ${schemaVersion + 1}`);
+    db.pragma("writable_schema = OFF");
+  } finally {
+    db.unsafeMode(false);
+  }
+}
+
+export function executeMigrationSql(db, sql) {
   if (databaseDialect(db) !== "sqlite") {
-    db.exec(sql);
+    // The Postgres adapter translates SQLite syntax (INSERT OR IGNORE, datetime('now'))
+    // only at the start of a statement, so a whole file must be sent one statement at a time.
+    for (const statement of splitSqlStatements(sql)) {
+      const executable = withoutLeadingComments(statement);
+      if (executable) db.exec(executable);
+    }
     return;
   }
 
   for (const statement of splitSqlStatements(sql)) {
+    const dropNotNull = withoutLeadingComments(statement).match(
+      /^ALTER\s+TABLE\s+["`]?([a-zA-Z_][\w]*)["`]?\s+ALTER\s+COLUMN\s+["`]?([a-zA-Z_][\w]*)["`]?\s+DROP\s+NOT\s+NULL\s*;?\s*$/i,
+    );
+    if (dropNotNull) {
+      sqliteDropNotNull(db, dropNotNull[1], dropNotNull[2]);
+      continue;
+    }
+
     const conditionalAdd = statement.match(
       /ALTER\s+TABLE\s+["`]?([a-zA-Z_][\w]*)["`]?\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+["`]?([a-zA-Z_][\w]*)["`]?\s+([\s\S]+)$/i,
     );
@@ -137,6 +194,32 @@ function executeMigrationSql(db, sql) {
       db.exec(`ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${definition}`);
     }
   }
+}
+
+/**
+ * Finds migration files that share the same numeric prefix.
+ *
+ * Migrations are applied in lexicographic filename order and tracked by full
+ * filename, so duplicates are not fatal — but they make the apply order depend
+ * on the description text rather than the number, which is easy to get wrong.
+ * Reported by `npm run migrate:status` so the next author picks a free number.
+ *
+ * @param {Array<{ name: string }>} files
+ * @returns {Array<{ prefix: string, names: string[] }>}
+ */
+export function findDuplicateMigrationPrefixes(files) {
+  const byPrefix = new Map();
+
+  for (const file of files) {
+    const prefix = String(file.name).match(/^(\d+)/)?.[1];
+    if (!prefix) continue;
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+    byPrefix.get(prefix).push(file.name);
+  }
+
+  return [...byPrefix.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([prefix, names]) => ({ prefix, names }));
 }
 
 /**

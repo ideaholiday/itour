@@ -3,8 +3,22 @@ import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { sendEmail } from "../src/services/emailService.js";
 import { normalizeWhatsAppPhone, sendWhatsAppMessage } from "../src/services/whatsappService.js";
+import { beginNotificationDelivery, updateProviderDeliveryStatus } from "../src/services/notificationLogService.js";
 
 const restoreEnv = (name, value) => value === undefined ? delete process.env[name] : process.env[name] = value;
+
+test("a read notification is not queued again during an outbox retry", () => {
+  const database = notificationDatabase();
+  try {
+    const input = { eventKey: "read-retry", eventType: "BOOKING_CONFIRMED", channel: "WHATSAPP", recipientRole: "SUPPLIER", recipientAddress: "+919876543210", provider: "META", body: "Confirmed" };
+    const first = beginNotificationDelivery(input, database);
+    database.prepare("UPDATE notification_deliveries SET status = 'READ' WHERE id = ?").run(first.delivery.id);
+    const retry = beginNotificationDelivery(input, database);
+    assert.equal(retry.idempotent, true);
+    assert.equal(retry.delivery.id, first.delivery.id);
+    assert.equal(retry.delivery.attempt_count, 1);
+  } finally { database.close(); }
+});
 
 function notificationDatabase() {
   const database = new Database(":memory:");
@@ -30,6 +44,23 @@ function notificationDatabase() {
   `);
   return database;
 }
+
+test("WhatsApp delivery callbacks populate a missing text timestamp and preserve an existing one", () => {
+  const database = notificationDatabase();
+  try {
+    database.prepare("INSERT INTO notification_deliveries (id, provider_message_id, status) VALUES (?, ?, ?)").run("callback-test", "wamid.callback", "SENT");
+    database.prepare("INSERT INTO whatsapp_logs (id, provider_message_id, gateway_status) VALUES (?, ?, ?)").run("callback-log", "wamid.callback", "SENT");
+    updateProviderDeliveryStatus("wamid.callback", "DELIVERED", null, database);
+    const delivered = database.prepare("SELECT status, sent_at FROM notification_deliveries WHERE id = ?").get("callback-test");
+    assert.equal(delivered.status, "DELIVERED");
+    assert.ok(delivered.sent_at);
+    updateProviderDeliveryStatus("wamid.callback", "READ", null, database);
+    const read = database.prepare("SELECT status, sent_at FROM notification_deliveries WHERE id = ?").get("callback-test");
+    assert.equal(read.status, "READ");
+    assert.equal(read.sent_at, delivered.sent_at);
+    assert.equal(database.prepare("SELECT gateway_status FROM whatsapp_logs WHERE id = ?").get("callback-log").gateway_status, "READ");
+  } finally { database.close(); }
+});
 
 test("Amazon SES sends through the provider and records the message id", async () => {
   const previous = process.env.EMAIL_NOTIFICATIONS_ENABLED;
@@ -145,3 +176,22 @@ test("Brevo (Sendinblue) email provider dispatches through API and logs messageI
   restoreEnv("BREVO_API_KEY", previous.key);
 });
 
+
+test("supplier SMS records provider acceptance and suppresses successful retries", async t => {
+  const { sendSupplierSms } = await import("../src/services/smsService.js");
+  const keys = ["SMS_NOTIFICATIONS_ENABLED", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_MESSAGING_SERVICE_SID"];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  t.after(() => { for (const key of keys) restoreEnv(key, previous[key]); });
+  Object.assign(process.env, { SMS_NOTIFICATIONS_ENABLED: "true", TWILIO_ACCOUNT_SID: "ACtest", TWILIO_AUTH_TOKEN: "test", TWILIO_MESSAGING_SERVICE_SID: "MGtest" });
+  const database = notificationDatabase(); t.after(() => database.close());
+  let calls = 0;
+  const request = async (url, options) => {
+    calls++; assert.match(url, /Accounts\/ACtest\/Messages.json$/);
+    assert.equal(options.body.get("To"), "+919876543210");
+    return { ok: true, json: async () => ({ sid: "SMtest", status: "queued" }) };
+  };
+  const input = { to: "9876543210", text: "Booking confirmed", eventKey: "sms:booking", supplierId: "supplier-test" };
+  assert.equal((await sendSupplierSms(input, { database, request })).success, true);
+  assert.equal((await sendSupplierSms(input, { database, request })).idempotent, true);
+  assert.equal(calls, 1);
+});

@@ -17,7 +17,7 @@ DURATION="${2:-180}"   # 3 minutes default
 INTERVAL="${3:-30}"    # 30 seconds default
 
 SERVICE_NAME="${SERVICE_NAME:-idea-holiday-marketplace}"
-REGION="${REGION:-us-central1}"
+REGION="${REGION:-asia-northeast1}"
 PROJECT_ID="${PROJECT_ID:-my-project-8591-489308}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -1,3 +1,5 @@
+import QRCode from "qrcode";
+import { trackedShareUrl } from "./supplierShareKitService.js";
 import crypto from "node:crypto";
 import { nanoid } from "nanoid";
 
@@ -53,6 +55,34 @@ function documentShell(title, booking, body) {
   </style></head><body><main class="page"><div class="top"><div><div class="brand"><i>idea</i>holiday.</div><div class="muted">Travel More Across India</div></div><div><span class="label">Booking reference</span><div class="ref">${escapeHtml(booking.ref)}</div></div></div>${body}<div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div></main></body></html>`;
 }
 
+function voucherQr(booking) {
+  if (booking.payment_status !== "PAID" || booking.status === "cancelled") return "";
+  // The reference opens an authenticated trip page; the QR contains no guest PII or pickup secret.
+  const qr = QRCode.create(`${resolveGuestDocumentBaseUrl()}/booking-confirmed/${encodeURIComponent(booking.ref)}`, { errorCorrectionLevel: "M" });
+  const size = qr.modules.size;
+  let path = "";
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (qr.modules.get(y, x)) path += `M${x + 4} ${y + 4}h1v1h-1z`;
+  return `<svg role="img" aria-label="Booking QR code" xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 ${size + 8} ${size + 8}"><rect width="100%" height="100%" fill="white"/><path d="${path}" fill="black"/></svg>`;
+}
+
+/**
+ * Share kit (docs/SHARE_KIT.md): a QR that, after the trip, takes the traveler
+ * to the operator's review link through the tracked /go/s redirect. The review
+ * still needs this booking's reference, which is printed on the voucher.
+ */
+function operatorReviewQr(booking) {
+  const visible = String(booking.supplier_profile_status || "PUBLISHED").toUpperCase() === "PUBLISHED"
+    && String(booking.supplier_kyb_status || "").toUpperCase() !== "SUSPENDED";
+  if (!booking.supplier_public_slug || !visible || booking.status === "cancelled") return "";
+  const url = trackedShareUrl(booking.supplier_public_slug, { target: "REVIEW", channel: "VOUCHER" });
+  const qr = QRCode.create(url, { errorCorrectionLevel: "M" });
+  const size = qr.modules.size;
+  let path = "";
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (qr.modules.get(y, x)) path += `M${x + 4} ${y + 4}h1v1h-1z`;
+  const svg = `<svg role="img" aria-label="Review QR code" xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 ${size + 8} ${size + 8}"><rect width="100%" height="100%" fill="white"/><path d="${path}" fill="black"/></svg>`;
+  return `<section class="section"><h2>After your trip</h2><div class="card">${svg}<br>Scan to review ${escapeHtml(booking.supplier_name || "your operator")}. You'll need booking reference <strong>${escapeHtml(booking.ref)}</strong>.</div></section>`;
+}
+
 export function renderGuestDocument(documentType, booking) {
   const type = String(documentType || "").toUpperCase();
   if (!documentTypes.has(type)) throw Object.assign(new Error("Document type is not supported"), { status: 404 });
@@ -61,16 +91,20 @@ export function renderGuestDocument(documentType, booking) {
     try { logistics = typeof booking.logistics_snapshot === "string" ? JSON.parse(booking.logistics_snapshot || "{}") : (booking.logistics_snapshot || {}); } catch {}
     const driver = booking.driver_name ? `${escapeHtml(booking.driver_name)} · ${escapeHtml(booking.driver_phone)}<br>${escapeHtml(booking.vehicle_model)} · <strong>${escapeHtml(booking.vehicle_number)}</strong>` : "Driver details will be shared before pickup.";
     const pickupStatus = booking.confirmation_status === "PENDING_SUPPLIER" || logistics.pendingSupplier ? "Pickup details pending supplier confirmation" : `${booking.pickup_time || "Time TBC"} · ${booking.pickup_location || "See meeting point"}`;
-    const body = `<h1>Booking voucher</h1><p class="muted">Present this mobile voucher at pickup. Government-issued identification may be requested.</p><div class="grid"><div class="card"><span class="label">Experience / option</span><strong>${escapeHtml(booking.product_title || booking.product_type)}</strong><br><span class="muted">${escapeHtml(booking.confirmation_status || booking.status || "PENDING")}</span></div><div class="card"><span class="label">Traveler</span><strong>${escapeHtml(booking.traveler_name)}</strong><br>${escapeHtml(booking.traveler_phone)}</div><div class="card"><span class="label">Date and pickup window</span><strong>${escapeHtml(booking.activity_date)} · ${escapeHtml(pickupStatus)}</strong></div><div class="card"><span class="label">Operator</span><strong>${escapeHtml(booking.supplier_name || "Idea Holiday partner")}</strong><br>${escapeHtml(booking.supplier_phone || "")}</div></div><section class="section"><h2>Pickup / meeting point</h2><div class="card">${escapeHtml(booking.pickup_location || logistics.pickupLocation || "Pending confirmation")}${booking.pickup_instructions ? `<br><span class="muted">${escapeHtml(booking.pickup_instructions)}</span>` : ""}${logistics.meetingPointLabel ? `<br><span class="muted">Meeting point: ${escapeHtml(logistics.meetingPointLabel)}</span>` : ""}</div></section>${booking.drop_location ? `<section class="section"><h2>Drop-off</h2><div class="card">${escapeHtml(booking.drop_location)}</div></section>` : ""}<section class="section"><h2>Driver and vehicle</h2><div class="card">${driver}</div></section><div class="notice"><strong>Pickup security:</strong> Check the driver and vehicle plate before sharing the private pickup code shown only in My Trips. The code is intentionally excluded from this shareable voucher.</div>`;
+    const body = `<h1>Booking voucher</h1>${voucherQr(booking)}<p class="muted">Present this mobile voucher at pickup. Government-issued identification may be requested.</p><div class="grid"><div class="card"><span class="label">Experience / option</span><strong>${escapeHtml(booking.product_title || booking.product_type)}</strong><br><span class="muted">${escapeHtml(booking.confirmation_status || booking.status || "PENDING")}</span></div><div class="card"><span class="label">Traveler</span><strong>${escapeHtml(booking.traveler_name)}</strong><br>${escapeHtml(booking.traveler_phone)}</div><div class="card"><span class="label">Date and pickup window</span><strong>${escapeHtml(booking.activity_date)} · ${escapeHtml(pickupStatus)}</strong></div><div class="card"><span class="label">Operator</span><strong>${escapeHtml(booking.supplier_name || "Idea Holiday partner")}</strong><br>${escapeHtml(booking.supplier_phone || "")}</div></div><section class="section"><h2>Pickup / meeting point</h2><div class="card">${escapeHtml(booking.pickup_location || logistics.pickupLocation || "Pending confirmation")}${booking.pickup_instructions ? `<br><span class="muted">${escapeHtml(booking.pickup_instructions)}</span>` : ""}${logistics.meetingPointLabel ? `<br><span class="muted">Meeting point: ${escapeHtml(logistics.meetingPointLabel)}</span>` : ""}</div></section>${booking.drop_location ? `<section class="section"><h2>Drop-off</h2><div class="card">${escapeHtml(booking.drop_location)}</div></section>` : ""}<section class="section"><h2>Driver and vehicle</h2><div class="card">${driver}</div></section><div class="notice"><strong>Pickup security:</strong> Check the driver and vehicle plate before sharing the private pickup code shown only in My Trips. The code is intentionally excluded from this shareable voucher.</div>${booking.traveler_invite_link ? `<section class="section"><h2>Travelling with friends?</h2><div class="card">Anyone who signs up with this link gets a discount on their first Idea Holiday trip:<br><strong>${escapeHtml(booking.traveler_invite_link)}</strong></div></section>` : ""}${operatorReviewQr(booking)}`;
     return documentShell(`Voucher ${booking.ref}`, booking, body);
   }
 
   const total = Number(booking.amount_inr || 0);
-  const charges = Math.min(total, Number(booking.tolls_and_tax_amount || 0));
-  const serviceValue = Math.max(0, total - charges);
+  const friendDiscount = Number(booking.referral_discount_inr || 0);
+  const walletCredit = Number(booking.wallet_credit_applied_inr || 0);
+  const couponDiscount = Number(booking.coupon_discount_inr || 0);
+  const discounts = friendDiscount + walletCredit + couponDiscount;
+  const charges = Math.min(total + discounts, Number(booking.tolls_and_tax_amount || 0));
+  const serviceValue = Math.max(0, total + discounts - charges);
   const businessName = process.env.BUSINESS_LEGAL_NAME || "Idea Holiday";
   const businessGstin = process.env.BUSINESS_GSTIN || "GSTIN available on request";
-  const body = `<h1>Booking invoice</h1><div class="grid"><div class="card"><span class="label">Invoice number</span><strong>INV-${escapeHtml(String(booking.ref).replace(/^IH-/, ""))}</strong><br><span class="muted">Issued ${escapeHtml(String(booking.created_at || "").slice(0, 10))}</span></div><div class="card"><span class="label">Payment</span><strong>${escapeHtml(booking.payment_status)} · ${escapeHtml(booking.payment_method)}</strong><br><span class="muted">${escapeHtml(booking.cashfree_payment_id || booking.razorpay_payment_id || "Recorded by Idea Holiday")}</span></div><div class="card"><span class="label">Billed to</span><strong>${escapeHtml(booking.traveler_name)}</strong><br>${escapeHtml(booking.traveler_email)}<br>${escapeHtml(booking.traveler_phone)}</div><div class="card"><span class="label">Issued by</span><strong>${escapeHtml(businessName)}</strong><br>${escapeHtml(businessGstin)}<br>${escapeHtml(process.env.BUSINESS_ADDRESS || "India")}</div></div><section class="section"><h2>Invoice items</h2><div class="row"><span>${escapeHtml(booking.product_title || booking.product_type)} · ${escapeHtml(booking.activity_date)}</span><strong>${money(serviceValue)}</strong></div><div class="row"><span>Taxes, tolls and statutory charges included</span><strong>${money(charges)}</strong></div><div class="row total"><span>Total paid</span><span>${money(total)}</span></div>${Number(booking.refunded_amount || 0) > 0 ? `<div class="row"><span>Refunded</span><strong>− ${money(booking.refunded_amount)}</strong></div>` : ""}</section><p class="muted">This electronic invoice is linked to booking ${escapeHtml(booking.ref)}. Supplier-specific tax documentation, where applicable, is issued under the operator’s registered details.</p>`;
+  const body = `<h1>Booking invoice</h1><div class="grid"><div class="card"><span class="label">Invoice number</span><strong>INV-${escapeHtml(String(booking.ref).replace(/^IH-/, ""))}</strong><br><span class="muted">Issued ${escapeHtml(String(booking.created_at || "").slice(0, 10))}</span></div><div class="card"><span class="label">Payment</span><strong>${escapeHtml(booking.payment_status)} · ${escapeHtml(booking.payment_method)}</strong><br><span class="muted">${escapeHtml(booking.cashfree_payment_id || booking.razorpay_payment_id || "Recorded by Idea Holiday")}</span></div><div class="card"><span class="label">Billed to</span><strong>${escapeHtml(booking.traveler_name)}</strong><br>${escapeHtml(booking.traveler_email)}<br>${escapeHtml(booking.traveler_phone)}</div><div class="card"><span class="label">Issued by</span><strong>${escapeHtml(businessName)}</strong><br>${escapeHtml(businessGstin)}<br>${escapeHtml(process.env.BUSINESS_ADDRESS || "India")}</div></div><section class="section"><h2>Invoice items</h2><div class="row"><span>${escapeHtml(booking.product_title || booking.product_type)} · ${escapeHtml(booking.activity_date)}</span><strong>${money(serviceValue)}</strong></div><div class="row"><span>Taxes, tolls and statutory charges included</span><strong>${money(charges)}</strong></div>${couponDiscount > 0 ? `<div class="row"><span>Promo code discount${booking.promo_code ? ` (${escapeHtml(booking.promo_code)})` : ""}</span><strong>− ${money(couponDiscount)}</strong></div>` : ""}${friendDiscount > 0 ? `<div class="row"><span>Friend referral discount</span><strong>− ${money(friendDiscount)}</strong></div>` : ""}${walletCredit > 0 ? `<div class="row"><span>Idea Holiday wallet credit</span><strong>− ${money(walletCredit)}</strong></div>` : ""}<div class="row total"><span>Total paid</span><span>${money(total)}</span></div>${Number(booking.refunded_amount || 0) > 0 ? `<div class="row"><span>Refunded</span><strong>− ${money(booking.refunded_amount)}</strong></div>` : ""}</section><p class="muted">This electronic invoice is linked to booking ${escapeHtml(booking.ref)}. Supplier-specific tax documentation, where applicable, is issued under the operator’s registered details.</p>`;
   return documentShell(`Invoice ${booking.ref}`, booking, body);
 }
 

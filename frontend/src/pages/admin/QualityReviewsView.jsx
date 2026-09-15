@@ -175,6 +175,13 @@ export default function QualityReviewsView() {
               <p className="mt-1 text-[10px] text-stone-500">
                 {review.booking_ref} · {review.supplier_name} · {review.driver_name || "No driver"}
               </p>
+              {/* How the review arrived. A moderator judging a suspicious review
+                  needs to see whether it came through a link the operator shared. */}
+              <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-stone-400">
+                {review.source || "VERIFIED"}
+                {review.verification_method ? ` · ${String(review.verification_method).replace(/_/g, " ").toLowerCase()}` : ""}
+                {review.verification_method === "BOOKING_REF" ? " (supplier share link)" : ""}
+              </p>
               <p className="mt-3 text-xs leading-relaxed text-stone-700">{review.comment}</p>
               {review.moderation_reason && (
                 <p className="mt-2 text-[10px] text-amber-800">Auto/moderation note: {review.moderation_reason}</p>

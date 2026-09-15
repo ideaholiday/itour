@@ -182,4 +182,12 @@ describe("BookingModificationService", () => {
     assert.strictEqual(bookingRow.refund_amount_inr, 8000);
     assert.strictEqual(bookingRow.cancellation_reason, "Personal emergency");
   });
+
+  it("refuses to cancel a booking twice, which would overwrite its refund state", () => {
+    assert.throws(
+      () => BookingModificationService.executeSelfServiceCancellation(db, "bk_moderate_trip", { reason: "Again" }, traveler1),
+      /BOOKING_ALREADY_CANCELLED/
+    );
+    assert.strictEqual(db.prepare("SELECT refund_amount_inr FROM bookings WHERE id = ?").get("bk_moderate_trip").refund_amount_inr, 8000);
+  });
 });

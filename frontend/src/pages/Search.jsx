@@ -87,16 +87,18 @@ const POPULAR_DESTINATIONS = [
 function FilterSection({ title, children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-b border-stone-100 dark:border-stone-800 py-3.5">
+    <div className="border-b border-stone-100 dark:border-stone-800 py-4">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 hover:text-amber-600 transition"
+        className="flex w-full items-center justify-between text-[11px] font-extrabold uppercase tracking-widest text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
       >
         <span>{title}</span>
-        {open ? <ChevronUp className="h-3.5 w-3.5 text-stone-400" /> : <ChevronDown className="h-3.5 w-3.5 text-stone-400" />}
+        <span className={`grid h-5 w-5 place-items-center rounded-full transition-all duration-200 ${open ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400" : "text-stone-400"}`}>
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </span>
       </button>
-      {open && <div className="mt-3">{children}</div>}
+      {open && <div className="mt-3 space-y-1.5">{children}</div>}
     </div>
   );
 }
@@ -115,7 +117,9 @@ export default function Search() {
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
   const [recentSearches, setRecentSearches] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const cardRefs = useRef({});
+  const searchBoxRef = useRef(null);
 
   // Query Params
   const q = params.get("q") || "";
@@ -143,6 +147,16 @@ export default function Search() {
   useEffect(() => {
     setLocalQ(q);
   }, [q]);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     setPriceRange({ min: minPrice, max: maxPrice });
@@ -491,10 +505,11 @@ export default function Search() {
       <div className="sticky top-[68px] z-30 border-b border-stone-200 dark:border-stone-800 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md shadow-xs">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           {/* Search input with autocomplete */}
-          <div className="relative flex-1">
+          <div ref={searchBoxRef} className="relative flex-1">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                setShowSuggestions(false);
                 update("q", localQ.trim());
               }}
               className="flex items-center gap-2 rounded-full border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/80 px-4 py-2.5 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition"
@@ -502,7 +517,11 @@ export default function Search() {
               <SearchIcon className="h-4 w-4 shrink-0 text-stone-400" />
               <input
                 value={localQ}
-                onChange={(e) => setLocalQ(e.target.value)}
+                onFocus={() => setShowSuggestions(true)}
+                onChange={(e) => {
+                  setLocalQ(e.target.value);
+                  setShowSuggestions(true);
+                }}
                 placeholder="Search destinations, tours, Taj Mahal, Goa scuba, airport cabs…"
                 className="min-w-0 flex-1 bg-transparent text-xs sm:text-sm font-medium text-stone-900 dark:text-stone-100 outline-none placeholder:text-stone-400"
               />
@@ -512,6 +531,7 @@ export default function Search() {
                   onClick={() => {
                     setLocalQ("");
                     update("q", "");
+                    setShowSuggestions(false);
                   }}
                   className="rounded-full p-1 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition"
                 >
@@ -519,14 +539,17 @@ export default function Search() {
                 </button>
               )}
             </form>
-            <SearchSuggestions
-              query={localQ}
-              onSelect={(item) => {
-                setLocalQ(item.value);
-                if (item.type === "destination") update("destination", item.value);
-                else update("q", item.value);
-              }}
-            />
+            {showSuggestions && (
+              <SearchSuggestions
+                query={localQ}
+                onSelect={(item) => {
+                  setLocalQ(item.value);
+                  setShowSuggestions(false);
+                  if (item.type === "destination") update("destination", item.value);
+                  else update("q", item.value);
+                }}
+              />
+            )}
           </div>
 
           {/* Sort Dropdown */}

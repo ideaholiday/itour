@@ -2,6 +2,8 @@ import { Worker } from "node:worker_threads";
 
 const RESPONSE_BUFFER_BYTES = 16 * 1024 * 1024;
 const decoder = new TextDecoder();
+const NOT_QUERYABLE = /is not queryable/i;
+const CONNECTION_LOST = /is not queryable|Connection terminated|ECONNRESET|server closed the connection|terminating connection/i;
 
 function parseConnectionString(rawValue) {
   const raw = String(rawValue || "").trim();
@@ -78,6 +80,7 @@ export function translateSqliteSql(sqlValue) {
   sql = sql.replace(/datetime\(([^)]+)\)/gi, "CAST($1 AS TIMESTAMPTZ)");
   sql = sql.replace(/\bp\.rowid\b/gi, "p.id");
   sql = sql.replace(/\browid\b/gi, "id");
+  sql = sql.replace(/SELECT\s+name\s+FROM\s+sqlite_master\s+WHERE\s+type\s*=\s*'table'\s+AND\s+name\s*=/gi, "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA AND table_name =");
   sql = replacePlaceholders(sql);
   if (insertOrIgnore) sql = `${sql.replace(/;\s*$/, "")} ON CONFLICT DO NOTHING`;
   return sql;
@@ -106,6 +109,10 @@ class PostgresStatement {
 export class PostgresSyncDatabase {
   constructor(connectionString) {
     this.connection = parseConnectionString(connectionString);
+    this._initWorker();
+  }
+
+  _initWorker() {
     const readyBuffer = new SharedArrayBuffer(RESPONSE_BUFFER_BYTES);
     this.worker = new Worker(new URL("./postgresWorker.js", import.meta.url), {
       workerData: { connection: this.connection, readyBuffer },
@@ -128,10 +135,32 @@ export class PostgresSyncDatabase {
     return payload;
   }
 
-  _execute(sql, params = []) {
+  _restartWorker() {
+    try { this.worker.terminate(); } catch {}
+    try { this._initWorker(); } catch {}
+  }
+
+  _execute(sql, params = [], retried = false) {
     const sharedBuffer = new SharedArrayBuffer(RESPONSE_BUFFER_BYTES);
     this.worker.postMessage({ sharedBuffer, sql, params });
-    return this._waitForResponse(sharedBuffer);
+    try {
+      return this._waitForResponse(sharedBuffer);
+    } catch (error) {
+      const message = String(error.message || "");
+      if (message.includes("timed out")) {
+        this._restartWorker();
+      } else if (!this.transactionDepth && CONNECTION_LOST.test(message)) {
+        // The worker's single pg.Client never reconnects by itself, so a dropped
+        // connection failed every later query until the instance restarted.
+        // Reconnect only outside a transaction: inside one, the rest of the
+        // transaction must fail rather than run on a new connection without BEGIN.
+        this._restartWorker();
+        // "not queryable" means the dead client refused the statement before
+        // sending it, so running it once more cannot apply a write twice.
+        if (!retried && NOT_QUERYABLE.test(message)) return this._execute(sql, params, true);
+      }
+      throw error;
+    }
   }
 
   prepare(sql) {
@@ -144,14 +173,19 @@ export class PostgresSyncDatabase {
 
   transaction(callback) {
     return (...args) => {
-      this._execute("BEGIN");
+      const depth = this.transactionDepth || 0;
+      const savepoint = `nested_${depth}`;
+      this._execute(depth ? `SAVEPOINT ${savepoint}` : "BEGIN");
+      this.transactionDepth = depth + 1;
       try {
         const result = callback(...args);
-        this._execute("COMMIT");
+        this._execute(depth ? `RELEASE SAVEPOINT ${savepoint}` : "COMMIT");
         return result;
       } catch (error) {
-        try { this._execute("ROLLBACK"); } catch {}
+        try { this._execute(depth ? `ROLLBACK TO SAVEPOINT ${savepoint}` : "ROLLBACK"); } catch {}
         throw error;
+      } finally {
+        this.transactionDepth = depth;
       }
     };
   }
