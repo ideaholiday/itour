@@ -41,7 +41,7 @@ import {
 } from "../services/driverDispatchService.js";
 
 import { getSupplierPayoutLedger, resolveCommissionRate } from "../services/financeService.js";
-import { creditSupplierCancellationToWallet } from "../services/refundCreditService.js";
+import { cancelBookingBySupplier, cancelDeparture, checkInBooking, departureManifest, manifestCsv, setAttendance } from "../services/supplierDepartureService.js";
 import { getSubscriptionStatus } from "../services/supplierSubscriptionService.js";
 import {
   listSubscriptionPayments, listSupplierSpotlights, quotePlanPayment, quoteSubscriptionPayment, renderSubscriptionInvoice,
@@ -58,7 +58,7 @@ import {
   runComprehensiveSupplierKyb,
 } from "../services/cashfreeSecureIdService.js";
 import { nanoid } from "nanoid";
-import { validateBody } from "../middleware/validation.js";
+import { validateBody, validateQuery } from "../middleware/validation.js";
 import { bookingSchemas, profileSchemas, supplierSchemas } from "../validators/apiSchemas.js";
 import { ensurePublicSlug, ownerProfileView, updateSupplierProfile } from "../services/supplierProfileService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
@@ -1694,17 +1694,7 @@ router.post("/:id/bookings/:bookingId/cancel", optionalAuthMiddleware, requireSu
 
     // A supplier cancellation refunds the traveler in full, to their wallet first (ADR 019):
     // they can rebook with it or, for 10 days, send it back to the original payment method.
-    let wallet = null;
-    if (booking.payment_status === "PAID") {
-      wallet = creditSupplierCancellationToWallet(db, { booking, reason, notes });
-    } else {
-      db.transaction(() => {
-        db.prepare("UPDATE bookings SET status = 'cancelled', cancellation_reason = ? WHERE id = ?").run(reason, booking.id);
-        db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
-        db.prepare("UPDATE driver_assignments SET assignment_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
-      })();
-      onReferralBookingCancelled(db, booking.id, { reason: "Cancelled by supplier" });
-    }
+    const wallet = cancelBookingBySupplier(db, { booking, reason, notes });
 
     queueNotification(sendGuestBookingNotification(db, booking.id, "BOOKING_CANCELLED", { eventKeySuffix: "SUPPLIER_CANCEL" }), "Supplier cancellation traveler notification");
 
@@ -1720,6 +1710,62 @@ router.post("/:id/bookings/:bookingId/cancel", optionalAuthMiddleware, requireSu
   } catch (err) {
     logger.error("Supplier cancellation failed", { requestId: req.requestId, error: err });
     res.status(err.status || 500).json({ error: err.message || "Failed to cancel booking" });
+  }
+});
+
+// Day-of-operations (docs/SUPPLIER_OPERATIONS.md): voucher check-in, no-shows,
+// the guest list for a departure, and cancelling a whole departure.
+
+// POST /api/suppliers/:id/check-in - Check a traveler in from a scanned voucher QR or typed reference
+router.post("/:id/check-in", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.checkIn), (req, res) => {
+  try {
+    const result = checkInBooking(db, { supplierId: req.params.id, code: req.body.code, actorId: req.user?.id, allowOtherDate: req.body.allowOtherDate === true });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not check this traveler in");
+  }
+});
+
+// PATCH /api/suppliers/:id/bookings/:bookingId/attendance - Mark checked in, no-show, or clear
+router.patch("/:id/bookings/:bookingId/attendance", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.attendance), (req, res) => {
+  try {
+    const booking = setAttendance(db, { supplierId: req.params.id, bookingId: req.params.bookingId, status: req.body.status, actorId: req.user?.id });
+    res.json({ success: true, booking });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not update attendance");
+  }
+});
+
+// GET /api/suppliers/:id/manifest?productId=&date=&time=&format=csv - Guest list for one departure
+router.get("/:id/manifest", optionalAuthMiddleware, requireSupplierAccess, validateQuery(supplierSchemas.manifestQuery), (req, res) => {
+  try {
+    const { productId, date, time, format } = req.query;
+    const manifest = departureManifest(db, { supplierId: req.params.id, productId, date, time: time || null });
+    if (format === "csv") {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="manifest_${date}${time ? `_${time.replace(":", "")}` : ""}.csv"`);
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(manifestCsv(manifest));
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ success: true, manifest });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the guest list");
+  }
+});
+
+// POST /api/suppliers/:id/products/:productId/departures/cancel - Cancel every booking on a departure and close it
+router.post("/:id/products/:productId/departures/cancel", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.departureCancel), (req, res) => {
+  try {
+    const { date, time, reason, notes, dryRun } = req.body;
+    const result = cancelDeparture(db, { supplierId: req.params.id, productId: req.params.productId, date, time: time || null, reason, notes: notes || null, dryRun: dryRun === true });
+    for (const booking of result.cancelled) {
+      queueNotification(sendGuestBookingNotification(db, booking.id, "BOOKING_CANCELLED", { eventKeySuffix: "SUPPLIER_CANCEL" }), "Departure cancellation traveler notification");
+    }
+    if (!result.dryRun) logger.info("Supplier cancelled a departure", { requestId: req.requestId, supplierId: req.params.id, productId: req.params.productId, date, time: time || null, bookings: result.cancelled.length });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not cancel the departure");
   }
 });
 

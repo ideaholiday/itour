@@ -188,6 +188,18 @@ export const api = {
     fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/bookings/${encodeURIComponent(bookingId)}/notifications/resend`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ eventType }) }).then(handle),
   calculateRefund: (payload) =>
     fetch(`${BASE}/checkout/calculate-refund`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  // Day-of-operations: voucher check-in, attendance, guest list and cancelling a departure.
+  supplierCheckIn: (supplierId, payload) =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/check-in`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  setSupplierAttendance: (supplierId, bookingId, status) =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/bookings/${encodeURIComponent(bookingId)}/attendance`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ status }) }).then(handle),
+  getSupplierManifest: (supplierId, { productId, date, time }) =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/manifest?${new URLSearchParams({ productId, date, ...(time ? { time } : {}) })}`, { headers: authHeaders() }).then(handle),
+  downloadSupplierManifestCsv: (supplierId, { productId, date, time }) =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/manifest?${new URLSearchParams({ productId, date, format: "csv", ...(time ? { time } : {}) })}`, { headers: authHeaders() })
+      .then(async (res) => { if (!res.ok) await handle(res); return res.blob(); }),
+  cancelSupplierDeparture: (supplierId, productId, payload) =>
+    fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/products/${encodeURIComponent(productId)}/departures/cancel`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   getSupplierPayoutLedger: (supplierId) =>
     fetch(`${BASE}/suppliers/${encodeURIComponent(supplierId)}/payout-ledger`, { headers: authHeaders() }).then(handle),
   autoBatchSettlements: () =>

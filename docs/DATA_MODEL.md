@@ -284,6 +284,8 @@ erDiagram
   - `pickup_otp_hash`: SHA-256 hash of the 6-digit pickup code for constant-time verification.
   - `pickup_otp_encrypted`: AES-256-GCM ciphertext decrypted only for the traveler view.
   - `pickup_otp_attempts`: Failed verification count (locks at 5).
+  - `attendance_status` (migration 047): `CHECKED_IN`, `NO_SHOW` or `NULL`. Recorded by the supplier; does not change `status` or money ([`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md)).
+  - `checked_in_at`, `checked_in_by`: when attendance was recorded (ISO timestamp) and the user who recorded it.
 - **`driver_assignments`**:
   - `id`: Primary key.
   - `booking_id`: Foreign key to `bookings(id)`.
