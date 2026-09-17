@@ -40,8 +40,12 @@ export default function AffiliateDashboardPage() {
   const [activeTab, setActiveTab] = useState("toolkit");
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [customDestination, setCustomDestination] = useState("goa");
+  const [customDestination, setCustomDestination] = useState("");
   const [generatedDeepLink, setGeneratedDeepLink] = useState("");
+  // A creator's own label for a post ("reels-goa"), carried on the link as ?sub=
+  // so the dashboard can show which post actually sold.
+  const [campaignLabel, setCampaignLabel] = useState("");
+  const [liveCities, setLiveCities] = useState([]);
 
   // KYC Form State
   const [panNumber, setPanNumber] = useState("");
@@ -165,7 +169,7 @@ export default function AffiliateDashboardPage() {
 
   useEffect(() => {
     if (!user) {
-      navigate("/login?redirect=/affiliate/dashboard");
+      navigate(`/login?from=${encodeURIComponent("/affiliate/dashboard")}`);
       return;
     }
     fetchDashboard();
@@ -173,21 +177,37 @@ export default function AffiliateDashboardPage() {
   }, [user]);
 
   useEffect(() => {
-    if (data?.shareLinks?.defaultLink) {
-      const base = window.location.origin;
-      const code = data.affiliateCode;
-      if (customDestination === "circuit-planner") {
-        setGeneratedDeepLink(`${base}/circuit-planner?ref=${code}`);
-      } else if (customDestination === "transfers") {
-        setGeneratedDeepLink(`${base}/transfers?ref=${code}`);
-      } else {
-        setGeneratedDeepLink(`${base}/search?destination=${customDestination}&ref=${code}`);
-      }
-    }
-  }, [customDestination, data]);
+    api.getAffiliateProgram()
+      .then((res) => {
+        const cities = res?.program?.liveCities || [];
+        setLiveCities(cities);
+        setCustomDestination((current) => current || cities[0] || "transfers");
+      })
+      .catch(() => setCustomDestination((current) => current || "transfers"));
+  }, []);
 
-  const copyText = (text, type = "code") => {
-    navigator.clipboard.writeText(text);
+  useEffect(() => {
+    if (!data?.affiliateCode || !customDestination) return;
+    const base = window.location.origin;
+    const params = new URLSearchParams({ ref: data.affiliateCode });
+    const label = campaignLabel.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+    if (label) params.set("sub", label);
+    if (customDestination === "circuit-planner") {
+      setGeneratedDeepLink(`${base}/circuit-planner?${params}`);
+    } else if (customDestination === "transfers") {
+      setGeneratedDeepLink(`${base}/transfers?${params}`);
+    } else {
+      setGeneratedDeepLink(`${base}/search?destination=${encodeURIComponent(customDestination)}&${params}`);
+    }
+  }, [customDestination, campaignLabel, data]);
+
+  const copyText = async (text, type = "code") => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      window.prompt("Copy this:", text);
+      return;
+    }
     if (type === "code") {
       setCopiedCode(true);
       setTimeout(() => setCopiedCode(false), 2500);
@@ -282,6 +302,11 @@ export default function AffiliateDashboardPage() {
   if (!data) return null;
 
   const defaultShareUrl = data.shareLinks?.defaultLink || `${window.location.origin}/?ref=${data.affiliateCode}`;
+  // This creator's real rates (their own, or their tier's), never a fixed number.
+  const pctText = (value) => `${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+  const commissionText = pctText(Number(data.commissionRate || 0) * 100);
+  const discountText = pctText(data.travelerDiscountPct);
+  const windowDays = data.payoutPolicy?.attributionWindowDays || 30;
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] dark:bg-stone-950 text-stone-900 dark:text-stone-100 pb-20">
@@ -310,7 +335,7 @@ export default function AffiliateDashboardPage() {
                 {data.channelName}
               </h1>
               <p className="text-xs text-stone-500 dark:text-stone-400">
-                Earning {Math.round((data.tier?.commissionRate ?? data.commissionRate ?? 0.1) * 100)}% on every booking referred with coupon{" "}
+                Earning {commissionText} on every booking referred with coupon{" "}
                 <strong className="text-amber-600 dark:text-amber-400 font-mono">{data.affiliateCode}</strong>
                 {data.tier?.label && (
                   <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-900/5 dark:bg-stone-100/10 border border-stone-300 dark:border-stone-700 align-middle">
@@ -327,7 +352,8 @@ export default function AffiliateDashboardPage() {
                   {data.tier.next.gmvToGoInr > 0
                     ? ` and ₹${Number(data.tier.next.gmvToGoInr).toLocaleString("en-IN")} more in bookings`
                     : ""}
-                  {" "}unlocks {data.tier.next.label} at {Math.round(data.tier.next.commissionRate * 100)}%.
+                  {" "}unlocks {data.tier.next.label} at {pctText(Number(data.tier.next.commissionRate) * 100)}.
+                  {data.tier.ratesOverridden ? " Your own rates stay until Idea Holiday changes them." : ""}
                 </p>
               )}
             </div>
@@ -369,7 +395,7 @@ export default function AffiliateDashboardPage() {
             <div className="text-2xl sm:text-3xl font-extrabold font-display text-emerald-600 dark:text-emerald-400">
               ₹{Number(data.metrics.lifetimeEarningsInr || 0).toLocaleString("en-IN")}
             </div>
-            <span className="text-[11px] text-stone-400 mt-1 block">10% commission on all completed trips</span>
+            <span className="text-[11px] text-stone-400 mt-1 block">Commission on completed trips</span>
           </div>
 
           <div className="p-5 rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 shadow-sm">
@@ -442,7 +468,7 @@ export default function AffiliateDashboardPage() {
                   <span className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full">
                     Your Branded Coupon
                   </span>
-                  <span className="text-xs text-stone-500">Traveler: 5% Off • You: 10% Cash</span>
+                  <span className="text-xs text-stone-500">Traveler: {discountText} off • You: {commissionText}</span>
                 </div>
 
                 <div className="p-6 rounded-2xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 text-center shadow-sm">
@@ -450,7 +476,7 @@ export default function AffiliateDashboardPage() {
                     {data.affiliateCode}
                   </div>
                   <p className="text-xs text-stone-500 mb-5">
-                    Share this code anywhere. When entered at checkout, the booking is instantly credited to your account.
+                    Share this code anywhere. When a follower enters it at checkout, the booking is credited to you. It can't be used on your own bookings.
                   </p>
                   <button
                     onClick={() => copyText(data.affiliateCode, "code")}
@@ -468,7 +494,7 @@ export default function AffiliateDashboardPage() {
                   <span className="text-xs font-bold uppercase tracking-wider text-stone-500">
                     Auto-Attributing Link
                   </span>
-                  <span className="text-xs text-stone-400">30-day Cookie Attribution</span>
+                  <span className="text-xs text-stone-400">{windowDays}-day attribution</span>
                 </div>
 
                 <div className="space-y-4">
@@ -499,15 +525,13 @@ export default function AffiliateDashboardPage() {
                     </label>
                     <div className="grid grid-cols-3 gap-2 mb-2">
                       {[
-                        { id: "goa", label: "Goa Tours" },
-                        { id: "rajasthan", label: "Rajasthan" },
-                        { id: "kerala", label: "Kerala" },
-                        { id: "manali", label: "Manali" },
+                        ...liveCities.slice(0, 7).map((city) => ({ id: city, label: city })),
                         { id: "transfers", label: "Airport Cabs" },
                         { id: "circuit-planner", label: "Circuit Planner" },
                       ].map((d) => (
                         <button
                           key={d.id}
+                          type="button"
                           onClick={() => setCustomDestination(d.id)}
                           className={`py-1.5 px-3 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
                             customDestination === d.id
@@ -519,6 +543,18 @@ export default function AffiliateDashboardPage() {
                         </button>
                       ))}
                     </div>
+                    <label className="text-[11px] font-semibold text-stone-600 dark:text-stone-300 block mb-1" htmlFor="campaign-label">
+                      Campaign label (optional)
+                    </label>
+                    <input
+                      id="campaign-label"
+                      value={campaignLabel}
+                      onChange={(e) => setCampaignLabel(e.target.value)}
+                      maxLength={64}
+                      placeholder="e.g. reels-goa-sept"
+                      className="w-full mb-2 px-4 py-2 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                    <p className="mb-2 text-[11px] text-stone-400">Use a different label per post to see which one brings bookings.</p>
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
@@ -548,11 +584,11 @@ export default function AffiliateDashboardPage() {
                   <div>
                     <span className="font-bold text-stone-700 dark:text-stone-300 block mb-1">📸 Instagram Story / Bio</span>
                     <p className="text-stone-500 leading-relaxed">
-                      "Planning your next India trip? Use my code <strong>{data.affiliateCode}</strong> on @IdeaHoliday for an exclusive 5% discount on heritage tours, airport cabs & desert safaris! Link in bio: {defaultShareUrl}"
+                      "Planning your next India trip? Use my code <strong>{data.affiliateCode}</strong> on @IdeaHoliday for {discountText} off tours, airport cabs & activities across India! Link in bio: {defaultShareUrl}"
                     </p>
                   </div>
                   <button
-                    onClick={() => copyText(`Planning your next India trip? Use my code ${data.affiliateCode} on @IdeaHoliday for an exclusive discount! ${defaultShareUrl}`, "link")}
+                    onClick={() => copyText(`Planning your next India trip? Use my code ${data.affiliateCode} on @IdeaHoliday for ${discountText} off tours, airport cabs & activities across India! Link in bio: ${defaultShareUrl}`, "link")}
                     className="mt-3 py-1.5 px-3 rounded-lg bg-stone-200 dark:bg-stone-700 text-[11px] font-bold self-start cursor-pointer hover:bg-stone-300"
                   >
                     Copy Template
@@ -563,11 +599,11 @@ export default function AffiliateDashboardPage() {
                   <div>
                     <span className="font-bold text-stone-700 dark:text-stone-300 block mb-1">🎥 YouTube Video Description</span>
                     <p className="text-stone-500 leading-relaxed">
-                      "Book verified sightseeing experiences, private transfers, and curated itineraries at Idea Holiday. Get 5% off using code <strong>{data.affiliateCode}</strong>: {defaultShareUrl}"
+                      "Book verified sightseeing experiences, private transfers, and curated itineraries at Idea Holiday. Get {discountText} off using code <strong>{data.affiliateCode}</strong>: {defaultShareUrl}"
                     </p>
                   </div>
                   <button
-                    onClick={() => copyText(`Book verified sightseeing experiences and private transfers at Idea Holiday. Get 5% off using code ${data.affiliateCode}: ${defaultShareUrl}`, "link")}
+                    onClick={() => copyText(`Book verified sightseeing experiences and private transfers at Idea Holiday. Get ${discountText} off using code ${data.affiliateCode}: ${defaultShareUrl}`, "link")}
                     className="mt-3 py-1.5 px-3 rounded-lg bg-stone-200 dark:bg-stone-700 text-[11px] font-bold self-start cursor-pointer hover:bg-stone-300"
                   >
                     Copy Template
@@ -600,7 +636,7 @@ export default function AffiliateDashboardPage() {
               <div>
                 <h3 className="font-bold text-lg">Referred Bookings & Commission</h3>
                 <p className="text-xs text-stone-500">
-                  Every booking made with your code or link earns 10% commission.
+                  Completed bookings made with your code or link earn {commissionText} commission.
                 </p>
               </div>
             </div>
@@ -628,7 +664,7 @@ export default function AffiliateDashboardPage() {
                       <th className="px-6 py-3.5">Experience</th>
                       <th className="px-6 py-3.5">Activity Date</th>
                       <th className="px-6 py-3.5">Trip Total</th>
-                      <th className="px-6 py-3.5">Your 10% Earning</th>
+                      <th className="px-6 py-3.5">Your Earning</th>
                       <th className="px-6 py-3.5">Source</th>
                       <th className="px-6 py-3.5">Status</th>
                     </tr>
@@ -965,7 +1001,7 @@ export default function AffiliateDashboardPage() {
 
                 {/* Bank Account Section */}
                 <div className="space-y-4 pt-4 border-t border-stone-200 dark:border-stone-800">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-stone-500">2. Bank Account Details (Instant Penny Drop)</h4>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-stone-500">2. Bank Account Details (verified by penny drop)</h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-semibold mb-1">Bank Account Number *</label>
@@ -1020,7 +1056,7 @@ export default function AffiliateDashboardPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold mb-1">UPI ID (Optional for Instant Payouts)</label>
+                    <label className="block text-xs font-semibold mb-1">UPI ID (optional)</label>
                     <input
                       type="text"
                       placeholder="yourname@okhdfcbank, name@upi"

@@ -15,14 +15,37 @@ import {
   computeBalances,
   computeTds,
   buildShareLink,
+  getAffiliateProgramSummary,
   MIN_PAYOUT_INR,
   redactAffiliate,
  transferEarningsToWallet,
 } from "../services/affiliateService.js";
 import { authenticate, optionalAuthMiddleware } from "../middleware/auth.js";
 import logger from "../config/logger.js";
+import { createRateLimiter } from "../middleware/security.js";
+import { liveCities } from "./seo.js";
 
 const router = express.Router();
+
+// Clicks are public, and KYC and payout accounts each trigger a paid Cashfree
+// verification, so all three are throttled per client.
+const clickLimiter = createRateLimiter({ windowMs: 60_000, limit: 60, scope: "affiliate-click" });
+const verificationLimiter = createRateLimiter({ windowMs: 15 * 60_000, limit: 10, scope: "affiliate-verification" });
+
+/**
+ * GET /api/affiliate/program
+ * Public: live tier rates and payout terms for the creator landing page.
+ */
+router.get("/program", (_req, res) => {
+  try {
+    res.set("Cache-Control", "public, max-age=300");
+    // Cities with something bookable today, for creators' destination links.
+    return res.json({ success: true, program: { ...getAffiliateProgramSummary(db), liveCities: liveCities(db).map((city) => city.name) } });
+  } catch (err) {
+    logger.error("Creator program summary failed", { error: err.message });
+    return res.status(500).json({ error: "Could not load the creator program" });
+  }
+});
 
 /**
  * GET /api/affiliate/me
@@ -82,7 +105,7 @@ router.put("/profile", authenticate, (req, res) => {
  * POST /api/affiliate/kyc
  * Submit PAN and Bank Account details with automated Cashfree verification
  */
-router.post("/kyc", authenticate, async (req, res) => {
+router.post("/kyc", verificationLimiter, authenticate, async (req, res) => {
   try {
     const existing = getAffiliateByUserId(db, req.user.id);
     if (!existing) return res.status(404).json({ error: "Affiliate account not found" });
@@ -183,7 +206,7 @@ router.post("/wallet-transfer", authenticate, (req, res) => {
  * POST /api/affiliate/track-click
  * Public endpoint to track link clicks on ?ref=CODE or ?aff=CODE
  */
-router.post("/track-click", optionalAuthMiddleware, (req, res) => {
+router.post("/track-click", clickLimiter, optionalAuthMiddleware, (req, res) => {
   try {
     const { affiliateCode, destinationPath, referrerUrl, visitorId, subId } = req.body;
     if (!affiliateCode) return res.status(400).json({ error: "Affiliate code is required" });
@@ -229,7 +252,7 @@ router.get("/payout-accounts", authenticate, (req, res) => {
  * POST /api/affiliate/payout-accounts
  * Add a bank account (penny-drop verified) or a UPI ID to receive commission.
  */
-router.post("/payout-accounts", authenticate, async (req, res) => {
+router.post("/payout-accounts", verificationLimiter, authenticate, async (req, res) => {
   try {
     const existing = getAffiliateByUserId(db, req.user.id);
     if (!existing) return res.status(404).json({ error: "Affiliate account not found" });

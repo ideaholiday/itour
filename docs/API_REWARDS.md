@@ -8,7 +8,10 @@
 Commission rules behind these endpoints are in BUSINESS_RULES §10.
 
 ### 8.1 Attribution (public)
-- **`POST /api/affiliate/track-click`**: Records a referral click and opens the
+- **`GET /api/affiliate/program`**: The creator landing page's terms, from the live tiers:
+  `{ program: { tiers: [{ code, label, commissionPct, travelerDiscountPct, minCompletedBookings, minLifetimeGmvInr }], entryTier, minPayoutInr, holdDays, attributionWindowDays, tdsPct, liveCities } }`.
+  `liveCities` are cities with a bookable product, for creators' destination links. Cached 5 minutes.
+- **`POST /api/affiliate/track-click`** (60/minute per client): Records a referral click and opens the
   attribution window. Called by the browser whenever a `?ref=` link is opened.
   - **Body**: `{ "affiliateCode": "TRAVELPRO10", "visitorId": "…", "subId": "reels-march", "destinationPath": "/activity/goa-scuba", "referrerUrl": "…" }`
   - **Response**: `{ "success": true, "attributionExpiresAt": "2026-10-12 09:00:00", "windowDays": 30 }`
@@ -20,18 +23,26 @@ Booking creation (`POST /api/bookings`) accepts `visitor_id`, and optionally
 `affiliate_code` and `affiliate_sub_id`. **The code alone earns nothing** — the
 server credits a link referral only when an unexpired attribution exists for
 that `visitor_id`. A coupon code applied through `promo_code` follows the normal
-promo path and is credited on the code itself.
+promo path and is credited on the code itself. **A creator can't use their own code**:
+`POST /api/promo/validate` and checkout refuse it with `400 OWN_CREATOR_CODE`.
 
 ### 8.2 Profile (Requires authentication)
 - **`GET /api/affiliate/me`**: `{ registered, affiliate }` for the signed-in user.
 - **`POST /api/affiliate/register`**: Creates the creator profile and provisions
   the matching traveler-facing promo code.
   - **Body**: `{ "channelName": "...", "channelType": "YOUTUBE", "channelUrl": "...", "customCode": "TRAVELPRO10", "bio": "..." }`
-- **`PUT /api/affiliate/profile`**: Updates channel name, type, URL, bio.
-- **`POST /api/affiliate/kyc`**: Submits PAN (and optionally bank/UPI, which are
-  routed through the payout-account flow below).
+  - `400` for a channel name over 80 characters, a `channelType` outside INSTAGRAM, YOUTUBE,
+    FACEBOOK, TWITTER, X, TIKTOK, BLOG, WEBSITE, COMMUNITY, TELEGRAM, WHATSAPP, OTHER, a
+    `channelUrl` that isn't an `http(s)://` address, or a bio over 1,000 characters.
+- **`PUT /api/affiliate/profile`**: Updates channel name, type, URL, bio (same checks).
+- **`POST /api/affiliate/kyc`** (10 per 15 minutes per client, shared with adding payout accounts):
+  Submits PAN (and optionally bank/UPI, which are routed through the payout-account flow below).
+  A verified PAN resubmitted unchanged is not re-checked; a different PAN starts unverified
+  and stays so if the check can't run.
   - **Body**: `{ "panNumber": "ABCDE1234F", "panHolderName": "...", "bankAccountNumber": "...", "bankIfsc": "...", "bankAccountHolder": "...", "upiId": "...", "gstin": "..." }`
-- **`GET /api/affiliate/dashboard`**: Full creator dashboard — tier and progress,
+- **`GET /api/affiliate/dashboard`**: Full creator dashboard. `commissionRate`, `travelerDiscountPct` and
+  `tier.commissionRate` are the creator's effective rates (their own admin-set rates, else the
+  tier's); `tier.ratesOverridden` says which. Tier and progress,
   balance breakdown (pending / on hold / withdrawable / reserved / paid), payout
   policy, payout accounts, referrals, campaign totals, payouts and ledger.
 - **`GET /api/affiliate/share-link?path=/activity/x&subId=reels-march`**: Builds
@@ -45,8 +56,10 @@ promo path and is credited on the code itself.
   - **Body (bank)**: `{ "method": "BANK_TRANSFER", "accountNumber": "...", "ifsc": "HDFC0001234", "accountHolder": "...", "accountType": "SAVINGS", "makePrimary": true }`
   - **Body (UPI)**: `{ "method": "UPI", "upiId": "name@okhdfcbank" }`
   - A *second* or later account is verified immediately but cannot receive a
-    payout for 24 hours (`usableFrom`); the first account is exempt.
-  - **Errors**: `400` malformed details, `409` already on file.
+    payout for 24 hours (`usableFrom`); only the creator's first-ever account is exempt
+    (archived accounts count, so removing every account and adding a new one still waits).
+  - **Errors**: `400` malformed details, `409` already on file, `429` more than 5 accounts
+    added in 24 hours (each bank account is a paid penny drop) or the 10-per-15-minutes limit.
 - **`PATCH /api/affiliate/payout-accounts/:id/primary`**: Points future payouts at
   this account.
 - **`DELETE /api/affiliate/payout-accounts/:id`**: Archives it. `409` while a

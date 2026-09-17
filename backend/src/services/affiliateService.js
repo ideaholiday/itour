@@ -29,6 +29,10 @@ export const DEFAULT_ATTRIBUTION_WINDOW_DAYS = 30;
  */
 export const PAYOUT_ACCOUNT_COOLING_HOURS = 24;
 
+// Each bank account added is a paid penny drop at Cashfree. More than this in a
+// day is either a mistake loop or someone probing account numbers.
+export const MAX_PAYOUT_ACCOUNTS_PER_DAY = 5;
+
 function affiliateError(message, status = 400, code = undefined) {
   const error = new Error(message);
   error.status = status;
@@ -134,6 +138,7 @@ export function resolveTier(database = db, affiliateId) {
           code: next.code,
           label: next.label,
           commissionRate: next.commission_rate,
+          travelerDiscountPct: Number(next.traveler_discount_pct),
           bookingsToGo: Math.max(0, Number(next.min_completed_bookings) - Number(stats.completed_bookings)),
           gmvToGoInr: round2(Math.max(0, Number(next.min_lifetime_gmv_inr) - Number(stats.gmv))),
         }
@@ -205,6 +210,7 @@ export async function registerAffiliate(database = db, {
 } = {}) {
   if (!userId) throw affiliateError("User ID is required", 400);
   if (!channelName || !channelName.trim()) throw affiliateError("Channel/Profile name is required", 400);
+  assertChannelFields({ channelName, channelType, channelUrl, bio });
 
   const existingUser = database.prepare("SELECT id, name, email FROM users WHERE id = ?").get(userId);
   if (!existingUser) throw affiliateError("User account not found", 404);
@@ -274,6 +280,45 @@ export async function registerAffiliate(database = db, {
   return getAffiliateByUserId(database, userId);
 }
 
+const CHANNEL_TYPES = ["INSTAGRAM", "YOUTUBE", "FACEBOOK", "TWITTER", "X", "TIKTOK", "BLOG", "WEBSITE", "COMMUNITY", "TELEGRAM", "WHATSAPP", "OTHER"];
+
+/** Profile fields are shown to admins and may become public links, so keep them plain and bounded. */
+function assertChannelFields({ channelName, channelType, channelUrl, bio }) {
+  if (channelName !== undefined && String(channelName).trim().length > 80) throw affiliateError("Channel name can be at most 80 characters", 400);
+  if (channelType !== undefined && channelType !== null && !CHANNEL_TYPES.includes(String(channelType).trim().toUpperCase())) {
+    throw affiliateError(`Channel type must be one of ${CHANNEL_TYPES.join(", ")}`, 400);
+  }
+  const url = String(channelUrl || "").trim();
+  if (url && (url.length > 300 || !/^https:\/\/[^\s]+$/i.test(url.replace(/^http:\/\//i, "https://")))) {
+    throw affiliateError("Channel link must be a web address starting with https://", 400);
+  }
+  if (bio && String(bio).length > 1000) throw affiliateError("Bio can be at most 1,000 characters", 400);
+}
+
+/**
+ * The program as advertised on the creator landing page: tier rates, payout
+ * minimum, clearing hold, attribution window and TDS. Read from the live tiers
+ * so the page never promises a rate an admin has since changed.
+ */
+export function getAffiliateProgramSummary(database = db) {
+  const tiers = (database.prepare("SELECT * FROM affiliate_tiers ORDER BY sort_order ASC").all() || []).map((tier) => ({
+    code: tier.code,
+    label: tier.label,
+    commissionPct: Math.round(Number(tier.commission_rate) * 10000) / 100,
+    travelerDiscountPct: Number(tier.traveler_discount_pct),
+    minCompletedBookings: Number(tier.min_completed_bookings),
+    minLifetimeGmvInr: Number(tier.min_lifetime_gmv_inr),
+  }));
+  return {
+    tiers,
+    entryTier: tiers[0] || null,
+    minPayoutInr: MIN_PAYOUT_INR,
+    holdDays: DEFAULT_PAYOUT_HOLD_DAYS,
+    attributionWindowDays: DEFAULT_ATTRIBUTION_WINDOW_DAYS,
+    tdsPct: Math.round(TDS_RATE * 10000) / 100,
+  };
+}
+
 /**
  * Retrieve affiliate record by User ID
  */
@@ -307,6 +352,7 @@ export function getAffiliateByCode(database = db, code) {
  * Update general channel profile & bio
  */
 export function updateAffiliateProfile(database = db, affiliateId, { channelName, channelType, channelUrl, bio } = {}) {
+  assertChannelFields({ channelName, channelType, channelUrl, bio });
   const affiliate = database.prepare("SELECT id FROM affiliates WHERE id = ?").get(affiliateId);
   if (!affiliate) throw affiliateError("Affiliate profile not found", 404);
 
@@ -414,11 +460,22 @@ export async function addPayoutAccount(database = db, affiliateId, {
   const existingActive = database.prepare(
     "SELECT COUNT(*) AS count FROM affiliate_payout_accounts WHERE affiliate_id = ? AND status = 'ACTIVE'"
   ).get(affiliateId)?.count || 0;
+  // Archived accounts count: otherwise removing every account and adding a new
+  // one would pass as a "first" account and skip the cooling period.
+  const everAdded = database.prepare(
+    "SELECT COUNT(*) AS count FROM affiliate_payout_accounts WHERE affiliate_id = ?"
+  ).get(affiliateId)?.count || 0;
+  const addedToday = database.prepare(
+    "SELECT COUNT(*) AS count FROM affiliate_payout_accounts WHERE affiliate_id = ? AND created_at >= ?"
+  ).get(affiliateId, new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " "))?.count || 0;
+  if (addedToday >= MAX_PAYOUT_ACCOUNTS_PER_DAY) {
+    throw affiliateError(`You can add up to ${MAX_PAYOUT_ACCOUNTS_PER_DAY} payout accounts a day. Please try again tomorrow, or contact support.`, 429);
+  }
 
   const accountId = `affacc_${nanoid(12)}`;
   // The first destination is trusted immediately; any later one is a change of
   // where money goes, so it waits out the cooling period.
-  const usableFrom = existingActive > 0 ? isoPlusHours(PAYOUT_ACCOUNT_COOLING_HOURS) : nowIso();
+  const usableFrom = everAdded > 0 ? isoPlusHours(PAYOUT_ACCOUNT_COOLING_HOURS) : nowIso();
 
   let verificationStatus = "UNVERIFIED";
   let verificationMessage = null;
@@ -662,8 +719,12 @@ export async function updateAffiliateKyc(database = db, affiliateId, {
     throw affiliateError("Invalid Indian PAN format (e.g. ABCDE1234F)", 400);
   }
 
-  let panVerified = affiliate.pan_verified ? 1 : 0;
-  if (cleanPan) {
+  // A different PAN is a different taxpayer: it starts unverified, even if the
+  // check below cannot run. Resubmitting an already verified PAN is not re-checked
+  // (each check is a paid Cashfree call).
+  const samePan = cleanPan && cleanPan === String(affiliate.pan_number || "").toUpperCase();
+  let panVerified = (!cleanPan || samePan) && affiliate.pan_verified ? 1 : 0;
+  if (cleanPan && !panVerified) {
     try {
       const panRes = await verifyPan({ pan: cleanPan, name: cleanPanName || affiliate.name });
       panVerified = panRes?.valid ? 1 : 0;
@@ -761,7 +822,7 @@ export function trackAffiliateClick(database = db, {
       database.prepare(`
         INSERT INTO affiliate_clicks (id, affiliate_id, destination_path, referrer_url, ip_hash)
         VALUES (?, ?, ?, ?, ?)
-      `).run(clickId, affiliate.id, destinationPath, referrerUrl, ipHash);
+      `).run(clickId, affiliate.id, String(destinationPath || "/").slice(0, 300), String(referrerUrl || "").slice(0, 500), ipHash);
 
       if (!visitorId) return;
       attributionId = `affattr_${nanoid(12)}`;
@@ -772,7 +833,7 @@ export function trackAffiliateClick(database = db, {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         attributionId, String(visitorId).slice(0, 64), affiliate.id, affiliate.affiliate_code,
-        cleanSubId, destinationPath, referrerUrl || null, userId, clickId, expiresAt
+        cleanSubId, String(destinationPath || "/").slice(0, 300), referrerUrl ? String(referrerUrl).slice(0, 500) : null, userId, clickId, expiresAt
       );
     })();
 
@@ -1216,6 +1277,11 @@ export function requestPayout(database = db, affiliateId, { amountInr, paymentMe
   `).get(affiliateId) || {};
 
   database.transaction(() => {
+    // Checked again inside the write: two requests sent together must not both
+    // spend the same balance.
+    if (requestedAmount > computeBalances(database, affiliateId).withdrawableInr) {
+      throw affiliateError("Your balance changed while this request was being made. Refresh and try again.", 409);
+    }
     database.prepare(`
       UPDATE affiliates
       SET available_balance_inr = MAX(0, available_balance_inr - ?),
@@ -1285,6 +1351,9 @@ export function transferEarningsToWallet(database = db, affiliateId, { amountInr
   const { tdsRate, tdsInr, netInr } = computeTds(affiliate, gross);
   const transferId = `aff_wal_${nanoid(12)}`;
   database.transaction(() => {
+    if (gross > computeBalances(database, affiliateId).withdrawableInr) {
+      throw affiliateError("Your balance changed while this request was being made. Refresh and try again.", 409);
+    }
     database.prepare(`
       INSERT INTO affiliate_wallet_transfers (id, affiliate_id, user_id, gross_amount_inr, tds_rate, tds_amount_inr, net_amount_inr)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1565,6 +1634,7 @@ export function getAffiliateDashboardMetrics(database = db, affiliateId) {
   }
 
   const nextTdsRate = TDS_RATE;
+  const rates = effectiveAffiliateRates(tier, affiliate);
 
   return {
     affiliateId: affiliate.id,
@@ -1573,14 +1643,16 @@ export function getAffiliateDashboardMetrics(database = db, affiliateId) {
     channelType: affiliate.channel_type,
     channelUrl: affiliate.channel_url,
     bio: affiliate.bio,
-    commissionRate: affiliate.commission_rate,
-    travelerDiscountPct: affiliate.traveler_discount_pct,
+    commissionRate: rates.commissionRate,
+    travelerDiscountPct: rates.travelerDiscountPct,
     status: affiliate.status,
     kycStatus: affiliate.kyc_status,
     tier: {
       code: tier.code,
       label: tier.label,
-      commissionRate: tier.commission_rate,
+      // What this creator earns now: their own admin-set rate, else the tier's.
+      commissionRate: rates.commissionRate,
+      ratesOverridden: rates.commissionOverridden || rates.discountOverridden,
       completedBookings: tier.completedBookings,
       lifetimeGmvInr: tier.lifetimeGmvInr,
       next: tier.next,

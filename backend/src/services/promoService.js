@@ -122,6 +122,11 @@ export function validatePromoCode(database, { code, amountInr = 0, userId = null
     try {
       if (audience === "TRAVELER") affiliate = database.prepare("SELECT * FROM affiliates WHERE affiliate_code = ? AND status = 'ACTIVE'").get(normalized);
     } catch {}
+    // A creator's code is for their audience. Without this anyone could sign up
+    // as a creator in a minute and discount their own trips.
+    if (affiliate && userId && affiliate.user_id === userId) {
+      throw promoError(`${normalized} is your own creator code. Share it with your followers; it can't be used on your own bookings.`, 400, "OWN_CREATOR_CODE");
+    }
 
     return {
       valid: true,

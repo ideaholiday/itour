@@ -17,7 +17,7 @@ export function WishlistButton({ productId, className = "", initialSaved = false
     e.stopPropagation();
     if (!user) {
       // Trigger login prompt or redirect
-      window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+      window.location.href = `/login?from=${encodeURIComponent(window.location.pathname)}`;
       return;
     }
 

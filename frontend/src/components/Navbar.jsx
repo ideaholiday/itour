@@ -38,10 +38,11 @@ const CATEGORY_BAR = [
   { emoji: "🚗", label: "Day Trips", q: "Day Tours" },
 ];
 
+// Only claims that are true on the live site: a banner advertising a sale or
+// destinations that don't exist is a misleading ad under the e-commerce rules.
 const PROMO_MESSAGES = [
-  "🔥 Weekend sale — up to 20% off selected tours",
-  "✨ New experiences added in Goa, Jaipur & Kerala",
-  "🎉 Invite friends and earn on every trip they take",
+  { text: "🎉 Invite friends and earn on every trip they take", to: "/travel-and-earn", cta: "Invite friends →" },
+  { text: "📸 Creators: share your code and earn on every completed trip", to: "/affiliate", cta: "Join →" },
 ];
 
 export default function Navbar() {
@@ -90,13 +91,13 @@ export default function Navbar() {
             key={promoIdx}
             className="text-[11px] font-semibold text-stone-300 animate-fade-in truncate"
           >
-            {PROMO_MESSAGES[promoIdx]}
+            {PROMO_MESSAGES[promoIdx].text}
           </p>
           <Link
-            to="/search"
+            to={PROMO_MESSAGES[promoIdx].to}
             className="ml-2 shrink-0 rounded-full bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 text-[10px] font-bold text-amber-400 hover:bg-amber-500/30 transition-colors"
           >
-            Shop now →
+            {PROMO_MESSAGES[promoIdx].cta}
           </Link>
         </div>
       </div>

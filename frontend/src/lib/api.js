@@ -336,6 +336,8 @@ export const api = {
     fetch(`/api/referral/admin/rewards/${encodeURIComponent(rewardId)}/review`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   setReferralRelationshipStatus: (relationshipId, payload) =>
     fetch(`/api/referral/admin/relationships/${encodeURIComponent(relationshipId)}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getAffiliateProgram: () =>
+    fetch("/api/affiliate/program").then(handle),
   getAffiliateMe: () =>
     fetch("/api/affiliate/me", { headers: authHeaders() }).then(handle),
   registerAffiliate: (payload) =>

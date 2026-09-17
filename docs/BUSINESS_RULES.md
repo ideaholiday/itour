@@ -299,7 +299,7 @@ exists to stop a specific way the money goes wrong.
    unreachable the account is left `PENDING` for a manual check — it is never
    marked good by default.
 4. **A changed destination cools off for 24 hours** before it can be paid into.
-   The creator's *first* account is exempt: there is nothing to redirect yet,
+   The creator's *first-ever* account is exempt: there is nothing to redirect yet,
    and the delay would only punish someone waiting on their first rupee. This is
    the control that makes an account-takeover payout fail.
 5. **Accounts are archived, never deleted**, because past payouts point at them.

@@ -23,51 +23,79 @@ import SeoHead from "../components/SeoHead.jsx";
 import { api } from "../lib/api.js";
 import { useAuth } from "../lib/auth.jsx";
 
-const PERKS = [
-  {
-    icon: IndianRupee,
-    title: "10% Cash Commission",
-    desc: "Earn a high 10% cash payout on every completed tour, circuit, and transfer booking made through your code or link.",
-    color: "from-amber-500 to-amber-600",
-  },
-  {
-    icon: Zap,
-    title: "Custom Coupon Code",
-    desc: "Create your branded coupon code (e.g. EXPLORE10). Your followers get 5% instant checkout savings, and you earn 10%.",
-    color: "from-emerald-500 to-teal-600",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Instant Bank Payouts",
-    desc: "Fast KYC verification via PAN & Bank Account with automated Penny-Drop verification. Withdraw directly to any Indian bank or UPI.",
-    color: "from-blue-500 to-indigo-600",
-  },
-  {
-    icon: TrendingUp,
-    title: "Live Tracking & Analytics",
-    desc: "Transparent dashboard displaying real-time link clicks, bookings, conversion rates, and accrued earnings.",
-    color: "from-rose-500 to-pink-600",
-  },
-];
+// Every rate on this page comes from the live program (GET /api/affiliate/program),
+// so the page never promises what an admin has since changed.
+const pct = (value) => `${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
 
-const FAQS = [
-  {
-    q: "How does the Idea Holiday Influencer & Affiliate Program work?",
-    a: "When you join, you get a customized coupon code (e.g. TRAVEL10) and deep referral tracking links. When your followers use your code or link to book any travel experience on Idea Holiday, they receive an exclusive discount, and you earn 10% cash commission on the trip value.",
-  },
-  {
-    q: "When do my earnings become available for payout?",
-    a: "Commissions are recorded in your dashboard in Pending status immediately upon booking. Once your follower completes their journey, the earnings mature to Available for Withdrawal, preventing chargeback and cancellation issues.",
-  },
-  {
-    q: "What is the minimum withdrawal threshold and payout method?",
-    a: "The minimum payout threshold is ₹1,000. You can request a payout anytime to your verified Indian bank account (via NEFT/IMPS) or your UPI ID directly from your dashboard.",
-  },
-  {
-    q: "Why do I need to complete KYC verification?",
-    a: "Because Idea Holiday pays real cash directly to your bank account, Indian tax and financial compliance guidelines require PAN verification and bank account verification (via Penny-Drop sync) before disbursing affiliate earnings.",
-  },
-];
+function programTerms(program) {
+  const entry = program?.entryTier;
+  const tiers = program?.tiers || [];
+  const top = tiers.length ? Math.max(...tiers.map((tier) => tier.commissionPct)) : null;
+  return {
+    loaded: Boolean(entry),
+    commission: entry ? pct(entry.commissionPct) : "",
+    // Whole phrases, so the copy still reads before the rates have loaded.
+    earn: entry ? `${pct(entry.commissionPct)} commission` : "commission",
+    save: entry ? `${pct(entry.travelerDiscountPct)} off` : "a discount",
+    commissionRate: entry ? entry.commissionPct / 100 : 0,
+    topCommission: top !== null ? pct(top) : null,
+    discount: entry ? pct(entry.travelerDiscountPct) : "",
+    minPayout: `₹${Number(program?.minPayoutInr || 1000).toLocaleString("en-IN")}`,
+    holdDays: program?.holdDays ?? 14,
+    windowDays: program?.attributionWindowDays ?? 30,
+    tds: program ? pct(program.tdsPct) : "1%",
+  };
+}
+
+function perks(terms) {
+  return [
+    {
+      icon: IndianRupee,
+      title: terms.loaded ? `${terms.commission} Cash Commission` : "Cash Commission",
+      desc: `Earn ${terms.earn} on every completed tour, circuit and transfer booked through your code or link${terms.topCommission && terms.topCommission !== terms.commission ? `, rising to ${terms.topCommission} as you grow` : ""}.`,
+      color: "from-amber-500 to-amber-600",
+    },
+    {
+      icon: Zap,
+      title: "Custom Coupon Code",
+      desc: `Create your branded coupon code (e.g. EXPLORE10). Your followers get ${terms.save} at checkout, and you earn ${terms.earn}.`,
+      color: "from-emerald-500 to-teal-600",
+    },
+    {
+      icon: ShieldCheck,
+      title: "Verified Bank & UPI Payouts",
+      desc: "PAN and bank verification with an automated penny drop. Withdraw to any Indian bank account or UPI ID once your earnings clear.",
+      color: "from-blue-500 to-indigo-600",
+    },
+    {
+      icon: TrendingUp,
+      title: "Live Tracking & Analytics",
+      desc: "Transparent dashboard displaying real-time link clicks, bookings, conversion rates, and accrued earnings.",
+      color: "from-rose-500 to-pink-600",
+    },
+  ];
+}
+
+function faqs(terms) {
+  return [
+    {
+      q: "How does the Idea Holiday Influencer & Affiliate Program work?",
+      a: `When you join, you get a customized coupon code (e.g. TRAVEL10) and trackable links. When your followers use your code, or book within ${terms.windowDays} days of clicking your link, they get ${terms.save} with your code and you earn ${terms.earn} on the trip value. Your own bookings don't count, and your code can't be used on them.`,
+    },
+    {
+      q: "When do my earnings become available for payout?",
+      a: `Commission shows in your dashboard as Pending as soon as a follower books. Once they complete the trip, it clears after a ${terms.holdDays}-day hold (the window refunds and chargebacks arrive in) and becomes available to withdraw. Cancelled or refunded bookings earn nothing.`,
+    },
+    {
+      q: "What is the minimum withdrawal threshold and payout method?",
+      a: `The minimum payout is ${terms.minPayout}. Request it from your dashboard to your verified bank account or UPI ID. ${terms.tds} TDS is deducted at source. You can also move any amount into your Idea Holiday wallet to spend on your own trips.`,
+    },
+    {
+      q: "Why do I need to complete KYC verification?",
+      a: "Because Idea Holiday pays real money into your bank account and deducts TDS against your PAN, Indian tax rules require PAN verification and bank account verification (a penny drop) before any payout.",
+    },
+  ];
+}
 
 export default function AffiliateLandingPage() {
   const { user } = useAuth();
@@ -88,6 +116,14 @@ export default function AffiliateLandingPage() {
   const [bio, setBio] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
+  const [program, setProgram] = useState(null);
+
+  useEffect(() => {
+    api.getAffiliateProgram().then((res) => setProgram(res?.program || null)).catch(() => setProgram(null));
+  }, []);
+  const terms = programTerms(program);
+  const PERKS = perks(terms);
+  const FAQS = faqs(terms);
 
   useEffect(() => {
     if (!user) {
@@ -104,11 +140,17 @@ export default function AffiliateLandingPage() {
       .finally(() => setLoadingCheck(false));
   }, [user]);
 
-  const estimatedMonthly = Math.round(bookingCount * avgBookingPrice * 0.10);
+  // Back from signup or login: open the application straight away.
+  useEffect(() => {
+    if (loadingCheck || !user || isAffiliate) return;
+    if (new URLSearchParams(window.location.search).get("apply") === "1") setShowModal(true);
+  }, [loadingCheck, user, isAffiliate]);
+
+  const estimatedMonthly = Math.round(bookingCount * avgBookingPrice * terms.commissionRate);
 
   const handleApplyClick = () => {
     if (!user) {
-      navigate("/login?redirect=/affiliate");
+      navigate(`/signup?from=${encodeURIComponent("/affiliate?apply=1")}`);
       return;
     }
     if (isAffiliate) {
@@ -147,7 +189,7 @@ export default function AffiliateLandingPage() {
     <div className="min-h-screen bg-[#FAF9F6] dark:bg-stone-950 text-stone-900 dark:text-stone-100">
       <SeoHead
         title="Creator & Influencer Affiliate Program | Idea Holiday"
-        description="Partner with Idea Holiday. Share your customized coupon code, recommend unforgettable travel experiences across India, and earn a 10% cash commission on every booking."
+        description="Partner with Idea Holiday. Share your coupon code, recommend travel experiences across India, give your followers a discount and earn commission on every completed booking."
       />
 
       {/* Hero Section */}
@@ -162,12 +204,12 @@ export default function AffiliateLandingPage() {
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold font-display tracking-tight leading-tight">
               Turn Your Travel Passion Into{" "}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700">
-                10% Cash Earnings
+                {terms.loaded ? `${terms.commission} Cash Earnings` : "Cash Earnings"}
               </span>
             </h1>
             <p className="text-lg md:text-xl text-stone-600 dark:text-stone-300 max-w-2xl mx-auto leading-relaxed">
               Recommend India's best sightseeing tours, airport cabs, and multi-day circuits.
-              Share your custom coupon code, give your community discounts, and earn 10% on every completed trip.
+              Share your custom coupon code, give your community {terms.save}, and earn {terms.earn} on every completed trip.
             </p>
 
             <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -245,7 +287,7 @@ export default function AffiliateLandingPage() {
                 Estimate Your Monthly Commission
               </h2>
               <p className="text-sm text-stone-500 dark:text-stone-400">
-                See how quickly 10% earnings add up with your audience.
+                See how quickly {terms.earn} adds up with your audience.
               </p>
             </div>
 
@@ -298,7 +340,7 @@ export default function AffiliateLandingPage() {
                 </div>
 
                 <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-stone-700 dark:text-stone-300">
-                  💡 <strong>Did you know?</strong> Multi-day circuits and private heritage tours average over ₹12,000 per booking, generating ₹1,200+ in a single referral.
+                  💡 <strong>Did you know?</strong> A ₹12,000 multi-day circuit earns you ₹{Math.round(12000 * terms.commissionRate).toLocaleString("en-IN")} from a single referral.
                 </div>
               </div>
 
@@ -310,7 +352,7 @@ export default function AffiliateLandingPage() {
                   ₹{estimatedMonthly.toLocaleString("en-IN")}
                 </div>
                 <span className="text-xs font-semibold text-stone-950/70 mb-6">
-                  per month (10% on ₹{(bookingCount * avgBookingPrice).toLocaleString("en-IN")} booking value)
+                  per month ({terms.earn} on ₹{(bookingCount * avgBookingPrice).toLocaleString("en-IN")} booking value)
                 </span>
                 <button
                   onClick={handleApplyClick}
@@ -349,13 +391,13 @@ export default function AffiliateLandingPage() {
             },
             {
               step: "03",
-              title: "Followers Save 5%",
+              title: terms.loaded ? `Followers Save ${terms.discount}` : "Followers Save",
               desc: "Your audience enjoys instant savings at checkout, boosting conversion rates.",
             },
             {
               step: "04",
-              title: "Get 10% Bank Payout",
-              desc: "Once trips conclude, withdraw your earnings directly to your verified bank or UPI.",
+              title: "Get Paid",
+              desc: `Once trips are completed and cleared, withdraw from ${terms.minPayout} to your verified bank or UPI.`,
             },
           ].map((item, idx) => (
             <div key={idx} className="relative">
@@ -416,7 +458,7 @@ export default function AffiliateLandingPage() {
               </span>
               <h3 className="text-2xl font-bold font-display mt-2">Join as an Influencer Partner</h3>
               <p className="text-xs text-stone-500 mt-1">
-                Configure your channel and custom coupon code to begin earning 10%.
+                Configure your channel and custom coupon code to begin earning {terms.earn}.
               </p>
             </div>
 
