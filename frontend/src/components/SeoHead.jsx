@@ -42,7 +42,7 @@ export default function SeoHead({
     // 3. Set Standard Meta
     setMetaTag("name", "description", description);
     setMetaTag("name", "keywords", keywords);
-    setMetaTag("name", "robots", noindex ? "noindex, nofollow" : "index, follow");
+    setMetaTag("name", "robots", noindex ? "noindex, follow" : "index, follow");
     setLinkTag("canonical", canonical);
 
     // 4. Set Open Graph Meta

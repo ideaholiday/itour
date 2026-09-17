@@ -5,6 +5,7 @@ import {
   claimShareLink, consumeInvite, createShareLink, inviteStats, issueBookingInvite,
   listShareLinks, resolveInvite, resolveShareLink, setShareLinkActive,
 } from "../src/services/reviewInviteService.js";
+import { translateSqliteSql } from "../src/postgresSyncDb.js";
 
 function inviteDatabase() {
   const database = new Database(":memory:");
@@ -49,6 +50,25 @@ test("an invite token opens exactly one booking, once", () => {
   consumeInvite(database, invite.id, "rev_1");
   assert.throws(() => resolveInvite(database, issued.token), /already been used/);
   assert.throws(() => resolveInvite(database, "not-a-real-token"), /not valid/);
+  database.close();
+});
+
+test("issuing an invite uses SQL the production Postgres adapter can run", () => {
+  const database = inviteDatabase();
+  const statements = [];
+  const recording = { prepare: (sql) => { statements.push(translateSqliteSql(sql)); return database.prepare(sql); } };
+  const issued = issueBookingInvite(recording, { bookingId: "booking_1" });
+  assert.ok(issued.token);
+  for (const sql of statements) {
+    assert.doesNotMatch(sql, /CAST\('now'/i, sql);
+    assert.doesNotMatch(sql, /expires_at\s*[<>]=?\s*CURRENT_TIMESTAMP/i, sql);
+  }
+  // Still a SQLite-style text timestamp about 30 days out, which resolveInvite parses.
+  const { expires_at: expiresAt } = database.prepare("SELECT expires_at FROM review_invites").get();
+  assert.match(expiresAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  const days = (new Date(`${expiresAt.replace(" ", "T")}Z`) - Date.now()) / 86400000;
+  assert.ok(days > 29.9 && days <= 30, `expires in ${days} days`);
+  assert.equal(issueBookingInvite(recording, { bookingId: "booking_1" }).reused, true, "a live invite is found again");
   database.close();
 });
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./lib/auth.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
@@ -26,6 +26,7 @@ const ReviewInvite = React.lazy(() => import("./pages/ReviewInvite.jsx"));
 const Login = React.lazy(() => import("./pages/Login.jsx"));
 const HowItWorks = React.lazy(() => import("./pages/HowItWorks.jsx"));
 const TermsPage = React.lazy(() => import("./pages/TermsPage.jsx"));
+const PrivacyPolicyPage = React.lazy(() => import("./pages/PrivacyPolicyPage.jsx"));
 const CancellationPage = React.lazy(() => import("./pages/CancellationPage.jsx"));
 const AboutPage = React.lazy(() => import("./pages/AboutPage.jsx"));
 const ContactPage = React.lazy(() => import("./pages/ContactPage.jsx"));
@@ -68,6 +69,7 @@ function AppContent() {
   const isWorkspace = ["/supplier", "/admin", "/ops", "/driver", "/track"].some((prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)) || domain.isSupplier || domain.isAdmin;
 
   React.useEffect(() => {
+    analytics.captureCampaign(location.search);
     analytics.trackPageView(location.pathname + location.search);
 
     const referral = parseReferralParams(location.search);
@@ -202,6 +204,8 @@ function AppContent() {
             <Route path="/how-it-works" element={<HowItWorks />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/cancellation" element={<CancellationPage />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+            <Route path="/privacy" element={<Navigate to="/privacy-policy" replace />} />
             <Route path="/about-us" element={<AboutPage />} />
             <Route path="/contact-us" element={<ContactPage />} />
             <Route path="*" element={<NotFound404 />} />

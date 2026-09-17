@@ -1,4 +1,4 @@
-import { demoPaymentsEnabled } from "../services/checkoutModeService.js";
+import { demoPaymentsEnabled, demoRefundFallbackEnabled } from "../services/checkoutModeService.js";
 import { processReservationOutbox } from "../services/reservationOutboxService.js";
 import { quarantineBookingPayment } from "../services/paymentReviewService.js";
 import { confirmNativeReservation, releaseNativeReservation } from "../services/nativeInventoryService.js";
@@ -729,7 +729,7 @@ router.post("/cancel-booking", authenticate, requireBookingOwner(), validateBody
               reason: cancellationReason,
               idempotencyKey: refund.id,
             });
-          } else if (booking.payment_method === "DEMO" || process.env.ENABLE_DEMO_PAYMENT === "true") {
+          } else if (booking.payment_method === "DEMO" || demoRefundFallbackEnabled()) {
             providerResult = { refundId: `rfnd_demo_${Date.now()}`, status: "PROCESSED" };
           }
         } catch (gatewayErr) {

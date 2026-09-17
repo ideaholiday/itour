@@ -69,6 +69,10 @@ function bookingForInvite(database, bookingRef) {
   `).get(bookingRef, bookingRef);
 }
 
+// Timestamps are computed here, not with datetime('now', ?): the Postgres
+// adapter cannot translate a modifier, so every invite insert failed in production.
+const sqlTimestamp = (date) => date.toISOString().slice(0, 19).replace("T", " ");
+
 function isCompleted(booking) {
   return String(booking.status || "").toLowerCase() === "completed"
     || String(booking.assignment_status || "").toUpperCase() === "COMPLETED";
@@ -96,17 +100,17 @@ export function issueBookingInvite(database, { bookingId, channel = "EMAIL", cre
   // A live invite is reused rather than duplicated, so a resend does not
   // invalidate the link the traveler may already be holding.
   const existing = database.prepare(
-    "SELECT * FROM review_invites WHERE booking_id = ? AND used_at IS NULL AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1"
-  ).get(booking.id);
+    "SELECT * FROM review_invites WHERE booking_id = ? AND used_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1"
+  ).get(booking.id, sqlTimestamp(new Date()));
   if (existing) return { token: null, url: null, invite: existing, reused: true };
 
   const token = `${nanoid(24)}`;
   const id = `rvi_${nanoid(12)}`;
   database.prepare(`
     INSERT INTO review_invites (id, token_hash, booking_id, product_id, supplier_id, channel, created_by, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', ?))
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, hashInviteToken(token), booking.id, booking.product_id, booking.supplier_id,
-    normalizedChannel, createdBy, `+${Math.max(1, Number(ttlDays) || INVITE_TTL_DAYS)} days`);
+    normalizedChannel, createdBy, sqlTimestamp(new Date(Date.now() + Math.max(1, Number(ttlDays) || INVITE_TTL_DAYS) * 86400000)));
 
   return {
     token,

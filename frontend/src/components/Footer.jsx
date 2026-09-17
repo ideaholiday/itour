@@ -36,14 +36,6 @@ function IconTwitter({ className }) {
     </svg>
   );
 }
-function IconYoutube({ className }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17" /><path d="m10 15 5-3-5-3z" />
-    </svg>
-  );
-}
-
 
 const footerGroups = [
   {
@@ -51,6 +43,7 @@ const footerGroups = [
     links: [
       ["Things to do", "/search"],
       ["Find tour operators", "/suppliers"],
+      ["List your business", "/supplier/signup"],
       ["Plan Circuit 🗺️", "/circuit-planner"],
       ["Travel & Earn ✨", "/travel-and-earn"],
       ["Influencer Program 🌟", "/affiliate"],
@@ -72,6 +65,7 @@ const footerGroups = [
     links: [
       ["Terms & Conditions", "/terms"],
       ["Cancellation & Refund", "/cancellation"],
+      ["Privacy Policy", "/privacy-policy"],
       ["How Idea Holiday works", "/how-it-works"],
     ],
   },
@@ -81,7 +75,6 @@ const SOCIAL_LINKS = [
   { icon: IconInstagram, label: "Instagram", href: "https://instagram.com/ideaholiday", hoverColor: "hover:text-pink-400" },
   { icon: IconFacebook, label: "Facebook", href: "https://facebook.com/ideaholiday", hoverColor: "hover:text-blue-400" },
   { icon: IconTwitter, label: "Twitter / X", href: "https://twitter.com/ideaholiday", hoverColor: "hover:text-sky-400" },
-  { icon: IconYoutube, label: "YouTube", href: "https://youtube.com/ideaholiday", hoverColor: "hover:text-red-400" },
 ];
 
 const PAYMENT_METHODS = [

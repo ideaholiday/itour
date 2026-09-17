@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Gift, Sparkles } from "lucide-react";
 import { api } from "../lib/api.js";
+import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 import GoogleAuthButton from "../components/GoogleAuthButton.jsx";
 import { clearStoredTravelerReferral, getStoredTravelerReferralCode, getVisitorId } from "../lib/affiliateAttribution.js";
@@ -83,6 +84,7 @@ export default function Login({ initialMode = "login" }) {
       const fn = mode === "login" ? api.login : api.signup;
       const result = await fn(payload);
       if (mode === "signup") {
+        analytics.trackSignUp("email");
         sessionStorage.removeItem("ih_ref_code");
         clearStoredTravelerReferral();
       }
@@ -185,7 +187,9 @@ export default function Login({ initialMode = "login" }) {
           </button>
         </p>
         <p className="mt-4 text-center text-[11px] leading-5 text-stone-500">
-          By continuing, you agree to Idea Holiday's terms and privacy policy.
+          By continuing, you agree to Idea Holiday's{" "}
+          <Link to="/terms" className="font-semibold underline hover:text-amber-800">terms</Link> and{" "}
+          <Link to="/privacy-policy" className="font-semibold underline hover:text-amber-800">privacy policy</Link>.
         </p>
       </section>
     </div>

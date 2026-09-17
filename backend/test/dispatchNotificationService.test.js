@@ -267,7 +267,7 @@ test("stuck-trip alerts reach the right people through the approved status templ
   assert.match(notStarted[1].template.components[0].parameters[3].text, /Driver Ravi Kumar \(\+919876543210\)/);
 });
 
-test("the driver reminder reuses the approved request template, and completion invites a problem report", () => {
+test("the driver reminder reuses the approved request template, and completion invites a rating and a problem report", () => {
   const db = database();
   assign(db);
   const [reminder, ...rest] = buildDispatchMessages(db, job(db, "DRIVER_REQUEST_REMINDER"));
@@ -277,8 +277,10 @@ test("the driver reminder reuses the approved request template, and completion i
   const other = database();
   accept(other);
   const [traveler] = buildDispatchMessages(other, job(other, "DISPATCH_COMPLETED"));
+  assert.match(traveler.template.components[0].parameters[3].text, /Rate your trip: https?:\/\/\S+\/(review\/\S+|my-reviews\?bookingRef=IH-ABC) /);
   assert.match(traveler.template.components[0].parameters[3].text, /\/bookings\?report=IH-ABC$/);
-  assert.match(traveler.html, /report a problem/i);
+  assert.match(traveler.html, /Rate your trip/);
+  assert.match(traveler.html, /Report it before the operator is paid/);
 });
 
 test("the traveler gets a live tracking link, and a driver at risk of missing pickup alerts the supplier and operations", () => {

@@ -85,6 +85,9 @@ Winston logging (`backend/src/config/logger.js`) enforces automated, recursive r
 2. **CORS Allowlist**: Restricts cross-origin requests strictly to authorized production domains (`ideaholiday.in`, `supply.ideaholiday.in`, `admin.ideaholiday.in`) and local development ports.
 3. **Rate Limiting**: `express-rate-limit` enforces rate ceilings on authentication and public search routes to prevent credential stuffing and denial-of-service attacks.
 4. **RFC 9116 Compliance**: Exposes standard security contact information at `GET /.well-known/security.txt`.
+5. **CSP and marketing tags**: `buildCspDirectives` (`middleware/security.js`) allows Google Tag Manager, Google Analytics, the Meta Pixel (`connect.facebook.net`, `www.facebook.com`) and Google Ads (`googleadservices.com`, `doubleclick.net`). A new tag added in GTM that loads from any other origin is blocked until its origin is added there.
+6. **Public health check**: `GET /api/health` reports only `ok`, database engine and persistence — never the database or Supabase address.
+7. **Hosts**: `www.` requests are redirected (308) to the bare domain; `supply.` and `admin.` hosts send `X-Robots-Tag: noindex, nofollow`.
 
 ---
 

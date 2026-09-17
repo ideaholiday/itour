@@ -3,6 +3,7 @@ import { whatsAppTemplate } from './whatsappService.js';
 import { driverTripUrl } from './dispatchWorkflowService.js';
 import { guestDocumentLinks } from './guestDocumentService.js';
 import { trackingUrl } from './tripTrackingService.js';
+import { issueBookingInvite } from './reviewInviteService.js';
 import logger from '../config/logger.js';
 
 // Dispatch WhatsApp templates. Each body is the exact text submitted to Meta as a
@@ -296,7 +297,14 @@ export function buildDispatchMessages(db, job, { now = new Date() } = {}) {
       statusMessage(supplier, 'Service started', `${driverName} verified the traveler pickup OTP.`, supplierLink);
     }
     if (event === 'DISPATCH_COMPLETED') {
-      statusMessage(traveler, 'Your trip is complete', `Thank you for travelling with Idea Holiday. Had a problem? Report it before the operator is paid: ${appUrl()}/bookings?report=${encodeURIComponent(booking.ref)}`, { label: 'Rate your trip or report a problem', url: `${appUrl()}/bookings?report=${encodeURIComponent(booking.ref)}` });
+      // Rating link first, report link second. A one-tap invite when one can be issued; a retried job
+      // (live invite already out) or a booking that already has a review falls back to My Reviews.
+      const ref = encodeURIComponent(booking.ref);
+      let reviewUrl = `${appUrl()}/my-reviews?bookingRef=${ref}`;
+      try { reviewUrl = issueBookingInvite(db, { bookingId: booking.id, channel: 'EMAIL' }).url || reviewUrl; }
+      catch (error) { logger.warn('Review invite not issued at trip completion', { bookingId: booking.id, error: error.message }); }
+      const reportUrl = `${appUrl()}/bookings?report=${ref}`;
+      statusMessage(traveler, 'Your trip is complete', `Thank you for travelling with Idea Holiday. Rate your trip: ${reviewUrl} Had a problem? Report it before the operator is paid: ${reportUrl}`, { label: 'Rate your trip', url: reviewUrl });
       statusMessage(supplier, 'Service completed', `${driverName} marked the service as completed.`, supplierLink);
     }
   }

@@ -1,5 +1,6 @@
 import { processCashfreeRefund } from "./cashfreeService.js";
 import { processRazorpayRefund } from "./razorpayService.js";
+import { demoRefundFallbackEnabled } from "./checkoutModeService.js";
 import { createRefundRecord, failRefund, finalizeRefund } from "./financeService.js";
 
 const defaultGateways = { cashfree: processCashfreeRefund, razorpay: processRazorpayRefund };
@@ -16,7 +17,7 @@ export async function sendRefundToGateway(booking, { refund, amount, reason }, g
   if (booking.razorpay_payment_id) {
     return gateways.razorpay({ paymentId: booking.razorpay_payment_id, amount, reason, idempotencyKey: refund.id });
   }
-  if (booking.payment_method === "DEMO" || process.env.ENABLE_DEMO_PAYMENT === "true") {
+  if (booking.payment_method === "DEMO" || demoRefundFallbackEnabled()) {
     return { refundId: `rfnd_demo_${Date.now()}`, status: "PROCESSED" };
   }
   throw Object.assign(new Error("Payment reference is missing; refund requires manual provider review"), { status: 409 });

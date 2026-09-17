@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import IdeaHolidayLogo from "../components/IdeaHolidayLogo.jsx";
 import { api } from "../lib/api.js";
+import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 
 const initialForm = {
@@ -115,6 +116,7 @@ export default function SupplierSignup() {
         state: form.state.trim(),
         password: form.password,
       });
+      analytics.trackSupplierSignup(form.city.trim());
       login(result.token, result.user);
       navigate("/supplier/dashboard?welcome=1", { replace: true });
     } catch (err) {
@@ -206,7 +208,7 @@ export default function SupplierSignup() {
 
             <label className="flex cursor-pointer items-start gap-3 rounded-2xl bg-[#FAF9F6] border border-stone-200 p-3 text-xs leading-5 text-stone-600">
               <input required type="checkbox" checked={form.agreed} onChange={update("agreed")} className="mt-0.5 h-4 w-4 rounded border-stone-300 accent-amber-500" />
-              <span>I agree to the <Link to="/terms" className="font-bold text-stone-900 underline decoration-stone-300 underline-offset-2">partner terms</Link> and confirm I’m authorized to represent this business.</span>
+              <span>I agree to the <Link to="/terms" className="font-bold text-stone-900 underline decoration-stone-300 underline-offset-2">partner terms</Link> and <Link to="/privacy-policy" className="font-bold text-stone-900 underline decoration-stone-300 underline-offset-2">privacy policy</Link>, and confirm I’m authorized to represent this business.</span>
             </label>
 
             {error && <p role="alert" className="rounded-2xl border border-rose-300 bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-800">{error}</p>}

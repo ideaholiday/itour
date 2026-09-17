@@ -18,6 +18,25 @@ const CASHFREE_CHECKOUT_ORIGINS = [
   "https://payments.cashfree.com",
   "https://*.cashfree.com",
 ];
+// Marketing tags loaded through Google Tag Manager: Meta Pixel (Instagram and
+// Facebook ads) and Google Ads conversions. Without these the tags fail silently.
+const MARKETING_SCRIPT_ORIGINS = [
+  "https://connect.facebook.net",
+  "https://www.googleadservices.com",
+  "https://googleads.g.doubleclick.net",
+];
+const MARKETING_CONNECT_ORIGINS = [
+  "https://connect.facebook.net",
+  "https://www.facebook.com",
+  "https://www.googleadservices.com",
+  "https://googleads.g.doubleclick.net",
+  "https://*.doubleclick.net",
+  "https://www.google.com",
+];
+const MARKETING_FRAME_ORIGINS = [
+  "https://www.googletagmanager.com",
+  "https://td.doubleclick.net",
+];
 
 function positiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -66,6 +85,7 @@ export function buildCspDirectives(environment = process.env) {
     "https://*.google-analytics.com",
     "https://*.analytics.google.com",
     "https://*.googletagmanager.com",
+    ...MARKETING_CONNECT_ORIGINS,
     ...allowed,
   ];
 
@@ -84,6 +104,7 @@ export function buildCspDirectives(environment = process.env) {
       "https://checkout.razorpay.com",
       "https://*.razorpay.com",
       "https://www.googletagmanager.com",
+      ...MARKETING_SCRIPT_ORIGINS,
     ],
     styleSrc: [
       "'self'",
@@ -123,6 +144,7 @@ export function buildCspDirectives(environment = process.env) {
       "https://api.razorpay.com",
       "https://checkout.razorpay.com",
       "https://*.razorpay.com",
+      ...MARKETING_FRAME_ORIGINS,
     ],
     objectSrc: ["'none'"],
     baseUri: ["'self'"],

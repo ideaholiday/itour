@@ -24,6 +24,7 @@ import {
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import SeoHead from "../components/SeoHead.jsx";
+import { activitySeo } from "../../../shared/activitySeo.js";
 import StarRating from "../components/StarRating.jsx";
 import SupplierBadge from "../components/supplier/SupplierBadge.jsx";
 import DatePicker from "../components/ui/DatePicker.jsx";
@@ -848,34 +849,18 @@ export default function ActivityDetail() {
     ? activity.images.filter(Boolean)
     : [activity.heroImage || activity.hero_image].filter(Boolean);
 
-  const productJsonLd = {
-    "@context": "https://schema.org",
-    "@graph": [{
-      "@type": isPackage ? "TouristTrip" : "Product",
-      "@id": `https://ideaholiday.in${activityPath(activity)}#product`,
-      "name": activity.title,
-      "description": activity.shortDesc || activity.short_desc || activity.title,
-      "image": imagesList.length ? imagesList : ["https://ideaholiday.in/idea-holiday-social.png"],
-      "category": activity.category || typeMeta.label,
-      "offers": {
-        "@type": "Offer", "priceCurrency": "INR",
-        "price": activity.priceInr || activity.price_inr || 999,
-        "availability": "https://schema.org/InStock",
-        "url": `https://ideaholiday.in${activityPath(activity)}`,
-        "seller": { "@type": "Organization", "name": "Idea Holiday" },
-      },
-      // Emitted only when verified reviews exist. A rating in structured data
-      // that no traveler gave is a search-engine policy breach, not a default.
-      ...(Number(activity.reviewCount || activity.review_count || 0) > 0 && activity.rating ? {
-        "aggregateRating": {
-          "@type": "AggregateRating",
-          "ratingValue": activity.rating,
-          "reviewCount": Number(activity.reviewCount || activity.review_count),
-          "bestRating": "5", "worstRating": "1",
-        },
-      } : {}),
-    }],
-  };
+  // Same tags the server writes into the page (shared/activitySeo.js).
+  const seo = activitySeo({
+    id: activity.id,
+    title: activity.title,
+    city: activity.city,
+    category: activity.category,
+    shortDesc: activity.shortDesc || activity.short_desc,
+    priceInr: activity.priceInr ?? activity.price_inr,
+    images: imagesList,
+    rating: activity.rating,
+    reviewCount: activity.reviewCount || activity.review_count,
+  }, { isPackage, categoryLabel: typeMeta.label });
 
   // ── Select correct booking panel ──
   const sharedProps = {
@@ -907,11 +892,12 @@ export default function ActivityDetail() {
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900">
       <SeoHead
-        title={`${activity.title} - Book on Idea Holiday`}
-        description={activity.shortDesc || activity.short_desc || `Book ${activity.title} in ${activity.city || "India"} on Idea Holiday.`}
-        canonical={`https://ideaholiday.in${activityPath(activity)}`}
-        image={imagesList[0] || "https://ideaholiday.in/idea-holiday-social.png"}
-        jsonLd={productJsonLd}
+        title={seo.title}
+        description={seo.description}
+        canonical={seo.canonical}
+        image={seo.image}
+        type={seo.type}
+        jsonLd={seo.jsonLd}
       />
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
 

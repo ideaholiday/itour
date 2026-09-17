@@ -56,8 +56,9 @@ graph TD
 - **Technology**: React 19, Vite, Tailwind CSS, Lucide React, QRcode.
 - **Role**: Primary marketplace client serving travelers, tour operators, fleet suppliers, ground ops staff, and platform administrators.
 - **Routing**: Client-side single page application with lazy-loaded workspaces to meet performance budgets (`< 225 KiB` initial JS entry).
+- **Server-rendered head tags**: before the SPA loads, the API writes each page's title, description, canonical, Open Graph and JSON-LD into `index.html` for supplier profiles, activity pages and `/search` city pages (`routes/seo.js`), because link previews (WhatsApp, Instagram, Facebook) never run JavaScript. Paths not in `shared/spaRoutes.js` get the app with a 404 status and `noindex`.
 - **Core Views**:
-  - Traveler: `/`, `/search`, `/activity/:id`, `/circuit-planner`, `/checkout`, `/circuit-checkout/:id`, `/my-trips`, `/my-reviews`.
+  - Traveler: `/`, `/search`, `/activity/:id`, `/circuit-planner`, `/checkout`, `/circuit-checkout/:id`, `/my-bookings`, `/my-reviews`.
   - Supplier: `/supplier/dashboard`, `/supplier/listings`, `/supplier/builder`, `/supplier/transfer-builder`, `/supplier/bookings`, `/supplier/coverage`.
   - Operations: `/ops/live-trip-board`, `/ops/circuits`, `/ops/notifications`, `/ops/support`.
   - Admin: `/admin/overview`, `/admin/suppliers`, `/admin/products`, `/admin/coverage`, `/admin/finance`, `/admin/quality`, `/admin/analytics`.

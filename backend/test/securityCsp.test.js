@@ -24,6 +24,15 @@ test("buildCspDirectives constructs allowed directives for third-party integrati
   assert.ok(directives.objectSrc.includes("'none'"));
 });
 
+test("CSP lets the Meta Pixel and Google Ads tags from Tag Manager load and report", () => {
+  const directives = buildCspDirectives({ NODE_ENV: "production" });
+  assert.ok(directives.scriptSrc.includes("https://connect.facebook.net"));
+  assert.ok(directives.connectSrc.includes("https://www.facebook.com"));
+  assert.ok(directives.scriptSrc.includes("https://www.googleadservices.com"));
+  assert.ok(directives.connectSrc.includes("https://googleads.g.doubleclick.net"));
+  assert.ok(directives.frameSrc.includes("https://td.doubleclick.net"));
+});
+
 test("security.txt route serves RFC 9116 content", () => {
   const headers = {};
   let body = "";

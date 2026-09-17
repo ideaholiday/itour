@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import TicketCard from "../components/TicketCard.jsx";
 import SeoHead from "../components/SeoHead.jsx";
+import { displayCity } from "../../../shared/activitySeo.js";
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import {
@@ -493,12 +494,19 @@ export default function Search() {
     ? `Book top-rated tours, day sightseeing, water sports, and airport cabs in ${destination} with verified local operators on Idea Holiday.`
     : "Discover and book curated day tours, activities, transfers and multi-day packages across India with transparent pricing and instant booking.";
 
+  // Matches the server (searchPage in routes/seo.js): a city alone is a landing
+  // page; keyword searches and filtered views stay out of search results.
+  const activeParams = [...params.keys()].filter((key) => params.get(key));
+  const searchNoindex = activeParams.length > 0 && !(destination && activeParams.length === 1);
+  const searchCanonical = `https://ideaholiday.in/search${destination ? `?destination=${encodeURIComponent(displayCity(destination))}` : ""}`;
+
   return (
     <div className="min-h-screen bg-[#FAF9F6] dark:bg-stone-950 text-stone-900 dark:text-stone-100">
       <SeoHead
         title={searchTitle}
         description={searchDesc}
-        canonical={`https://ideaholiday.in/search${params.toString() ? `?${params.toString()}` : ""}`}
+        canonical={searchCanonical}
+        noindex={searchNoindex}
       />
 
       {/* ── Sticky Search & Control Bar ── */}

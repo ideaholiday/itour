@@ -51,7 +51,7 @@ marketplace treats every product identically regardless of origin.
 
 | Role | Works in | Does |
 | :--- | :--- | :--- |
-| **Traveler** (`TRAVELER`) | `/`, `/search`, `/activity/:id`, `/checkout`, `/circuit-planner`, `/my-trips` | Search, hold seats for 10 minutes, pay, receive a QR voucher, cancel, review |
+| **Traveler** (`TRAVELER`) | `/`, `/search`, `/activity/:id`, `/checkout`, `/circuit-planner`, `/my-bookings` | Search, hold seats for 10 minutes, pay, receive a QR voucher, cancel, review |
 | **Supplier** (`SUPPLIER`) | `/supplier/*` | KYB, coverage zones, publish listings, seats, rates, calendar, driver roster |
 | **Ground ops** (`STAFF`) | `/ops/*` | Dispatch fallbacks, OTP resets, SLA timeouts, notification audits |
 | **Admin** (`ADMIN`) | `/admin/*` | KYB approval, product moderation, commission, finance, analytics |

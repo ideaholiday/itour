@@ -116,7 +116,8 @@ import notificationWebhooksRouter from "./routes/notificationWebhooks.js";
 import supportRouter from "./routes/support.js";
 import reviewsRouter from "./routes/reviews.js";
 import analyticsRouter from "./routes/analytics.js";
-import seoRouter from "./routes/seo.js";
+import seoRouter, { indexTemplate, notFoundPage } from "./routes/seo.js";
+import { isKnownSpaPath } from "../../shared/spaRoutes.js";
 import { driverAppAssetLinks } from "./lib/androidAppLinks.js";
 import publicSuppliersRouter from "./routes/publicSuppliers.js";
 import { goRouter, shareRouter } from "./routes/shareKit.js";
@@ -143,6 +144,12 @@ import { blockPublicKybUploads } from "./services/kybFileService.js";
 
 const app = express();
 app.use(requestContext);
+// www.ideaholiday.in (typed from an Instagram bio or a printed card) lands on the one canonical domain.
+app.use((req, res, next) => {
+  const host = String(req.headers.host || "").toLowerCase();
+  if (!host.startsWith("www.")) return next();
+  return res.redirect(308, `https://${host.slice(4).replace(/:\d+$/, "")}${req.originalUrl}`);
+});
 app.use(stableErrorResponses);
 configureSecurity(app);
 app.use(express.json({
@@ -234,6 +241,13 @@ mountApiRoutes("/api");
 mountApiRoutes("/api/v1");
 app.use("/octo", octoRouter);
 
+// The supplier and admin portals serve the same app as the marketplace; only
+// ideaholiday.in itself belongs in search results.
+app.use((req, res, next) => {
+  if (/^(supply|admin)\./i.test(req.hostname || "")) res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  next();
+});
+
 app.use("/", securityTxtRouter);
 app.use("/", seoRouter);
 app.use("/", goRouter);
@@ -243,13 +257,10 @@ app.get(["/api/health", "/api/v1/health"], (req, res) =>
     ok: true,
     service: "idea-holiday-api",
     timestamp: new Date().toISOString(),
-    supabaseUrl: process.env.SUPABASE_URL || "https://jidknptoyloucgldaool.supabase.co",
-    supabaseConnected: Boolean(process.env.SUPABASE_ANON_KEY),
+    // Public: say what deploy checks need, not where the database lives.
     database: {
       engine: databaseInfo.engine,
       persistent: databaseInfo.persistent,
-      journalMode: databaseInfo.journalMode,
-      schema: databaseInfo.schema || null,
     },
     features: ["transfers", "sightseeing", "multi_day_packages", "4_role_ecosystem"]
   })
@@ -269,6 +280,15 @@ app.use(express.static(frontendDist));
 
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api")) return next();
+  // A path the React app has no page for still gets the app (it shows "not
+  // found"), but with a 404 status and noindex so Google drops it.
+  if (!isKnownSpaPath(req.path)) {
+    const template = indexTemplate();
+    if (template) {
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(404).type("html").send(notFoundPage(template, req.path).html);
+    }
+  }
   res.sendFile(path.join(frontendDist, "index.html"), (err) => {
     if (err) res.status(404).send("Idea Holiday API Backend running. Frontend dist not built yet.");
   });

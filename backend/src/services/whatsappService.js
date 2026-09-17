@@ -148,7 +148,7 @@ export async function sendWhatsAppVoucher({
 }, options) {
   const mapsLink = pickupLat && pickupLng
     ? `https://maps.google.com/?q=${pickupLat},${pickupLng}`
-    : pickupLocation ? `https://maps.google.com/?q=${encodeURIComponent(pickupLocation)}` : "https://ideaholiday.in/my-trips";
+    : pickupLocation ? `https://maps.google.com/?q=${encodeURIComponent(pickupLocation)}` : "https://ideaholiday.in/my-bookings";
   const messageBody = `Idea Holiday booking ${bookingRef}\n\nHello ${customerName || "Traveler"}, your trip is confirmed.\nDriver: ${driverName || "To be assigned"}\nDriver phone: ${driverPhone || "To be shared"}\nVehicle: ${vehicleModel || "AC commercial vehicle"} (${vehicleNumber || "TBA"})\nPickup: ${pickupTime || "Time to be confirmed"}, ${pickupLocation || "Location to be confirmed"}\nMap: ${mapsLink}\n\nYour private pickup OTP is available in My Trips. Share it only after checking the driver and number plate.`;
   return sendWhatsAppMessage({
     to: customerPhone,

@@ -6,6 +6,7 @@ import db from "../db.js";
 import logger from "../config/logger.js";
 import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { activityPath } from "../../../shared/activityUrl.js";
+import { activitySeo, displayCity } from "../../../shared/activitySeo.js";
 import {
   findDirectoryCity, isProfileVisible, profilePath, publicSupplierView, resolveProfileSlug, sitemapSupplierEntries,
 } from "../services/supplierProfileService.js";
@@ -27,7 +28,8 @@ router.get(["/activity/:id", "/activity/:slug/:id"], (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-export function generateSitemapXml(products = [], baseUrl = BASE_URL) {
+/** Products and cities with something bookable today (see liveProductSql). */
+export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = []) {
   const staticUrls = [
     { loc: `${baseUrl}/`, priority: "1.0", changefreq: "daily" },
     { loc: `${baseUrl}/transfers`, priority: "0.9", changefreq: "daily" },
@@ -37,24 +39,22 @@ export function generateSitemapXml(products = [], baseUrl = BASE_URL) {
     { loc: `${baseUrl}/contact-us`, priority: "0.6", changefreq: "monthly" },
     { loc: `${baseUrl}/terms`, priority: "0.5", changefreq: "monthly" },
     { loc: `${baseUrl}/cancellation`, priority: "0.5", changefreq: "monthly" },
+    { loc: `${baseUrl}/privacy-policy`, priority: "0.5", changefreq: "monthly" },
   ];
 
-  const popularDestinations = ["Goa", "Jaipur", "Agra", "Delhi", "Kerala", "Varanasi", "Rishikesh", "Manali", "Udaipur", "Mumbai"];
-  const destinationUrls = popularDestinations.map((city) => ({
-    loc: `${baseUrl}/search?q=${encodeURIComponent(city)}`,
+  const destinationUrls = (cities || []).map((city) => ({
+    loc: `${baseUrl}${citySearchPath(city.name)}`,
     priority: "0.8",
     changefreq: "weekly",
   }));
 
-  const productUrls = (products || []).map((p) => {
-    const lastMod = p.updated_at ? new Date(p.updated_at).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
-    return {
-      loc: `${baseUrl}${activityPath(p)}`,
-      lastmod: lastMod,
-      priority: "0.85",
-      changefreq: "weekly",
-    };
-  });
+  // No <lastmod>: products carry no edit time, and a guessed date teaches
+  // Google to ignore the field for the whole site.
+  const productUrls = (products || []).map((p) => ({
+    loc: `${baseUrl}${activityPath(p)}`,
+    priority: "0.85",
+    changefreq: "weekly",
+  }));
 
   const allUrls = [...staticUrls, ...destinationUrls, ...productUrls];
 
@@ -63,10 +63,7 @@ export function generateSitemapXml(products = [], baseUrl = BASE_URL) {
 
   allUrls.forEach((entry) => {
     xml += `  <url>\n`;
-    xml += `    <loc>${entry.loc}</loc>\n`;
-    if (entry.lastmod) {
-      xml += `    <lastmod>${entry.lastmod}</lastmod>\n`;
-    }
+    xml += `    <loc>${xmlEscape(entry.loc)}</loc>\n`;
     if (entry.changefreq) {
       xml += `    <changefreq>${entry.changefreq}</changefreq>\n`;
     }
@@ -91,6 +88,10 @@ Disallow: /supplier/dashboard
 Disallow: /supplier/bookings
 Disallow: /checkout
 Disallow: /checkout/*
+Disallow: /circuit-checkout/
+Disallow: /booking-confirmed/
+Disallow: /driver/
+Disallow: /track/
 
 Sitemap: ${baseUrl}/sitemap.xml
 Sitemap: ${baseUrl}/sitemap-suppliers.xml
@@ -285,8 +286,134 @@ export function supplierDirectoryPage(database, citySlug, template, baseUrl = BA
   };
 }
 
+// ── Activities, city search pages and 404s ────────────────────
+
+/** SQL condition: a product travelers can see and book right now (same rule as GET /api/activities/:id). */
+export function liveProductSql(alias = "p") {
+  return `${alias}.status = 'PUBLISHED' AND COALESCE(${alias}.is_published, 1) = 1 AND ${approvedSupplierSql(alias)}`;
+}
+
+export function citySearchPath(city) {
+  return `/search?destination=${encodeURIComponent(city)}`;
+}
+
+/** Cities with at least one live product, named the way most of their listings spell them. */
+export function liveCities(database) {
+  const rows = database.prepare(`
+    SELECT TRIM(p.city) AS city, COUNT(*) AS products FROM products p
+    WHERE ${liveProductSql("p")} AND TRIM(COALESCE(p.city, '')) <> ''
+    GROUP BY TRIM(p.city)
+  `).all();
+  const byKey = new Map();
+  for (const row of rows) {
+    const name = displayCity(row.city);
+    const key = name.toLowerCase();
+    const entry = byKey.get(key) || { name, products: 0, best: 0 };
+    entry.products += Number(row.products);
+    if (Number(row.products) > entry.best) Object.assign(entry, { name, best: Number(row.products) });
+    byKey.set(key, entry);
+  }
+  return [...byKey.values()].map(({ name, products }) => ({ name, products })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const notFoundSeo = (baseUrl, pathName, title = "Page not found | Idea Holiday") => ({
+  title,
+  description: "This page is not available on Idea Holiday.",
+  canonical: `${baseUrl}${pathName}`,
+  robots: "noindex, follow",
+});
+
+function parseImages(row) {
+  let images = [];
+  try {
+    const parsed = JSON.parse(row.images || "[]");
+    if (Array.isArray(parsed)) images = parsed.filter((url) => typeof url === "string");
+  } catch {
+    // Legacy rows may hold a bare URL.
+    if (typeof row.images === "string") images = [row.images];
+  }
+  return images.length ? images : [row.hero_image].filter(Boolean);
+}
+
+/** What /activity/:slug/:id answers before the SPA loads: its own head tags, or a noindex 404. */
+export function activityPage(database, id, template, baseUrl = BASE_URL) {
+  const row = database.prepare(`
+    SELECT p.id, p.title, p.city, p.category, p.product_type, p.short_desc, p.price_inr, p.hero_image, p.images
+    FROM products p WHERE p.id = ? AND ${liveProductSql("p")}
+  `).get(id);
+  if (!row) {
+    return { status: 404, html: renderSeoHtml(template, notFoundSeo(baseUrl, `/activity/${encodeURIComponent(id)}`, "Experience not available | Idea Holiday")) };
+  }
+  let quality = null;
+  try {
+    quality = database.prepare("SELECT review_count, average_rating FROM quality_scores WHERE entity_type = 'PRODUCT' AND entity_id = ?").get(row.id);
+  } catch {
+    quality = null;
+  }
+  const seo = activitySeo({
+    id: row.id,
+    title: row.title,
+    city: row.city,
+    category: row.category,
+    shortDesc: row.short_desc,
+    priceInr: row.price_inr,
+    images: parseImages(row),
+    rating: quality?.review_count ? quality.average_rating : null,
+    reviewCount: quality?.review_count || 0,
+  }, { baseUrl, isPackage: String(row.product_type || "").toUpperCase() === "PACKAGE" });
+  return { status: 200, html: renderSeoHtml(template, seo) };
+}
+
+/**
+ * /search head tags. A city page (?destination= alone) is indexable when that
+ * city has live products; keyword searches and filtered views are noindex so
+ * Google doesn't fill up with near-duplicate result pages.
+ */
+export function searchPage(database, query, template, baseUrl = BASE_URL) {
+  const keys = Object.keys(query || {}).filter((key) => String(query[key] ?? "").trim() !== "");
+  const destination = String(query?.destination || "").trim();
+  if (!keys.length) {
+    return {
+      status: 200,
+      html: renderSeoHtml(template, {
+        title: "Explore Tours & Travel Experiences Across India | Idea Holiday",
+        description: "Discover and book curated day tours, activities, transfers and multi-day packages across India with transparent pricing.",
+        canonical: `${baseUrl}/search`,
+      }),
+    };
+  }
+  if (destination && keys.length === 1) {
+    const city = liveCities(database).find((entry) => entry.name.toLowerCase() === displayCity(destination).toLowerCase());
+    const name = city?.name || displayCity(destination);
+    const canonicalPath = citySearchPath(name);
+    return {
+      status: 200,
+      html: renderSeoHtml(template, {
+        title: `${name} Tours, Cabs & Experiences | Idea Holiday`,
+        description: `Book tours, day sightseeing, activities and airport cabs in ${name} from local operators on Idea Holiday.`,
+        canonical: `${baseUrl}${canonicalPath}`,
+        robots: city ? "index, follow" : "noindex, follow",
+      }),
+    };
+  }
+  return {
+    status: 200,
+    html: renderSeoHtml(template, {
+      title: "Search results | Idea Holiday",
+      description: "Tours, activities, transfers and packages on Idea Holiday.",
+      canonical: destination ? `${baseUrl}${citySearchPath(displayCity(destination))}` : `${baseUrl}/search`,
+      robots: "noindex, follow",
+    }),
+  };
+}
+
+/** The SPA shell with a 404 status for a path the React app has no page for. */
+export function notFoundPage(template, pathName, baseUrl = BASE_URL) {
+  return { status: 404, html: renderSeoHtml(template, notFoundSeo(baseUrl, pathName)) };
+}
+
 let cachedTemplate = null;
-function indexTemplate() {
+export function indexTemplate() {
   if (cachedTemplate && process.env.NODE_ENV === "production") return cachedTemplate;
   try {
     cachedTemplate = fs.readFileSync(INDEX_TEMPLATE_PATH, "utf8");
@@ -302,6 +429,31 @@ function sendPage(res, page) {
   res.setHeader("Cache-Control", page.status === 200 ? "public, max-age=60, stale-while-revalidate=300" : "no-store");
   return res.status(page.status).type("html").send(page.html);
 }
+
+router.get(["/activity/:id", "/activity/:slug/:id"], (req, res, next) => {
+  const template = indexTemplate();
+  if (!template) return next();
+  try {
+    return sendPage(res, activityPage(db, req.params.id, template, BASE_URL));
+  } catch (error) {
+    logger.error("Activity page render failed", { requestId: req.requestId, error });
+    return next();
+  }
+});
+
+// Short link people type or print; the policy lives at one canonical address.
+router.get("/privacy", (_req, res) => res.redirect(301, "/privacy-policy"));
+
+router.get("/search", (req, res, next) => {
+  const template = indexTemplate();
+  if (!template) return next();
+  try {
+    return sendPage(res, searchPage(db, req.query, template, BASE_URL));
+  } catch (error) {
+    logger.error("Search page render failed", { requestId: req.requestId, error });
+    return next();
+  }
+});
 
 router.get("/suppliers/in/:citySlug", (req, res, next) => {
   const template = indexTemplate();
@@ -350,16 +502,19 @@ router.get("/sitemap-suppliers.xml", (req, res) => {
 router.get("/sitemap.xml", (req, res) => {
   try {
     let products = [];
+    let cities = [];
     try {
       products = db
-        .prepare(`SELECT id, title, created_at as updated_at, category, city as destination_name FROM products WHERE is_published = 1 AND ${approvedSupplierSql("products")} ORDER BY id DESC`)
+        .prepare(`SELECT p.id, p.title FROM products p WHERE ${liveProductSql("p")} ORDER BY p.id DESC`)
         .all() || [];
+      cities = liveCities(db);
     } catch (dbErr) {
       logger.warn("Sitemap database fallback failed", { requestId: req.requestId, error: dbErr });
       products = [];
+      cities = [];
     }
 
-    const xml = generateSitemapXml(products, BASE_URL);
+    const xml = generateSitemapXml(products, BASE_URL, cities);
     res.header("Content-Type", "application/xml");
     res.send(xml);
   } catch (err) {
