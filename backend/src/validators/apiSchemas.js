@@ -69,8 +69,20 @@ export const referralSchemas = {
     channel: z.enum(["WHATSAPP", "QR", "REVIEW", "VOUCHER", "COPY", "CODE", "OTHER", "whatsapp", "qr", "review", "voucher", "copy", "code", "other"]).optional().nullable(),
     landingPath: optionalText(300),
   }),
-  review: object({ decision: z.enum(["APPROVE", "REJECT"]), note: optionalText(1_000) }),
-  relationship: object({ status: z.enum(["ACTIVE", "BLOCKED"]), reason: optionalText(500) }),
+  // Taking money away or overriding an abuse check needs a written why.
+  review: object({ decision: z.enum(["APPROVE", "REJECT"]), note: optionalText(1_000) }).superRefine((value, ctx) => {
+    if (value.decision === "REJECT" && String(value.note || "").length < 3) ctx.addIssue({ code: "custom", path: ["note"], message: "Give a reason for rejecting this reward" });
+  }),
+  relationship: object({ status: z.enum(["ACTIVE", "BLOCKED"]), reason: optionalText(500) }).superRefine((value, ctx) => {
+    if (String(value.reason || "").length < 3) ctx.addIssue({ code: "custom", path: ["reason"], message: value.status === "ACTIVE" ? "Give a reason for reopening this referral" : "Give a reason for blocking this referral" });
+  }),
+};
+
+export const affiliateAdminSchemas = {
+  status: object({ status: z.enum(["ACTIVE", "SUSPENDED", "REJECTED", "PENDING"]), reason: optionalText(500) }).superRefine((value, ctx) => {
+    if (value.status !== "ACTIVE" && String(value.reason || "").length < 3) ctx.addIssue({ code: "custom", path: ["reason"], message: "Give a reason; the creator's code stops working" });
+  }),
+  kyc: object({ kyc_status: z.enum(["VERIFIED", "REJECTED", "PENDING_REVIEW"]), reason: text(3, 500) }),
 };
 
 export const bookingSchemas = {

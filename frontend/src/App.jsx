@@ -176,6 +176,7 @@ function AppContent() {
             <Route path="/ops/support" element={<OpsPanel view="support" />} />
             <Route path="/ops/tasks" element={<OpsPanel view="tasks" />} />
             <Route path="/ops/circuits" element={<OpsPanel view="circuits" />} />
+            <Route path="/ops/referrals" element={<OpsPanel view="referrals" />} />
             <Route path="/activity/:id" element={<ActivityDetail />} />
             <Route path="/activity/:slug/:id" element={<ActivityDetail />} />
             <Route path="/checkout/:id" element={<Checkout />} />

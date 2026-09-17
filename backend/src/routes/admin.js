@@ -99,10 +99,11 @@ router.get("/metrics", optionalAuthMiddleware, requireAdminAccess, (req, res) =>
     const coveredCities = db.prepare("SELECT COUNT(DISTINCT city) as count FROM geo_fences WHERE (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").get().count;
     const pendingCoverage = db.prepare("SELECT COUNT(*) as count FROM geo_fences WHERE approval_status = 'PENDING_REVIEW'").get().count;
 
-    const gmvResult = db.prepare("SELECT SUM(amount_inr) as sum FROM bookings WHERE LOWER(status) != 'cancelled'").get();
+    // Same definition as Analytics: an unpaid checkout is not revenue.
+    const gmvResult = db.prepare("SELECT SUM(amount_inr) as sum FROM bookings WHERE LOWER(status) NOT IN ('cancelled', 'pending_payment')").get();
     const grossRevenue = gmvResult ? gmvResult.sum || 0 : 0;
 
-    const commResult = db.prepare("SELECT SUM(commission_amount) as sum FROM bookings WHERE LOWER(status) != 'cancelled'").get();
+    const commResult = db.prepare("SELECT SUM(commission_amount) as sum FROM bookings WHERE LOWER(status) NOT IN ('cancelled', 'pending_payment')").get();
     const totalCommission = commResult ? commResult.sum || 0 : 0;
 
     const pendingPayoutResult = db.prepare("SELECT SUM(net_payout) as sum FROM payouts WHERE payout_status = 'SCHEDULED'").get();
@@ -117,6 +118,14 @@ router.get("/metrics", optionalAuthMiddleware, requireAdminAccess, (req, res) =>
         "SELECT COUNT(*) AS count FROM affiliate_payouts WHERE status IN ('REQUESTED', 'PROCESSING')"
       ).get()?.count || 0;
     } catch { /* Table arrives with migration 027; the badge simply stays empty until then. */ }
+
+    // Work waiting on a person, for the Travel & Earn and Verified checks badges.
+    let heldReferralRewards = 0;
+    let pendingVerificationChecks = 0;
+    try {
+      heldReferralRewards = db.prepare("SELECT COUNT(*) AS count FROM referral_rewards WHERE status = 'HELD_FOR_REVIEW'").get()?.count || 0;
+      pendingVerificationChecks = db.prepare("SELECT COUNT(*) AS count FROM supplier_verifications WHERE status = 'PENDING_CHECKS' AND source = 'PURCHASE'").get()?.count || 0;
+    } catch { /* Tables arrive with later migrations; the badges stay empty until then. */ }
 
     res.json({
       success: true,
@@ -138,7 +147,9 @@ router.get("/metrics", optionalAuthMiddleware, requireAdminAccess, (req, res) =>
         totalCommission,
         pendingPayouts,
         totalPayoutsProcessed,
-        pendingAffiliatePayouts
+        pendingAffiliatePayouts,
+        heldReferralRewards,
+        pendingVerificationChecks
       }
     });
   } catch (err) {

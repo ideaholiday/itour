@@ -262,7 +262,7 @@ exists to stop a specific way the money goes wrong.
    can see which post actually sold rather than only that "something" did.
 6. **No self-referral.** A booking whose traveler is the creator themselves is
    refused. It is self-dealing, not a referral.
-7. **Suspended creators earn nothing.** Attribution requires `status = 'ACTIVE'`.
+7. **Suspended creators earn nothing; their code stops.** Needs `status = 'ACTIVE'`.
 
 ### 10.2 Commission and tiers
 1. **The rate is the creator's own admin-set rate, else their tier's**, resolved at
@@ -305,7 +305,7 @@ exists to stop a specific way the money goes wrong.
 5. **Accounts are archived, never deleted**, because past payouts point at them.
    An account with a payout in flight cannot be removed at all.
 6. **A manual KYC approval attests to the PAN only.** It cannot mark a bank
-   account verified — only the bank can.
+   account verified — only the bank can. Needs a PAN on file.
 
 ### 10.5 Payouts and tax
 1. **Minimum withdrawal is ₹1,000**, and never more than the withdrawable

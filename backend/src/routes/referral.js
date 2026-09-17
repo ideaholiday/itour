@@ -6,6 +6,7 @@ import { authenticate, optionalAuthMiddleware, requireRoles } from "../middlewar
 import { createRateLimiter } from "../middleware/security.js";
 import { validateBody } from "../middleware/validation.js";
 import { referralSchemas } from "../validators/apiSchemas.js";
+import { recordAuditEvent } from "../services/auditService.js";
 import {
   buildReferralLink,
   findReferrerByCode,
@@ -103,6 +104,7 @@ router.post("/admin/rewards/:id/review", ...adminOnly, validateBody(referralSche
       note: req.body.note || null,
       actorId: req.user.id,
     });
+    auditReferralDecision(req, "REFERRAL_REWARD_REVIEWED", "REFERRAL_REWARD", { nextStatus: reward.status, reason: req.body.note || null, amount: reward.referrer_amount_inr });
     res.json({ success: true, reward });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
@@ -112,16 +114,34 @@ router.post("/admin/rewards/:id/review", ...adminOnly, validateBody(referralSche
 /** PATCH /api/referral/admin/relationships/:id  { status: ACTIVE | BLOCKED, reason } */
 router.patch("/admin/relationships/:id", ...adminOnly, validateBody(referralSchemas.relationship), (req, res) => {
   try {
+    const previous = db.prepare("SELECT status, blocked_reason FROM referral_relationships WHERE id = ?").get(req.params.id);
     const relationship = setReferralRelationshipStatus(db, {
       relationshipId: req.params.id,
       status: req.body.status,
       reason: req.body.reason || null,
       clearReview: req.body.status === "ACTIVE",
     });
+    // Reopening clears blocked_reason on the row, so the audit entry keeps what the block was for.
+    auditReferralDecision(req, "REFERRAL_RELATIONSHIP_STATUS_CHANGED", "REFERRAL_RELATIONSHIP", {
+      previousStatus: previous?.blocked_reason ? `${previous.status}: ${previous.blocked_reason}` : previous?.status,
+      nextStatus: relationship.status,
+      reason: req.body.reason,
+    });
     res.json({ success: true, relationship });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
 });
+
+function auditReferralDecision(req, action, resourceType, metadata) {
+  try {
+    recordAuditEvent(db, {
+      action, actor: req.user, resourceType, resourceId: req.params.id, requestId: req.requestId,
+      ipAddress: req.ip, userAgent: req.headers["user-agent"], metadata,
+    });
+  } catch (error) {
+    logger.error("Referral decision could not be audited", { requestId: req.requestId, error: error.message });
+  }
+}
 
 export default router;

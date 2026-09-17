@@ -8,7 +8,13 @@ import {
   computeBalances,
   refreshAffiliateTier,
   redactAffiliate,
+  setAffiliateStatus,
+  decideAffiliateKyc,
+  getAffiliateAdminDetail,
 } from "../services/affiliateService.js";
+import { recordAuditEvent } from "../services/auditService.js";
+import { validateBody } from "../middleware/validation.js";
+import { affiliateAdminSchemas } from "../validators/apiSchemas.js";
 import logger from "../config/logger.js";
 import {
   listAffiliateRateChanges, listAffiliateTiers, sendAffiliateRateNotices, setAffiliateRates, updateAffiliateTier,
@@ -97,52 +103,61 @@ router.get("/", (req, res) => {
 });
 
 /**
- * PATCH /api/admin/affiliates/:id/status
- * Update account status (ACTIVE, SUSPENDED, REJECTED)
+ * PATCH /api/admin/affiliates/:id/status  { status, reason }
+ * Anything but ACTIVE needs a reason, and switches the creator's coupon off.
  */
-router.patch("/:id/status", (req, res) => {
+router.patch("/:id/status", validateBody(affiliateAdminSchemas.status), (req, res) => {
   try {
-    const { status } = req.body;
-    if (!["ACTIVE", "SUSPENDED", "REJECTED", "PENDING"].includes(status)) {
-      return res.status(400).json({ error: "Invalid status value" });
-    }
-
-    db.prepare("UPDATE affiliates SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, req.params.id);
-    const updated = db.prepare("SELECT * FROM affiliates WHERE id = ?").get(req.params.id);
-    return res.json({ success: true, affiliate: redactAffiliate(updated) });
+    const { status, reason } = req.body;
+    const result = setAffiliateStatus(db, req.params.id, { status });
+    auditCreatorDecision(req, "AFFILIATE_STATUS_CHANGED", { previousStatus: result.previousStatus, nextStatus: status, reason });
+    return res.json({ success: true, affiliate: result.affiliate });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "Failed to update affiliate status" });
+    return decisionFailure(res, req, err, "Failed to update affiliate status");
   }
 });
 
 /**
- * PATCH /api/admin/affiliates/:id/kyc
- * Manually approve or reject KYC
+ * PATCH /api/admin/affiliates/:id/kyc  { kyc_status, reason }
+ * Manual PAN decision. VERIFIED needs a PAN on file; bank accounts are never
+ * vouched for here, only by the penny drop.
  */
-router.patch("/:id/kyc", (req, res) => {
+router.patch("/:id/kyc", validateBody(affiliateAdminSchemas.kyc), (req, res) => {
   try {
-    const { kyc_status } = req.body;
-    if (!["VERIFIED", "REJECTED", "PENDING_REVIEW"].includes(kyc_status)) {
-      return res.status(400).json({ error: "Invalid KYC status" });
-    }
-
-    // A manual approval attests to the PAN. It cannot vouch for a bank account
-    // the bank itself has not confirmed, so account verification stays where it
-    // is — set per account by the penny drop.
-    const panVerified = kyc_status === "VERIFIED" ? 1 : 0;
-
-    db.prepare(`
-      UPDATE affiliates
-      SET kyc_status = ?, pan_verified = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(kyc_status, panVerified, req.params.id);
-
-    const updated = db.prepare("SELECT * FROM affiliates WHERE id = ?").get(req.params.id);
-    return res.json({ success: true, affiliate: redactAffiliate(updated) });
+    const { kyc_status: kycStatus, reason } = req.body;
+    const result = decideAffiliateKyc(db, req.params.id, { kycStatus });
+    auditCreatorDecision(req, "AFFILIATE_KYC_DECIDED", { previousStatus: result.previousStatus, nextStatus: kycStatus, reason });
+    return res.json({ success: true, affiliate: result.affiliate });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "Failed to update affiliate KYC" });
+    return decisionFailure(res, req, err, "Failed to update affiliate KYC");
   }
 });
+
+/** GET /api/admin/affiliates/:id/detail — balances, masked accounts, recent referrals, campaigns. */
+router.get("/:id/detail", (req, res) => {
+  try {
+    return res.json({ success: true, ...getAffiliateAdminDetail(db, req.params.id) });
+  } catch (err) {
+    return decisionFailure(res, req, err, "Failed to load the creator");
+  }
+});
+
+function auditCreatorDecision(req, action, metadata) {
+  try {
+    recordAuditEvent(db, {
+      action, actor: req.user, resourceType: "AFFILIATE", resourceId: req.params.id, requestId: req.requestId,
+      ipAddress: req.ip, userAgent: req.headers["user-agent"], metadata,
+    });
+  } catch (error) {
+    logger.error("Creator decision could not be audited", { requestId: req.requestId, error });
+  }
+}
+
+function decisionFailure(res, req, err, fallback) {
+  if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message, code: err.code });
+  logger.error(fallback, { requestId: req.requestId, error: err });
+  return res.status(500).json({ error: fallback });
+}
 
 /**
  * GET /api/admin/affiliates/payouts

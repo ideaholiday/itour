@@ -29,9 +29,10 @@ export const DEFAULT_ATTRIBUTION_WINDOW_DAYS = 30;
  */
 export const PAYOUT_ACCOUNT_COOLING_HOURS = 24;
 
-function affiliateError(message, status = 400) {
+function affiliateError(message, status = 400, code = undefined) {
   const error = new Error(message);
   error.status = status;
+  if (code) error.code = code;
   return error;
 }
 
@@ -1326,12 +1327,15 @@ export function settlePayout(database = db, payoutId, { utrReference, actorId = 
   const tds = round2(payout.tds_amount_inr);
 
   database.transaction(() => {
-    database.prepare(`
+    // Conditional on the status just read, so two admins (or a double click on
+    // two API instances) cannot both settle and move the money twice.
+    const taken = database.prepare(`
       UPDATE affiliate_payouts
       SET status = 'PAID', utr_reference = ?, provider = ?, provider_ref = ?,
           processed_at = datetime('now'), processed_by = ?
-      WHERE id = ?
+      WHERE id = ? AND status NOT IN ('PAID', 'REJECTED')
     `).run(reference, provider, providerRef, actorId, payout.id);
+    if (!taken.changes) throw affiliateError("This payout was already settled or rejected", 409);
 
     database.prepare(`
       UPDATE affiliates
@@ -1392,12 +1396,13 @@ export function rejectPayout(database = db, payoutId, { reason, actorId = null }
   const gross = round2(payout.gross_amount_inr ?? payout.amount_inr);
 
   database.transaction(() => {
-    database.prepare(`
+    const taken = database.prepare(`
       UPDATE affiliate_payouts
       SET status = 'REJECTED', rejection_reason = ?, failure_reason = ?,
           processed_at = datetime('now'), processed_by = ?
-      WHERE id = ?
+      WHERE id = ? AND status NOT IN ('PAID', 'REJECTED')
     `).run(cleanReason, cleanReason, actorId, payout.id);
+    if (!taken.changes) throw affiliateError("This payout was already settled or rejected", 409);
 
     database.prepare(`
       UPDATE affiliates
@@ -1416,6 +1421,81 @@ export function rejectPayout(database = db, payoutId, { reason, actorId = null }
   })();
 
   return database.prepare("SELECT * FROM affiliate_payouts WHERE id = ?").get(payout.id);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Admin decisions                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Suspend, reject or reactivate a creator. Their coupon follows: a creator who
+ * is not ACTIVE earns nothing, and without this their code kept working as an
+ * ordinary promo, still discounting bookings for their audience.
+ */
+export function setAffiliateStatus(database = db, affiliateId, { status }) {
+  const affiliate = database.prepare("SELECT * FROM affiliates WHERE id = ?").get(affiliateId);
+  if (!affiliate) throw affiliateError("Creator not found", 404);
+  database.transaction(() => {
+    database.prepare("UPDATE affiliates SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, affiliateId);
+    database.prepare("UPDATE promo_codes SET is_active = ? WHERE code = ?").run(status === "ACTIVE" ? 1 : 0, affiliate.affiliate_code);
+  })();
+  return {
+    previousStatus: affiliate.status,
+    affiliate: redactAffiliate(database.prepare("SELECT * FROM affiliates WHERE id = ?").get(affiliateId)),
+  };
+}
+
+/**
+ * A manual KYC decision attests to the PAN only (§10.4.6). VERIFIED needs a PAN
+ * on file: TDS is filed against it, so "verified" with nothing to verify would
+ * let a creator be paid with no taxpayer identified.
+ */
+export function decideAffiliateKyc(database = db, affiliateId, { kycStatus }) {
+  const affiliate = database.prepare("SELECT * FROM affiliates WHERE id = ?").get(affiliateId);
+  if (!affiliate) throw affiliateError("Creator not found", 404);
+  if (kycStatus === "VERIFIED" && !String(affiliate.pan_number || "").trim()) {
+    throw affiliateError("This creator has not submitted a PAN yet, so there is nothing to verify", 409, "PAN_MISSING");
+  }
+  database.prepare(`
+    UPDATE affiliates SET kyc_status = ?, pan_verified = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(kycStatus, kycStatus === "VERIFIED" ? 1 : 0, affiliateId);
+  return {
+    previousStatus: affiliate.kyc_status,
+    affiliate: redactAffiliate(database.prepare("SELECT * FROM affiliates WHERE id = ?").get(affiliateId)),
+  };
+}
+
+/**
+ * Everything an admin needs to answer "why can't this creator be paid?" and
+ * "is this creator real?": derived balances, masked payout accounts, recent
+ * referrals and which campaign labels sell.
+ */
+export function getAffiliateAdminDetail(database = db, affiliateId) {
+  const affiliate = database.prepare(`
+    SELECT a.*, u.name AS user_name, u.email AS user_email FROM affiliates a JOIN users u ON u.id = a.user_id WHERE a.id = ?
+  `).get(affiliateId);
+  if (!affiliate) throw affiliateError("Creator not found", 404);
+  const referrals = database.prepare(`
+    SELECT r.id, r.status, r.attribution_type, r.booking_amount_inr, r.commission_rate, r.earning_inr, r.sub_id,
+           r.payable_at, r.created_at, b.ref AS booking_ref, b.status AS booking_status, b.activity_date
+    FROM affiliate_referrals r LEFT JOIN bookings b ON b.id = r.booking_id
+    WHERE r.affiliate_id = ? ORDER BY r.created_at DESC LIMIT 50
+  `).all(affiliateId);
+  const campaigns = database.prepare(`
+    SELECT COALESCE(sub_id, '') AS sub_id, COUNT(*) AS bookings,
+           COALESCE(SUM(CASE WHEN status != 'CANCELLED' THEN earning_inr ELSE 0 END), 0) AS earning_inr
+    FROM affiliate_referrals WHERE affiliate_id = ? GROUP BY COALESCE(sub_id, '') ORDER BY bookings DESC LIMIT 10
+  `).all(affiliateId);
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ");
+  const clicks30d = Number(database.prepare("SELECT COUNT(*) AS count FROM affiliate_clicks WHERE affiliate_id = ? AND created_at >= ?").get(affiliateId, since)?.count || 0);
+  return {
+    affiliate: redactAffiliate(affiliate),
+    balances: computeBalances(database, affiliateId),
+    accounts: listPayoutAccounts(database, affiliateId, { includeArchived: true }),
+    referrals: referrals.map((row) => ({ ...row, earning_inr: round2(row.earning_inr), booking_amount_inr: round2(row.booking_amount_inr) })),
+    campaigns: campaigns.map((row) => ({ subId: row.sub_id || null, bookings: Number(row.bookings), earningInr: round2(row.earning_inr) })),
+    clicks30d,
+  };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -19,7 +19,8 @@ import {
   Headphones,
   Route,
   LogOut,
-  LayoutDashboard
+  LayoutDashboard,
+  Gift
 } from "lucide-react";
 
 export default function OpsLayout({ children }) {
@@ -38,6 +39,7 @@ export default function OpsLayout({ children }) {
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [isRealtimeActive, setIsRealtimeActive] = useState(true);
   const [openCriticalTaskCount, setOpenCriticalTaskCount] = useState(0);
+  const [heldReferralRewards, setHeldReferralRewards] = useState(0);
 
   const fetchOpsMetrics = async () => {
     try {
@@ -71,6 +73,15 @@ export default function OpsLayout({ children }) {
     // Realtime auto-poll interval every 5s
     const interval = setInterval(() => { fetchOpsMetrics(); fetchOpenCriticalTasks(); }, 5000);
     return () => clearInterval(interval);
+  }, [location.pathname]);
+
+  // Referral rewards waiting on a person. Checked on navigation, not every 5s:
+  // the review queue is heavier than the live-trip poll.
+  useEffect(() => {
+    fetch("/api/referral/admin/review", { headers: authHeaders() })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setHeldReferralRewards(data?.rewards?.length || 0))
+      .catch(() => {});
   }, [location.pathname]);
 
   const navItems = [
@@ -108,6 +119,13 @@ export default function OpsLayout({ children }) {
       icon: Layers,
       badge: openCriticalTaskCount > 0 ? `${openCriticalTaskCount} CRITICAL` : null,
       badgeColor: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse font-bold"
+    },
+    {
+      path: "/ops/referrals",
+      label: "Referral Reviews",
+      icon: Gift,
+      badge: heldReferralRewards > 0 ? `${heldReferralRewards} TO REVIEW` : null,
+      badgeColor: "bg-amber-100 text-amber-800 border-amber-300 font-bold"
     }
   ];
 

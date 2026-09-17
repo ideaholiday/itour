@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, RefreshCw, ShieldAlert, TrendingUp, Users } from "lucide-react";
 import { api } from "../../lib/api.js";
+import ReasonDialog from "../../components/admin/ReasonDialog.jsx";
 
 const money = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 const pct = (value) => `${Number(value || 0).toLocaleString("en-IN", { maximumFractionDigits: 1 })}%`;
@@ -22,7 +23,9 @@ const SIGNAL_LABELS = {
 export default function ReferralProgramView() {
   const [days, setDays] = useState(90);
   const [metrics, setMetrics] = useState(null);
-  const [queue, setQueue] = useState({ rewards: [], blockedRelationships: [], signals: [] });
+  const [queue, setQueue] = useState({ rewards: [], blockedRelationships: [], signals: [], topReferrers: [] });
+  const [dialog, setDialog] = useState(null);
+  const [expanded, setExpanded] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -44,29 +47,50 @@ export default function ReferralProgramView() {
     load();
   }, [load]);
 
-  const decide = async (rewardId, decision) => {
-    setActing(rewardId);
+  // Every decision goes through the reason dialog; rejecting, reopening and
+  // blocking need a written reason, which the API records in the audit log.
+  const askDecision = (reward, decision) => setDialog(decision === "APPROVE" ? {
+    kind: "reward", id: reward.id, decision,
+    title: `Approve ${money(reward.referrer_amount_inr)} for ${reward.referrer_name}?`,
+    message: "It was held because this referrer earned a lot quickly or brought many signups at once. Approve only if the friends look like real, separate travelers.",
+    confirmLabel: "Approve credit", requireReason: false,
+  } : {
+    kind: "reward", id: reward.id, decision, tone: "danger",
+    title: `Reject ${money(reward.referrer_amount_inr)} for ${reward.referrer_name}?`,
+    message: "No credit will be issued for this trip. This can't be undone.",
+    confirmLabel: "Reject reward", placeholder: "e.g. friend shares the referrer's address and card",
+  });
+
+  const askReopen = (relationship) => setDialog({
+    kind: "relationship", id: relationship.id, status: "ACTIVE",
+    title: `Reopen ${relationship.referrer_name} → ${relationship.friend_name}?`,
+    message: "The friend's future trips will earn credit for the referrer. Reopen only if they are genuinely different people, such as family sharing a phone.",
+    confirmLabel: "Reopen referral", placeholder: "e.g. spoke to both; mother and son sharing a phone",
+  });
+
+  const askBlock = (referrer, relationship) => setDialog({
+    kind: "relationship", id: relationship.id, status: "BLOCKED", tone: "danger",
+    title: `Block ${referrer.referrer_name} → ${relationship.friend_name}?`,
+    message: "Future trips by this friend stop earning for the referrer. Credit already cleared is not taken back.",
+    confirmLabel: "Block referral", placeholder: "e.g. same address and payment card as the referrer",
+  });
+
+  const confirmDialog = async (reason) => {
+    setActing(dialog.id);
     setError("");
     try {
-      await api.reviewReferralReward(rewardId, { decision });
-      setNotice(decision === "APPROVE" ? "Approved. The credit reaches the wallet on the next run, within 5 minutes." : "Rejected. No credit will be issued.");
+      if (dialog.kind === "reward") {
+        await api.reviewReferralReward(dialog.id, { decision: dialog.decision, ...(reason ? { note: reason } : {}) });
+        setNotice(dialog.decision === "APPROVE" ? "Approved. The credit reaches the wallet on the next run, within 5 minutes." : "Rejected. No credit will be issued.");
+      } else {
+        await api.setReferralRelationshipStatus(dialog.id, { status: dialog.status, reason });
+        setNotice(dialog.status === "ACTIVE" ? "Referral reopened. The friend's future trips will earn for the referrer." : "Referral blocked. The friend's future trips won't earn for the referrer.");
+      }
+      setDialog(null);
       load();
     } catch (err) {
       setError(err.message || "The decision couldn't be saved");
-    } finally {
-      setActing(null);
-    }
-  };
-
-  const reopen = async (relationshipId) => {
-    setActing(relationshipId);
-    setError("");
-    try {
-      await api.setReferralRelationshipStatus(relationshipId, { status: "ACTIVE" });
-      setNotice("Referral reopened. The friend's future trips will earn for the referrer.");
-      load();
-    } catch (err) {
-      setError(err.message || "The referral couldn't be reopened");
+      setDialog(null);
     } finally {
       setActing(null);
     }
@@ -160,8 +184,8 @@ export default function ReferralProgramView() {
                     <td className="py-2.5 pr-3 font-mono">{reward.booking_ref} · {money(reward.amount_inr)}</td>
                     <td className="py-2.5 pr-3 text-right font-mono font-bold">{money(reward.referrer_amount_inr)}</td>
                     <td className="py-2.5 text-right whitespace-nowrap">
-                      <button disabled={acting === reward.id} onClick={() => decide(reward.id, "APPROVE")} className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white disabled:opacity-50">Approve</button>
-                      <button disabled={acting === reward.id} onClick={() => decide(reward.id, "REJECT")} className="ml-2 rounded-lg border border-stone-300 px-3 py-1.5 font-bold text-stone-700 disabled:opacity-50">Reject</button>
+                      <button disabled={acting === reward.id} onClick={() => askDecision(reward, "APPROVE")} className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white disabled:opacity-50">Approve</button>
+                      <button disabled={acting === reward.id} onClick={() => askDecision(reward, "REJECT")} className="ml-2 rounded-lg border border-stone-300 px-3 py-1.5 font-bold text-stone-700 disabled:opacity-50">Reject</button>
                     </td>
                   </tr>
                 ))}
@@ -184,12 +208,82 @@ export default function ReferralProgramView() {
                   <strong>{relationship.referrer_name}</strong> referred <strong>{relationship.friend_name}</strong>
                   <span className="ml-2 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">{SIGNAL_LABELS[relationship.blocked_reason] || relationship.blocked_reason}</span>
                 </span>
-                <button disabled={acting === relationship.id} onClick={() => reopen(relationship.id)} className="rounded-lg border border-stone-300 px-3 py-1.5 font-bold text-stone-700 disabled:opacity-50">Reopen</button>
+                <button disabled={acting === relationship.id} onClick={() => askReopen(relationship)} className="rounded-lg border border-stone-300 px-3 py-1.5 font-bold text-stone-700 disabled:opacity-50">Reopen</button>
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      <section className="rounded-2xl border border-stone-200 bg-white p-5">
+        <h2 className="text-sm font-bold">Top referrers, last 90 days</h2>
+        <p className="mt-0.5 text-xs text-stone-500">Who brought in the most friends. Many friends with few trips, or several already blocked, is worth a closer look.</p>
+        {(queue.topReferrers || []).length === 0 ? (
+          <p className="mt-4 text-xs text-stone-500">No referrals in the last 90 days.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-xs">
+              <thead className="text-[10px] uppercase tracking-wider text-stone-500">
+                <tr><th className="py-2 pr-3">Referrer</th><th className="py-2 pr-3 text-right">Friends</th><th className="py-2 pr-3 text-right">Blocked</th><th className="py-2 pr-3 text-right">Rewarded trips</th><th className="py-2 pr-3 text-right">Credit</th><th className="py-2" /></tr>
+              </thead>
+              <tbody className="divide-y divide-stone-100">
+                {queue.topReferrers.map((referrer) => (
+                  <React.Fragment key={referrer.referrer_user_id}>
+                    <tr>
+                      <td className="py-2.5 pr-3"><span className="font-semibold">{referrer.referrer_name}</span><span className="block text-stone-500">{referrer.referrer_email}</span></td>
+                      <td className="py-2.5 pr-3 text-right font-mono">{referrer.friends}</td>
+                      <td className={`py-2.5 pr-3 text-right font-mono ${referrer.blocked_friends ? "font-bold text-rose-700" : ""}`}>{referrer.blocked_friends}</td>
+                      <td className="py-2.5 pr-3 text-right font-mono">{referrer.rewarded_trips}</td>
+                      <td className="py-2.5 pr-3 text-right font-mono font-bold">{money(referrer.credit_inr)}</td>
+                      <td className="py-2.5 text-right">
+                        {referrer.activeRelationships.length > 0 && (
+                          <button type="button" aria-expanded={expanded === referrer.referrer_user_id} onClick={() => setExpanded(expanded === referrer.referrer_user_id ? null : referrer.referrer_user_id)} className="rounded-lg border border-stone-300 px-3 py-1.5 font-bold text-stone-700">
+                            {expanded === referrer.referrer_user_id ? "Hide friends" : "Friends"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {expanded === referrer.referrer_user_id && referrer.activeRelationships.map((relationship) => (
+                      <tr key={relationship.id} className="bg-stone-50">
+                        <td className="py-2 pl-4 pr-3" colSpan={4}>
+                          <span className="font-semibold">{relationship.friend_name}</span>
+                          <span className="ml-2 text-stone-500">{relationship.friend_email}</span>
+                          <span className="ml-2 text-[10px] text-stone-400">joined {String(relationship.established_at || "").slice(0, 10)} · {String(relationship.source || "").toLowerCase().replaceAll("_", " ")}</span>
+                        </td>
+                        <td className="py-2 pr-3 text-right" colSpan={2}>
+                          <button type="button" disabled={acting === relationship.id} onClick={() => askBlock(referrer, relationship)} className="rounded-lg border border-rose-300 px-3 py-1.5 font-bold text-rose-700 disabled:opacity-50">Block</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-stone-200 bg-white p-5">
+        <h2 className="text-sm font-bold">Recent abuse checks <span className="text-stone-400">({(queue.signals || []).length})</span></h2>
+        <p className="mt-0.5 text-xs text-stone-500">Every time a referral was refused or held automatically, newest first.</p>
+        {(queue.signals || []).length === 0 ? (
+          <p className="mt-4 text-xs text-stone-500">No checks have fired.</p>
+        ) : (
+          <ul className="mt-4 max-h-72 divide-y divide-stone-100 overflow-y-auto">
+            {queue.signals.map((signal) => (
+              <li key={signal.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
+                <span>
+                  <strong>{SIGNAL_LABELS[signal.signal] || signal.signal}</strong>
+                  <span className="ml-2 text-stone-600">{signal.referrer_name || "Unknown referrer"}{signal.user_name ? ` → ${signal.user_name}` : ""}</span>
+                </span>
+                <span className="font-mono text-[10px] text-stone-500">{String(signal.action || "").toLowerCase().replaceAll("_", " ")} · {String(signal.created_at || "").slice(0, 16)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <ReasonDialog request={dialog} busy={Boolean(acting)} onConfirm={confirmDialog} onCancel={() => setDialog(null)} />
     </div>
   );
 }

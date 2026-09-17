@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth.jsx";
 import { authHeaders } from "../../lib/api.js";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
+import { getPortalUrls } from "../../lib/domainContext.js";
 import {
   Users,
   Package,
@@ -108,14 +109,14 @@ export default function AdminLayout({ children }) {
       path: "/admin/referrals",
       label: "Travel & Earn",
       icon: Gift,
-      badge: null,
+      badge: metrics?.heldReferralRewards > 0 ? `${metrics.heldReferralRewards} To Review` : null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     },
     {
       path: "/admin/verifications",
       label: "Verified checks",
       icon: BadgeCheck,
-      badge: null,
+      badge: metrics?.pendingVerificationChecks > 0 ? `${metrics.pendingVerificationChecks} To Check` : null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     },
     {
@@ -184,7 +185,7 @@ export default function AdminLayout({ children }) {
 
           {/* Admin User Profile & Controls */}
           <div className="flex items-center gap-3">
-            <Link to="/" className="hidden rounded-xl px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 md:block">View site</Link>
+            <a href={getPortalUrls().traveler} target="_blank" rel="noopener noreferrer" className="hidden rounded-xl px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 md:block">View site</a>
             <button
               onClick={fetchGlobalMetrics}
               title="Refresh Metrics"

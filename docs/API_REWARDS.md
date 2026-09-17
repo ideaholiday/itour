@@ -70,9 +70,17 @@ promo path and is credited on the code itself.
 - Both refuse `400 OVER_GIVEAWAY_CAP` when commission + discount (as % of booking) would exceed the cap, including for creators on the tier with one rate of their own.
 - **`GET /api/admin/affiliates`**: Lists creators. Filters: `status`,
   `kyc_status`, `search`.
-- **`PATCH /api/admin/affiliates/:id/status`**: `ACTIVE`, `SUSPENDED`, `REJECTED`, `PENDING`.
-- **`PATCH /api/admin/affiliates/:id/kyc`**: Manual PAN decision. **Cannot** mark
-  a bank account verified — only the bank can.
+- **`PATCH /api/admin/affiliates/:id/status`** `{ status: ACTIVE|SUSPENDED|REJECTED|PENDING, reason }`:
+  `reason` (3–500 chars) is required for anything but `ACTIVE`. Also switches the
+  creator's coupon on or off. `404` unknown creator. Audited as `AFFILIATE_STATUS_CHANGED`.
+- **`PATCH /api/admin/affiliates/:id/kyc`** `{ kyc_status: VERIFIED|REJECTED|PENDING_REVIEW, reason }`:
+  Manual PAN decision; `reason` is required. `409 PAN_MISSING` for `VERIFIED` with no PAN
+  on file. **Cannot** mark a bank account verified — only the bank can. Audited as
+  `AFFILIATE_KYC_DECIDED`.
+- **`GET /api/admin/affiliates/:id/detail`** → `{ affiliate, balances, accounts, referrals, campaigns, clicks30d }`:
+  derived balances, masked payout accounts (including archived), the last 50 referrals
+  with booking ref and sub-ID, bookings and earnings per campaign label, and link clicks
+  in the last 30 days. PAN and account numbers stay masked.
 - **`POST /api/admin/affiliates/:id/refresh-tier`**: Recomputes the tier.
 - **`GET /api/admin/affiliates/:id/payout-accounts`**: Accounts (including
   archived) plus derived balances.
@@ -82,7 +90,8 @@ promo path and is credited on the code itself.
   and the exact net amount to transfer. **This disclosure is audit-logged with
   the acting admin.**
 - **`POST /api/admin/affiliates/payouts/:id/settle`**: `{ "utrReference": "..." }`.
-  Marks the funding commissions `PAID`.
+  Marks the funding commissions `PAID`. `409` if the payout was settled or rejected in
+  the meantime.
 - **`POST /api/admin/affiliates/payouts/:id/reject`**: `{ "reason": "..." }`.
   Returns the balance to the creator.
 
@@ -136,11 +145,15 @@ See BUSINESS_RULES §11.
   friend discounts, referrer credit cleared, `costPctOfMargin`,
   `clickToFirstTripPct`, `viralCoefficient`, reversals, wallet issued / redeemed /
   expired / `breakagePct`, `walletDiscrepancies`, and abuse signals by type.
-- **`GET /api/referral/admin/review`**: `{ rewards, blockedRelationships, signals }`.
+- **`GET /api/referral/admin/review`**: `{ rewards, blockedRelationships, signals, topReferrers }`.
+  `topReferrers`: the 20 referrers with the most friends joined in the last 90 days, each
+  with `friends`, `blocked_friends`, `rewarded_trips`, `credit_inr` and `activeRelationships`.
 - **`POST /api/referral/admin/rewards/:id/review`**: `{ "decision": "APPROVE" | "REJECT", "note": "…" }`.
-  Approve clears on the next lifecycle run.
+  `note` (3+ chars) is required to reject. Approve clears on the next lifecycle run.
+  Audited as `REFERRAL_REWARD_REVIEWED`.
 - **`PATCH /api/referral/admin/relationships/:id`**: `{ "status": "ACTIVE" | "BLOCKED", "reason": "…" }`.
-  Reopening also clears the review flag.
+  `reason` (3+ chars) is required. Reopening also clears the review flag. Audited as
+  `REFERRAL_RELATIONSHIP_STATUS_CHANGED`, keeping the earlier block reason.
 
 ---
 

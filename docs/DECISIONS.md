@@ -237,3 +237,13 @@ This document records significant technical and product architectural decisions.
   - Refund credit has **no per-booking cap and no expiry**; it can pay for a whole booking.
   - For **10 days** after the cancellation, the traveler can send the unspent refund credit back to the **original payment method**. The refund goes to the gateway at once, with no staff approval. After 10 days it stays as credit.
 - **Consequences**: Rules in `REFUND_CREDIT.md`. Refund credit is the traveler's money, not a discount: it is kept apart from referral credit (not capped, never clawed back, spent last), and a booking credit pays for in full is confirmed without a gateway (`POST /api/checkout/wallet-payment`). The supplier of the cancelled booking is paid nothing. Refund credit restored from a cancelled rebooking comes back as credit only. Idea Holiday holds unspent refund credit as a liability until it is spent or refunded.
+
+---
+
+## ADR 020: Creator Tiers Fit the 10% Cap; Staff Review Referrals
+- **Date**: 2026-09-17
+- **Context**: The seeded creator tiers (Starter 10% + 5%, Rising 12% + 5%, Elite 15% + 7%) were over the 10% giveaway cap (ADR 017). Checkout spends the cap on creator commission first, so a follower typing a Starter creator's code got ₹0 off. Separately, the referral review API already allowed `STAFF`, but the review screen was admin-only.
+- **Decision Made**:
+  - **Creator tiers use the whole cap, balanced:** Starter **6% commission + 4% audience discount**, Rising **7% + 3%**, Elite **8% + 2%**. Followers always get a real discount; creators earn more as they move up. Tier thresholds are unchanged. An admin enters them in Admin → Programs, which re-places creators, syncs their codes' discount and emails creators whose rates moved.
+  - **Operations staff review Travel & Earn referrals** at `/ops/referrals`: approve or reject held rewards, block or reopen pairings, with a written reason. Creator KYC, rates and payouts stay admin-only.
+- **Consequences**: Commission already accrued keeps its old rate (BUSINESS_RULES §10.2.2). A creator with their own rates set on the Creators page keeps them. Referral decisions record the staff member in the audit log.

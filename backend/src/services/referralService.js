@@ -1273,7 +1273,35 @@ export function listReferralReviewQueue(database) {
     ORDER BY s.created_at DESC
     LIMIT 100
   `).all();
-  return { rewards, blockedRelationships: blocked, signals };
+  // Who is earning most right now: the list to eyeball for rings of fake
+  // friends before the velocity rules catch them.
+  const since = sqlTimestamp(addDays(new Date(), -90));
+  const topReferrers = database.prepare(`
+    SELECT rel.referrer_user_id, u.name AS referrer_name, u.email AS referrer_email,
+      COUNT(DISTINCT rel.id) AS friends,
+      COUNT(DISTINCT CASE WHEN rel.status = 'BLOCKED' THEN rel.id END) AS blocked_friends,
+      COUNT(DISTINCT rr.id) AS rewarded_trips,
+      COALESCE(SUM(CASE WHEN rr.status IN ('ACCRUED', 'HELD_FOR_REVIEW', 'CLEARED') THEN rr.referrer_amount_inr ELSE 0 END), 0) AS credit_inr
+    FROM referral_relationships rel
+    JOIN users u ON u.id = rel.referrer_user_id
+    LEFT JOIN referral_rewards rr ON rr.relationship_id = rel.id AND rr.created_at >= ?
+    WHERE rel.established_at >= ?
+    GROUP BY rel.referrer_user_id, u.name, u.email
+    ORDER BY friends DESC, credit_inr DESC
+    LIMIT 20
+  `).all(since, since).map((row) => ({ ...row, friends: Number(row.friends), blocked_friends: Number(row.blocked_friends), rewarded_trips: Number(row.rewarded_trips), credit_inr: money(row.credit_inr) }));
+  const activeRelationships = database.prepare(`
+    SELECT rel.id, rel.referrer_user_id, rel.established_at, rel.source, fu.name AS friend_name, fu.email AS friend_email
+    FROM referral_relationships rel JOIN users fu ON fu.id = rel.referred_user_id
+    WHERE rel.status = 'ACTIVE' AND rel.referrer_user_id IN (${topReferrers.map(() => "?").join(",") || "NULL"})
+    ORDER BY rel.established_at DESC
+  `).all(...topReferrers.map((row) => row.referrer_user_id));
+  return {
+    rewards,
+    blockedRelationships: blocked,
+    signals,
+    topReferrers: topReferrers.map((row) => ({ ...row, activeRelationships: activeRelationships.filter((rel) => rel.referrer_user_id === row.referrer_user_id) })),
+  };
 }
 
 export function reviewReferralReward(database, { rewardId, decision, note = null, actorId = null, now = new Date() }) {

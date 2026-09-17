@@ -10,8 +10,11 @@ import {
   RefreshCw,
   ShieldCheck,
   Search,
+  X,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { authHeaders } from "../../lib/api.js";
+import ReasonDialog from "../../components/admin/ReasonDialog.jsx";
 
 const STATUS_STYLES = {
   REQUESTED: "bg-amber-500/10 text-amber-700 border-amber-500/30",
@@ -22,6 +25,11 @@ const STATUS_STYLES = {
 
 function money(value) {
   return `₹${Number(value || 0).toLocaleString("en-IN")}`;
+}
+
+// commission_rate is a fraction (0.125); show it as 12.5%, not a rounded 13%.
+function ratePct(fraction) {
+  return Math.round(Number(fraction || 0) * 10000) / 100;
 }
 
 async function adminFetch(path, options = {}) {
@@ -58,25 +66,54 @@ export default function AffiliatePayoutsView() {
   const [rejectReason, setRejectReason] = useState("");
   const [acting, setActing] = useState(false);
 
-  const load = useCallback(() => {
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [tierWarning, setTierWarning] = useState(null);
+  const [decision, setDecision] = useState(null);
+  const [deciding, setDeciding] = useState(false);
+  const [detail, setDetail] = useState(null);
+
+  // Typing in the search box waits for a pause instead of querying per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const loadPayouts = useCallback(() => {
     setLoading(true);
     setError("");
     const query = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : "";
-    Promise.all([
-      adminFetch(`/payouts${query}`),
-      adminFetch(`/${search ? `?search=${encodeURIComponent(search)}` : ""}`),
-    ])
-      .then(([payoutRes, affiliateRes]) => {
-        setPayouts(payoutRes.payouts || []);
-        setAffiliates(affiliateRes.affiliates || []);
-      })
-      .catch((err) => setError(err.message || "Could not load affiliate data"))
+    return adminFetch(`/payouts${query}`)
+      .then((res) => setPayouts(res.payouts || []))
+      .catch((err) => setError(err.message || "Could not load payouts"))
       .finally(() => setLoading(false));
-  }, [statusFilter, search]);
+  }, [statusFilter]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const loadCreators = useCallback(() => {
+    return adminFetch(`/${debouncedSearch ? `?search=${encodeURIComponent(debouncedSearch)}` : ""}`)
+      .then((res) => setAffiliates(res.affiliates || []))
+      .catch((err) => setError(err.message || "Could not load creators"));
+  }, [debouncedSearch]);
+
+  // A tier over the giveaway cap means creators' audience discounts are cut,
+  // often to nothing, at checkout: the cap is spent on their commission first.
+  const loadTierWarning = useCallback(() => {
+    adminFetch("/tiers")
+      .then((res) => {
+        const over = (res.tiers || []).filter((tier) => tier.overCap && tier.creators > 0);
+        setTierWarning(over.length ? { cap: res.giveawayCapPct, tiers: over } : null);
+      })
+      .catch(() => setTierWarning(null));
+  }, []);
+
+  const load = useCallback(() => {
+    loadPayouts();
+    loadCreators();
+    loadTierWarning();
+  }, [loadPayouts, loadCreators, loadTierWarning]);
+
+  useEffect(() => { loadPayouts(); }, [loadPayouts]);
+  useEffect(() => { loadCreators(); }, [loadCreators]);
+  useEffect(() => { loadTierWarning(); }, [loadTierWarning]);
 
   const openSettlement = async (payout) => {
     setOpenPayout(payout);
@@ -148,29 +185,69 @@ export default function AffiliatePayoutsView() {
     }
   };
 
-  const updateKyc = async (affiliateId, kycStatus) => {
+  // KYC and account status change only after a reason is written; the select
+  // just opens the dialog, and the API records the reason in the audit log.
+  const askKyc = (affiliate, kycStatus) => {
+    if (kycStatus === affiliate.kyc_status) return;
+    setDecision({
+      kind: "kyc", affiliate, value: kycStatus, tone: kycStatus === "VERIFIED" ? null : "danger",
+      title: `${kycStatus === "VERIFIED" ? "Verify" : kycStatus === "REJECTED" ? "Reject" : "Reopen"} KYC for ${affiliate.channel_name}?`,
+      message: kycStatus === "VERIFIED"
+        ? `You are confirming PAN ${affiliate.pan_number || "(none on file)"} belongs to this creator. They can then be paid, with TDS filed against it. Bank accounts still need the bank's own verification.`
+        : "The creator can't be paid until KYC is verified again. Commission keeps accruing.",
+      confirmLabel: "Save KYC decision",
+      placeholder: kycStatus === "VERIFIED" ? "e.g. PAN card checked against the name on the bank account" : "e.g. name on PAN doesn't match the account holder",
+    });
+  };
+
+  const askStatus = (affiliate, status) => {
+    if (status === affiliate.status) return;
+    setDecision({
+      kind: "status", affiliate, value: status, tone: status === "ACTIVE" ? null : "danger",
+      requireReason: status !== "ACTIVE",
+      title: `${status === "ACTIVE" ? "Activate" : status === "SUSPENDED" ? "Suspend" : status === "REJECTED" ? "Reject" : "Set to pending"} ${affiliate.channel_name}?`,
+      message: status === "ACTIVE"
+        ? `Their code ${affiliate.affiliate_code} works again and new bookings earn commission.`
+        : `Their code ${affiliate.affiliate_code} stops giving a discount and new bookings earn nothing. Commission already earned is kept.`,
+      confirmLabel: status === "ACTIVE" ? "Activate" : "Save",
+      placeholder: "e.g. fake followers; bookings cancelled after every payout",
+    });
+  };
+
+  const confirmDecision = async (reason) => {
+    setDeciding(true);
+    setError("");
     try {
-      await adminFetch(`/${encodeURIComponent(affiliateId)}/kyc`, {
+      const { kind, affiliate, value } = decision;
+      await adminFetch(`/${encodeURIComponent(affiliate.id)}/${kind}`, {
         method: "PATCH",
-        body: JSON.stringify({ kyc_status: kycStatus }),
+        body: JSON.stringify(kind === "kyc" ? { kyc_status: value, reason } : { status: value, ...(reason ? { reason } : {}) }),
       });
-      setNotice("KYC status updated.");
-      load();
+      setNotice(kind === "kyc" ? `${affiliate.channel_name}: KYC is now ${value}.` : `${affiliate.channel_name} is now ${value}.`);
+      setDecision(null);
+      loadCreators();
     } catch (err) {
-      setError(err.message || "Could not update KYC");
+      setError(err.message || "Could not save the decision");
+      setDecision(null);
+    } finally {
+      setDeciding(false);
     }
   };
 
-  const updateStatus = async (affiliateId, status) => {
+  useEffect(() => {
+    if (!detail) return undefined;
+    const close = (event) => { if (event.key === "Escape") setDetail(null); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [detail]);
+
+  const openDetail = async (affiliate) => {
+    setDetail({ affiliate, loading: true });
     try {
-      await adminFetch(`/${encodeURIComponent(affiliateId)}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
-      setNotice("Affiliate status updated.");
-      load();
+      const res = await adminFetch(`/${encodeURIComponent(affiliate.id)}/detail`);
+      setDetail({ affiliate, ...res, loading: false });
     } catch (err) {
-      setError(err.message || "Could not update status");
+      setDetail({ affiliate, loading: false, error: err.message || "Could not load this creator" });
     }
   };
 
@@ -202,6 +279,17 @@ export default function AffiliatePayoutsView() {
         <div className="flex items-center gap-2 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-4 text-xs font-semibold text-rose-700">
           <AlertCircle className="h-4 w-4 shrink-0" />
           {error}
+        </div>
+      )}
+
+      {tierWarning && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-amber-400/40 bg-amber-50 p-4 text-xs font-semibold text-amber-900">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>
+            {tierWarning.tiers.map((tier) => `${tier.label} (${tier.creators} creator${tier.creators === 1 ? "" : "s"})`).join(", ")} {tierWarning.tiers.length === 1 ? "is" : "are"} over the {tierWarning.cap}% giveaway cap.
+            Their followers' coupon discount is cut at checkout, often to ₹0, because the cap is spent on commission first.
+          </span>
+          <Link to="/admin/programs" className="font-bold underline">Fix the tier rates in Programs</Link>
         </div>
       )}
 
@@ -385,7 +473,9 @@ export default function AffiliatePayoutsView() {
                     {affiliates.map((affiliate) => (
                       <tr key={affiliate.id} className="hover:bg-stone-50">
                         <td className="px-5 py-3.5">
-                          <div className="font-bold">{affiliate.channel_name}</div>
+                          <button type="button" onClick={() => openDetail(affiliate)} className="text-left font-bold hover:text-amber-800 hover:underline">
+                            {affiliate.channel_name}
+                          </button>
                           <div className="font-mono text-[10px] text-stone-400">
                             {affiliate.affiliate_code} · {affiliate.user_email}
                           </div>
@@ -395,7 +485,7 @@ export default function AffiliatePayoutsView() {
                             {affiliate.tier_code || "STARTER"}
                           </span>
                           <span className="ml-1.5 text-[10px] text-stone-400">
-                            {Math.round(Number(affiliate.commission_rate || 0) * 100)}%
+                            {ratePct(affiliate.commission_rate)}%
                           </span>
                         </td>
                         <td className="px-5 py-3.5 text-right">{affiliate.referrals_count}</td>
@@ -404,8 +494,9 @@ export default function AffiliatePayoutsView() {
                         </td>
                         <td className="px-5 py-3.5">
                           <select
+                            aria-label={`KYC for ${affiliate.channel_name}`}
                             value={affiliate.kyc_status}
-                            onChange={(event) => updateKyc(affiliate.id, event.target.value)}
+                            onChange={(event) => askKyc(affiliate, event.target.value)}
                             className="cursor-pointer rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-semibold"
                           >
                             {["UNVERIFIED", "PENDING_REVIEW", "VERIFIED", "REJECTED"].map((value) => (
@@ -414,11 +505,15 @@ export default function AffiliatePayoutsView() {
                               </option>
                             ))}
                           </select>
+                          <div className="mt-1 font-mono text-[10px] text-stone-400">
+                            {affiliate.pan_number ? `PAN ${affiliate.pan_number}${affiliate.pan_verified ? " ✓" : ""}` : "No PAN yet"}
+                          </div>
                         </td>
                         <td className="px-5 py-3.5">
                           <select
+                            aria-label={`Account status for ${affiliate.channel_name}`}
                             value={affiliate.status}
-                            onChange={(event) => updateStatus(affiliate.id, event.target.value)}
+                            onChange={(event) => askStatus(affiliate, event.target.value)}
                             className="cursor-pointer rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-semibold"
                           >
                             {["PENDING", "ACTIVE", "SUSPENDED", "REJECTED"].map((value) => (
@@ -437,7 +532,7 @@ export default function AffiliatePayoutsView() {
                             })}
                             className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-semibold hover:border-amber-500"
                           >
-                            {Math.round(Number(affiliate.commission_rate || 0) * 10000) / 100}% + {Number(affiliate.traveler_discount_pct || 0)}%
+                            {ratePct(affiliate.commission_rate)}% + {Number(affiliate.traveler_discount_pct || 0)}%
                             {(affiliate.commission_override_rate !== null && affiliate.commission_override_rate !== undefined) || (affiliate.traveler_discount_override_pct !== null && affiliate.traveler_discount_override_pct !== undefined) ? " · own" : ""}
                           </button>
                         </td>
@@ -572,6 +667,89 @@ export default function AffiliatePayoutsView() {
           </div>
         </div>
       )}
+      {detail && (
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={() => setDetail(null)}>
+          <aside className="h-full w-full max-w-xl overflow-y-auto bg-white p-6 shadow-2xl" onClick={(event) => event.stopPropagation()} aria-label="Creator details">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-display text-xl font-bold">{detail.affiliate.channel_name}</h3>
+                <p className="font-mono text-[11px] text-stone-500">{detail.affiliate.affiliate_code} · {detail.affiliate.user_email}</p>
+              </div>
+              <button type="button" onClick={() => setDetail(null)} aria-label="Close" className="rounded-lg p-1 text-stone-400 hover:text-stone-700"><X className="h-5 w-5" /></button>
+            </div>
+            {detail.loading && <p className="text-xs text-stone-400">Loading…</p>}
+            {detail.error && <p className="rounded-xl bg-rose-500/10 p-3 text-xs font-semibold text-rose-700">{detail.error}</p>}
+            {detail.balances && (
+              <div className="space-y-5 text-xs">
+                <section className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {[
+                    ["Trip not done yet", detail.balances.pendingInr],
+                    ["Clearing (hold)", detail.balances.onHoldInr],
+                    ["Withdrawable", detail.balances.withdrawableInr],
+                    ["Payout requested", detail.balances.reservedInr],
+                    ["Paid (gross)", detail.balances.paidInr],
+                    ["TDS withheld", detail.balances.tdsWithheldInr],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-stone-200 p-3">
+                      <span className="block text-[10px] font-bold text-stone-500">{label}</span>
+                      <span className="font-mono text-sm font-extrabold">{money(value)}</span>
+                    </div>
+                  ))}
+                </section>
+                <p className="text-stone-500">{detail.clicks30d} link clicks in the last 30 days.</p>
+
+                <section>
+                  <h4 className="mb-2 font-bold">Payout accounts</h4>
+                  {detail.accounts.length === 0 ? <p className="text-stone-500">None added. The creator can't be paid until they add one.</p> : (
+                    <ul className="divide-y divide-stone-100 rounded-xl border border-stone-200">
+                      {detail.accounts.map((account) => (
+                        <li key={account.id} className="flex flex-wrap items-center justify-between gap-2 p-3">
+                          <span className="font-mono">{account.label}{account.isPrimary ? " · primary" : ""}{account.status !== "ACTIVE" ? " · archived" : ""}</span>
+                          <span className={`font-bold ${account.isUsable ? "text-emerald-700" : "text-amber-700"}`}>
+                            {account.verificationStatus}{account.nameMatchScore != null ? ` · name ${Math.round(account.nameMatchScore)}%` : ""}{account.verificationStatus === "VERIFIED" && !account.isUsable && account.status === "ACTIVE" ? " · cooling off" : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section>
+                  <h4 className="mb-2 font-bold">What sells (campaign labels)</h4>
+                  {detail.campaigns.length === 0 ? <p className="text-stone-500">No bookings yet.</p> : (
+                    <ul className="space-y-1">
+                      {detail.campaigns.map((campaign) => (
+                        <li key={campaign.subId || "none"} className="flex justify-between"><span className="font-mono">{campaign.subId || "(no label)"}</span><span>{campaign.bookings} booking{campaign.bookings === 1 ? "" : "s"} · {money(campaign.earningInr)}</span></li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section>
+                  <h4 className="mb-2 font-bold">Recent referrals</h4>
+                  {detail.referrals.length === 0 ? <p className="text-stone-500">None yet.</p> : (
+                    <table className="w-full text-left">
+                      <thead className="text-[10px] uppercase tracking-wider text-stone-500"><tr><th className="py-1.5 pr-2">Booking</th><th className="py-1.5 pr-2">Via</th><th className="py-1.5 pr-2 text-right">Earning</th><th className="py-1.5">Status</th></tr></thead>
+                      <tbody className="divide-y divide-stone-100">
+                        {detail.referrals.map((referral) => (
+                          <tr key={referral.id}>
+                            <td className="py-1.5 pr-2 font-mono">{referral.booking_ref || "—"}<span className="block text-[10px] text-stone-400">{String(referral.created_at || "").slice(0, 10)}</span></td>
+                            <td className="py-1.5 pr-2">{referral.attribution_type === "REFERRAL_LINK" ? "Link" : "Coupon"}{referral.sub_id ? ` · ${referral.sub_id}` : ""}</td>
+                            <td className="py-1.5 pr-2 text-right font-mono">{money(referral.earning_inr)} <span className="text-[10px] text-stone-400">@{ratePct(referral.commission_rate)}%</span></td>
+                            <td className="py-1.5">{referral.status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </section>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
+
+      <ReasonDialog request={decision} busy={deciding} onConfirm={confirmDecision} onCancel={() => setDecision(null)} />
     </div>
   );
 }
