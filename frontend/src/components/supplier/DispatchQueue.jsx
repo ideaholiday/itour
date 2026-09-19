@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { authHeaders } from '../../lib/api.js';
 import DispatchTimeline from './DispatchTimeline.jsx';
+import PhoneInput from '../PhoneInput.jsx';
 
 const inputClass = 'mt-1 w-full rounded-lg border border-stone-300 bg-white p-2 text-xs text-stone-900 focus:border-amber-500 focus:outline-none';
 
@@ -81,7 +82,7 @@ function OpsAssignDriver({ task, onDone }) {
     </label>
     {choice === 'OUTSIDE' && <div className="grid gap-2 sm:grid-cols-2">
       {field('fallbackDriverName', 'Driver name', { maxLength: 120 })}
-      {field('fallbackDriverPhone', 'Driver mobile / WhatsApp', { inputMode: 'tel', placeholder: '+91…' })}
+      <div className="text-xs font-bold text-stone-700"><label htmlFor={`fallback-phone-${task.booking_id}`}>Driver mobile / WhatsApp</label><PhoneInput id={`fallback-phone-${task.booking_id}`} required value={manual.fallbackDriverPhone} onChange={(phone) => setManual({ ...manual, fallbackDriverPhone: phone })} inputClassName={inputClass} /></div>
       {field('fallbackDriverEmail', 'Driver email (for trip link)', { type: 'email' })}
       {field('seatCapacity', 'Vehicle seats', { type: 'number', min: 1, max: 100 })}
       {field('fallbackVehicleModel', 'Vehicle model', { placeholder: `Must suit ${task.vehicle_category || 'the booked category'}` })}

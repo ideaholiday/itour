@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { api, authHeaders } from "../../lib/api.js";
+import PhoneInput from "../PhoneInput.jsx";
 
 const money = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 
@@ -934,12 +935,11 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                             onChange={(e) => setCustomDriverName(e.target.value)}
                             className="rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs text-stone-900"
                           />
-                          <input
-                            type="text"
-                            placeholder="Driver Phone"
+                          <PhoneInput
+                            aria-label="Driver phone"
                             value={customDriverPhone}
-                            onChange={(e) => setCustomDriverPhone(e.target.value)}
-                            className="rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs text-stone-900"
+                            onChange={setCustomDriverPhone}
+                            inputClassName="rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs text-stone-900"
                           />
                           <label className="text-xs">Driver email<input type="email" required value={customDriverEmail} onChange={e => setCustomDriverEmail(e.target.value)} className="w-full rounded border p-2" /></label>
                           <label className="text-xs">Vehicle seats<input type="number" min="1" max="100" required value={customSeatCapacity} onChange={e => setCustomSeatCapacity(e.target.value)} className="w-full rounded border p-2" /></label>

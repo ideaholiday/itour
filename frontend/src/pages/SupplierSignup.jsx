@@ -18,6 +18,7 @@ import IdeaHolidayLogo from "../components/IdeaHolidayLogo.jsx";
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
+import PhoneInput from "../components/PhoneInput.jsx";
 
 const initialForm = {
   companyName: "",
@@ -178,7 +179,7 @@ export default function SupplierSignup() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field id="supplier-name" label="Contact person"><input id="supplier-name" required autoComplete="name" value={form.contactName} onChange={update("contactName")} placeholder="Full name" className={inputClass} /></Field>
-              <Field id="supplier-phone" label="Mobile number"><input id="supplier-phone" required type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={update("phone")} placeholder="+91 98765 43210" className={inputClass} /></Field>
+              <Field id="supplier-phone" label="Mobile number"><PhoneInput id="supplier-phone" required value={form.phone} onChange={(phone) => { setForm((current) => ({ ...current, phone })); if (error) setError(""); }} inputClassName={inputClass} /></Field>
             </div>
 
             <Field id="supplier-email" label="Work email address"><input id="supplier-email" required type="email" autoComplete="email" value={form.email} onChange={update("email")} placeholder="you@company.com" className={inputClass} /></Field>

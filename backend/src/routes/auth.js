@@ -6,6 +6,7 @@ import db from "../db.js";
 import { hashPassword, passwordMatches } from "../lib/passwords.js";
 import { authenticate } from "../middleware/auth.js";
 import logger from "../config/logger.js";
+import { toE164 } from "../lib/phone.js";
 import { validateBody } from "../middleware/validation.js";
 import { authSchemas } from "../validators/apiSchemas.js";
 import { establishReferralRelationship } from "../services/referralService.js";
@@ -29,7 +30,7 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   const name = normalizeText(req.body.name);
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || "");
-  const phone = normalizeText(req.body.phone) || null;
+  const phone = toE164(req.body.phone) || null;
   const referralCode = normalizeText(req.body.referralCode || req.body.ref);
   const visitorId = normalizeText(req.body.visitorId) || null;
 
@@ -68,7 +69,7 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   const companyName = normalizeText(req.body.companyName);
   const contactName = normalizeText(req.body.contactName);
   const email = normalizeEmail(req.body.email);
-  const phone = normalizeText(req.body.phone);
+  const phone = toE164(req.body.phone);
   const requestedCity = normalizeText(req.body.city);
   const requestedState = normalizeText(req.body.state);
   const password = String(req.body.password || "");
@@ -81,9 +82,6 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   }
   if (password.length < 8) {
     return res.status(400).json({ error: "Password must be at least 8 characters" });
-  }
-  if (phone.replace(/\D/g, "").length < 10) {
-    return res.status(400).json({ error: "Enter a valid mobile number" });
   }
 
   const approvedCity = db.prepare(`

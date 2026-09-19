@@ -15,6 +15,7 @@ import {
   Check
 } from "lucide-react";
 import api, { authHeaders } from "../../lib/api.js";
+import PhoneInput from "../../components/PhoneInput.jsx";
 
 export default function WhatsAppNotificationView() {
   const [logs, setLogs] = useState([]);
@@ -310,12 +311,12 @@ Your trip ref *${dispatchForm.bookingRef}* is confirmed! Here are your chauffeur
             </div>
 
             <div>
-              <label className="text-stone-600 font-bold block mb-1">Customer Phone Number</label>
-              <input
-                type="text"
+              <label htmlFor="dispatch-customer-phone" className="text-stone-600 font-bold block mb-1">Customer Phone Number</label>
+              <PhoneInput
+                id="dispatch-customer-phone"
                 value={dispatchForm.customerPhone}
-                onChange={(e) => setDispatchForm({ ...dispatchForm, customerPhone: e.target.value })}
-                className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:bg-white focus:border-amber-500 outline-none"
+                onChange={(customerPhone) => setDispatchForm({ ...dispatchForm, customerPhone })}
+                inputClassName="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:bg-white focus:border-amber-500 outline-none"
               />
             </div>
 
@@ -330,12 +331,12 @@ Your trip ref *${dispatchForm.bookingRef}* is confirmed! Here are your chauffeur
             </div>
 
             <div>
-              <label className="text-stone-600 font-bold block mb-1">Driver Phone Number</label>
-              <input
-                type="text"
+              <label htmlFor="dispatch-driver-phone" className="text-stone-600 font-bold block mb-1">Driver Phone Number</label>
+              <PhoneInput
+                id="dispatch-driver-phone"
                 value={dispatchForm.driverPhone}
-                onChange={(e) => setDispatchForm({ ...dispatchForm, driverPhone: e.target.value })}
-                className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:bg-white focus:border-amber-500 outline-none"
+                onChange={(driverPhone) => setDispatchForm({ ...dispatchForm, driverPhone })}
+                inputClassName="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:bg-white focus:border-amber-500 outline-none"
               />
             </div>
 

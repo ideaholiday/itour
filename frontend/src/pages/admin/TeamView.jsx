@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Copy, KeyRound, Pencil, RefreshCw, Trash2, UserPlus, X } from "lucide-react";
 import { api } from "../../lib/api.js";
+import PhoneInput from "../../components/PhoneInput.jsx";
 
 const EMPTY_FORM = { name: "", email: "", phone: "", role: "STAFF" };
 const inputClass = "w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-500";
@@ -158,7 +159,7 @@ export default function TeamView() {
         <form onSubmit={addMember} className="grid gap-3 rounded-2xl border border-stone-200 bg-white p-5 sm:grid-cols-2">
           <label className="text-xs font-bold text-stone-700">Full name<input required minLength={2} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={`mt-1 ${inputClass}`} /></label>
           <label className="text-xs font-bold text-stone-700">Email<input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={`mt-1 ${inputClass}`} /></label>
-          <label className="text-xs font-bold text-stone-700">WhatsApp number<input required value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+91 98765 43210" className={`mt-1 ${inputClass}`} /></label>
+          <div className="text-xs font-bold text-stone-700"><label htmlFor="team-add-phone">WhatsApp number</label><PhoneInput id="team-add-phone" required value={form.phone} onChange={(phone) => setForm({ ...form, phone })} className="mt-1" inputClassName={inputClass} /></div>
           <label className="text-xs font-bold text-stone-700">Role
             <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className={`mt-1 ${inputClass}`}>
               <option value="STAFF">Staff: Operations only</option>
@@ -182,7 +183,7 @@ export default function TeamView() {
                 <li key={member.id} className="p-5">
                   <form onSubmit={saveEdit} className="grid gap-3 sm:grid-cols-3">
                     <label className="text-xs font-bold text-stone-700">Full name<input required minLength={2} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} className={`mt-1 ${inputClass}`} /></label>
-                    <label className="text-xs font-bold text-stone-700">WhatsApp number<input required value={editing.phone} onChange={(e) => setEditing({ ...editing, phone: e.target.value })} placeholder="+91 98765 43210" className={`mt-1 ${inputClass}`} /></label>
+                    <div className="text-xs font-bold text-stone-700"><label htmlFor="team-edit-phone">WhatsApp number</label><PhoneInput id="team-edit-phone" required value={editing.phone} onChange={(phone) => setEditing({ ...editing, phone })} className="mt-1" inputClassName={inputClass} /></div>
                     <label className="text-xs font-bold text-stone-700">Role
                       <select value={editing.role} disabled={isSelf} onChange={(e) => setEditing({ ...editing, role: e.target.value })} className={`mt-1 ${inputClass} disabled:bg-stone-100`}>
                         <option value="STAFF">Staff</option>

@@ -25,6 +25,7 @@ import EmergencyReallocationModal from "../../components/ops/EmergencyReallocati
 import LiveTripMapView from "../../components/ops/LiveTripMapView.jsx";
 import TripStatusActionModal from "../../components/ops/TripStatusActionModal.jsx";
 import { api } from "../../lib/api.js";
+import PhoneInput from "../../components/PhoneInput.jsx";
 
 export default function LiveTripBoardView() {
   const [boardData, setBoardData] = useState({
@@ -441,12 +442,12 @@ export default function LiveTripBoardView() {
               </div>
 
               <div>
-                <label className="text-stone-700 block mb-1 font-bold">Backup Driver Phone</label>
-                <input
-                  type="text"
+                <label htmlFor="backup-driver-phone" className="text-stone-700 block mb-1 font-bold">Backup Driver Phone</label>
+                <PhoneInput
+                  id="backup-driver-phone"
                   value={fallbackDriverPhone}
-                  onChange={(e) => setFallbackDriverPhone(e.target.value)}
-                  className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                  onChange={setFallbackDriverPhone}
+                  inputClassName="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
                 />
               </div>
 

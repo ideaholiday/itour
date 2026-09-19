@@ -6,7 +6,7 @@ import { OTHER_COUNTRY, PHONE_COUNTRIES, countryForCurrency, joinPhone, phoneCou
  * Country code picker plus number box. `value` is the whole number
  * (`+66 081 234 5678`); pasting a number that starts with `+` switches the picker.
  */
-export default function PhoneInput({ id, value, onChange, required = false, disabled = false, className = "", inputClassName = "" }) {
+export default function PhoneInput({ id, "aria-label": ariaLabel, value, onChange, required = false, disabled = false, className = "", inputClassName = "" }) {
   const { currency } = useCurrency();
   const [picked, setPicked] = useState(null);
   const [touched, setTouched] = useState(false);
@@ -31,12 +31,13 @@ export default function PhoneInput({ id, value, onChange, required = false, disa
   return (
     <div className={className}>
       <div className="flex gap-2">
+        {/* Inline width: the screens' shared input classes carry w-full. */}
         <select aria-label="Country code" value={iso} disabled={disabled} onChange={(e) => changeCountry(e.target.value)}
-          className={`w-auto shrink-0 pr-2 ${inputClassName}`}>
+          style={{ width: "auto", flex: "none" }} className={`pr-2 ${inputClassName}`}>
           {PHONE_COUNTRIES.map((option) => <option key={option.iso} value={option.iso}>{option.flag} +{option.dialCode}</option>)}
           <option value={OTHER_COUNTRY}>🌐 Other</option>
         </select>
-        <input id={id} type="tel" autoComplete="tel" inputMode="tel" required={required} disabled={disabled}
+        <input id={id} aria-label={ariaLabel} type="tel" autoComplete="tel" inputMode="tel" required={required} disabled={disabled}
           value={parts.number} onChange={(e) => changeNumber(e.target.value)} onBlur={() => setTouched(true)}
           placeholder={country ? country.example : "+44 7700 900123"} aria-invalid={Boolean(invalid)}
           className={`min-w-0 flex-1 ${inputClassName}`} />

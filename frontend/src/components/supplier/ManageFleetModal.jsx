@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Users, X, Plus, Phone, Car, Shield, Star, AlertTriangle, Check, Search } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
+import PhoneInput from "../PhoneInput.jsx";
 
 export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers = [], onRefresh }) {
   const [activeTab, setActiveTab] = useState("LIST"); // 'LIST' or 'ADD'
@@ -289,14 +290,13 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">Driver WhatsApp Phone Number *</label>
-                  <input
-                    type="tel"
+                  <label htmlFor="fleet-driver-phone" className="block text-xs font-bold text-stone-700 mb-1">Driver WhatsApp Phone Number *</label>
+                  <PhoneInput
+                    id="fleet-driver-phone"
                     required
-                    placeholder="e.g. +919839033445"
                     value={driverPhone}
-                    onChange={(e) => setDriverPhone(e.target.value)}
-                    className="w-full bg-white border border-stone-300 text-stone-900 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500"
+                    onChange={setDriverPhone}
+                    inputClassName="w-full bg-white border border-stone-300 text-stone-900 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500"
                   />
                 </div>
 
