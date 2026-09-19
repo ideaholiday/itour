@@ -16,6 +16,13 @@ export function phoneCountry(iso) {
   return PHONE_COUNTRIES.find((country) => country.iso === iso) || null;
 }
 
+const COUNTRY_NAME = { India: "IN", Thailand: "TH", "United Arab Emirates": "AE" };
+
+/** The picker's country for a destination's `country` (`Thailand` → `TH`). */
+export function phoneCountryForName(name) {
+  return COUNTRY_NAME[name] || null;
+}
+
 /** The picker's starting country for a traveler browsing in `currency`. */
 export function countryForCurrency(currency) {
   return CURRENCY_COUNTRY[currency] || "IN";

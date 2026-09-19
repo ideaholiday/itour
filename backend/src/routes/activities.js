@@ -285,10 +285,10 @@ router.get("/cities", (req, res) => {
 
   try {
     const rows = db.prepare(`
-      SELECT id, name, state, COALESCE(category, 'TOURISM') AS category
+      SELECT id, name, state, COALESCE(category, 'TOURISM') AS category, COALESCE(country, 'India') AS country
       FROM destinations
       WHERE COALESCE(is_active, 1) = 1
-      ORDER BY CASE WHEN category = 'METRO' THEN 0 ELSE 1 END, name
+      ORDER BY CASE WHEN COALESCE(country, 'India') = 'India' THEN 0 ELSE 1 END, country, CASE WHEN category = 'METRO' THEN 0 ELSE 1 END, name
     `).all();
     citiesCache.data = rows;
     citiesCache.expiresAt = now + 300000;

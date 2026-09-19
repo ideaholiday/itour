@@ -6,12 +6,12 @@ import { OTHER_COUNTRY, PHONE_COUNTRIES, countryForCurrency, joinPhone, phoneCou
  * Country code picker plus number box. `value` is the whole number
  * (`+66 081 234 5678`); pasting a number that starts with `+` switches the picker.
  */
-export default function PhoneInput({ id, "aria-label": ariaLabel, value, onChange, required = false, disabled = false, className = "", inputClassName = "" }) {
+export default function PhoneInput({ id, "aria-label": ariaLabel, value, onChange, defaultCountry = null, required = false, disabled = false, className = "", inputClassName = "" }) {
   const { currency } = useCurrency();
   const [picked, setPicked] = useState(null);
   const [touched, setTouched] = useState(false);
   const parts = splitPhone(value);
-  const iso = parts.iso || picked || countryForCurrency(currency);
+  const iso = parts.iso || picked || defaultCountry || countryForCurrency(currency);
   const country = phoneCountry(iso);
   const invalid = touched && String(value || "").trim() && !toE164(value);
 

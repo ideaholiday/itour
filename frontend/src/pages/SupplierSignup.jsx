@@ -19,6 +19,7 @@ import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 import PhoneInput from "../components/PhoneInput.jsx";
+import { phoneCountryForName } from "../lib/phone.js";
 
 const initialForm = {
   companyName: "",
@@ -28,6 +29,7 @@ const initialForm = {
   cityId: "",
   city: "",
   state: "",
+  country: "",
   password: "",
   confirmPassword: "",
   agreed: false,
@@ -78,6 +80,10 @@ export default function SupplierSignup() {
     if (error) setError("");
   };
 
+  // Cities come from the catalogue with their country (ADR 022: India, Thailand, UAE).
+  const indiaCities = cities.filter((city) => (city.country || "India") === "India");
+  const abroadCountries = [...new Set(cities.map((city) => city.country).filter((country) => country && country !== "India"))];
+
   const selectCity = (event) => {
     const selected = cities.find((city) => city.id === event.target.value);
     setForm((current) => ({
@@ -85,6 +91,7 @@ export default function SupplierSignup() {
       cityId: selected?.id || "",
       city: selected?.name || "",
       state: selected?.state || "",
+      country: selected?.country || "India",
     }));
     if (error) setError("");
   };
@@ -179,7 +186,7 @@ export default function SupplierSignup() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field id="supplier-name" label="Contact person"><input id="supplier-name" required autoComplete="name" value={form.contactName} onChange={update("contactName")} placeholder="Full name" className={inputClass} /></Field>
-              <Field id="supplier-phone" label="Mobile number"><PhoneInput id="supplier-phone" required value={form.phone} onChange={(phone) => { setForm((current) => ({ ...current, phone })); if (error) setError(""); }} inputClassName={inputClass} /></Field>
+              <Field id="supplier-phone" label="Mobile number"><PhoneInput id="supplier-phone" required defaultCountry={phoneCountryForName(form.country)} value={form.phone} onChange={(phone) => { setForm((current) => ({ ...current, phone })); if (error) setError(""); }} inputClassName={inputClass} /></Field>
             </div>
 
             <Field id="supplier-email" label="Work email address"><input id="supplier-email" required type="email" autoComplete="email" value={form.email} onChange={update("email")} placeholder="you@company.com" className={inputClass} /></Field>
@@ -191,15 +198,20 @@ export default function SupplierSignup() {
                   <select id="supplier-city" required disabled={citiesLoading} value={form.cityId} onChange={selectCity} className={`${inputClass} appearance-none pl-10 disabled:bg-stone-100`}>
                     <option value="">{citiesLoading ? "Loading approved cities…" : "Select a city"}</option>
                     <optgroup label="India metro cities">
-                      {cities.filter((city) => city.category === "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
+                      {indiaCities.filter((city) => city.category === "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
                     </optgroup>
-                    <optgroup label="Tourism cities">
-                      {cities.filter((city) => city.category !== "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
+                    <optgroup label="India tourism cities">
+                      {indiaCities.filter((city) => city.category !== "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
                     </optgroup>
+                    {abroadCountries.map((country) => (
+                      <optgroup key={country} label={country}>
+                        {cities.filter((city) => city.country === country).map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
               </Field>
-              <Field id="supplier-state" label="State"><input id="supplier-state" readOnly tabIndex={-1} value={form.state} placeholder="Selected automatically" className={`${inputClass} bg-[#FAF9F6] text-stone-600`} /></Field>
+              <Field id="supplier-state" label={form.country && form.country !== "India" ? "Province / emirate" : "State"}><input id="supplier-state" readOnly tabIndex={-1} value={form.state} placeholder="Selected automatically" className={`${inputClass} bg-[#FAF9F6] text-stone-600`} /></Field>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
