@@ -6,6 +6,7 @@ import { authenticate, optionalAuthMiddleware, requireBookingOwner, requireRoles
 import { validateBody } from "../middleware/validation.js";
 import { bookingCreateSchema, bookingQuoteSchema, bookingSchemas } from "../validators/apiSchemas.js";
 import logger from "../config/logger.js";
+import { PHONE_FORMAT_HINT, toE164 } from "../lib/phone.js";
 import {
   MAX_OTP_ATTEMPTS,
   activatePickupOtp,
@@ -74,8 +75,8 @@ function validateContact({ traveler_name, traveler_phone, traveler_email, pickup
     error.status = 400;
     throw error;
   }
-  if (!/^\+?[0-9][0-9\s-]{7,17}$/.test(traveler_phone.trim())) {
-    const error = new Error("Enter a valid mobile or WhatsApp number");
+  if (!toE164(traveler_phone)) {
+    const error = new Error(PHONE_FORMAT_HINT);
     error.status = 400;
     throw error;
   }

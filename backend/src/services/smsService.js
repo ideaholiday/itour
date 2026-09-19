@@ -1,3 +1,4 @@
+import { toE164 } from "../lib/phone.js";
 import { beginNotificationDelivery, finishNotificationDelivery } from "./notificationLogService.js";
 
 export function smsConfiguration() {
@@ -6,9 +7,8 @@ export function smsConfiguration() {
 export async function sendSupplierSms({ to, text, eventKey, supplierId, metadata = {} }, { database, request = fetch } = {}) {
   const config = smsConfiguration();
   if (!config.enabled) return { success: false, skipped: true, status: "SKIPPED" };
-  let phone = String(to || "").replace(/[\s()-]/g, "");
-  if (/^\d{10}$/.test(phone)) phone = `+91${phone}`;
-  if (!/^\+[1-9]\d{7,14}$/.test(phone)) return { success: false, status: "FAILED", error: "Invalid supplier phone number" };
+  const phone = toE164(to);
+  if (!phone) return { success: false, status: "FAILED", error: "Invalid supplier phone number" };
   const started = beginNotificationDelivery({ eventKey, eventType: "BOOKING_CONFIRMED", channel: "SMS", recipientRole: "SUPPLIER", recipientId: supplierId, recipientAddress: phone, provider: "TWILIO", body: text, metadata }, database);
   if (started.idempotent) return { success: true, idempotent: true, status: started.delivery.status };
   try {

@@ -1,13 +1,11 @@
 import { z } from "zod";
+import { PHONE_FORMAT_HINT, toE164 } from "../lib/phone.js";
 
 const text = (min = 1, max = 500) => z.string().trim().min(min).max(max);
 const optionalText = (max = 500) => z.string().trim().max(max).optional().nullable();
 const id = text(1, 160);
 const email = z.string().trim().email().max(254).transform((value) => value.toLowerCase());
-const phone = z.string().trim().min(8).max(24).refine(
-  (value) => value.replace(/\D/g, "").length >= 10 && value.replace(/\D/g, "").length <= 15,
-  "Enter a valid phone number",
-);
+const phone = z.string().trim().min(8).max(24).refine((value) => Boolean(toE164(value)), PHONE_FORMAT_HINT);
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const time = z.string().trim().regex(/^\d{1,2}:\d{2}(?:\s*[AP]M)?$/i);
 const count = z.union([z.number().int(), z.string().regex(/^\d+$/)]).refine((value) => Number(value) >= 0 && Number(value) <= 100);

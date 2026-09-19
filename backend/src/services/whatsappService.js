@@ -2,14 +2,13 @@ import { nanoid } from "nanoid";
 import db from "../db.js";
 import { beginNotificationDelivery, finishNotificationDelivery } from "./notificationLogService.js";
 import logger from "../config/logger.js";
+import { toE164 } from "../lib/phone.js";
 
 const enabled = () => String(process.env.WHATSAPP_CLOUD_API_ENABLED || "false").toLowerCase() === "true";
 
 export function normalizeWhatsAppPhone(value, countryCode = process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || "91") {
-  let digits = String(value || "").replace(/\D/g, "");
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.length === 10) digits = `${String(countryCode).replace(/\D/g, "")}${digits}`;
-  return digits.length >= 11 && digits.length <= 15 ? digits : null;
+  const phone = toE164(value, countryCode);
+  return phone ? phone.slice(1) : null;
 }
 
 export function whatsAppProviderConfiguration() {

@@ -259,3 +259,17 @@ This document records significant technical and product architectural decisions.
   - **"Paste a link" stays** alongside upload, so existing products keep working.
   - **KYB files already lost** from Cloud Run's disk are accepted as lost: affected suppliers upload them again. (Checked 2026-09-19: the production service has no volume and no `KYB_FILES_DIR`, so every uploaded file lives only until the next deploy or restart.)
 - **Consequences**: Phase 0 (done): uploads need sign-in, are rate limited, and public uploads must be real PNG/JPG/WEBP images (SECURITY §3). Phase 1 (done): with `MEDIA_STORAGE=supabase`, which `deploy.sh` sets, uploads go to the buckets and KYB references keep the `kyb-file://` form. Files already on Cloud Run's disk are not moved. Phase 2 (done): the Product Builder and the profile editor upload photos, shrunk in the browser to at most 1600px (WEBP, or JPEG where the browser can't make WEBP) with camera metadata removed; a pasted link still works. Phase 3 (done): photos never saved into a product, profile or review are deleted after **30 days**, not the 7 first planned, because product drafts live only in the supplier's browser. Admin photo review and per-plan photo limits were not taken up.
+
+---
+
+## ADR 022: Thailand and the UAE Launch; Phones Carry a Country Code
+- **Date**: 2026-09-19
+- **Context**: Idea Holiday is expanding to Thailand and Dubai, for travelers and suppliers. Phone handling assumed India: any 10-digit number got `+91`, so a Thai (`081 234 5678`) or UAE (`050 123 4567`) local number became a wrong `+91` number and WhatsApp silently failed.
+- **Decision Made**:
+  - **Phones are E.164** (`+<country code><number>`). India, Thailand and the UAE are checked against their mobile format; other country codes are accepted on length. `backend/src/lib/phone.js` is the one place that reads a typed number.
+  - **Every phone field gets a country picker** (India, Thailand, UAE), for travelers, suppliers, drivers and staff.
+  - **Supplier payouts stay in INR**, including Thai and UAE suppliers (PRODUCT non-goal 3 holds).
+  - **Foreign suppliers upload their own country's documents** for KYB, and an admin approves them.
+  - **WhatsApp templates stay in English** for all countries; the higher per-country Meta price is accepted.
+  - **Address search stays India-only**; travelers abroad paste their full pickup address.
+- **Consequences**: Phase 1 (done): WhatsApp, SMS and phone validation use `toE164`; a local number with a leading 0 and no country code is rejected rather than sent to `+91`. Next: the picker on checkout, signup and profile; supplier, driver and team forms; a migration storing existing numbers as `+91…`; referral matching on the full number instead of the last 10 digits.
