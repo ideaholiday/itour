@@ -20,6 +20,7 @@
 import { nanoid } from "nanoid";
 import logger from "../config/logger.js";
 import { getProgramDefaults, getSettings } from "./programSettingsService.js";
+import { toE164 } from "../lib/phone.js";
 
 /** Settings in the shape the referral code uses (rates as fractions). */
 function toPolicy(settings) {
@@ -100,10 +101,12 @@ const firstName = (name) => String(name || "").trim().split(/\s+/)[0] || null;
 // Identity normalisation
 // ---------------------------------------------------------------------------
 
-/** Indian mobile numbers compare on their last 10 digits, whatever prefix was typed. */
+/**
+ * Phones compare as E.164 (ADR 022), so +66 81 234 5678 and the Indian
+ * 68123 45678 stay different people although their last 10 digits match.
+ */
 export function normalizePhone(value) {
-  const digits = String(value || "").replace(/\D/g, "");
-  return digits.length >= 10 ? digits.slice(-10) : null;
+  return toE164(value);
 }
 
 /**
@@ -261,14 +264,14 @@ function travelerHasPaidBooking(database, { userId, phone, email, excludeBooking
       AND (
         user_id = ?
         OR (? != '' AND LOWER(traveler_email) = ?)
-        OR (? != '' AND traveler_phone LIKE ?)
+        OR (? != '' AND traveler_phone = ?)
       )
     LIMIT 1
   `).get(
     excludeBookingId || "",
     userId || "",
     emailKey, emailKey,
-    phoneKey || "", phoneKey ? `%${phoneKey}` : "",
+    phoneKey || "", phoneKey || "",
   );
   return Boolean(row);
 }

@@ -332,7 +332,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       db.prepare("UPDATE products SET id = id WHERE id = ?").run(quote.product.id);
       if (!existingUser) {
         db.prepare("INSERT INTO users (id, name, email, password, phone, role) VALUES (?, ?, ?, ?, ?, 'TRAVELER')")
-          .run(userId, req.body.traveler_name.trim(), req.body.traveler_email.trim().toLowerCase(), `external_${nanoid(20)}`, req.body.traveler_phone.trim());
+          .run(userId, req.body.traveler_name.trim(), req.body.traveler_email.trim().toLowerCase(), `external_${nanoid(20)}`, toE164(req.body.traveler_phone));
       }
       db.prepare(
         `INSERT INTO bookings (
@@ -358,7 +358,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         req.body.special_requests || null, req.body.promo_code || null,
         req.body.selected_addons ? (typeof req.body.selected_addons === "string" ? req.body.selected_addons : JSON.stringify(req.body.selected_addons)) : "[]",
         quote.adults, quote.children, quote.luggage,
-        quote.vehicleCategory, req.body.traveler_name.trim(), req.body.traveler_phone.trim(), req.body.traveler_email.trim().toLowerCase(),
+        quote.vehicleCategory, req.body.traveler_name.trim(), toE164(req.body.traveler_phone), req.body.traveler_email.trim().toLowerCase(),
         finalPayableAmount, quote.tolls + quote.stateTax + quote.gstAmount, assignmentCommissionAmount, selectedSupplier.commissionRate,
         assignmentSupplierPayout, String(req.body.payment_method || "DEMO").toUpperCase(),
         selectedSupplier.score, selectedAssignmentReason, selectedSupplier.candidateProductId

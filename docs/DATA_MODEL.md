@@ -58,7 +58,7 @@ erDiagram
 | `email` | TEXT | UNIQUE, NOT NULL | Account email (stored in lowercase). |
 | `password_hash` | TEXT | NOT NULL | Salted PBKDF2/scrypt password hash. |
 | `name` | TEXT | NOT NULL | Full name of the user. |
-| `phone` | TEXT | | Normalized mobile number (E.164 without leading `+`). |
+| `phone` | TEXT | | Mobile number as E.164 with `+` (`+66812345678`), ADR 022. |
 | `role` | TEXT | DEFAULT 'TRAVELER' | `TRAVELER`, `SUPPLIER`, `STAFF`, `ADMIN`. |
 | _(no `supplier_id`)_ | — | — | A `SUPPLIER` login is linked to its supplier row by matching `users.email` to `suppliers.email` (`middleware/auth.js`), not by a column on `users`. |
 | `created_at` | TIMESTAMP | DEFAULT NOW | Record creation timestamp. |
@@ -475,6 +475,11 @@ Migration 037, ADR 017. Read and written only through `programSettingsService`.
   `last_reminder_days`.
 
 ---
+
+### 2.17 Phone Numbers (E.164)
+Every phone that WhatsApp or SMS reaches is stored as E.164 with `+`: `users.phone`, `suppliers.phone`, `user_profiles.phone`, `bookings.traveler_phone`, `circuit_orders.traveler_phone`, `supplier_drivers.driver_phone`, `driver_assignments.driver_phone` (ADR 022). The API converts on save with `toE164` (`backend/src/lib/phone.js`). Migration 048 converted stored numbers; a value it could not read with certainty (for example a Thai `0812345678` with no country code) was left as typed. `emergency_contact_phone` and `whatsapp_logs` are not converted.
+
+- `phone_e164_backup` (048): `table_name`, `column_name`, `row_id`, `original`, `cleaned`, `converted`. The value each converted row had before 048, so `@down` can restore it. Holds phone numbers; drop it in a later migration once the conversion is confirmed in production.
 
 ## 3. Sensitive Data & Security Controls
 1. **Pickup OTPs**:

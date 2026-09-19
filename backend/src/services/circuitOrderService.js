@@ -45,7 +45,7 @@ function contactDetails(user, input = {}) {
   if (!toE164(travelerPhone)) {
     throw orderError(PHONE_FORMAT_HINT, 400, "TRAVELER_CONTACT_REQUIRED");
   }
-  return { travelerName, travelerEmail, travelerPhone };
+  return { travelerName, travelerEmail, travelerPhone: toE164(travelerPhone) };
 }
 
 function orderRecord(database, orderId, userId) {

@@ -121,9 +121,11 @@ test("amounts are 10% of the booking's own commission, rounded down", () => {
 });
 
 test("identity normalisation sees through phone prefixes and Gmail aliases", () => {
-  assert.equal(normalizePhone("+91 98765-43210"), "9876543210");
-  assert.equal(normalizePhone("098765 43210"), "9876543210");
+  assert.equal(normalizePhone("+91 98765-43210"), "+919876543210");
+  assert.equal(normalizePhone("098765 43210"), "+919876543210");
   assert.equal(normalizePhone("12345"), null);
+  // Same last 10 digits, different countries: not the same person.
+  assert.notEqual(normalizePhone("+66 81 234 5678"), normalizePhone("68123 45678"));
   assert.equal(normalizeEmailIdentity("Priya.Menon+trips@GMAIL.com"), "priyamenon@gmail.com");
   assert.equal(normalizeEmailIdentity("priya.menon+x@googlemail.com"), "priyamenon@gmail.com");
   assert.equal(normalizeEmailIdentity("priya.menon+x@company.in"), "priya.menon@company.in");
