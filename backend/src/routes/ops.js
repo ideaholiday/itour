@@ -23,6 +23,7 @@ import logger from "../config/logger.js";
 import { validateBody } from "../middleware/validation.js";
 import { opsSchemas } from "../validators/apiSchemas.js";
 import { driverLocationTrail, latestDriverLocation, purgeExpiredDriverLocations } from "../services/driverLocationService.js";
+import { purgeOrphanUploads } from "../services/uploadCleanupService.js";
 
 const router = express.Router();
 const opsAccess = requireRoles("ADMIN", "STAFF");
@@ -181,7 +182,12 @@ router.post("/process-reservation-outbox", optionalAuthMiddleware, requireSchedu
 router.post("/process-post-trip-invites", optionalAuthMiddleware, requireSchedulerOrRoles("ADMIN", "STAFF"), validateBody(opsSchemas.scheduler), async (req, res) => {
   try {
     const result = await sendPendingPostTripReviewInvites(db);
-    res.json({ success: true, checked: result.checked, sent: result.sent.map((item) => item.bookingRef) });
+    // Unused photo uploads are removed after 30 days (ADR 021); a failure here never blocks the invites.
+    const photoCleanup = await purgeOrphanUploads(db).catch((err) => {
+      logger.error("Unused upload cleanup failed", { error: err });
+      return { error: "Cleanup failed" };
+    });
+    res.json({ success: true, checked: result.checked, sent: result.sent.map((item) => item.bookingRef), photoCleanup });
   } catch (err) {
     logger.error("Post-trip invite processing failed", { error: err });
     res.status(500).json({ error: "Post-trip invite processing failed" });

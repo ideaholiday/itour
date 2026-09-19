@@ -40,3 +40,17 @@ export async function getObject(bucket, objectPath) {
 export function publicObjectUrl(objectPath) {
   return storage().from(PUBLIC_MEDIA_BUCKET).getPublicUrl(objectPath).data.publicUrl;
 }
+
+export async function removeObject(bucket, objectPath) {
+  const { error } = await storage().from(bucket).remove([objectPath]);
+  if (error) throw new Error(`Storage delete failed: ${error.message}`);
+}
+
+// The object path of a link to this project's public photo bucket, or null for
+// any other link (another host, a pasted link, a local /uploads file).
+export function publicObjectPath(url) {
+  if (!mediaStorageEnabled()) return null;
+  const prefix = `${String(process.env.SUPABASE_URL).replace(/\/$/, "")}/storage/v1/object/public/${PUBLIC_MEDIA_BUCKET}/`;
+  const value = String(url || "");
+  return value.startsWith(prefix) ? decodeURIComponent(value.slice(prefix.length)) : null;
+}

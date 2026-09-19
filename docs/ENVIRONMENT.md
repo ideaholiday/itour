@@ -193,7 +193,7 @@ The API also runs driver dispatch on a 30-second in-process timer, but Cloud Run
 | `driver-dispatch` | `POST /api/ops/process-driver-dispatch` | `*/5 * * * *` | Auto-assigns drivers, expires unanswered requests, queues 24-hour and 2-hour reminders and alerts, and delivers the dispatch notification queue. |
 | `idea-holiday-schedule-run` | `POST /api/ops/process-assignment-timeouts` | `*/5 * * * *` | Supplier acceptance SLA and circuit reconfirmation timeouts. |
 | `idea-holiday-queue-drain` | `POST /api/ops/process-reservation-outbox` | `* * * * *` | Booking confirmation outbox delivery. |
-| `post-trip-invites` | `POST /api/ops/process-post-trip-invites` | `15 * * * *` | Review and report-a-problem invites for trips completed in the last 7 days. |
+| `post-trip-invites` | `POST /api/ops/process-post-trip-invites` | `15 * * * *` | Review and report-a-problem invites for trips completed in the last 7 days. Also deletes up to 50 unused photo uploads older than 30 days (`uploadCleanupService`, ADR 021). |
 
 All four jobs run in `Asia/Kolkata`, send `X-Scheduler-Token` from the `idea-holiday-assignment-scheduler-token` secret, and are created in project `my-project-8591-489308`, Cloud Scheduler location `us-central1`. They call the Cloud Run service in `asia-northeast1` (ADR 016). The token is attached to Cloud Run as `ASSIGNMENT_SCHEDULER_TOKEN` by `deploy.sh`.
 
