@@ -35,6 +35,7 @@ import {
   previewReferralBenefit,
   redeemWalletCredit,
 } from "../services/referralService.js";
+import { localDateTimeMs, productTime } from "../lib/localTime.js";
 
 const router = Router();
 router.use(optionalAuthMiddleware);
@@ -632,7 +633,7 @@ router.get("/:ref/logistics", authenticate, (req, res) => {
 });
 
 function amendmentCutoff(booking) {
-  const at = new Date(`${booking.activity_date}T${booking.pickup_time || "09:00"}:00`).getTime() - 4 * 60 * 60 * 1000;
+  const at = localDateTimeMs(booking.activity_date, booking.pickup_time, productTime(db, booking.product_id)) - 4 * 60 * 60 * 1000;
   return new Date(at).toISOString();
 }
 

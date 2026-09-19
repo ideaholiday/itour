@@ -24,6 +24,7 @@ import { validateBody } from "../middleware/validation.js";
 import { opsSchemas } from "../validators/apiSchemas.js";
 import { driverLocationTrail, latestDriverLocation, purgeExpiredDriverLocations } from "../services/driverLocationService.js";
 import { purgeOrphanUploads } from "../services/uploadCleanupService.js";
+import { localDateTimeMs, productTime } from "../lib/localTime.js";
 
 const router = express.Router();
 const opsAccess = requireRoles("ADMIN", "STAFF");
@@ -78,6 +79,7 @@ router.get("/live-trips", (req, res) => {
 
     let totalSlaBreaches = 0;
 
+    const productTimes = new Map();
     rawBookings.forEach((b) => {
       const hasDriver = Boolean(b.driver_name && b.driver_name !== "Driver Pending Assignment");
       const status = (b.assignment_status || "UNASSIGNED").toUpperCase();
@@ -86,9 +88,9 @@ router.get("/live-trips", (req, res) => {
       const isUnassigned = !hasDriver || status === "UNASSIGNED";
       const isLive = !["cancelled", "completed"].includes(String(b.status || "").toLowerCase());
 
-      // Minutes until pickup, computed from the booking's actual activity date/time (IST).
+      // Minutes until pickup, from the booking's date and time in its product's city (ADR 023).
       // A negative value means the pickup time has already passed with no driver assigned.
-      const pickupAt = b.activity_date ? Date.parse(`${b.activity_date}T${b.pickup_time || "09:00"}:00+05:30`) : NaN;
+      const pickupAt = b.activity_date ? localDateTimeMs(b.activity_date, b.pickup_time, productTime(db, b.product_id, productTimes)) : NaN;
       const minutesToPickup = Number.isFinite(pickupAt) ? Math.round((pickupAt - Date.now()) / 60000) : null;
       const slaAlert = isLive && isUnassigned && minutesToPickup !== null && minutesToPickup <= 60;
 

@@ -296,7 +296,6 @@ export default function SupplierTransferBuilder() {
           title: title.trim(),
           city: city.trim(),
           state: state.trim(),
-          country: "India",
           category: selectedType.category,
           shortDesc: description.trim(),
           fullDesc: description.trim(),

@@ -8,6 +8,7 @@ import { locationSchemas } from "../validators/apiSchemas.js";
 import { ensureDefaultProductOption, getBookingQuestions, getProductOptions } from "../services/logisticsService.js";
 import { priorMeanRating } from "../services/reviewService.js";
 import { approvedSupplierSql } from "../services/supplierKybGate.js";
+import { listingOpenIn } from "../lib/locationCatalog.js";
 
 const router = Router();
 
@@ -289,7 +290,7 @@ router.get("/cities", (req, res) => {
       FROM destinations
       WHERE COALESCE(is_active, 1) = 1
       ORDER BY CASE WHEN COALESCE(country, 'India') = 'India' THEN 0 ELSE 1 END, country, CASE WHEN category = 'METRO' THEN 0 ELSE 1 END, name
-    `).all();
+    `).all().map((row) => ({ ...row, listing_open: listingOpenIn(row.country) }));
     citiesCache.data = rows;
     citiesCache.expiresAt = now + 300000;
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");

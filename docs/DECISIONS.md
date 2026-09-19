@@ -273,3 +273,16 @@ This document records significant technical and product architectural decisions.
   - **WhatsApp templates stay in English** for all countries; the higher per-country Meta price is accepted.
   - **Address search stays India-only**; travelers abroad paste their full pickup address.
 - **Consequences**: Phase 1 (done): WhatsApp, SMS and phone validation use `toE164`; a local number with a leading 0 and no country code is rejected rather than sent to `+91`. Phase 2 (done): checkout, signup and profile have the picker (India, Thailand, UAE, Other) and send the number as E.164; the starting country follows the header currency (AED → UAE; there is no THB currency yet); circuit checkout uses the profile number. Phase 3 (done): supplier signup, driver (fleet, assignment, fallback, ops override), team and the ops WhatsApp test forms have the picker; traveler and supplier signup store the number as E.164 (drivers and staff already were). Phase 4 (done): bookings and circuit orders store the traveler number as E.164; migration 048 converts stored numbers (unambiguous Indian mobiles get `+91`, anything uncertain is left as typed) and keeps the originals in `phone_e164_backup`; Travel & Earn matches phones on the full E.164 number, not the last 10 digits. Supplier signup (done): migration 049 adds `destinations.country` and the base cities Bangkok, Pattaya, Phuket, Krabi, Chiang Mai and Dubai; signup groups cities by country and sets the phone country from the city. Listing products abroad is still blocked: `resolveIndiaCatalogLocation` accepts India only.
+
+---
+
+## ADR 023: Products Can Be Listed in Thailand; Dubai Later
+- **Date**: 2026-09-19
+- **Context**: Thai and UAE suppliers can sign up (ADR 022), but listings were India-only: the city check refused other countries, every departure time was read as India time, approval needed an Indian PAN, and 5% GST was added to every transfer and tour.
+- **Decision Made**:
+  - **Listings open in Thailand now; the UAE later.** Dubai stays in signup but can't hold a product yet.
+  - **Times are local to the product's city.** A Bangkok supplier's 09:00 means 09:00 in Bangkok (`Asia/Bangkok`); cutoffs, free-cancellation deadlines and alerts use that time.
+  - **Thai suppliers upload Thai documents**, approved by an admin by hand (no Cashfree check): company registration certificate (DBD affidavit), TAT tour operator licence, passport or Thai ID of the authorised director, and for transfer suppliers a commercial vehicle registration or public transport permit.
+  - **No GST on products in Thailand** (0%). Indian products keep their current GST.
+  - **Suppliers enter prices in INR**, matching INR payouts (ADR 022).
+- **Consequences**: Delivered in steps L1–L5 (city and country, local time, documents by country, tax, traveler side); progress is recorded here as each lands.

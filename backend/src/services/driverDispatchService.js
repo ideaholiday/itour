@@ -7,6 +7,7 @@ import { hashPickupOtp } from "./bookingService.js";
 import { markReferralTripCompleted } from "./referralService.js";
 import { onTripCompleted } from "./affiliateService.js";
 import { latestDriverLocation, recordDriverLocations, telemetryFromAssignment } from "./driverLocationService.js";
+import { INDIA_TIME, localDateTimeMs, productTime } from "../lib/localTime.js";
 
 export const DISPATCH_STATUS_TRANSITIONS = Object.freeze({
   ASSIGNED: ["EN_ROUTE"],
@@ -64,12 +65,13 @@ function timeParts(value) {
   return [hour, minute];
 }
 
-export function bookingWindow(booking) {
+/** The trip's start and end instants; `time` is the product city's clock (ADR 023). */
+export function bookingWindow(booking, time = INDIA_TIME) {
   const [year, month, day] = String(booking.activity_date || "").split("-").map(Number);
   const [hour, minute] = timeParts(booking.pickup_time);
   if (![year, month, day].every(Number.isFinite)) throw dispatchError("Booking has an invalid travel date");
   if (new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) !== booking.activity_date) throw dispatchError("Booking has an invalid travel date");
-  const start = Date.UTC(year, month - 1, day, hour, minute) - 330 * 60000;
+  const start = localDateTimeMs(booking.activity_date, `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, time);
   const packageHours = Number(booking.total_days) > 0 ? Number(booking.total_days) * 24 : 0;
   const productHours = Number(booking.duration_hours) > 0 ? Number(booking.duration_hours) : 0;
   const transferHours = Number(booking.duration_mins) > 0 ? Number(booking.duration_mins) / 60 : 0;
@@ -105,7 +107,8 @@ function assignmentConflicts(database, booking, driver) {
     const samePhone = driverPhone && normalizeWhatsAppPhone(candidate.driver_phone) === driverPhone;
     const sameVehicle = String(candidate.vehicle_number || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === plate;
     if (candidate.departure_key === departureKey(booking) && candidate.departure_key?.startsWith("departure:")) return false;
-    const a = bookingWindow(booking), b = bookingWindow(candidate);
+    const time = productTime(database, booking.product_id);
+    const a = bookingWindow(booking, time), b = bookingWindow(candidate, time);
     return (sameRosterDriver || samePhone || sameVehicle) && a.start < b.end + buffer * 60000 && b.start < a.end + buffer * 60000;
   });
 }
@@ -213,7 +216,7 @@ function assignDriverLocked(database, { supplierId, bookingId, supplierDriverId,
     database.prepare("UPDATE bookings SET status = 'driver_assigned' WHERE id = ?").run(bookingId);
     const minutes = database.prepare("SELECT response_minutes FROM dispatch_settings WHERE supplier_id = ?").get(supplierId)?.response_minutes ?? 30;
     database.prepare(`UPDATE driver_assignments SET driver_email = ?, seat_capacity = ?, revision = ?, schedule_key = ?, departure_key = ?, acknowledgement = 'PENDING', response_deadline = ?, acknowledged_at = NULL WHERE id = ?`)
-      .run(driver.driver_email, Number(driver.seat_capacity), randomUUID(), scheduleKey(booking), departureKey(booking), new Date(Math.min(now.getTime() + minutes * 60000, bookingWindow(booking).start)).toISOString(), assignmentId);
+      .run(driver.driver_email, Number(driver.seat_capacity), randomUUID(), scheduleKey(booking), departureKey(booking), new Date(Math.min(now.getTime() + minutes * 60000, bookingWindow(booking, productTime(database, booking.product_id)).start)).toISOString(), assignmentId);
     const saved = database.prepare("SELECT * FROM driver_assignments WHERE id = ?").get(assignmentId);
     enqueueDispatch(database, booking, saved, 'DRIVER_REQUEST', { now });
     event(database, saved, {

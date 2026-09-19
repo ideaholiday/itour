@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { onReferralBookingCancelled } from "./referralService.js";
 import { getSettings } from "./programSettingsService.js";
+import { INDIA_TIME, localDateTimeMs, productTime } from "../lib/localTime.js";
 
 function financeError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -32,21 +33,21 @@ export function resolveCommissionRate(database, supplierId, productId = null) {
   return Math.max(0, Math.min(50, Number(resolved) || 0));
 }
 
-function pickupTimestamp(dateValue, timeValue = "09:00") {
+function pickupTimestamp(dateValue, timeValue = "09:00", time = INDIA_TIME) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateValue || ""))) return null;
   const match = String(timeValue || "09:00").trim().match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
-  if (!match) return new Date(`${dateValue}T09:00:00`).getTime();
+  if (!match) return localDateTimeMs(dateValue, "09:00", time);
   let hour = Number(match[1]);
   const minute = Number(match[2]);
   const meridiem = match[3]?.toUpperCase();
   if (meridiem === "PM" && hour < 12) hour += 12;
   if (meridiem === "AM" && hour === 12) hour = 0;
   if (hour > 23 || minute > 59) return null;
-  return new Date(`${dateValue}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`).getTime();
+  return localDateTimeMs(dateValue, `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, time);
 }
 
-export function hoursUntilPickup(booking, now = new Date()) {
-  const pickup = pickupTimestamp(booking.activity_date || booking.travel_date, booking.pickup_time);
+export function hoursUntilPickup(booking, now = new Date(), time = INDIA_TIME) {
+  const pickup = pickupTimestamp(booking.activity_date || booking.travel_date, booking.pickup_time, time);
   return pickup === null ? 0 : Math.max(0, money((pickup - now.getTime()) / 3_600_000));
 }
 
@@ -56,7 +57,9 @@ export function calculateRefundQuote(database, bookingOrId, { now = new Date(), 
     : database.prepare(`SELECT b.*, p.cancellation_policy FROM bookings b LEFT JOIN products p ON p.id = b.product_id WHERE b.id = ? OR b.ref = ?`).get(bookingOrId, bookingOrId);
   if (!booking) throw financeError("Booking not found", 404);
   const totalAmount = money(booking.amount_inr);
-  const hours = hoursUntilPickup(booking, now);
+  // Deadlines run on the clock of the product's city (ADR 023).
+  const time = productTime(database, booking.product_id);
+  const hours = hoursUntilPickup(booking, now, time);
   const snapshot = typeof booking.logistics_snapshot === "string" ? JSON.parse(booking.logistics_snapshot || "{}") : booking.logistics_snapshot || {};
   const nativeCancellationHours = snapshot.nativeCancellationHours;
   const policy = String(booking.cancellation_policy || "FLEXIBLE_24H").toUpperCase();
@@ -74,7 +77,7 @@ export function calculateRefundQuote(database, bookingOrId, { now = new Date(), 
     if (![0, 50, 100].includes(percentage)) throw financeError("Refund override must be 0%, 50% or 100%");
     tier = `Admin override (${percentage}% refund)`;
   } else if (nativeCancellationHours != null) {
-    const startsAt = Date.parse(`${booking.activity_date}T${booking.pickup_time || "09:00"}:00+05:30`);
+    const startsAt = localDateTimeMs(booking.activity_date, booking.pickup_time, time);
     percentage = (startsAt - now.getTime()) / 3600000 >= Number(nativeCancellationHours) ? 100 : 0;
     tier = `Full refund until ${nativeCancellationHours} hours before departure`;
   } else if (isWithinBookingGrace && policy !== "NON_REFUNDABLE") {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { localDateTimeMs, productTime } from "../lib/localTime.js";
 
 export const NATIVE_HOLD_MINUTES = 10;
 
@@ -280,7 +281,7 @@ export function resolvePromotion(db, rules, localDate, localTime, { code = null,
 
   const supplied = code ? String(code).trim().toUpperCase() : null;
   const bookingDay = now.toISOString().slice(0, 10);
-  const departureAt = Date.parse(`${localDate}T${localTime}:00+05:30`);
+  const departureAt = localDateTimeMs(localDate, localTime, productTime(db, rules.product_id));
   const leadHours = (departureAt - now.getTime()) / 3600000;
 
   const eligible = rows.filter((row) => {
@@ -389,7 +390,7 @@ function linkedResources(db, optionId, localDate, time, excludeId = "") {
 
 function slotView(db, rules, localDate, time, excludeId = "", promoContext = {}) {
   const id = `${rules.option_id}:${localDate}:${time}`;
-  const start = `${localDate}T${time}:00+05:30`;
+  const start = `${localDate}T${time}:00${productTime(db, rules.product_id).offset}`;
   const cutoff = new Date(Date.parse(start) - Number(rules.cutoff_minutes) * 60000).toISOString();
   const override = resolveOverride(db, rules.option_id, localDate, time);
   const pricing = resolvePricing(db, rules, localDate);

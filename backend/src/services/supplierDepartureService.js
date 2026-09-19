@@ -1,6 +1,7 @@
 import { saveSlotOverride } from "./nativeInventoryService.js";
 import { creditSupplierCancellationToWallet } from "./refundCreditService.js";
 import { onReferralBookingCancelled } from "./referralService.js";
+import { localDate, productTime } from "../lib/localTime.js";
 
 /**
  * Supplier day-of-operations (docs/SUPPLIER_OPERATIONS.md): check travelers in by
@@ -74,7 +75,8 @@ export function checkInBooking(db, { supplierId, code, actorId = null, allowOthe
   if (!booking) throw departureError("No booking with this reference belongs to your business", 404, "BOOKING_NOT_FOUND");
   requireAttendable(booking);
 
-  const today = indiaDate(now);
+  // "Today" is the date where the trip runs: Bangkok is 1.5 hours ahead of India (ADR 023).
+  const today = localDate(now, productTime(db, booking.product_id));
   if (booking.activity_date !== today && !allowOtherDate) {
     throw departureError(`Booking ${booking.ref} is for ${booking.activity_date}, not today`, 409, "WRONG_DATE");
   }
@@ -94,7 +96,7 @@ export function setAttendance(db, { supplierId, bookingId, status, actorId = nul
   const booking = findSupplierBooking(db, supplierId, bookingId);
   if (!booking) throw departureError("Booking was not found for this supplier", 404, "BOOKING_NOT_FOUND");
   requireAttendable(booking);
-  if (status === "NO_SHOW" && booking.activity_date > indiaDate(now)) {
+  if (status === "NO_SHOW" && booking.activity_date > localDate(now, productTime(db, booking.product_id))) {
     throw departureError("A traveler can only be marked as a no-show on or after the trip date", 409, "TOO_EARLY");
   }
 
@@ -205,7 +207,7 @@ function optionsRunning(db, productId, time) {
  */
 export function cancelDeparture(db, { supplierId, productId, date, time = null, reason, notes = null, dryRun = false, now = new Date() }) {
   requireSupplierProduct(db, supplierId, productId);
-  if (date < indiaDate(now)) throw departureError("A departure that has already happened cannot be cancelled", 409, "DEPARTURE_IN_PAST");
+  if (date < localDate(now, productTime(db, productId))) throw departureError("A departure that has already happened cannot be cancelled", 409, "DEPARTURE_IN_PAST");
 
   const load = () => db.prepare(`SELECT * FROM bookings WHERE supplier_id = ? AND product_id = ? AND activity_date = ?
     AND LOWER(status) <> 'cancelled'${time ? " AND pickup_time = ?" : ""} ORDER BY created_at, id`)

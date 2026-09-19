@@ -1,5 +1,6 @@
 import { getInventoryRules } from "./nativeInventoryService.js";
 import { calculateHaversineDistanceKm } from "../engine/transferEngine.js";
+import { localDateTimeMs, productTime } from "../lib/localTime.js";
 
 export const LOCATION_TYPES = Object.freeze([
   "AIRPORT", "RAILWAY_STATION", "BUS_STAND", "HOTEL_ZONE",
@@ -429,7 +430,7 @@ function validateFlight(route, input) {
   return null;
 }
 
-function validateDayTour(context, input, now) {
+function validateDayTour(context, input, now, time) {
   const meta = context.dayTour;
   if (!meta) return null;
   const slots = parseJson(meta.available_time_slots).map(timeMinutes).filter(Number.isFinite);
@@ -443,8 +444,8 @@ function validateDayTour(context, input, now) {
     return { valid: false, error: "The selected pickup time is outside this tour's operating hours.", code: "INVALID_BOOKING_PARAMS", detail: { suggestion: `Choose a time between ${meta.operating_start_time || "06:00"} and ${meta.operating_end_time || "22:00"}.` } };
   }
   if (input.activity_date && pickup !== null) {
-    const departure = new Date(`${input.activity_date}T${String(Math.floor(pickup / 60)).padStart(2, "0")}:${String(pickup % 60).padStart(2, "0")}:00`);
-    const hours = (departure.getTime() - now.getTime()) / 3_600_000;
+    const departure = localDateTimeMs(input.activity_date, `${String(Math.floor(pickup / 60)).padStart(2, "0")}:${String(pickup % 60).padStart(2, "0")}`, time);
+    const hours = (departure - now.getTime()) / 3_600_000;
     if (hours < Number(meta.advance_booking_cutoff_hours || 4)) {
       return { valid: false, error: `Bookings close ${Number(meta.advance_booking_cutoff_hours || 4)} hours before departure.`, code: "INVALID_BOOKING_PARAMS", detail: { suggestion: "Choose a later slot or another date." } };
     }
@@ -511,7 +512,7 @@ export function validateBookingLocations(db, input, { requireOperationalDetails 
     if (flightError) return flightError;
   }
   if (isTour && !getInventoryRules(db, productId, input.product_option_id)) {
-    const dayTourError = validateDayTour(context, input, now);
+    const dayTourError = validateDayTour(context, input, now, productTime(db, productId));
     if (dayTourError) return dayTourError;
   }
   if (isPackage) {

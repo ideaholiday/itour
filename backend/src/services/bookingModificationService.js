@@ -2,6 +2,7 @@ import { moveNativeReservation } from "./nativeInventoryService.js";
 import { onBookingCancelled } from "./affiliateService.js";
 import { onReferralBookingCancelled } from "./referralService.js";
 import crypto from "crypto";
+import { INDIA_TIME, localDateTimeMs, productTime } from "../lib/localTime.js";
 
 export class BookingModificationService {
   /**
@@ -21,14 +22,14 @@ export class BookingModificationService {
   /**
    * Computes remaining hours before trip start
    */
-  static getHoursUntilDeparture(activityDate, pickupTime = "09:00") {
+  static getHoursUntilDeparture(activityDate, pickupTime = "09:00", time = INDIA_TIME) {
     try {
       const timeParts = String(pickupTime || "09:00").split(":");
       const hours = parseInt(timeParts[0], 10) || 9;
       const minutes = parseInt(timeParts[1], 10) || 0;
-      const departureDate = new Date(`${activityDate}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00`);
+      const departureMs = localDateTimeMs(activityDate, `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`, time);
       const now = new Date();
-      const diffMs = departureDate.getTime() - now.getTime();
+      const diffMs = departureMs - now.getTime();
       return diffMs / (1000 * 60 * 60);
     } catch {
       return 0;
@@ -70,7 +71,7 @@ export class BookingModificationService {
     if (policy === "MODERATE_48H") cutoffHours = 48;
     if (policy === "STRICT") cutoffHours = 72;
 
-    const hoursUntilDeparture = this.getHoursUntilDeparture(booking.activity_date, booking.pickup_time);
+    const hoursUntilDeparture = this.getHoursUntilDeparture(booking.activity_date, booking.pickup_time, productTime(database, booking.product_id));
     const isAdmin = actor && ["ADMIN", "STAFF"].includes(String(actor.role || "").toUpperCase());
 
     const isEligible = isAdmin || hoursUntilDeparture >= cutoffHours;
@@ -162,7 +163,7 @@ export class BookingModificationService {
       if (product?.cancellation_policy) policy = product.cancellation_policy;
     }
 
-    const hoursUntilDeparture = this.getHoursUntilDeparture(booking.activity_date, booking.pickup_time);
+    const hoursUntilDeparture = this.getHoursUntilDeparture(booking.activity_date, booking.pickup_time, productTime(database, booking.product_id));
     const totalAmountInr = Number(booking.amount_inr || 0);
 
     let refundPercentage = 0;

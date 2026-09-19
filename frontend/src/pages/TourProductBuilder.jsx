@@ -287,7 +287,6 @@ export default function TourProductBuilder() {
         title: formData.step1.title,
         city: formData.step1.city,
         state: formData.step1.state,
-        country: "India",
         category: pType === "DAY_TOUR" ? "Day Sightseeing" : "Multi-Day Packages",
         shortDesc: formData.step1.shortDescription,
         fullDesc: formData.step1.shortDescription,

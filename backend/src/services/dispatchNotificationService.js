@@ -5,6 +5,7 @@ import { guestDocumentLinks } from './guestDocumentService.js';
 import { trackingUrl } from './tripTrackingService.js';
 import { issueBookingInvite } from './reviewInviteService.js';
 import logger from '../config/logger.js';
+import { INDIA_TIME, localClock, localDate, productTime } from '../lib/localTime.js';
 
 // Dispatch WhatsApp templates. Each body is the exact text submitted to Meta as a
 // UTILITY template under `name`; `params` lists the {{n}} values in order and
@@ -104,23 +105,25 @@ const appUrl = () => String(process.env.PUBLIC_APP_URL || 'https://ideaholiday.i
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-export function formatPickup(booking) {
+export function formatPickup(booking, time = INDIA_TIME) {
   const [y, m, d] = String(booking.activity_date || '').split('-').map(Number);
   if (![y, m, d].every(Number.isFinite)) return `${booking.activity_date || 'Date TBC'} ${booking.pickup_time || ''}`.trim();
   const date = new Date(Date.UTC(y, m - 1, d));
-  return `${WEEKDAYS[date.getUTCDay()]} ${d} ${MONTHS[m - 1]} ${y}, ${booking.pickup_time || 'time TBC'} IST`;
+  return `${WEEKDAYS[date.getUTCDay()]} ${d} ${MONTHS[m - 1]} ${y}, ${booking.pickup_time || 'time TBC'} ${time.label}`;
 }
 
-function formatIst(iso) {
-  const ist = new Date(Date.parse(iso) + 330 * 60000);
-  if (Number.isNaN(ist.getTime())) return 'the response deadline';
-  return `${ist.getUTCDate()} ${MONTHS[ist.getUTCMonth()]}, ${String(ist.getUTCHours()).padStart(2, '0')}:${String(ist.getUTCMinutes()).padStart(2, '0')} IST`;
+// A deadline in the trip's local time: IST in India, ICT in Thailand (ADR 023).
+function formatIst(iso, time = INDIA_TIME) {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return 'the response deadline';
+  const [, month, day] = localDate(new Date(ms), time).split('-').map(Number);
+  return `${day} ${MONTHS[month - 1]}, ${localClock(ms, time)} ${time.label}`;
 }
 
-// "today" / "tomorrow" relative to India time, otherwise the date.
-export function pickupDayWord(booking, now = new Date()) {
-  const today = new Date(now.getTime() + 330 * 60000).toISOString().slice(0, 10);
-  const tomorrow = new Date(now.getTime() + 330 * 60000 + 86400000).toISOString().slice(0, 10);
+// "today" / "tomorrow" relative to the trip's local time, otherwise the date.
+export function pickupDayWord(booking, now = new Date(), time = INDIA_TIME) {
+  const today = localDate(now, time);
+  const tomorrow = localDate(new Date(now.getTime() + 86400000), time);
   if (booking.activity_date === today) return 'today';
   if (booking.activity_date === tomorrow) return 'tomorrow';
   return `on ${booking.activity_date}`;
@@ -166,7 +169,8 @@ export function buildDispatchMessages(db, job, { now = new Date() } = {}) {
   const payload = JSON.parse(job.payload || '{}');
   const event = job.event_type;
   const tour = booking.product_title || booking.product_type || 'your trip';
-  const pickupAt = formatPickup(booking);
+  const time = productTime(db, booking.product_id);
+  const pickupAt = formatPickup(booking, time);
   const location = booking.pickup_location || 'pickup point on your voucher';
   const passengers = Number(booking.adults || 0) + Number(booking.children || 0);
   const accepted = assignment?.acknowledgement === 'ACCEPTED' && assignment.assignment_status !== 'CANCELLED';
@@ -210,13 +214,13 @@ export function buildDispatchMessages(db, job, { now = new Date() } = {}) {
   if (event === 'DRIVER_REQUEST') {
     add(driver, `New trip request ${booking.ref}: ${tour}, ${pickupAt}`, {
       greeting: hello(driver.name),
-      intro: `You have a new Idea Holiday trip request. Please accept or decline before ${formatIst(assignment.response_deadline)}.`,
+      intro: `You have a new Idea Holiday trip request. Please accept or decline before ${formatIst(assignment.response_deadline, time)}.`,
       rows: [...tripRows, ['Vehicle', vehicle]],
       action: tripUrl ? { label: 'Accept or decline', url: tripUrl } : null,
       notes: ['Traveler contact details appear after you accept. Do not share this link.'],
-    }, dispatchTemplate('DRIVER_REQUEST', [booking.ref, tour, pickupAt, location, passengers, vehicle, formatIst(assignment.response_deadline), tripLink]));
+    }, dispatchTemplate('DRIVER_REQUEST', [booking.ref, tour, pickupAt, location, passengers, vehicle, formatIst(assignment.response_deadline, time), tripLink]));
   } else if (event === 'DRIVER_REQUEST_REMINDER') {
-    const deadline = formatIst(assignment.response_deadline);
+    const deadline = formatIst(assignment.response_deadline, time);
     add(driver, `Reminder: accept or decline trip ${booking.ref} before ${deadline}`, {
       greeting: hello(driver.name),
       intro: `You have not answered this Idea Holiday trip request yet. Please accept or decline before ${deadline}, or it will be offered to another driver.`,
@@ -247,13 +251,13 @@ export function buildDispatchMessages(db, job, { now = new Date() } = {}) {
     }
   } else if (event === 'DRIVER_AUTO_ASSIGNED') {
     // The supplier learns which of its drivers was requested, so it can step in before the deadline.
-    statusMessage(supplier, 'Driver auto-assigned', `${assignment.driver_name} (${vehicle}) was sent the trip request and must accept by ${formatIst(assignment.response_deadline)}.`, { label: 'Open bookings', url: `${appUrl()}/supplier/bookings` });
+    statusMessage(supplier, 'Driver auto-assigned', `${assignment.driver_name} (${vehicle}) was sent the trip request and must accept by ${formatIst(assignment.response_deadline, time)}.`, { label: 'Open bookings', url: `${appUrl()}/supplier/bookings` });
   } else if (event === 'DRIVER_CONFIRMED') {
     travelerDriverMessage('Your driver is confirmed', `Driver confirmed for ${tour} (${booking.ref})`);
     driverTripMessage('Trip confirmed', `Trip confirmed ${booking.ref}: ${pickupAt}`);
     statusMessage(supplier, 'Driver confirmed', `${assignment.driver_name} accepted in ${vehicle}.`, { label: 'Open bookings', url: `${appUrl()}/supplier/bookings` });
   } else if (event === 'PRE_TRIP_REMINDER') {
-    const day = pickupDayWord(booking, now);
+    const day = pickupDayWord(booking, now, time);
     const subject = `Trip Reminder: Your ${tour} is ${day} (${booking.ref})`;
     if (accepted) {
       travelerDriverMessage(`Your trip is ${day}`, subject);

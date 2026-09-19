@@ -12,6 +12,7 @@ import { getProductOptions } from "./logisticsService.js";
 import { octoReservationView } from "./reservationProviders.js";
 import logger from "../config/logger.js";
 import { approvedSupplierSql } from "./supplierKybGate.js";
+import { productTime } from "../lib/localTime.js";
 
 // Channel partners see and book only what travelers can: published products
 // whose supplier is KYB-approved.
@@ -147,7 +148,7 @@ export function formatOctoProduct(db, product) {
     internalName: product.title,
     reference: product.product_code || product.id,
     locale: "en",
-    timeZone: "Asia/Kolkata",
+    timeZone: productTime(db, product.id).timeZone,
     instantConfirmation: Boolean(product.is_instant_booking ?? 1),
     instantDelivery: true,
     availabilityRequired: true,

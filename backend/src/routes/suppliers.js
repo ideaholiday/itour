@@ -17,7 +17,7 @@ import { canTransitionBooking } from "../services/bookingService.js";
 import { authenticate, optionalAuthMiddleware, requireRoles, requireSupplierSelf } from "../middleware/auth.js";
 import logger from "../config/logger.js";
 import { validateTransferMeta } from "../lib/transferListing.js";
-import { resolveIndiaCatalogLocation } from "../lib/locationCatalog.js";
+import { listingOpenIn, resolveCatalogLocation } from "../lib/locationCatalog.js";
 import { respondToSupplierAssignment } from "../services/assignmentSlaService.js";
 import { respondToCircuitReconfirmation } from "../services/circuitOrchestrationService.js";
 import { evaluateSupplierAvailability, normalizeAvailabilityRule } from "../services/availabilityService.js";
@@ -770,10 +770,9 @@ router.post("/:id/geofences", validateBody(supplierSchemas.geofence), (req, res)
     const fenceId = `fence_${Date.now()}`;
 
     if (!zoneName?.trim() || !city?.trim()) return res.status(400).json({ error: "Zone name and city are required" });
-    const locationValidation = resolveIndiaCatalogLocation(
-      db.prepare("SELECT id, name, state FROM destinations WHERE COALESCE(is_active, 1) = 1").all(),
+    const locationValidation = resolveCatalogLocation(
+      db.prepare("SELECT id, name, state, country FROM destinations WHERE COALESCE(is_active, 1) = 1").all(),
       city,
-      "India",
     );
     if (locationValidation.error) return res.status(400).json({ error: locationValidation.error });
     const canonicalCity = locationValidation.value.city;
@@ -844,6 +843,11 @@ router.post("/:id/products/v2", (req, res) => {
     if (!title?.trim()) return res.status(400).json({ error: "Title is required" });
     if (!city?.trim()) return res.status(400).json({ error: "City is required" });
     if (!state?.trim()) return res.status(400).json({ error: "State / Region is required" });
+    // Free-text cities stay allowed; a catalogue city abroad must be open for listing (ADR 023).
+    const catalogCity = db.prepare("SELECT name, country FROM destinations WHERE LOWER(name) = LOWER(?) AND COALESCE(is_active, 1) = 1").get(city.trim());
+    if (catalogCity && !listingOpenIn(catalogCity.country)) {
+      return res.status(400).json({ error: `Listings in ${catalogCity.country} open soon. ${catalogCity.name} can't hold a product yet.` });
+    }
     const normPrice = Number(priceInr);
     if (!Number.isFinite(normPrice) || normPrice <= 0)
       return res.status(400).json({ error: "Price must be greater than zero" });
@@ -989,7 +993,7 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
       title,
       city,
       state,
-      country = "India",
+      country,
       category,
       shortDesc,
       fullDesc,
@@ -1041,8 +1045,8 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
         return res.status(400).json({ error: "Each stop description cannot exceed 1,000 characters" });
       }
     }
-    const locationValidation = resolveIndiaCatalogLocation(
-      db.prepare("SELECT id, name, state FROM destinations WHERE COALESCE(is_active, 1) = 1").all(),
+    const locationValidation = resolveCatalogLocation(
+      db.prepare("SELECT id, name, state, country FROM destinations WHERE COALESCE(is_active, 1) = 1").all(),
       city,
       country,
     );

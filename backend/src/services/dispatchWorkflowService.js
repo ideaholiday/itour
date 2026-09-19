@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { assignDriverToBooking, bookingWindow, bookingWithDuration, getFleetAvailability, updateDispatchStatus, verifyPickupOtp } from './driverDispatchService.js';
 import { assertDriverSharingLocation, assessDriverLocationRisk, LOCATION_RISK } from './driverLocationService.js';
 import { dispatchTransaction, scheduleKey, departureKey, enqueueDispatch, revokeAssignment, isCancelledBooking } from './dispatchStateService.js';
+import { productTime } from '../lib/localTime.js';
 
 const active = b => b.payment_status === 'PAID' && ['confirmed', 'driver_assigned'].includes(String(b.status).toLowerCase()) && ['SUPPLIER_ACCEPTED','LEGACY_ASSIGNED','MANUAL_ASSIGNED','AUTO_REALLOCATED','RESCHEDULE_RECONFIRMED'].includes(b.supplier_assignment_status || 'LEGACY_ASSIGNED');
 const error = (message, status = 409) => Object.assign(new Error(message), { status });
@@ -145,7 +146,7 @@ export function processTripWatch(db, { now = new Date(), supplierId = null } = {
     const booking = bookingWithDuration(db, id, assignment.supplier_id);
     if (!booking) continue;
     let window;
-    try { window = bookingWindow(booking); } catch { continue; }
+    try { window = bookingWindow(booking, productTime(db, booking.product_id)); } catch { continue; }
     const at = now.getTime();
     const raise = (taskType, eventType, stage, priority, reason) => {
       tripTask(db, booking, taskType, reason, priority);
@@ -204,7 +205,7 @@ export function processDispatchSchedule(db, { now = new Date(), supplierId = nul
       }
       if (!active(booking)) continue;
       let window;
-      try { window = bookingWindow(booking); } catch { dispatchException(db, booking, 'Valid pickup date and time required', now); continue; }
+      try { window = bookingWindow(booking, productTime(db, booking.product_id)); } catch { dispatchException(db, booking, 'Valid pickup date and time required', now); continue; }
       if (window.start <= now.getTime()) {
         if (!assignment || assignment.acknowledgement !== 'ACCEPTED') dispatchException(db, booking, 'Pickup overdue without an accepted driver', now, { stage: 'OVERDUE', priority: 'CRITICAL' });
         continue;
@@ -301,7 +302,7 @@ export function driverAction(db, context, { action, otp, note }, now = new Date(
     const current = currentDriverAssignment(db, context.assignment.id, context.assignment.revision, now);
     if (current.assignment.acknowledgement !== 'ACCEPTED') throw error('Accept the trip first');
     if (!['ASSIGNED','EN_ROUTE','ARRIVED','TRIP_STARTED'].includes(current.assignment.assignment_status)) throw error('Trip cannot be started');
-    if (now.getTime() < bookingWindow(current.booking).start - 2 * 3600000) throw error('Pickup verification opens two hours before departure');
+    if (now.getTime() < bookingWindow(current.booking, productTime(db, current.booking.product_id)).start - 2 * 3600000) throw error('Pickup verification opens two hours before departure');
     verifyPickupOtp(db, current.booking.id, otp);
   }
   return dispatchTransaction(db, () => {
@@ -333,16 +334,18 @@ export const TRIP_ISSUE_TASK_TYPES = Object.freeze(['PICKUP_NOT_STARTED', 'TRIP_
 
 export function listDispatchExceptions(db, { supplierId = null, now = new Date(), taskTypes = ['DRIVER_ASSIGNMENT_REQUIRED'] } = {}) {
   const rows = db.prepare(`SELECT t.id, t.task_type, t.booking_id, t.priority, t.notes, t.status, t.created_at, t.assigned_staff_name,
-      b.ref, b.supplier_id, b.activity_date, b.pickup_time, b.pickup_location, b.traveler_name, b.adults, b.children, b.vehicle_category,
+      b.ref, b.supplier_id, b.product_id, b.activity_date, b.pickup_time, b.pickup_location, b.traveler_name, b.adults, b.children, b.vehicle_category,
       s.company_name AS supplier_name, s.phone AS supplier_phone, p.title AS product_title,
       da.driver_name, da.driver_phone, da.vehicle_number, da.acknowledgement, da.response_deadline, da.assignment_status
     FROM staff_tasks t JOIN bookings b ON b.id = t.booking_id
     LEFT JOIN suppliers s ON s.id = b.supplier_id LEFT JOIN products p ON p.id = b.product_id
     LEFT JOIN driver_assignments da ON da.booking_id = b.id
     WHERE t.task_type IN (${taskTypes.map(() => '?').join(', ')}) AND t.status = 'OPEN' ${supplierId ? 'AND b.supplier_id = ?' : ''}`).all(...taskTypes, ...(supplierId ? [supplierId] : []));
+  const productTimes = new Map();
   return rows.map(row => {
     let pickupAt = null;
-    try { pickupAt = bookingWindow(row).start; } catch {}
+    const time = productTime(db, row.product_id, productTimes);
+    try { pickupAt = bookingWindow(row, time).start; } catch {}
     const pendingDriver = row.acknowledgement === 'PENDING' && row.assignment_status !== 'CANCELLED';
     return {
       ...row,
