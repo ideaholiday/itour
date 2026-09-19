@@ -33,6 +33,8 @@ import { useAuth } from "../lib/auth.jsx";
 import api from "../lib/api.js";
 import Card, { CardHeader, CardTitle, CardContent } from "../components/ui/Card";
 import Input from "../components/ui/Input";
+import PhoneInput from "../components/PhoneInput.jsx";
+import { toE164 } from "../lib/phone.js";
 import Button from "../components/ui/Button";
 import Avatar from "../components/ui/Avatar";
 import Tabs from "../components/ui/Tabs";
@@ -122,9 +124,10 @@ export function UserProfile() {
     setSuccess("");
 
     try {
+      const phone = toE164(profile.phone) || profile.phone.trim();
       const payload = {
         displayName: profile.name,
-        phone: profile.phone,
+        phone,
         emergencyContactName: profile.emergency_contact_name,
         emergencyContactPhone: profile.emergency_contact_phone,
         travelPreferences: {
@@ -143,7 +146,7 @@ export function UserProfile() {
 
       const res = await api.patch("/users/profile", payload);
       if (res?.user && login) {
-        login({ ...user, name: profile.name, phone: profile.phone });
+        login({ ...user, name: profile.name, phone });
       }
       setSuccess("Profile and preferences saved successfully.");
       setTimeout(() => setSuccess(""), 4000);
@@ -207,13 +210,13 @@ export function UserProfile() {
               disabled
               helperText="Managed by authentication provider"
             />
-            <Input
-              label="Phone / Mobile Number"
-              type="tel"
-              value={profile.phone}
-              onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
-              placeholder="+91 98765 43210"
-            />
+            <div className="w-full">
+              <label htmlFor="profile-phone" className="block text-xs font-semibold uppercase tracking-wider text-stone-600 dark:text-stone-300 mb-1.5">
+                WhatsApp / Mobile Number
+              </label>
+              <PhoneInput id="profile-phone" value={profile.phone} onChange={(phone) => setProfile({ ...profile, phone })}
+                inputClassName="rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 placeholder-stone-400 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500" />
+            </div>
             <Input
               label="City & State"
               value={profile.city ? `${profile.city}${profile.state ? `, ${profile.state}` : ""}` : ""}

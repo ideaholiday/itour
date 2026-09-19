@@ -5,6 +5,7 @@ import { validateBody } from "../middleware/validation.js";
 import { z } from "zod";
 import crypto from "crypto";
 import logger from "../config/logger.js";
+import { PHONE_FORMAT_HINT, toE164 } from "../lib/phone.js";
 import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { sseService } from "../services/sseService.js";
 import { ItineraryService } from "../services/itineraryService.js";
@@ -61,7 +62,7 @@ router.get("/users/profile", authenticate, (req, res) => {
 
 const ProfileUpdateSchema = z.object({
   displayName: z.string().min(1).max(100).optional(),
-  phone: z.string().min(5).max(20).optional(),
+  phone: z.string().trim().min(5).max(24).refine((value) => Boolean(toE164(value)), PHONE_FORMAT_HINT).optional(),
   avatarUrl: z.string().url().or(z.string().startsWith("/uploads/")).optional().nullable(),
   travelPreferences: z.record(z.any()).optional(),
   savedAddresses: z.array(z.any()).optional(),

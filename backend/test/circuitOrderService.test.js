@@ -347,6 +347,12 @@ test("requires quote ownership, readiness, freshness, and complete traveler cont
     () => consumeCircuitQuote(database, { quoteId: "no_contact", userId: "traveler_1", idempotencyKey: "circuit-request-008" }, { now: NOW }),
     (error) => error.code === "TRAVELER_CONTACT_REQUIRED",
   );
+  // A Thai local number with no country code would otherwise be sent to +91.
+  database.prepare("UPDATE users SET phone = '0812345678' WHERE id = 'traveler_1'").run();
+  assert.throws(
+    () => consumeCircuitQuote(database, { quoteId: "no_contact", userId: "traveler_1", idempotencyKey: "circuit-request-009" }, { now: NOW }),
+    (error) => error.code === "TRAVELER_CONTACT_REQUIRED",
+  );
 });
 
 test("confirms one grouped charge by atomically activating every circuit booking", () => {

@@ -5,6 +5,8 @@ import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 import GoogleAuthButton from "../components/GoogleAuthButton.jsx";
+import PhoneInput from "../components/PhoneInput.jsx";
+import { toE164 } from "../lib/phone.js";
 import { clearStoredTravelerReferral, getStoredTravelerReferralCode, getVisitorId } from "../lib/affiliateAttribution.js";
 
 export default function Login({ initialMode = "login" }) {
@@ -78,6 +80,7 @@ export default function Login({ initialMode = "login" }) {
         ...form,
         email: form.email.trim(),
         name: form.name.trim(),
+        phone: toE164(form.phone) || form.phone.trim(),
         ...(mode === "signup" && referralCode ? { referralCode } : {}),
         ...(mode === "signup" && getVisitorId() ? { visitorId: getVisitorId() } : {}),
       };
@@ -163,8 +166,8 @@ export default function Login({ initialMode = "login" }) {
           {isSignup && (
             <div>
               <label htmlFor="auth-phone" className="mb-1.5 block text-xs font-bold text-stone-700">Mobile number</label>
-              <input id="auth-phone" required type="tel" autoComplete="tel" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                placeholder="+91 98765 43210" className="w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-3.5 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20" />
+              <PhoneInput id="auth-phone" required value={form.phone} onChange={(phone) => setForm({ ...form, phone })}
+                inputClassName="rounded-xl border border-stone-300 bg-[#FAF9F6] px-3.5 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20" />
             </div>
           )}
           <div>

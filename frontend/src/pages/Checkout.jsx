@@ -14,6 +14,8 @@ import { useCurrency } from "../lib/currency.jsx";
 import PickupPointPicker from "../components/PickupPointPicker.jsx";
 import { isValidTravelNumber, typedAddressAccepted } from "../lib/checkoutLocation.js";
 import { loadCashfreeSdk } from "../lib/cashfreeSdk.js";
+import PhoneInput from "../components/PhoneInput.jsx";
+import { toE164 } from "../lib/phone.js";
 
 const PICKUP_TYPES = [
   { id: "HOTEL", label: "Hotel / stay", icon: "🏨", placeholder: "Hotel or property name, full address and area" },
@@ -279,7 +281,7 @@ export default function Checkout() {
     joiningMethod === "MEET" || joiningMethod === "LATER" ||
     (pickupPoint.address.trim().length >= 3)
   );
-  const travelerReady = Boolean(travelerName.trim() && travelerPhone.trim() && travelerEmail.trim());
+  const travelerReady = Boolean(travelerName.trim() && toE164(travelerPhone) && travelerEmail.trim());
   // A hotel typed by hand (no map pin) is bookable wherever the server accepts
   // it; operations confirm the exact spot.
   const dropTypedAccepted = typedAddressAccepted(dropRule, dropLocation);
@@ -416,7 +418,9 @@ export default function Checkout() {
     event.preventDefault();
     setError("");
     if (!travelerReady) {
-      setError("Add the traveler's full name, mobile number and email.");
+      setError(travelerPhone.trim() && !toE164(travelerPhone)
+        ? "Check the WhatsApp number: pick the country and enter the mobile number."
+        : "Add the traveler's full name, mobile number and email.");
       return;
     }
     if (!pickupReady) {
@@ -495,7 +499,7 @@ export default function Checkout() {
         vehicle_category: vehicle,
         variant_name: variant,
         traveler_name: travelerName.trim(),
-        traveler_phone: travelerPhone.trim(),
+        traveler_phone: toE164(travelerPhone) || travelerPhone.trim(),
         traveler_email: travelerEmail.trim(),
         payment_method: paymentMethod,
         client_request_id: clientRequestId
@@ -624,7 +628,7 @@ export default function Checkout() {
           <form onSubmit={handleSubmitBooking} className="space-y-6">
             <section className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-amber-100 text-amber-800"><UserRound className="h-5 w-5" /></span><div><h2 className="font-serif text-xl font-bold text-stone-900">Who’s traveling?</h2><p className="text-xs text-stone-500">Voucher and important trip updates go here.</p></div></div>
-              <div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-xs font-bold text-stone-700">Full name<input required value={travelerName} onChange={(e) => setTravelerName(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></label><label className="text-xs font-bold text-stone-700">WhatsApp / mobile<input required value={travelerPhone} onChange={(e) => setTravelerPhone(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></label><label className="text-xs font-bold text-stone-700 sm:col-span-2">Email for e-ticket<input type="email" required value={travelerEmail} onChange={(e) => setTravelerEmail(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></label></div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-xs font-bold text-stone-700">Full name<input required value={travelerName} onChange={(e) => setTravelerName(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></label><div className="text-xs font-bold text-stone-700"><label htmlFor="checkout-phone">WhatsApp / mobile</label><PhoneInput id="checkout-phone" required value={travelerPhone} onChange={setTravelerPhone} className="mt-2" inputClassName="rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></div><label className="text-xs font-bold text-stone-700 sm:col-span-2">Email for e-ticket<input type="email" required value={travelerEmail} onChange={(e) => setTravelerEmail(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></label></div>
             </section>
 
             <section id="pickup-details" className="scroll-mt-28 rounded-3xl border border-amber-300 bg-gradient-to-br from-amber-50/40 to-white p-5 shadow-sm sm:p-6 space-y-4">

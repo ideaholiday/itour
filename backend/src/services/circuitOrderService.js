@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
 import { isSupplierSubscriptionCovered } from "./supplierKybGate.js";
+import { PHONE_FORMAT_HINT, toE164 } from "../lib/phone.js";
 
 const HOLD_VALIDITY_MS = 10 * 60 * 1000;
 const ACTIVE_ORDER_STATUS = "PENDING_PAYMENT";
@@ -41,8 +42,8 @@ function contactDetails(user, input = {}) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(travelerEmail)) {
     throw orderError("Enter a valid traveler email", 400, "TRAVELER_CONTACT_REQUIRED");
   }
-  if (!/^\+?[0-9][0-9\s-]{7,17}$/.test(travelerPhone)) {
-    throw orderError("Enter a valid traveler phone number", 400, "TRAVELER_CONTACT_REQUIRED");
+  if (!toE164(travelerPhone)) {
+    throw orderError(PHONE_FORMAT_HINT, 400, "TRAVELER_CONTACT_REQUIRED");
   }
   return { travelerName, travelerEmail, travelerPhone };
 }
