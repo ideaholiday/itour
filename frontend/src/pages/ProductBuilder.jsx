@@ -10,6 +10,7 @@ import {
 import { useAuth } from "../lib/auth.jsx";
 import { authHeaders } from "../lib/api.js";
 import { activityPath } from "../lib/activityUrl.js";
+import { uploadImage } from "../lib/imageUpload.js";
 
 // ─── Product taxonomy ─────────────────────────────────────────────────────────
 const PRODUCT_TYPES = {
@@ -208,7 +209,70 @@ function StepType({ value, onChange }) {
 }
 
 // ─── Step 1: Basic Info ───────────────────────────────────────────────────────
-function StepBasicInfo({ data, onChange, errors }) {
+const MAX_GALLERY_IMAGES = 5;
+
+// A file picker styled as a button. Calls onFiles with the chosen files.
+function PhotoUploadButton({ label, multiple = false, busy, disabled, onFiles }) {
+  return (
+    <label className={`inline-flex shrink-0 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 ${busy || disabled ? "opacity-60" : "cursor-pointer hover:bg-stone-50"}`}>
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+      {busy ? "Uploading…" : label}
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        multiple={multiple}
+        className="sr-only"
+        disabled={busy || disabled}
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          e.target.value = "";
+          if (files.length) onFiles(files);
+        }}
+      />
+    </label>
+  );
+}
+
+function StepBasicInfo({ data, onChange, errors, supplierId }) {
+  const [uploading, setUploading] = useState(null); // "hero" | "gallery" | null
+  const [uploadError, setUploadError] = useState("");
+  // Uploads finish after the form may have changed, so they merge into the latest data.
+  const latest = useRef(data);
+  latest.current = data;
+  const gallery = data.images || [];
+
+  const uploadHero = async ([file]) => {
+    setUploading("hero");
+    setUploadError("");
+    try {
+      const url = await uploadImage(file, { entityType: "PRODUCT", entityId: supplierId || null });
+      onChange({ ...latest.current, heroImage: url });
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const uploadGallery = async (files) => {
+    const room = MAX_GALLERY_IMAGES - (latest.current.images || []).filter((img) => img.trim()).length;
+    const chosen = files.slice(0, Math.max(0, room));
+    setUploadError(files.length > chosen.length ? `Only ${MAX_GALLERY_IMAGES} gallery photos are allowed; the extra ones were skipped.` : "");
+    setUploading("gallery");
+    try {
+      for (const file of chosen) {
+        const url = await uploadImage(file, { entityType: "PRODUCT", entityId: supplierId || null });
+        const current = (latest.current.images || []).filter((img) => img.trim());
+        latest.current = { ...latest.current, images: [...current, url] };
+        onChange(latest.current);
+      }
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setUploading(null);
+    }
+  };
+
   const upd = (key, val) => onChange({ ...data, [key]: val });
   return (
     <div className="space-y-6">
@@ -275,13 +339,16 @@ function StepBasicInfo({ data, onChange, errors }) {
         </div>
 
         <div className="sm:col-span-2">
-          <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">Hero Image URL *</label>
-          <input
-            value={data.heroImage || ""}
-            onChange={(e) => upd("heroImage", e.target.value)}
-            placeholder="https://images.unsplash.com/..."
-            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
-          />
+          <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">Hero Image *</label>
+          <div className="flex gap-2">
+            <input
+              value={data.heroImage || ""}
+              onChange={(e) => upd("heroImage", e.target.value)}
+              placeholder="Upload a photo or paste a link: https://..."
+              className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
+            />
+            <PhotoUploadButton label={data.heroImage ? "Replace" : "Upload photo"} busy={uploading === "hero"} disabled={Boolean(uploading)} onFiles={uploadHero} />
+          </div>
           {data.heroImage && (
             <div className="mt-2 h-40 rounded-2xl overflow-hidden border border-stone-200">
               <img src={data.heroImage} alt="preview" className="h-full w-full object-cover" onError={(e) => (e.target.style.display = "none")} />
@@ -290,9 +357,12 @@ function StepBasicInfo({ data, onChange, errors }) {
         </div>
 
         <div className="sm:col-span-2">
-          <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">Gallery Images <span className="text-stone-400 font-normal">(up to 5 additional)</span></label>
-          {(data.images || []).map((img, i) => (
-            <div key={i} className="flex gap-2 mb-2">
+          <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">Gallery Images <span className="text-stone-400 font-normal">(up to {MAX_GALLERY_IMAGES} additional)</span></label>
+          {gallery.map((img, i) => (
+            <div key={i} className="flex items-center gap-2 mb-2">
+              <div className="h-10 w-14 shrink-0 overflow-hidden rounded-lg border border-stone-200 bg-stone-100">
+                {img.trim() && <img src={img} alt="" className="h-full w-full object-cover" onError={(e) => (e.target.style.visibility = "hidden")} />}
+              </div>
               <input
                 value={img}
                 onChange={(e) => {
@@ -308,11 +378,16 @@ function StepBasicInfo({ data, onChange, errors }) {
               </button>
             </div>
           ))}
-          {(data.images || []).length < 5 && (
-            <button type="button" onClick={() => upd("images", [...(data.images || []), ""])} className="flex items-center gap-2 text-xs font-bold text-amber-700 hover:text-amber-900">
-              <Plus className="h-3.5 w-3.5" /> Add gallery image
-            </button>
+          {gallery.length < MAX_GALLERY_IMAGES && (
+            <div className="flex flex-wrap items-center gap-3">
+              <PhotoUploadButton label="Upload photos" multiple busy={uploading === "gallery"} disabled={Boolean(uploading)} onFiles={uploadGallery} />
+              <button type="button" onClick={() => upd("images", [...gallery, ""])} className="flex items-center gap-2 text-xs font-bold text-amber-700 hover:text-amber-900">
+                <Plus className="h-3.5 w-3.5" /> Add image link
+              </button>
+            </div>
           )}
+          {uploadError && <p className="mt-2 text-xs text-rose-700">{uploadError}</p>}
+          <p className="mt-2 text-[11px] text-stone-400">JPG, PNG or WEBP. Photos are resized before upload.</p>
         </div>
       </div>
     </div>
@@ -1158,7 +1233,7 @@ export default function ProductBuilder() {
             <StepType value={formData.type} onChange={(v) => updStep("type", v)} />
           )}
           {step === 1 && (
-            <StepBasicInfo data={formData.basic} onChange={(v) => updStep("basic", v)} errors={{}} />
+            <StepBasicInfo data={formData.basic} onChange={(v) => updStep("basic", v)} errors={{}} supplierId={supplierId} />
           )}
           {step === 2 && (
             <StepOverview data={formData.overview} onChange={(v) => updStep("overview", v)} />

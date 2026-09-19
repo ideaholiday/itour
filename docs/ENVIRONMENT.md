@@ -164,7 +164,8 @@ Idea Holiday booking {{1}} needs a driver assignment. Service: {{2}}. Scheduled 
 | `ETA_PROVIDER` | Optional | `ola` | Traveler tracking ETA from Ola Maps driving distance and time (`ola`) or Mappls live traffic (`mappls`), cached a minute per route. Unset or on failure: a local estimate. Alerts always use the local estimate. Production sets `ola`. |
 | `SUPABASE_URL` | Optional | `https://<id>.supabase.co` | Supabase Cloud project URL. |
 | `SUPABASE_ANON_KEY` | Optional | `<supabase-anon-key>` | Supabase anonymous public key. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Optional | `<supabase-service-key>`| Supabase backend service role key. |
+| `SUPABASE_SERVICE_ROLE_KEY` | With `MEDIA_STORAGE=supabase` | `<supabase-service-key>`| Supabase backend service role key, server-side only. Writes uploads to Supabase Storage. Production reads Secret Manager `idea-holiday-supabase-service-role-key`. |
+| `MEDIA_STORAGE` | Optional | `supabase` | Where uploads are stored. `supabase`: photos in the public bucket `supplier-media`, KYB documents in the private bucket `kyb-documents` (ADR 021); needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` or the API won't start. Unset: local disk (`backend/uploads`, `KYB_FILES_DIR`), for development and CI. Production sets `supabase`, because Cloud Run's disk is wiped on every deploy. |
 
 ---
 

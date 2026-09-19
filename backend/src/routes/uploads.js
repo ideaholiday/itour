@@ -58,7 +58,7 @@ router.post("/uploads", uploadLimiter, authenticateBearer, async (req, res) => {
       if (!kybMime) {
         return res.status(400).json({ error: "UNSUPPORTED_FILE_TYPE", message: "KYB documents must be a PDF, PNG, JPG or WEBP file" });
       }
-      const stored = saveKybFile(buffer, kybMime);
+      const stored = await saveKybFile(buffer, kybMime);
       const upload = UploadService.recordUpload({
         userId: req.user.id || null,
         filename: stored.filename,
@@ -75,7 +75,7 @@ router.post("/uploads", uploadLimiter, authenticateBearer, async (req, res) => {
     if (!detectImageType(buffer)) {
       return res.status(400).json({ error: "UNSUPPORTED_FILE_TYPE", message: "Photos must be a PNG, JPG or WEBP image" });
     }
-    const upload = UploadService.saveFileBuffer({
+    const upload = await UploadService.saveFileBuffer({
       buffer,
       originalName: filename,
       userId: req.user?.id || null,

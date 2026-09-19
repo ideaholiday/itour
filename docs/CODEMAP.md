@@ -53,7 +53,7 @@ Schema changes: only as a new file in `backend/migrations/` (AGENTS.md R7). Igno
 | Profile plans (Verified check queue, Spotlights) | `suppliers.js` (`/:id/plans`, `/:id/spotlights`), `admin.js` (`/verification-queue`) | `supplierPlanPaymentService`, `supplierProfileService` | `components/supplier/SupplierSubscriptionPanel.jsx`, `pages/admin/VerificationQueueView.jsx`, `pages/SupplierProfile.jsx` |
 | Supplier subscriptions, launch waiver, subscription payments and invoices | `admin.js` (`/supplier-subscriptions`), `auth.js` (signup), `suppliers.js` (`/:id/subscription`), `checkout.js` (webhook) | `supplierSubscriptionService`, `supplierPlanPaymentService`, `supplierKybGate` | `pages/admin/ProgramsView.jsx`, `components/supplier/SupplierSubscriptionPanel.jsx`, `lib/cashfreeSdk.js` |
 | OCTo API and channel manager | `octo.js`, `supplierChannels.js` | `octoService`, `channelManagerService`, `channels/channelRegistry.js` | `pages/supplier/SupplierChannelManagerPage.jsx` |
-| Uploads (incl. private KYB files) | `uploads.js` | `uploadService`, `kybFileService` | `components/KybDocumentViewer.jsx` |
+| Uploads (incl. private KYB files) | `uploads.js` | `uploadService`, `kybFileService`, `mediaStorage` (Supabase Storage) | `components/KybDocumentViewer.jsx`, `lib/imageUpload.js` (shrinks photos before upload) |
 | Auth | `auth.js` | `lib/passwords.js` | `lib/auth.jsx`, `pages/Login.jsx` |
 
 Frontend routes are declared in `frontend/src/App.jsx`. Portal detection (`supply.` / `admin.` hosts) is in `frontend/src/lib/domainContext.js`.

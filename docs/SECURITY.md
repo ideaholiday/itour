@@ -54,6 +54,7 @@ To protect against driver impersonation and unauthorized passenger pickups:
    - Sign-in is required, and uploads are limited to 60 an hour per client (`scope: "upload"`).
    - Public uploads (photos) must be a real PNG, JPG or WEBP image, checked from the file's first bytes (`detectImageType`). The stored extension comes from those bytes, never from the uploaded file name, so a page can't be served from our domain as a "photo".
    - KYB documents are stored privately and only accepted for the supplier's own account or by staff (`kybFileService.js`).
+   - In production (`MEDIA_STORAGE=supabase`) photos go to the public Supabase Storage bucket `supplier-media` and KYB documents to the private bucket `kyb-documents`. The buckets have no storage policies, so only the backend's service-role key can write to them; KYB files are read back only through the backend's owner/admin routes.
 
 ---
 

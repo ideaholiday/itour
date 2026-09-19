@@ -50,9 +50,9 @@ test("Phase 4: Universal pagination middleware formats standardized response", (
   });
 });
 
-test("Phase 4: File upload service saves buffers and tracks metadata in uploads table", () => {
+test("Phase 4: File upload service saves buffers and tracks metadata in uploads table", async () => {
   const buffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff, 0xd9]);
-  const upload = UploadService.saveFileBuffer({
+  const upload = await UploadService.saveFileBuffer({
     buffer,
     originalName: "test-hero.html",
     userId: "user_traveler",
@@ -66,7 +66,7 @@ test("Phase 4: File upload service saves buffers and tracks metadata in uploads 
   assert.equal(upload.size_bytes, buffer.length);
   assert.ok(upload.url.startsWith("/uploads/"));
   assert.ok(upload.url.endsWith(".jpg"), "extension comes from the image bytes, not the file name");
-  assert.throws(() => UploadService.saveFileBuffer({ buffer: Buffer.from("<html>not an image</html>"), originalName: "x.png" }), /PNG, JPG or WEBP/);
+  await assert.rejects(UploadService.saveFileBuffer({ buffer: Buffer.from("<html>not an image</html>"), originalName: "x.png" }), /PNG, JPG or WEBP/);
 
   const retrieved = UploadService.getUploadById(upload.id);
   assert.equal(retrieved.id, upload.id);

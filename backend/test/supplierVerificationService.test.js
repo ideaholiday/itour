@@ -46,8 +46,8 @@ function verificationDatabase({ status = "PENDING" } = {}) {
   return database;
 }
 
-function addDocument(database, id, docType, { withFile = true } = {}) {
-  const docUrl = withFile ? saveKybFile(Buffer.from("%PDF-1.4 test"), "application/pdf").url : "https://example.com/docs/uploaded.pdf";
+async function addDocument(database, id, docType, { withFile = true } = {}) {
+  const docUrl = withFile ? (await saveKybFile(Buffer.from("%PDF-1.4 test"), "application/pdf")).url : "https://example.com/docs/uploaded.pdf";
   database.prepare("INSERT INTO kyb_documents (id, supplier_id, doc_type, doc_url, status) VALUES (?, 'supplier-1', ?, ?, 'PENDING')")
     .run(id, docType, docUrl);
 }
@@ -62,10 +62,10 @@ function addCheck(database, type, { number, valid = true, simulated = false, cre
 
 const supplierRow = (database) => database.prepare("SELECT * FROM suppliers WHERE id = 'supplier-1'").get();
 
-test("supplier approval atomically verifies the supplier and its KYB documents", () => {
+test("supplier approval atomically verifies the supplier and its KYB documents", async () => {
   const database = verificationDatabase();
-  addDocument(database, "document-1", "COMMERCIAL_TRANSPORT_LICENSE");
-  addDocument(database, "document-2", "PAN");
+  await addDocument(database, "document-1", "COMMERCIAL_TRANSPORT_LICENSE");
+  await addDocument(database, "document-2", "PAN");
   const result = saveSupplierVerification(database, {
     supplierId: "supplier-1",
     action: "APPROVED",
@@ -82,9 +82,9 @@ test("supplier approval atomically verifies the supplier and its KYB documents",
   database.close();
 });
 
-test("supplier rejection requires and records a reason", () => {
+test("supplier rejection requires and records a reason", async () => {
   const database = verificationDatabase();
-  addDocument(database, "document-1", "PAN");
+  await addDocument(database, "document-1", "PAN");
   assert.throws(
     () => saveSupplierVerification(database, { supplierId: "supplier-1", action: "REJECTED", reason: "" }),
     /rejection reason is required/i,
@@ -101,10 +101,10 @@ test("supplier rejection requires and records a reason", () => {
   database.close();
 });
 
-test("an admin cannot approve a supplier whose required documents are missing or only placeholder links", () => {
+test("an admin cannot approve a supplier whose required documents are missing or only placeholder links", async () => {
   const database = verificationDatabase();
-  addDocument(database, "document-1", "COMMERCIAL_TRANSPORT_LICENSE");
-  addDocument(database, "document-2", "PAN", { withFile: false });
+  await addDocument(database, "document-1", "COMMERCIAL_TRANSPORT_LICENSE");
+  await addDocument(database, "document-2", "PAN", { withFile: false });
 
   assert.throws(
     () => saveSupplierVerification(database, { supplierId: "supplier-1", action: "APPROVED" }),
@@ -198,16 +198,16 @@ test("simulated Cashfree answers never approve a supplier in production", (t) =>
   database.close();
 });
 
-test("KYB file references cannot point outside the private folder", () => {
+test("KYB file references cannot point outside the private folder", async () => {
   assert.equal(kybFileName("kyb-file://../../etc/passwd"), null);
   assert.equal(kybFileName("/uploads/../secret.pdf"), null);
   assert.equal(kybFileName("https://example.com/docs/uploaded.pdf"), null);
   assert.equal(resolveKybFilePath("kyb-file://kyb_missing.pdf"), null);
 
-  const stored = saveKybFile(Buffer.from("%PDF-1.4"), "application/pdf");
+  const stored = await saveKybFile(Buffer.from("%PDF-1.4"), "application/pdf");
   assert.match(stored.url, /^kyb-file:\/\/kyb_\d+_[0-9a-f]+\.pdf$/);
   assert.equal(resolveKybFilePath(stored.url), path.join(kybFilesDir, stored.filename));
-  assert.throws(() => saveKybFile(Buffer.from("<html>"), "text/html"), /PDF, PNG, JPG or WEBP/);
+  await assert.rejects(saveKybFile(Buffer.from("<html>"), "text/html"), /PDF, PNG, JPG or WEBP/);
 });
 
 test("PostgreSQL verification SQL gives the optional parameters a column type", () => {

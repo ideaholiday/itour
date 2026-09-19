@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import db from "../db.js";
 import logger from "../config/logger.js";
+import { PUBLIC_MEDIA_BUCKET, mediaStorageEnabled, publicObjectUrl, putObject } from "./mediaStorage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "../../uploads");
@@ -83,15 +84,21 @@ export class UploadService {
   /**
    * Process raw buffer or file
    */
-  static saveFileBuffer({ buffer, originalName, userId = null, entityType = null, entityId = null }) {
+  static async saveFileBuffer({ buffer, originalName, userId = null, entityType = null, entityId = null }) {
     const mimeType = detectImageType(buffer);
     const ext = IMAGE_EXTENSIONS[mimeType];
     if (!ext) throw Object.assign(new Error("Images must be a PNG, JPG or WEBP file"), { status: 400 });
-    const uniqueName = `file_${Date.now()}_${crypto.randomBytes(4).toString("hex")}${ext}`;
-    const filePath = path.join(UPLOADS_DIR, uniqueName);
+    const uniqueName = `file_${Date.now()}_${crypto.randomBytes(8).toString("hex")}${ext}`;
 
-    fs.writeFileSync(filePath, buffer);
-    const url = `/uploads/${uniqueName}`;
+    let url;
+    if (mediaStorageEnabled()) {
+      const objectPath = `${String(entityType || "GENERAL").toLowerCase()}/${uniqueName}`;
+      await putObject(PUBLIC_MEDIA_BUCKET, objectPath, buffer, mimeType);
+      url = publicObjectUrl(objectPath);
+    } else {
+      fs.writeFileSync(path.join(UPLOADS_DIR, uniqueName), buffer);
+      url = `/uploads/${uniqueName}`;
+    }
 
     return this.recordUpload({
       userId,

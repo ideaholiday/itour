@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Check, Copy, ExternalLink, Eye, EyeOff, ImagePlus, Search } from "lucide-react";
 import { api } from "../../lib/api.js";
+import { uploadImage } from "../../lib/imageUpload.js";
 import SupplierBadge from "./SupplierBadge.jsx";
 import ReviewShareLinks from "./ReviewShareLinks.jsx";
 
@@ -13,32 +14,18 @@ const SOCIAL_FIELDS = [
 
 const toList = (text) => text.split(",").map((item) => item.trim()).filter(Boolean);
 
-function readAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 function ImageField({ label, value, onChange, supplierId, hint }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const upload = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) { setError("Choose an image file"); return; }
-    if (file.size > 5 * 1024 * 1024) { setError("Images must be under 5 MB"); return; }
     setBusy(true);
     setError("");
     try {
-      const result = await api.uploadFile({ data: await readAsDataUrl(file), filename: file.name, mimeType: file.type, entityType: "GENERAL", entityId: supplierId });
-      const url = result.upload?.url || result.url;
-      if (!url) throw new Error("Upload failed");
-      onChange(url);
-    } catch {
-      setError("Upload failed. Try a smaller image.");
+      onChange(await uploadImage(file, { entityType: "GENERAL", entityId: supplierId }));
+    } catch (err) {
+      setError(err.message);
     } finally {
       setBusy(false);
       event.target.value = "";

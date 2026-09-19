@@ -7,7 +7,7 @@ REGION="asia-northeast1"
 SERVICE_NAME="idea-holiday-marketplace"
 # Live Cashfree credentials come only from Secret Manager, never from a local
 # backend/.env (which holds sandbox keys for development).
-DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest,ASSIGNMENT_SCHEDULER_TOKEN=idea-holiday-assignment-scheduler-token:latest,CASHFREE_APP_ID=idea-holiday-cashfree-app-id:latest,CASHFREE_SECRET_KEY=idea-holiday-cashfree-secret-key:latest,CASHFREE_SECUREID_PUBLIC_KEY=idea-holiday-cashfree-secureid-public-key:latest,WHATSAPP_APP_SECRET=idea-holiday-whatsapp-app-secret:latest,WHATSAPP_WEBHOOK_VERIFY_TOKEN=idea-holiday-whatsapp-webhook-verify-token:latest,OLA_MAPS_CLIENT_ID=idea-holiday-ola-maps-client-id:latest,OLA_MAPS_CLIENT_SECRET=idea-holiday-ola-maps-client-secret:latest"
+DEPLOY_SECRETS="JWT_SECRET=idea-holiday-jwt-secret:latest,OTP_SECRET=idea-holiday-otp-secret:latest,MAPPLS_API_KEY=idea-holiday-mappls-api-key:latest,DATABASE_URL=idea-holiday-database-url:latest,ASSIGNMENT_SCHEDULER_TOKEN=idea-holiday-assignment-scheduler-token:latest,CASHFREE_APP_ID=idea-holiday-cashfree-app-id:latest,CASHFREE_SECRET_KEY=idea-holiday-cashfree-secret-key:latest,CASHFREE_SECUREID_PUBLIC_KEY=idea-holiday-cashfree-secureid-public-key:latest,WHATSAPP_APP_SECRET=idea-holiday-whatsapp-app-secret:latest,WHATSAPP_WEBHOOK_VERIFY_TOKEN=idea-holiday-whatsapp-webhook-verify-token:latest,OLA_MAPS_CLIENT_ID=idea-holiday-ola-maps-client-id:latest,OLA_MAPS_CLIENT_SECRET=idea-holiday-ola-maps-client-secret:latest,SUPABASE_SERVICE_ROLE_KEY=idea-holiday-supabase-service-role-key:latest"
 
 if [ -f "backend/.env" ]; then
   source backend/.env
@@ -24,7 +24,7 @@ CASHFREE_API_VERSION="${CASHFREE_API_VERSION:-2023-08-01}"
 DEMO_PAYMENT_ONLY="${DEMO_PAYMENT_ONLY:-false}"
 ENABLE_DEMO_PAYMENT="${ENABLE_DEMO_PAYMENT:-true}"
 
-DEPLOY_ENV_VARS="NODE_ENV=production,ETA_PROVIDER=ola,SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY},CASHFREE_ENV=${CASHFREE_ENV},CASHFREE_API_VERSION=${CASHFREE_API_VERSION},DEMO_PAYMENT_ONLY=${DEMO_PAYMENT_ONLY},ENABLE_DEMO_PAYMENT=${ENABLE_DEMO_PAYMENT},DATABASE_ENGINE=postgres,POSTGRES_SCHEMA=marketplace"
+DEPLOY_ENV_VARS="NODE_ENV=production,ETA_PROVIDER=ola,SUPABASE_URL=${SUPABASE_URL},SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY},CASHFREE_ENV=${CASHFREE_ENV},CASHFREE_API_VERSION=${CASHFREE_API_VERSION},DEMO_PAYMENT_ONLY=${DEMO_PAYMENT_ONLY},ENABLE_DEMO_PAYMENT=${ENABLE_DEMO_PAYMENT},DATABASE_ENGINE=postgres,POSTGRES_SCHEMA=marketplace,MEDIA_STORAGE=supabase"
 
 # Keep the production runtime aligned with locally configured transactional
 # notification providers. Long-lived credentials should be moved to Secret
