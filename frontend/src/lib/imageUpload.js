@@ -21,7 +21,7 @@ function blobToDataUrl(blob) {
 }
 
 export async function prepareImage(file) {
-  if (!file?.type?.startsWith("image/")) throw new Error("Choose a photo (JPG, PNG or WEBP)");
+  if (!file?.type?.startsWith("image/")) throw new Error("Choose a photo (JPG, PNG or WEBP).");
   if (file.size > MAX_ORIGINAL_BYTES) throw new Error("That photo is over 20 MB. Choose a smaller one.");
 
   let bitmap;
