@@ -50,6 +50,10 @@ To protect against driver impersonation and unauthorized passenger pickups:
 2. **Zod Schema Enforcement**:
    - All mutation endpoints (`POST`, `PUT`, `PATCH`) validate incoming payloads against strict Zod schemas (`backend/src/validators/apiSchemas.js`).
    - Non-matching or malicious payloads trigger HTTP 400 with a `VALIDATION_ERROR` code without echoing raw input back to the client.
+3. **File Uploads** (`POST /api/uploads`, `backend/src/routes/uploads.js`):
+   - Sign-in is required, and uploads are limited to 60 an hour per client (`scope: "upload"`).
+   - Public uploads (photos) must be a real PNG, JPG or WEBP image, checked from the file's first bytes (`detectImageType`). The stored extension comes from those bytes, never from the uploaded file name, so a page can't be served from our domain as a "photo".
+   - KYB documents are stored privately and only accepted for the supplier's own account or by staff (`kybFileService.js`).
 
 ---
 

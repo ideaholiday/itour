@@ -13,6 +13,22 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+// Public uploads are served from our own domain, so only real images are
+// kept, and the file's extension comes from its contents, never its name.
+const IMAGE_EXTENSIONS = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+};
+
+export function detectImageType(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return null;
+  if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+
 export class UploadService {
   /**
    * Save uploaded file metadata to database
@@ -67,8 +83,10 @@ export class UploadService {
   /**
    * Process raw buffer or file
    */
-  static saveFileBuffer({ buffer, originalName, mimeType, userId = null, entityType = null, entityId = null }) {
-    const ext = path.extname(originalName) || (mimeType.includes("png") ? ".png" : ".jpg");
+  static saveFileBuffer({ buffer, originalName, userId = null, entityType = null, entityId = null }) {
+    const mimeType = detectImageType(buffer);
+    const ext = IMAGE_EXTENSIONS[mimeType];
+    if (!ext) throw Object.assign(new Error("Images must be a PNG, JPG or WEBP file"), { status: 400 });
     const uniqueName = `file_${Date.now()}_${crypto.randomBytes(4).toString("hex")}${ext}`;
     const filePath = path.join(UPLOADS_DIR, uniqueName);
 

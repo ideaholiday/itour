@@ -247,3 +247,15 @@ This document records significant technical and product architectural decisions.
   - **Creator tiers use the whole cap, balanced:** Starter **6% commission + 4% audience discount**, Rising **7% + 3%**, Elite **8% + 2%**. Followers always get a real discount; creators earn more as they move up. Tier thresholds are unchanged. An admin enters them in Admin → Programs, which re-places creators, syncs their codes' discount and emails creators whose rates moved.
   - **Operations staff review Travel & Earn referrals** at `/ops/referrals`: approve or reject held rewards, block or reopen pairings, with a written reason. Creator KYC, rates and payouts stay admin-only.
 - **Consequences**: Commission already accrued keeps its old rate (BUSINESS_RULES §10.2.2). A creator with their own rates set on the Creators page keeps them. Referral decisions record the staff member in the audit log.
+
+---
+
+## ADR 021: Supplier Photos Are Uploaded to Supabase Storage
+- **Date**: 2026-09-19
+- **Context**: Suppliers add product photos by pasting links. The existing upload endpoint writes files to the API's local disk, which Cloud Run wipes on every deploy or restart, and it accepted signed-out uploads with any file type.
+- **Decision Made**:
+  - **Storage: Supabase Storage** (the backend already uses `@supabase/supabase-js`). Photos go to a public bucket; KYB documents to a private one. Local disk stays for development and CI.
+  - **Up to 5 photos per product**, as the Product Builder allows today.
+  - **"Paste a link" stays** alongside upload, so existing products keep working.
+  - **KYB files already lost** from Cloud Run's disk are accepted as lost: affected suppliers upload them again. (Checked 2026-09-19: the production service has no volume and no `KYB_FILES_DIR`, so every uploaded file lives only until the next deploy or restart.)
+- **Consequences**: Phase 0 (done): uploads need sign-in, are rate limited, and public uploads must be real PNG/JPG/WEBP images (SECURITY §3). Next: move storage to Supabase Storage, then add upload to the Product Builder gallery.
