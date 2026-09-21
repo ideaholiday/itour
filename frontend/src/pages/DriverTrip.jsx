@@ -235,14 +235,14 @@ export default function DriverTrip() {
     {!trip && !error && <p>{busy || session ? 'Loading trip…' : 'Open the private trip link from your email or WhatsApp.'}</p>}
     {trip && <div className="space-y-5 rounded-2xl border bg-white p-5">
       <h2 className="text-lg font-bold">{trip.bookingRef}</h2>
-      <p>{trip.date} · {trip.pickupTime} IST</p>
+      <p>{trip.date} · {trip.pickupTime} {trip.timeLabel || 'IST'}</p>
       <p><strong>Pickup:</strong> {trip.pickupLocation}</p>
       {trip.dropLocation && <p><strong>Drop:</strong> {trip.dropLocation}</p>}
       <p><strong>Traveler:</strong> {trip.travelerName} · {trip.passengers} passengers</p>
       {trip.travelerPhone && <a className="block underline" href={`tel:${trip.travelerPhone}`}>Call traveler</a>}
       <p><strong>Vehicle:</strong> {trip.vehicleModel} · {trip.vehicleNumber}</p>
       <p role="status"><strong>Status:</strong> {trip.status.replaceAll('_',' ')} · {trip.acknowledgement}</p>
-      {trip.acknowledgement === 'PENDING' && <p>Respond by {new Date(trip.responseDeadline).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST.</p>}
+      {trip.acknowledgement === 'PENDING' && <p>Respond by {new Date(trip.responseDeadline).toLocaleString('en-IN', { timeZone: trip.timeZone || 'Asia/Kolkata' })} {trip.timeLabel || 'IST'}.</p>}
 
       {trip.acknowledgement === 'ACCEPTED' && trip.status === 'ASSIGNED' && (
         <p className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-950">

@@ -177,7 +177,7 @@ export default function TripTracking() {
             )}
 
             <section className="rounded-3xl border border-stone-200 bg-white p-5 text-sm shadow-sm">
-              <p><span className="text-stone-500">Pickup:</span> <strong>{trip.pickupLocation}</strong> · {trip.activityDate} {trip.pickupTime} IST</p>
+              <p><span className="text-stone-500">Pickup:</span> <strong>{trip.pickupLocation}</strong> · {trip.activityDate} {trip.pickupTime} {trip.timeLabel || 'IST'}</p>
               {trip.dropLocation && <p className="mt-1"><span className="text-stone-500">Drop-off:</span> <strong>{trip.dropLocation}</strong></p>}
               <p className="mt-3 text-xs text-stone-500">Share your pickup OTP only with this driver, after checking the number plate. This link is private to your booking.</p>
             </section>

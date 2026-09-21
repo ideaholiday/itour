@@ -119,3 +119,14 @@ test("location risk: late, not moving and signal lost are told apart", async () 
   recordDriverLocations(moving, { assignment: assignment(moving) }, [600, 300, 30].map((secondsAgo, index) => ({ lat: 26.88 - index * 0.01, lng: 80.9462, recordedAt: at(secondsAgo) })), { now: NOW });
   assert.equal(assessDriverLocationRisk(moving, { booking, assignment: assignment(moving), pickupAtMs, now: NOW }), null);
 });
+
+test("a missed-pickup alert names the pickup in the trip city's time (ADR 023)", async () => {
+  const { assessDriverLocationRisk } = await import("../src/services/driverLocationService.js");
+  const { COUNTRY_TIME } = await import("../src/lib/localTime.js");
+  const db = database();
+  // 09:00 in Bangkok is 07:30 in India.
+  const pickupAtMs = Date.parse("2026-09-14T09:00:00+07:00");
+  const risk = (time) => assessDriverLocationRisk(db, { booking: {}, assignment: assignment(db), pickupAtMs, now: NOW, time });
+  assert.match(risk(COUNTRY_TIME.Thailand).detail, /the 09:00 ICT pickup/);
+  assert.match(risk(undefined).detail, /the 07:30 IST pickup/, "India time when the trip city is unknown");
+});

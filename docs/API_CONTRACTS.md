@@ -393,9 +393,9 @@ The supplier, `ADMIN` or `STAFF`. Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPE
   }
   ```
   Outside driver instead of `supplierDriverId`: `driverName`, `driverPhone`, `driverEmail`, `seatCapacity`, `vehicleModel`, `vehicleNumber`. `note` (3+ characters) is required with `confirmedByPhone`.
-- **`GET /api/suppliers/:id/bookings/:bookingId/dispatch-timeline`**: The booking's driver and trip events (`event_type`, `new_status`, `actor_id`, `note`, `details`, `created_at`). `404` for another supplier's booking.
+- **`GET /api/suppliers/:id/bookings/:bookingId/dispatch-timeline`**: The booking's driver and trip events (`event_type`, `new_status`, `actor_id`, `note`, `details`, `created_at`), plus the trip city's `timeZone` and `timeLabel` (`IST`, `ICT`). `404` for another supplier's booking.
 - **`POST /api/suppliers/:id/bookings/:bookingId/confirm-driver`** `{ "note": "Called Ravi at 18:05" }`: Records a pending driver's acceptance taken by phone. Allowed after the response deadline while the assignment is still pending; `409` once the driver was removed or the schedule changed. Idempotent for an already accepted driver. Queues the driver-confirmed notifications, closes the assignment task, and writes an `ACCEPT_BY_PHONE` audit event with the note.
-- **`GET /api/suppliers/:id/dispatch`**: Effective dispatch settings (`automatic_enabled`, `lead_hours`, `response_minutes`, `max_attempts`, `buffer_minutes`, and `source` of `DEFAULT` or `SUPPLIER`), fleet `readiness` (`total`, `ready`, and each driver's `missing` fields), open "assign manually" tasks (most urgent pickup first, with `minutes_to_pickup`, `priority`, `driver_state` of `NO_DRIVER` or `AWAITING_DRIVER`), and recent notification jobs.
+- **`GET /api/suppliers/:id/dispatch`**: Effective dispatch settings (`automatic_enabled`, `lead_hours`, `response_minutes`, `max_attempts`, `buffer_minutes`, and `source` of `DEFAULT` or `SUPPLIER`), fleet `readiness` (`total`, `ready`, and each driver's `missing` fields), open "assign manually" tasks (most urgent pickup first, with `pickup_at`, `minutes_to_pickup`, the trip city's `time_zone` and `time_label`, `priority`, `driver_state` of `NO_DRIVER` or `AWAITING_DRIVER`), and recent notification jobs.
 
 ### 3.3 Verify Pickup OTP & Commence Journey
 - **Endpoint**: `POST /api/bookings/:id/verify-pickup-otp`
@@ -422,7 +422,7 @@ The supplier, `ADMIN` or `STAFF`. Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPE
 ### 4.1 Live Trip Board & Fallbacks
 - **`GET /api/ops/live-dispatch`**: Returns active trips, unassigned bookings, and telemetry status.
 - **`GET /api/ops/dispatch-queue`**: All open "assign manually" `tasks` across suppliers, most urgent pickup first, with supplier contact and driver state; `tripIssues` (`PICKUP_NOT_STARTED`, `TRIP_COMPLETION_OVERDUE`); and recent notification jobs. The supplier `GET /api/suppliers/:id/dispatch` returns the same `tripIssues` for its bookings.
-- **`GET /api/ops/bookings/:bookingId/dispatch-timeline`**: Timeline for any booking.
+- **`GET /api/ops/bookings/:bookingId/dispatch-timeline`**: Timeline for any booking, with `timeZone` and `timeLabel`.
 - **`POST /api/ops/bookings/:bookingId/trip-override`** `{ "action": "START" | "COMPLETE", "note": "..." }`: Start an accepted trip without the pickup OTP, or complete a started trip. `409` for any other state.
 - **`GET /api/ops/bookings/:bookingId/fleet-availability`**: The booking supplier's fleet with availability reasons, available drivers first.
 - **`POST /api/ops/fallback-override`**: Operations take over assignment. Body: `bookingId`, `notes` (required reason), and either `supplierDriverId` or an outside driver (`fallbackDriverName`, `fallbackDriverPhone`, `fallbackDriverEmail`, `seatCapacity`, `fallbackVehicleModel`, `fallbackVehicleNumber`). With `confirmedByPhone: true` the driver is accepted immediately and `notes` is recorded as the phone confirmation.
@@ -435,7 +435,7 @@ The supplier, `ADMIN` or `STAFF`. Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPE
 - **`POST /action`**: `EN_ROUTE`, `ARRIVED`, `START` → `409 LOCATION_SHARING_REQUIRED` without a phone position from the last 5 minutes.
 - **`POST /location`** `{ points: [{ lat, lng, accuracy?, speed? (m/s), heading?, recordedAt? }] }` (1–20) → `{ accepted, rejected, location }`. Accepted trips in `ASSIGNED`–`TRIP_STARTED` only; bad, >1,000 m, >250 km/h, future or >6 h old points are dropped (`422` if none left); 30 requests/min per session. `GET /` includes `trip.location`.
 - Supplier `GET /api/suppliers/:id` bookings carry `driver_last_lat`, `driver_last_lng`, `driver_last_accuracy_m`, `driver_last_location_at`.
-- **`GET /api/tracking/:ref`** (traveler): `X-Tracking-Token` from the signed link (`/track/<ref>#<token>`, 7 days) or the signed-in owner; else `404`. → `{ trip: { status, driver, location (EN_ROUTE–TRIP_STARTED only), eta { minutes, distanceM, source OLA|MAPPLS|ESTIMATE|NEARBY, to PICKUP|DROP }, pickup, drop } }`. Driver `GET /` adds `pickup`, `distanceToPickupM`.
+- **`GET /api/tracking/:ref`** (traveler): `X-Tracking-Token` from the signed link (`/track/<ref>#<token>`, 7 days) or the signed-in owner; else `404`. → `{ trip: { status, driver, location (EN_ROUTE–TRIP_STARTED only), eta { minutes, distanceM, source OLA|MAPPLS|ESTIMATE|NEARBY, to PICKUP|DROP }, pickup, drop, timeLabel } }`; `timeLabel` (`IST`, `ICT`) names the zone of `activityDate`/`pickupTime`. Driver `GET /` adds `pickup`, `distanceToPickupM`, `timeZone`, `timeLabel`.
 
 ### 4.2 Circuit Management Queue
 - **`GET /api/ops/circuits`**: Lists pending multi-supplier circuit reschedule/cancellation requests.

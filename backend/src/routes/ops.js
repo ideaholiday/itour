@@ -213,9 +213,10 @@ router.get("/bookings/:bookingId/fleet-availability", (req, res) => {
 });
 
 router.get("/bookings/:bookingId/dispatch-timeline", (req, res) => {
-  const b = db.prepare("SELECT id FROM bookings WHERE id = ? OR ref = ?").get(req.params.bookingId, req.params.bookingId);
+  const b = db.prepare("SELECT id, product_id FROM bookings WHERE id = ? OR ref = ?").get(req.params.bookingId, req.params.bookingId);
   if (!b) return res.status(404).json({ error: "Booking not found" });
-  res.json({ success: true, timeline: getDispatchTimeline(db, b.id) });
+  const time = productTime(db, b.product_id);
+  res.json({ success: true, timeline: getDispatchTimeline(db, b.id), timeZone: time.timeZone, timeLabel: time.label });
 });
 
 router.post("/bookings/:bookingId/trip-override", validateBody(opsSchemas.tripOverride), (req, res) => {

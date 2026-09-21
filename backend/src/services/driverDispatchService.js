@@ -101,14 +101,15 @@ function assignmentConflicts(database, booking, driver) {
   const buffer = database.prepare("SELECT buffer_minutes FROM dispatch_settings WHERE supplier_id = ?").get(booking.supplier_id)?.buffer_minutes ?? 30;
   const driverPhone = normalizeWhatsAppPhone(driver.driver_phone);
   const plate = normalizeVehicleNumber(driver.vehicle_number).replace(/[^A-Z0-9]/g, "");
+  const times = new Map();
   return candidates.filter((candidate) => {
     if (!activeAssignmentStatuses.has(String(candidate.assignment_status || "ASSIGNED").toUpperCase())) return false;
     const sameRosterDriver = driver.id && candidate.supplier_driver_id === driver.id;
     const samePhone = driverPhone && normalizeWhatsAppPhone(candidate.driver_phone) === driverPhone;
     const sameVehicle = String(candidate.vehicle_number || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === plate;
     if (candidate.departure_key === departureKey(booking) && candidate.departure_key?.startsWith("departure:")) return false;
-    const time = productTime(database, booking.product_id);
-    const a = bookingWindow(booking, time), b = bookingWindow(candidate, time);
+    // Each trip in its own city's time, so a clash across countries is still caught.
+    const a = bookingWindow(booking, productTime(database, booking.product_id, times)), b = bookingWindow(candidate, productTime(database, candidate.product_id, times));
     return (sameRosterDriver || samePhone || sameVehicle) && a.start < b.end + buffer * 60000 && b.start < a.end + buffer * 60000;
   });
 }

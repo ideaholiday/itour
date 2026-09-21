@@ -20,7 +20,7 @@
 | **Promotions** | Percentage or flat discounts, optionally behind a promo code, optionally keyed on booking lead time |
 | **Shared vehicle** | Link this option to a vehicle or guide shared with other options |
 
-Times are `Asia/Kolkata`. Prices are INR **before** the 5% tax calculation.
+Times are local to the product's city: `Asia/Kolkata` in India, `Asia/Bangkok` in Thailand (ADR 023, `backend/src/lib/localTime.js`). Prices are INR **before** the 5% tax calculation.
 Saving enables instant confirmation for that option.
 
 Guard rails: a listing with untracked existing reservations cannot enable seat

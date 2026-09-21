@@ -102,3 +102,12 @@ test("ETA uses Mappls driving time when enabled, falls back to the estimate, and
   assert.ok(fallback.minutes > 0);
   assert.equal((await tripEta(to, to, { now: 1_000, fetchImpl: failing })).source, "NEARBY");
 });
+
+test("the traveler sees the pickup time in the trip city's zone (ADR 023)", async () => {
+  const db = database();
+  assert.equal((await buildTripTracking(db, booking(db), { now: NOW, eta: noEta })).timeLabel, "IST");
+  db.exec("ALTER TABLE products ADD COLUMN city TEXT; CREATE TABLE destinations (name TEXT, country TEXT)");
+  db.prepare("INSERT INTO destinations VALUES ('Bangkok', 'Thailand')").run();
+  db.prepare("UPDATE products SET city = 'Bangkok'").run();
+  assert.equal((await buildTripTracking(db, booking(db), { now: NOW, eta: noEta })).timeLabel, "ICT");
+});

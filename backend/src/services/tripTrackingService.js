@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { ARRIVAL_RADIUS_M, distanceMeters, telemetryFromAssignment } from "./driverLocationService.js";
 import { tripEta } from "./etaService.js";
+import { productTime } from "../lib/localTime.js";
 
 /**
  * The traveler's live trip page (ADR 012, phase 2).
@@ -48,7 +49,7 @@ function coordinate(lat, lng) {
 }
 
 export function findTrackableBooking(db, ref) {
-  return db.prepare(`SELECT b.id, b.ref, b.user_id, b.traveler_email, b.status, b.payment_status, b.activity_date, b.pickup_time,
+  return db.prepare(`SELECT b.id, b.ref, b.product_id, b.user_id, b.traveler_email, b.status, b.payment_status, b.activity_date, b.pickup_time,
       b.pickup_location, b.pickup_lat, b.pickup_lng, b.drop_location, b.drop_lat, b.drop_lng, p.title AS product_title
     FROM bookings b LEFT JOIN products p ON p.id = b.product_id WHERE b.ref = ?`).get(String(ref || "").toUpperCase()) || null;
 }
@@ -79,6 +80,7 @@ export async function buildTripTracking(db, booking, { now = new Date(), eta = t
     title: booking.product_title || "Your trip",
     activityDate: booking.activity_date,
     pickupTime: booking.pickup_time,
+    timeLabel: productTime(db, booking.product_id).label,
     pickupLocation: booking.pickup_location,
     dropLocation: booking.drop_location || null,
     pickup,

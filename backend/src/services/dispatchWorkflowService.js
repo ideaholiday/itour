@@ -19,7 +19,7 @@ export function currentDriverAssignment(db, assignmentId, revision, now = new Da
   const assignment = db.prepare('SELECT * FROM driver_assignments WHERE id = ?').get(assignmentId);
   if (!assignment || !assignment.revision || assignment.revision !== revision || assignment.assignment_status === 'CANCELLED') throw error('This driver assignment is no longer available', 401);
   const booking = bookingWithDuration(db, assignment.booking_id, assignment.supplier_id);
-  if (!booking || booking.payment_status !== 'PAID' || isCancelledBooking(booking) || scheduleKey(booking) !== assignment.schedule_key || now.getTime() > bookingWindow(booking).end + 24 * 3600000) throw error('This trip link has expired or the schedule changed', 401);
+  if (!booking || booking.payment_status !== 'PAID' || isCancelledBooking(booking) || scheduleKey(booking) !== assignment.schedule_key || now.getTime() > bookingWindow(booking, productTime(db, booking.product_id)).end + 24 * 3600000) throw error('This trip link has expired or the schedule changed', 401);
   return { assignment, booking };
 }
 export function exchangeDriverLink(db, token) {
@@ -145,8 +145,9 @@ export function processTripWatch(db, { now = new Date(), supplierId = null } = {
     const assignment = db.prepare('SELECT * FROM driver_assignments WHERE booking_id = ?').get(id);
     const booking = bookingWithDuration(db, id, assignment.supplier_id);
     if (!booking) continue;
+    const time = productTime(db, booking.product_id);
     let window;
-    try { window = bookingWindow(booking, productTime(db, booking.product_id)); } catch { continue; }
+    try { window = bookingWindow(booking, time); } catch { continue; }
     const at = now.getTime();
     const raise = (taskType, eventType, stage, priority, reason) => {
       tripTask(db, booking, taskType, reason, priority);
@@ -160,7 +161,7 @@ export function processTripWatch(db, { now = new Date(), supplierId = null } = {
       raise('PICKUP_NOT_STARTED', 'PICKUP_NOT_STARTED', 'START+1', 'CRITICAL', `Pickup not started ${TRIP_WATCH.notStartedMinutes} minutes after pickup time (driver status: ${assignment.assignment_status.replaceAll('_', ' ').toLowerCase()})`);
     } else if (at >= window.start - LOCATION_RISK.watchMinutesBefore * 60000) {
       // From 30 minutes before pickup, the driver's live location says whether they will make it (ADR 012).
-      const risk = assessDriverLocationRisk(db, { booking, assignment, pickupAtMs: window.start, now });
+      const risk = assessDriverLocationRisk(db, { booking, assignment, pickupAtMs: window.start, now, time });
       if (risk) raise('DRIVER_LOCATION_RISK', 'DRIVER_LOCATION_RISK', `LOC-${risk.reason}`, 'HIGH', risk.detail);
     }
   }
@@ -350,6 +351,8 @@ export function listDispatchExceptions(db, { supplierId = null, now = new Date()
     return {
       ...row,
       pickup_at: pickupAt ? new Date(pickupAt).toISOString() : null,
+      time_zone: time.timeZone,
+      time_label: time.label,
       minutes_to_pickup: pickupAt ? Math.round((pickupAt - now.getTime()) / 60000) : null,
       passengers: Number(row.adults || 0) + Number(row.children || 0),
       driver_state: pendingDriver ? 'AWAITING_DRIVER' : 'NO_DRIVER',

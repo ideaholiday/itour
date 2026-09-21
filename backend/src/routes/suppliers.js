@@ -18,6 +18,7 @@ import { authenticate, optionalAuthMiddleware, requireRoles, requireSupplierSelf
 import logger from "../config/logger.js";
 import { validateTransferMeta } from "../lib/transferListing.js";
 import { listingOpenIn, resolveCatalogLocation } from "../lib/locationCatalog.js";
+import { productTime } from "../lib/localTime.js";
 import { respondToSupplierAssignment } from "../services/assignmentSlaService.js";
 import { respondToCircuitReconfirmation } from "../services/circuitOrchestrationService.js";
 import { evaluateSupplierAvailability, normalizeAvailabilityRule } from "../services/availabilityService.js";
@@ -1435,9 +1436,10 @@ router.post("/:id/bookings/:bookingId/notifications/resend", optionalAuthMiddlew
 
 // GET /api/suppliers/:id/bookings/:bookingId/dispatch-timeline - Assignment and trip history for one booking
 router.get("/:id/bookings/:bookingId/dispatch-timeline", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
-  const booking = db.prepare("SELECT id FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
+  const booking = db.prepare("SELECT id, product_id FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
   if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
-  res.json({ success: true, timeline: getDispatchTimeline(db, booking.id) });
+  const time = productTime(db, booking.product_id);
+  res.json({ success: true, timeline: getDispatchTimeline(db, booking.id), timeZone: time.timeZone, timeLabel: time.label });
 });
 
 // POST /api/suppliers/:id/bookings/:bookingId/confirm-driver - Record a driver's acceptance taken by phone

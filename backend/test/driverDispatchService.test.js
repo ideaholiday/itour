@@ -95,6 +95,21 @@ test("blocks overlapping driver or vehicle assignments and allows a later trip",
   db.close();
 });
 
+test("a clash between trips in different countries is judged in each city's own time (ADR 023)", () => {
+  const db = database();
+  db.exec("ALTER TABLE products ADD COLUMN city TEXT; CREATE TABLE destinations (name TEXT, country TEXT)");
+  db.prepare("INSERT INTO destinations VALUES ('Lucknow', 'India'), ('Bangkok', 'Thailand')").run();
+  db.prepare("UPDATE products SET city = 'Lucknow'").run();
+  db.prepare("INSERT INTO products (id, duration_hours, group_type, city) VALUES ('product-th', 2, 'PRIVATE', 'Bangkok')").run();
+  addBooking(db, "booking-in", "09:00");
+  addBooking(db, "booking-th", "12:00");
+  db.prepare("UPDATE bookings SET product_id = 'product-th' WHERE id = 'booking-th'").run();
+  assignDriverToBooking(db, { supplierId: "supplier-1", bookingId: "booking-in", supplierDriverId: "driver-1" });
+  // 12:00 in Bangkok is 10:30 in India, inside the 09:00 IST trip's 2 hours plus buffer.
+  assert.throws(() => assignDriverToBooking(db, { supplierId: "supplier-1", bookingId: "booking-th", supplierDriverId: "driver-1" }), /already assigned/i);
+  db.close();
+});
+
 test("enforces dispatch order and requires the OTP path to start a trip", () => {
   const db = database();
   addBooking(db, "booking-1", "09:00");

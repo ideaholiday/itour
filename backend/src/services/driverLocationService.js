@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { INDIA_TIME, localClock } from "../lib/localTime.js";
 
 /**
  * Live driver location (ADR 012).
@@ -201,12 +202,13 @@ export const LOCATION_RISK = Object.freeze({ watchMinutesBefore: 30, lateGraceMi
  * reported. Returns null when nothing looks wrong. Uses the local estimate only,
  * so the scheduler never spends paid routing calls.
  */
-export function assessDriverLocationRisk(db, { booking, assignment, pickupAtMs, now = new Date() }) {
+export function assessDriverLocationRisk(db, { booking, assignment, pickupAtMs, now = new Date(), time = INDIA_TIME }) {
   const status = assignment?.assignment_status;
   const minutesToPickup = Math.round((pickupAtMs - now.getTime()) / 60_000);
-  const pickupClock = new Date(pickupAtMs).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+  // The pickup in the trip city's own time: IST in India, ICT in Thailand (ADR 023).
+  const pickupClock = `${localClock(pickupAtMs, time)} ${time.label}`;
   if (status === "ASSIGNED") {
-    return { reason: "NOT_ON_THE_WAY", detail: `Driver has not started for the ${pickupClock} IST pickup (${minutesToPickup > 0 ? `${minutesToPickup} min left` : "pickup time reached"})` };
+    return { reason: "NOT_ON_THE_WAY", detail: `Driver has not started for the ${pickupClock} pickup (${minutesToPickup > 0 ? `${minutesToPickup} min left` : "pickup time reached"})` };
   }
   if (status !== "EN_ROUTE") return null;
   const location = telemetryFromAssignment(assignment, now);
@@ -219,7 +221,7 @@ export function assessDriverLocationRisk(db, { booking, assignment, pickupAtMs, 
     const drive = estimateDrive(distance);
     const lateBy = Math.round((now.getTime() + drive.minutes * 60_000 - pickupAtMs) / 60_000);
     if (lateBy > LOCATION_RISK.lateGraceMinutes) {
-      return { reason: "RUNNING_LATE", detail: `Driver is about ${(drive.distanceM / 1000).toFixed(1)} km away and may be ${lateBy} min late for the ${pickupClock} IST pickup` };
+      return { reason: "RUNNING_LATE", detail: `Driver is about ${(drive.distanceM / 1000).toFixed(1)} km away and may be ${lateBy} min late for the ${pickupClock} pickup` };
     }
   }
   const since = new Date(now.getTime() - LOCATION_RISK.stillWindowMinutes * 60_000).toISOString();

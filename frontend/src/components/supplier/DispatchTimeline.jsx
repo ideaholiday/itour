@@ -44,10 +44,12 @@ function details(event) {
 
 export default function DispatchTimeline({ url }) {
   const [events, setEvents] = useState(null), [error, setError] = useState('');
+  // Times in the trip city's zone, as the API reports it (ADR 023).
+  const [zone, setZone] = useState({ timeZone: 'Asia/Kolkata', timeLabel: 'IST' });
   useEffect(() => {
     let active = true;
     fetch(url, { headers: authHeaders() })
-      .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Timeline unavailable'); if (active) setEvents(d.timeline || []); })
+      .then(async r => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'Timeline unavailable'); if (active) { setEvents(d.timeline || []); if (d.timeZone) setZone({ timeZone: d.timeZone, timeLabel: d.timeLabel }); } })
       .catch(err => active && setError(err.message));
     return () => { active = false; };
   }, [url]);
@@ -62,7 +64,7 @@ export default function DispatchTimeline({ url }) {
       return <li key={event.id} className="relative text-xs">
         <span className={`absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full ${TONES[key] || 'bg-amber-500'}`} aria-hidden="true" />
         <p className="font-bold text-stone-900">{describe(event)}</p>
-        <p className="text-stone-500">{at ? at.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' IST' : event.created_at}{actorLabel(event.actor_id) && ` · ${actorLabel(event.actor_id)}`}{extra && ` · ${extra}`}</p>
+        <p className="text-stone-500">{at ? at.toLocaleString('en-IN', { timeZone: zone.timeZone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ` ${zone.timeLabel}` : event.created_at}{actorLabel(event.actor_id) && ` · ${actorLabel(event.actor_id)}`}{extra && ` · ${extra}`}</p>
         {event.note && <p className="mt-0.5 text-stone-700">{event.note}</p>}
       </li>;
     })}

@@ -3,6 +3,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import db from '../db.js';
+import { productTime } from '../lib/localTime.js';
 import { validateBody } from '../middleware/validation.js';
 import { authenticateDriver, exchangeDriverLink, driverAction } from '../services/dispatchWorkflowService.js';
 import { ARRIVAL_RADIUS_M, distanceMeters, latestDriverLocation, MAX_POINTS_PER_BATCH, recordDriverLocations } from '../services/driverLocationService.js';
@@ -24,8 +25,9 @@ router.use((req, res, next) => {
 });
 router.get('/', (req, res) => {
   const { assignment: a, booking: b } = req.driverTrip;
+  const time = productTime(db, b.product_id);
   res.json({ success: true, trip: {
-    bookingRef: b.ref, date: b.activity_date, pickupTime: b.pickup_time, pickupLocation: b.pickup_location, dropLocation: b.drop_location,
+    bookingRef: b.ref, date: b.activity_date, pickupTime: b.pickup_time, timeZone: time.timeZone, timeLabel: time.label, pickupLocation: b.pickup_location, dropLocation: b.drop_location,
     travelerName: b.traveler_name, travelerPhone: a.acknowledgement === 'ACCEPTED' ? b.traveler_phone : null,
     passengers: Number(b.adults || 0) + Number(b.children || 0), driverName: a.driver_name, vehicleModel: a.vehicle_model, vehicleNumber: a.vehicle_number,
     acknowledgement: a.acknowledgement, responseDeadline: a.response_deadline, status: a.assignment_status, completedAt: a.completed_at,

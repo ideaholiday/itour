@@ -17,7 +17,8 @@ function formatDuration(minutes) {
   return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
 }
 
-const istTime = iso => iso ? new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+// A time in the trip city's zone (ADR 023); the task carries it from the API.
+const tripTime = (iso, task) => iso ? `${new Date(iso).toLocaleString('en-IN', { timeZone: task.time_zone || 'Asia/Kolkata', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} ${task.time_label || 'IST'}` : '';
 
 async function send(url, method = 'GET', body) {
   const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -145,7 +146,7 @@ function TripIssueCard({ task, supplierId, onSelect, onChanged }) {
       <strong className="font-mono">{task.ref}</strong>
       <span className="rounded-full bg-rose-700 px-2 py-0.5 text-[10px] font-black uppercase text-white">{atRisk ? 'Driver may miss pickup' : late ? 'Pickup not started' : 'Completion overdue'}</span>
     </div>
-    <p className="mt-1 text-xs text-stone-700">{task.product_title || 'Trip'} · pickup {istTime(task.pickup_at)} IST · {task.pickup_location}</p>
+    <p className="mt-1 text-xs text-stone-700">{task.product_title || 'Trip'} · pickup {tripTime(task.pickup_at, task)} · {task.pickup_location}</p>
     {!supplierId && <p className="text-xs text-stone-600">Supplier: {task.supplier_name || task.supplier_id}{task.supplier_phone && <> · <a className="underline" href={`tel:${task.supplier_phone}`}>{task.supplier_phone}</a></>}</p>}
     <p className="mt-1 text-xs font-semibold text-stone-800">{task.notes}</p>
     {task.driver_name && <p className="text-xs text-stone-700">Driver {task.driver_name} · <a className="underline" href={`tel:${task.driver_phone}`}>{task.driver_phone}</a> · {task.vehicle_number} · status {String(task.assignment_status || '').replaceAll('_', ' ').toLowerCase()}</p>}
@@ -170,12 +171,12 @@ function TaskCard({ task, supplierId, onSelect, onChanged }) {
       <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${clock.tone}`}>{clock.label}</span>
       {task.priority === 'CRITICAL' && <span className="rounded-full bg-rose-700 px-2 py-0.5 text-[10px] font-black uppercase text-white">Critical</span>}
     </div>
-    <p className="mt-1 text-xs text-stone-700">{task.product_title || 'Trip'} · {istTime(task.pickup_at) || `${task.activity_date} ${task.pickup_time}`} IST · {task.pickup_location} · {task.passengers} pax · {task.vehicle_category || 'Any vehicle'}</p>
+    <p className="mt-1 text-xs text-stone-700">{task.product_title || 'Trip'} · {tripTime(task.pickup_at, task) || `${task.activity_date} ${task.pickup_time} ${task.time_label || 'IST'}`} · {task.pickup_location} · {task.passengers} pax · {task.vehicle_category || 'Any vehicle'}</p>
     {!supplierId && <p className="text-xs text-stone-600">Supplier: {task.supplier_name || task.supplier_id}{task.supplier_phone && <> · <a className="underline" href={`tel:${task.supplier_phone}`}>{task.supplier_phone}</a></>}</p>}
     <p className="mt-1 text-xs font-semibold text-stone-800">{task.notes}</p>
     <p className="mt-1 text-xs text-stone-700">
       {task.driver_state === 'AWAITING_DRIVER'
-        ? <>Waiting for <strong>{task.driver_name}</strong> (<a className="underline" href={`tel:${task.driver_phone}`}>{task.driver_phone}</a>, {task.vehicle_number}) to accept{task.response_deadline && ` by ${istTime(task.response_deadline)} IST`}.</>
+        ? <>Waiting for <strong>{task.driver_name}</strong> (<a className="underline" href={`tel:${task.driver_phone}`}>{task.driver_phone}</a>, {task.vehicle_number}) to accept{task.response_deadline && ` by ${tripTime(task.response_deadline, task)}`}.</>
         : 'No driver assigned.'}
     </p>
     <div className="mt-2 flex flex-wrap gap-2">

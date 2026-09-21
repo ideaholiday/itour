@@ -112,7 +112,7 @@ Suppliers define custom free-cancellation deadlines in hours (e.g., 24h, 48h, 72
 4. **Payout Hold**: Supplier payouts remain in `SCHEDULED` status until the trip status moves to `completed` via verified OTP.
 
 ### 6.1 Driver Dispatch Notifications
-Every dispatch message goes by email (HTML trip card with a plain-text part) and WhatsApp (approved template, see `docs/ENVIRONMENT.md` §3.1.1). Times are relative to pickup, in IST.
+Every dispatch message goes by email (HTML trip card with a plain-text part) and WhatsApp (approved template, see `docs/ENVIRONMENT.md` §3.1.1). Times are relative to pickup, in the trip city's time.
 
 | When | Traveler | Driver | Supplier | Idea Holiday ops |
 | :--- | :--- | :--- | :--- | :--- |
