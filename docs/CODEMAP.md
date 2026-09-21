@@ -22,7 +22,7 @@ Schema changes: only as a new file in `backend/migrations/` (AGENTS.md R7). Igno
 | Feature | Route (`backend/src/routes/`) | Main services (`backend/src/services/`) | Frontend (`frontend/src/`) |
 | :--- | :--- | :--- | :--- |
 | Product detail, pickup validation | `activities.js` | `locationValidationService`, `supplierKybGate`, `reviewService` | `pages/ActivityDetail.jsx` |
-| Search | `search.js` | `searchService` | `pages/Search.jsx` |
+| Search | `search.js` | `searchService` | `pages/Search.jsx`, `components/SearchBar.jsx`, `lib/destinations.js` (destination link value) |
 | Transfer quotes | `transfers.js` | `locationValidationService`, `engine/transferEngine.js` | `pages/TransferSearch.jsx` |
 | Live availability, seat holds | `availability.js` (`/native/:productId`, `/native/hold`) | `nativeInventoryService`, `reservationProviders`, `supplierKybGate` | `pages/ActivityDetail.jsx` |
 | Checkout, payments (GST by country: `lib/productTax.js`) | `checkout.js` | `bookingService`, `razorpayService`, `cashfreeService`, `checkoutModeService`, `paymentReviewService`, `financeService` | `pages/Checkout.jsx` |
@@ -37,7 +37,7 @@ Schema changes: only as a new file in `backend/migrations/` (AGENTS.md R7). Igno
 | Live driver location (GPS), traveler tracking | `driverTrips.js`, `ops.js`, `suppliers.js`, `tracking.js` | `driverLocationService`, `tripTrackingService`, `etaService` | `pages/DriverTrip.jsx`, `pages/TripTracking.jsx`, `components/ops/LiveTripMapView.jsx`, `components/supplier/SupplierBookingManager.jsx` |
 | Supplier assignment SLA | `ops.js`, `checkout.js` | `supplierAssignmentService`, `assignmentSlaService` | `pages/OpsPanel.jsx` |
 | Supplier profiles, directory, enquiries, SEO pages | `publicSuppliers.js`, `enquiries.js`, `seo.js` | `supplierProfileService`, `supplierEnquiryService` | `pages/SupplierProfile.jsx`, `pages/SupplierDirectory.jsx`, `components/EnquiryInbox.jsx` |
-| Server-rendered head tags (activity pages, `/search` city pages), sitemaps, robots, real 404s, `www` redirect | `seo.js`, `server.js` (SPA fallback) | `shared/activitySeo.js`, `shared/spaRoutes.js` (keep in step with `App.jsx`; a unit test checks) | `pages/ActivityDetail.jsx`, `pages/Search.jsx`, `components/SeoHead.jsx` |
+| Server-rendered head tags (activity pages, `/search` city and country pages), sitemaps, robots, real 404s, `www` redirect | `seo.js`, `server.js` (SPA fallback) | `shared/activitySeo.js`, `shared/spaRoutes.js` (keep in step with `App.jsx`; a unit test checks) | `pages/ActivityDetail.jsx`, `pages/Search.jsx`, `components/SeoHead.jsx` |
 | Marketing tracking (GTM data layer, UTM/click-id attribution, signup events) | — | `shared/campaignAttribution.js` | `lib/analytics.js`, `pages/Login.jsx`, `pages/SupplierSignup.jsx` |
 | Legal pages | `seo.js` (`/privacy` → `/privacy-policy`) | — | `pages/TermsPage.jsx`, `pages/CancellationPage.jsx`, `pages/PrivacyPolicyPage.jsx` |
 | Share kit (QR, print sheets, widget, voucher QR) | `shareKit.js` (`/go/s`, `/api/share`), `suppliers.js` (`/:id/share-kit`) | `supplierShareKitService`, `guestDocumentService` | `components/supplier/SupplierShareKitPanel.jsx` |

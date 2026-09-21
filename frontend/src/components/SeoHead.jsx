@@ -5,7 +5,7 @@ import React, { useEffect } from "react";
  */
 export default function SeoHead({
   title = "Idea Holiday — India's Premier Travel Experience Marketplace",
-  description = "Book curated day tours, heritage sightseeing, scuba & water sports, airport transfers and holiday packages across India with verified local operators.",
+  description = "Book curated day tours, heritage sightseeing, scuba & water sports, airport transfers and holiday packages in India and Thailand with verified local operators.",
   keywords = "India tours, airport transfers, Goa water sports, Taj Mahal sunrise tour, Jaipur sightseeing, Kerala backwaters, Rishikesh river rafting, Golden triangle tour",
   canonical = "https://ideaholiday.in/",
   image = "https://ideaholiday.in/idea-holiday-social.png",

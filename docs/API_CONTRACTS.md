@@ -56,6 +56,9 @@ All API endpoints follow RESTful design principles and are served under the `/ap
   }
   ```
 
+### 1.1a Marketplace Search
+- **`GET /api/search`**: Published, bookable products with `q`, `city`, `state`, `country`, `category`, `type`, price, duration, rating and feature filters; returns `{ products, pagination, facets }`. `city` takes a city name or a destination id (`city_th_bangkok`). `country` (`India`, `Thailand`) is the product city's country, and `q` also matches it. `facets.countries` counts products per country (ADR 023).
+
 ### 1.2 Product Details, Pickup Suggestions & Live Availability
 - **`GET /api/activities/:id`**: Returns published tour/transfer listing with 5-product-type models (`product_type`, `product_sub_type`, ticket tiers, vehicle options, SIC hubs, hotel tiers, itinerary items) and location rules. `country` (the city's), `timeZone`, `timeLabel` (`IST`, `ICT`) and `gstFree` (`true` in Thailand) drive the traveler's time and tax labels (ADR 023).
 - **`GET /api/activities/:id/pickup-suggestions?q=Airport`**: Returns product-scoped anchor points matching `canonical_locations`.

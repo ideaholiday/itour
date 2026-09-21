@@ -27,6 +27,7 @@ import SearchBar from "../components/SearchBar.jsx";
 import SeoHead from "../components/SeoHead.jsx";
 import { SkeletonCard } from "../components/ui/SkeletonLoader.jsx";
 import { api } from "../lib/api.js";
+import { destinationParam } from "../lib/destinations.js";
 import { useCurrency } from "../lib/currency.jsx";
 
 const HERO_IMAGES = [
@@ -255,6 +256,14 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Link to Thailand only once it has something bookable (ADR 023).
+  const [thailandLive, setThailandLive] = useState(false);
+  useEffect(() => {
+    api.getActivities({ country: "Thailand", limit: 1 })
+      .then((data) => setThailandLive((data?.products || []).length > 0))
+      .catch(() => {});
+  }, []);
+
   const featuredDests = (destinations.length ? destinations : FALLBACK_DESTINATIONS).slice(0, 5);
 
   const homeJsonLd = {
@@ -269,7 +278,7 @@ export default function Home() {
     <div className="bg-white dark:bg-stone-950 text-stone-950 dark:text-stone-50">
       <SeoHead
         title="Idea Holiday — India's Premier Travel Experience Marketplace"
-        description="Book curated day tours, heritage sightseeing, scuba & water sports, airport transfers and holiday packages across India with verified local operators."
+        description="Book curated day tours, heritage sightseeing, scuba & water sports, airport transfers and holiday packages in India and Thailand with verified local operators."
         canonical="https://ideaholiday.in/"
         jsonLd={homeJsonLd}
       />
@@ -377,6 +386,9 @@ export default function Home() {
           <div>
             <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">Where India feels different</p>
             <h2 className="font-display text-3xl text-stone-900 dark:text-stone-100 sm:text-5xl">Find your next story</h2>
+            {thailandLive && <Link to="/search?country=Thailand" className="mt-3 inline-flex items-center gap-1.5 text-sm font-bold text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300">
+              Now in Thailand too: Bangkok, Pattaya, Phuket <ArrowRight className="h-4 w-4" />
+            </Link>}
           </div>
           <Link to="/search" className="hidden items-center gap-2 text-sm font-extrabold text-amber-700 dark:text-amber-400 transition hover:text-amber-800 dark:hover:text-amber-300 sm:flex">
             All destinations <ArrowRight className="h-4 w-4" />
@@ -387,7 +399,7 @@ export default function Home() {
           {featuredDests.map((dest, i) => (
             <Link
               key={dest.id}
-              to={`/search?destination=${dest.id}`}
+              to={`/search?destination=${encodeURIComponent(destinationParam(dest))}`}
               className={`group relative overflow-hidden rounded-3xl ${i === 0 ? "col-span-2 row-span-2" : ""}`}
             >
               <img
@@ -507,7 +519,7 @@ export default function Home() {
             <div className="absolute top-7 left-1/4 right-1/4 h-0.5 bg-gradient-to-r from-amber-200 via-amber-400 to-amber-200 dark:from-amber-800 dark:via-amber-600 dark:to-amber-800 hidden sm:block" />
 
             {[
-              { n: "01", title: "Search & discover", copy: "Browse 500+ experiences across India — tours, sightseeing, transfers and multi-day packages.", icon: "🔍" },
+              { n: "01", title: "Search & discover", copy: "Browse 500+ experiences across India and Thailand — tours, sightseeing, transfers and multi-day packages.", icon: "🔍" },
               { n: "02", title: "Book in minutes", copy: "Secure checkout, instant voucher, flexible payment. No hidden platform fees.", icon: "⚡" },
               { n: "03", title: "Enjoy your trip", copy: "Your verified local operator meets you. We're on standby for any support you need.", icon: "🌟" },
             ].map(({ n, title, copy, icon }, i) => (

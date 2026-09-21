@@ -3,6 +3,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import TicketCard from "../components/TicketCard.jsx";
 import SeoHead from "../components/SeoHead.jsx";
 import { displayCity } from "../../../shared/activitySeo.js";
+import { destinationParam } from "../lib/destinations.js";
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import {
@@ -126,6 +127,7 @@ export default function Search() {
   const q = params.get("q") || "";
   const category = params.get("category") || "";
   const destination = params.get("destination") || "";
+  const country = params.get("country") || "";
   const sort = params.get("sort") || "recommended";
   const groupType = params.get("groupType") || "";
   const duration = params.get("duration") || "";
@@ -188,6 +190,7 @@ export default function Search() {
       category,
       city: destination,
       destination,
+      country,
       type,
       productType: type,
       groupType,
@@ -208,7 +211,7 @@ export default function Search() {
         const list = Array.isArray(data) ? data : (data?.products || []);
         setActivities(list);
         if (data?.facets) setFacets(data.facets);
-        analytics.trackViewItemList(list, q || category || destination || "All Experiences");
+        analytics.trackViewItemList(list, q || category || destination || country || "All Experiences");
       })
       .catch((err) => {
         console.error("Search failed:", err);
@@ -219,7 +222,7 @@ export default function Search() {
 
   useEffect(() => {
     loadActivities();
-  }, [q, category, destination, type, groupType, duration, vehicleType, minRating, minPrice, maxPrice, instantOnly, freeCancellation, bestseller, sort]);
+  }, [q, category, destination, country, type, groupType, duration, vehicleType, minRating, minPrice, maxPrice, instantOnly, freeCancellation, bestseller, sort]);
 
   const update = (key, value) => {
     const next = new URLSearchParams(params);
@@ -255,13 +258,17 @@ export default function Search() {
     }
   };
 
+  // Links may carry a destination id (`city_th_bangkok`); show the city's name.
+  const destinationName = destinations.find((d) => d.id === destination)?.name || destination;
+
   // Active filter chips
   const activeFilters = [
     q && { label: `"${q}"`, key: "q" },
     type && { label: TYPE_OPTIONS.find((o) => o.id === type)?.label || type, key: "type" },
     groupType && { label: GROUP_OPTIONS.find((o) => o.id === groupType)?.label || groupType, key: "groupType" },
     category && { label: category, key: "category" },
-    destination && { label: destination, key: "destination" },
+    destination && { label: destinationName, key: "destination" },
+    country && { label: country, key: "country" },
     duration && { label: DURATION_OPTIONS.find((o) => o.id === duration)?.label || duration, key: "duration" },
     vehicleType && { label: VEHICLE_OPTIONS.find((o) => o.id === vehicleType)?.label || vehicleType, key: "vehicleType" },
     minRating && { label: `${minRating}★+`, key: "minRating" },
@@ -376,6 +383,30 @@ export default function Search() {
         </div>
       </FilterSection>
 
+      {/* Country (ADR 023: listings in India and Thailand) */}
+      {(facets?.countries?.length > 1 || country) && (
+        <FilterSection title="Country">
+          <div className="space-y-1">
+            {["", ...(facets?.countries || []).map((c) => c.name).filter((name) => name !== country), ...(country ? [country] : [])].map((name) => {
+              const count = facets?.countries?.find((c) => c.name === name)?.count;
+              return (
+                <button
+                  key={name || "all"}
+                  type="button"
+                  onClick={() => update("country", name)}
+                  className={`w-full rounded-xl px-2.5 py-1.5 text-left text-xs font-semibold transition flex items-center justify-between ${
+                    country === name ? "bg-amber-500 text-stone-950 font-bold" : "text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                  }`}
+                >
+                  <span>{name || "All countries"}</span>
+                  {count != null && <span className="text-[10px] opacity-75 font-mono">({count})</span>}
+                </button>
+              );
+            })}
+          </div>
+        </FilterSection>
+      )}
+
       {/* Categories with Facet Counts */}
       <FilterSection title="Categories" defaultOpen={false}>
         <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
@@ -407,7 +438,7 @@ export default function Search() {
               <button
                 key={d.id || d.name}
                 type="button"
-                onClick={() => update("destination", d.id || d.name)}
+                onClick={() => update("destination", destinationParam(d))}
                 className="w-full rounded-xl px-2.5 py-1.5 text-left text-xs text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
               >
                 {d.name}
@@ -480,25 +511,28 @@ export default function Search() {
     </div>
   );
 
+  const where = country || "India and Thailand";
   const searchTitle = q
     ? `Search results for "${q}" | Idea Holiday`
     : destination
-    ? `${destination} Tours, Cabs & Experiences | Idea Holiday`
+    ? `${destinationName} Tours, Cabs & Experiences | Idea Holiday`
     : category
-    ? `${category} in India | Idea Holiday`
+    ? `${category} in ${where} | Idea Holiday`
     : type === "TRANSFER"
-    ? "Airport & Outstation Cabs Across India | Idea Holiday"
-    : "Explore Tours & Travel Experiences Across India | Idea Holiday";
+    ? `Airport & Outstation Cabs in ${where} | Idea Holiday`
+    : country
+    ? `${country} Tours, Transfers & Experiences | Idea Holiday`
+    : "Explore Tours & Travel Experiences in India and Thailand | Idea Holiday";
 
   const searchDesc = destination
-    ? `Book top-rated tours, day sightseeing, water sports, and airport cabs in ${destination} with verified local operators on Idea Holiday.`
-    : "Discover and book curated day tours, activities, transfers and multi-day packages across India with transparent pricing and instant booking.";
+    ? `Book top-rated tours, day sightseeing, water sports, and airport cabs in ${destinationName} with verified local operators on Idea Holiday.`
+    : `Discover and book curated day tours, activities, transfers and multi-day packages in ${where} with transparent pricing and instant booking.`;
 
   // Matches the server (searchPage in routes/seo.js): a city alone is a landing
   // page; keyword searches and filtered views stay out of search results.
   const activeParams = [...params.keys()].filter((key) => params.get(key));
-  const searchNoindex = activeParams.length > 0 && !(destination && activeParams.length === 1);
-  const searchCanonical = `https://ideaholiday.in/search${destination ? `?destination=${encodeURIComponent(displayCity(destination))}` : ""}`;
+  const searchNoindex = activeParams.length > 0 && !((destination || country) && activeParams.length === 1);
+  const searchCanonical = `https://ideaholiday.in/search${destination ? `?destination=${encodeURIComponent(displayCity(destinationName))}` : country ? `?country=${encodeURIComponent(country)}` : ""}`;
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] dark:bg-stone-950 text-stone-900 dark:text-stone-100">
@@ -692,11 +726,13 @@ export default function Search() {
           <div>
             <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-stone-900 dark:text-stone-100">
               {destination
-                ? `Experiences in ${destination}`
+                ? `Experiences in ${destinationName}`
                 : q
                 ? `Results for "${q}"`
                 : category
-                ? `${category} in India`
+                ? `${category} in ${where}`
+                : country
+                ? `Experiences in ${country}`
                 : "All Experiences & Cabs"}
             </h1>
             <p className="mt-1 text-xs text-stone-500">

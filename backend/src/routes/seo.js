@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import db from "../db.js";
 import logger from "../config/logger.js";
 import { approvedSupplierSql } from "../services/supplierKybGate.js";
+import { LISTING_COUNTRIES } from "../lib/locationCatalog.js";
 import { activityPath } from "../../../shared/activityUrl.js";
 import { activitySeo, displayCity } from "../../../shared/activitySeo.js";
 import {
@@ -376,9 +377,27 @@ export function searchPage(database, query, template, baseUrl = BASE_URL) {
     return {
       status: 200,
       html: renderSeoHtml(template, {
-        title: "Explore Tours & Travel Experiences Across India | Idea Holiday",
-        description: "Discover and book curated day tours, activities, transfers and multi-day packages across India with transparent pricing.",
+        title: "Explore Tours & Travel Experiences in India and Thailand | Idea Holiday",
+        description: "Discover and book curated day tours, activities, transfers and multi-day packages in India and Thailand with transparent pricing.",
         canonical: `${baseUrl}/search`,
+      }),
+    };
+  }
+  const country = String(query?.country || "").trim();
+  if (country && keys.length === 1) {
+    // A country page (?country=Thailand) is indexable once that country has a live product (ADR 023).
+    const name = LISTING_COUNTRIES.find((entry) => entry.toLowerCase() === country.toLowerCase()) || displayCity(country);
+    const live = LISTING_COUNTRIES.includes(name) && database.prepare(`
+      SELECT 1 FROM products p JOIN destinations d ON LOWER(d.name) = LOWER(TRIM(p.city))
+      WHERE ${liveProductSql("p")} AND COALESCE(d.country, 'India') = ? LIMIT 1
+    `).get(name);
+    return {
+      status: 200,
+      html: renderSeoHtml(template, {
+        title: `${name} Tours, Transfers & Experiences | Idea Holiday`,
+        description: `Book tours, day trips, activities and transfers in ${name} from local operators on Idea Holiday.`,
+        canonical: `${baseUrl}/search?country=${encodeURIComponent(name)}`,
+        robots: live ? "index, follow" : "noindex, follow",
       }),
     };
   }

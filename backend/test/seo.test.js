@@ -220,6 +220,24 @@ test("city pages are indexable only where something is bookable; keyword and fil
   db.close();
 });
 
+test("a country page is indexable once that country has a live product (ADR 023)", () => {
+  const db = catalogDatabase();
+  db.exec(`
+    CREATE TABLE destinations (id TEXT PRIMARY KEY, name TEXT, country TEXT);
+    INSERT INTO destinations VALUES ('goa', 'Goa', 'India'), ('city_th_bangkok', 'Bangkok', 'Thailand'), ('city_ae_dubai', 'Dubai', 'United Arab Emirates');
+  `);
+  const empty = headOf(searchPage(db, { country: "thailand" }, INDEX_TEMPLATE, "https://ideaholiday.in").html);
+  assert.match(empty, /<title>Thailand Tours, Transfers &amp; Experiences \| Idea Holiday<\/title>/);
+  assert.match(empty, /<link rel="canonical" href="https:\/\/ideaholiday.in\/search\?country=Thailand" \/>/);
+  assert.match(empty, /content="noindex, follow"/, "nothing bookable in Thailand yet");
+
+  db.prepare("UPDATE products SET city = 'Bangkok' WHERE id = 'p_scuba'").run();
+  assert.match(headOf(searchPage(db, { country: "Thailand" }, INDEX_TEMPLATE).html), /content="index, follow"/);
+  assert.match(headOf(searchPage(db, { country: "United Arab Emirates" }, INDEX_TEMPLATE).html), /content="noindex, follow"/, "the UAE is not open for listing");
+  assert.match(headOf(searchPage(db, { country: "Thailand", q: "scuba" }, INDEX_TEMPLATE).html), /content="noindex, follow"/);
+  db.close();
+});
+
 test("a path the app has no page for is a noindex 404; every App.jsx route is known", () => {
   const page = notFoundPage(INDEX_TEMPLATE, "/no-such-page", "https://ideaholiday.in");
   assert.equal(page.status, 404);

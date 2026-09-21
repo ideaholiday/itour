@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { LoaderCircle, MapPin, Search, Calendar, Sparkles } from "lucide-react";
 import DatePicker, { toLocalISO } from "./ui/DatePicker.jsx";
 import { api } from "../lib/api.js";
+import { destinationParam } from "../lib/destinations.js";
 
 export default function SearchBar({ initial = "" }) {
   const [q, setQ] = useState(initial);
@@ -17,7 +18,7 @@ export default function SearchBar({ initial = "" }) {
 
   const query = q.trim();
   const matchingDestinations = query
-    ? destinations.filter((d) => `${d.name} ${d.state || ""}`.toLowerCase().includes(query.toLowerCase())).slice(0, 4)
+    ? destinations.filter((d) => `${d.name} ${d.state || ""} ${d.country || ""}`.toLowerCase().includes(query.toLowerCase())).slice(0, 4)
     : [];
 
   useEffect(() => {
@@ -158,7 +159,7 @@ export default function SearchBar({ initial = "" }) {
                 <button
                   key={d.id}
                   type="button"
-                  onClick={() => searchFor(d.name, d.id)}
+                  onClick={() => searchFor(d.name, destinationParam(d))}
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors"
                 >
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-50 dark:bg-amber-900/30">
@@ -166,7 +167,7 @@ export default function SearchBar({ initial = "" }) {
                   </span>
                   <span>
                     <span className="block font-semibold">{d.name}</span>
-                    {d.state && <span className="block text-xs text-stone-400 dark:text-stone-500">{d.state}</span>}
+                    {d.state && <span className="block text-xs text-stone-400 dark:text-stone-500">{d.country && d.country !== "India" ? d.country : d.state}</span>}
                   </span>
                 </button>
               ))}

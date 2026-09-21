@@ -39,8 +39,16 @@ const CITY_COORDINATES = {
   "madurai": { lat: 9.9252, lng: 78.1198 },
   "mysuru": { lat: 12.2958, lng: 76.6394 },
   "ooty": { lat: 11.4102, lng: 76.6950 },
-  "puducherry": { lat: 11.9416, lng: 79.8083 }
+  "puducherry": { lat: 11.9416, lng: 79.8083 },
+  "bangkok": { lat: 13.7563, lng: 100.5018 },
+  "pattaya": { lat: 12.9236, lng: 100.8825 },
+  "phuket": { lat: 7.8804, lng: 98.3923 },
+  "krabi": { lat: 8.0863, lng: 98.9063 },
+  "chiang mai": { lat: 18.7883, lng: 98.9853 }
 };
+
+// A product's country is its city's (ADR 023); a city outside the catalogue is in India.
+const productCountrySql = (alias = "p") => `COALESCE((SELECT d.country FROM destinations d WHERE LOWER(d.name) = LOWER(TRIM(${alias}.city)) LIMIT 1), 'India')`;
 
 export class SearchService {
   /**
@@ -76,10 +84,10 @@ export class SearchService {
     }
 
     const destinations = db.prepare(`
-      SELECT name, state FROM destinations
-      WHERE LOWER(name) LIKE ? OR LOWER(state) LIKE ?
+      SELECT name, state, COALESCE(country, 'India') AS country FROM destinations
+      WHERE LOWER(name) LIKE ? OR LOWER(state) LIKE ? OR LOWER(COALESCE(country, 'India')) LIKE ?
       LIMIT 5
-    `).all(`%${q}%`, `%${q}%`).map(d => `${d.name}, ${d.state}`);
+    `).all(`%${q}%`, `%${q}%`, `%${q}%`).map(d => `${d.name}, ${d.country === "India" ? d.state : d.country}`);
 
     const rawProducts = db.prepare(`
       SELECT id, title, city, price_inr, category FROM products
@@ -122,6 +130,7 @@ export class SearchService {
       query = "",
       city = "",
       state = "",
+      country = "",
       category = "",
       productType = "",
       type = "",
@@ -159,14 +168,21 @@ export class SearchService {
         LOWER(p.city) LIKE ? OR 
         LOWER(p.state) LIKE ? OR 
         LOWER(p.short_desc) LIKE ? OR
-        LOWER(p.category) LIKE ?
+        LOWER(p.category) LIKE ? OR
+        LOWER(${productCountrySql("p")}) LIKE ?
       )`);
-      params.push(q, q, q, q, q);
+      params.push(q, q, q, q, q, q);
     }
 
+    // `city` is a city name or a destination id (links use `city_th_bangkok` for Bangkok).
     if (city) {
-      whereConditions.push("LOWER(p.city) = LOWER(?)");
-      params.push(city);
+      whereConditions.push("(LOWER(p.city) = LOWER(?) OR LOWER(p.city) = (SELECT LOWER(name) FROM destinations WHERE id = ?))");
+      params.push(city, city);
+    }
+
+    if (country) {
+      whereConditions.push(`LOWER(${productCountrySql("p")}) = LOWER(?)`);
+      params.push(country);
     }
 
     if (state) {
@@ -331,8 +347,8 @@ export class SearchService {
 
     // Compute dynamic facet aggregations over the current search base
     const baseWhere = `WHERE (p.is_published = 1 OR p.status = 'PUBLISHED') AND ${approvedSupplierSql("p")}` + 
-      (query && query.trim() ? ` AND (LOWER(p.title) LIKE ? OR LOWER(p.city) LIKE ? OR LOWER(p.state) LIKE ? OR LOWER(p.short_desc) LIKE ? OR LOWER(p.category) LIKE ?)` : "");
-    const baseParams = query && query.trim() ? [`%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`] : [];
+      (query && query.trim() ? ` AND (LOWER(p.title) LIKE ? OR LOWER(p.city) LIKE ? OR LOWER(p.state) LIKE ? OR LOWER(p.short_desc) LIKE ? OR LOWER(p.category) LIKE ? OR LOWER(${productCountrySql("p")}) LIKE ?)` : "");
+    const baseParams = query && query.trim() ? Array(6).fill(`%${query.trim().toLowerCase()}%`) : [];
 
     const categoryFacets = db.prepare(`
       SELECT category as name, COUNT(*) as count FROM products p ${baseWhere} GROUP BY category ORDER BY count DESC
@@ -340,6 +356,10 @@ export class SearchService {
 
     const cityFacets = db.prepare(`
       SELECT city as name, COUNT(*) as count FROM products p ${baseWhere} GROUP BY city ORDER BY count DESC LIMIT 12
+    `).all(...baseParams);
+
+    const countryFacets = db.prepare(`
+      SELECT ${productCountrySql("p")} as name, COUNT(*) as count FROM products p ${baseWhere} GROUP BY 1 ORDER BY count DESC
     `).all(...baseParams);
 
     const typeFacets = db.prepare(`
@@ -411,6 +431,7 @@ export class SearchService {
       facets: {
         categories: categoryFacets,
         cities: cityFacets,
+        countries: countryFacets,
         productTypes: typeFacets,
         durations: durationCounts,
         priceRange: { min: priceStats.min || 499, max: priceStats.max || 25000 },

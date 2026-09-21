@@ -113,7 +113,7 @@ export default function Footer() {
           <IdeaHolidayLogo className="text-3xl" showTagline dark={true} />
 
           <p className="mt-5 max-w-sm text-sm leading-relaxed text-stone-400">
-            Travel More with Idea Holiday. Discover thoughtfully curated experiences and trusted local experts across India.
+            Travel More with Idea Holiday. Discover thoughtfully curated experiences and trusted local experts across India and Thailand.
           </p>
 
           {/* Newsletter */}
