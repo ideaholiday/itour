@@ -391,7 +391,9 @@ function linkedResources(db, optionId, localDate, time, excludeId = "") {
 
 function slotView(db, rules, localDate, time, excludeId = "", promoContext = {}) {
   const id = `${rules.option_id}:${localDate}:${time}`;
-  const start = `${localDate}T${time}:00${productTime(db, rules.product_id).offset}`;
+  // The city's zone, not the rule's stored time_zone (which defaults to India).
+  const zone = productTime(db, rules.product_id);
+  const start = `${localDate}T${time}:00${zone.offset}`;
   const cutoff = new Date(Date.parse(start) - Number(rules.cutoff_minutes) * 60000).toISOString();
   const override = resolveOverride(db, rules.option_id, localDate, time);
   const pricing = resolvePricing(db, rules, localDate);
@@ -410,7 +412,7 @@ function slotView(db, rules, localDate, time, excludeId = "", promoContext = {})
   const status = !open ? "CLOSED" : Date.parse(cutoff) <= Date.now() ? "CUTOFF" : vacancies === 0 ? "SOLD_OUT" : "AVAILABLE";
   const minPartySize = Math.max(1, Number(rules.min_party_size ?? 1));
   const maxPartySize = Math.max(0, Number(rules.max_party_size ?? 0));
-  return { id, productId: rules.product_id, optionId: rules.option_id, localDateTimeStart: start, utcCutoffAt: cutoff, timeZone: rules.time_zone,
+  return { id, productId: rules.product_id, optionId: rules.option_id, localDateTimeStart: start, utcCutoffAt: cutoff, timeZone: zone.timeZone, timeLabel: zone.label,
     localDate, localTime: time, capacity, vacancies, available: status === "AVAILABLE", status,
     adultPrice: unitPrices.ADULT ?? pricing.adultPrice, childPrice: unitPrices.CHILD ?? pricing.childPrice,
     unitPrices,

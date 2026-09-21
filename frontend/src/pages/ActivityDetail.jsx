@@ -255,7 +255,7 @@ function AddOnsBlock({ availableAddons, selectedAddonIds, toggleAddon, headcount
   );
 }
 
-function BookingTrustFooter() {
+function BookingTrustFooter({ gstFree = false }) {
   return (
     <div className="space-y-2 border-t border-stone-200 pt-4 text-[11px] leading-relaxed text-stone-500">
       <p className="flex gap-2">
@@ -264,7 +264,7 @@ function BookingTrustFooter() {
       </p>
       <p className="flex gap-2">
         <Sparkles className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
-        <span>Instant confirmation with mobile voucher &amp; GST invoice.</span>
+        <span>Instant confirmation with mobile voucher &amp; {gstFree ? "receipt" : "GST invoice"}.</span>
       </p>
     </div>
   );
@@ -352,7 +352,7 @@ function BookingPanelPackage({
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-4 text-sm font-bold text-stone-950 transition shadow-sm disabled:cursor-not-allowed disabled:opacity-40">
         Book This Holiday Package <ArrowRight className="h-4 w-4" />
       </button>
-      <BookingTrustFooter />
+      <BookingTrustFooter gstFree={activity.gstFree} />
     </div>
   );
 }
@@ -434,7 +434,7 @@ function BookingPanelTour({
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-4 text-sm font-bold text-stone-950 transition shadow-sm disabled:cursor-not-allowed disabled:opacity-40">
         {isSIC ? "Reserve My Seat" : "Book Private Tour"} <ArrowRight className="h-4 w-4" />
       </button>
-      <BookingTrustFooter />
+      <BookingTrustFooter gstFree={activity.gstFree} />
     </div>
   );
 }
@@ -503,7 +503,7 @@ function BookingPanelTransfer({
           <div className="mb-1 flex items-center gap-2 text-xs font-bold text-stone-700">
             <Car className="h-4 w-4 text-indigo-600" /> Choose Vehicle Class
           </div>
-          <p className="mb-2 text-[11px] text-stone-400">Fixed fares - Fastag tolls and GST included</p>
+          <p className="mb-2 text-[11px] text-stone-400">{activity.gstFree ? `Fixed fares - no GST in ${activity.country}` : "Fixed fares - Fastag tolls and GST included"}</p>
           <VehicleSelector vehicles={vehicles} selectedVehicle={selectedVehicle}
             setSelectedVehicle={setSelectedVehicle} formatPrice={formatPrice} headcount={headcount} />
         </div>
@@ -515,7 +515,7 @@ function BookingPanelTransfer({
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-4 text-sm font-bold text-stone-950 transition shadow-sm disabled:cursor-not-allowed disabled:opacity-40">
         Book Transfer <ArrowRight className="h-4 w-4" />
       </button>
-      <BookingTrustFooter />
+      <BookingTrustFooter gstFree={activity.gstFree} />
     </div>
   );
 }
@@ -643,7 +643,7 @@ function BookingPanelAttractionExperience({
       {totalTickets < 1 && ticketTiers.length > 0 && (
         <p className="text-center text-[11px] text-stone-400">Select at least 1 ticket to continue</p>
       )}
-      <BookingTrustFooter />
+      <BookingTrustFooter gstFree={activity.gstFree} />
     </div>
   );
 }
@@ -980,7 +980,7 @@ export default function ActivityDetail() {
                   label: productSubType === "SIC" || productSubType === "TICKET_SIC" ? "Shared Group (SIC)" : isTransfer ? "Private Vehicle" : "Private / Flexible",
                   sub: "Format",
                 },
-                { icon: MapPin, label: activity.city || "India", sub: "Location" },
+                { icon: MapPin, label: activity.city || activity.country || "India", sub: "Location" },
                 {
                   icon: ShieldCheck,
                   label: activity.freeCancellation !== false ? "Free Cancellation" : "Standard Policy",

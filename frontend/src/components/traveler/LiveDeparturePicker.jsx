@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 
 const VALID_DATE = /^\d{4}-\d{2}-\d{2}$/;
+// Slots carry their city's zone (ADR 023); a Bangkok 09:00 is 09:00 in Bangkok.
+const ZONE_NAMES = { "Asia/Kolkata": "India Standard Time", "Asia/Bangkok": "Thailand time (ICT)" };
+const zoneName = slot => ZONE_NAMES[slot?.timeZone] || (slot?.timeLabel ? `Local time (${slot.timeLabel})` : "India Standard Time");
 const rupees = value => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 
 export default function LiveDeparturePicker({ productId, date, selectedTime, selectedOptionId, onSelect }) {
@@ -52,7 +55,7 @@ export default function LiveDeparturePicker({ productId, date, selectedTime, sel
   const seasonal = slots.find(slot => slot.priceScheduleLabel)?.priceScheduleLabel;
   const promoted = slots.find(slot => slot.promotion)?.promotion?.label;
 
-  return <section className="my-4 rounded-xl border border-emerald-200 bg-white p-4"><h3 className="font-bold text-stone-900">Live departure availability</h3><p className="mt-1 text-xs text-stone-600">India Standard Time · Updated every 15 seconds</p>
+  return <section className="my-4 rounded-xl border border-emerald-200 bg-white p-4"><h3 className="font-bold text-stone-900">Live departure availability</h3><p className="mt-1 text-xs text-stone-600">{zoneName(slots[0])} · Updated every 15 seconds</p>
     {error && <p role="alert">{error}</p>}
     {seasonal && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">{seasonal} pricing applies on this date.</p>}
     {promoted && <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900">{promoted} — discount already applied below.</p>}

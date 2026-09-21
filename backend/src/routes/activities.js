@@ -9,6 +9,8 @@ import { ensureDefaultProductOption, getBookingQuestions, getProductOptions } fr
 import { priorMeanRating } from "../services/reviewService.js";
 import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { listingOpenIn } from "../lib/locationCatalog.js";
+import { countryTime } from "../lib/localTime.js";
+import { GST_FREE_COUNTRIES, productCountry } from "../lib/productTax.js";
 
 const router = Router();
 
@@ -491,6 +493,11 @@ router.get("/activities/:id", (req, res) => {
     const row = db.prepare(`SELECT p.* FROM products p WHERE p.id = ? AND p.status = 'PUBLISHED' AND COALESCE(p.is_published, 1) = 1 AND ${approvedSupplierSql("p")}`).get(req.params.id);
     if (!row) return res.status(404).json({ error: "Product not found" });
     const product = parseProductRow(row);
+    // The city's country sets the traveler's time zone and tax labels (ADR 023).
+    product.country = productCountry(db, row.id);
+    product.timeZone = countryTime(product.country).timeZone;
+    product.timeLabel = countryTime(product.country).label;
+    product.gstFree = GST_FREE_COUNTRIES.includes(product.country);
     const context = getProductLocationContext(db, row.id);
     product.locationRules = context?.rules?.map((rule) => ({
       side: rule.rule_side,

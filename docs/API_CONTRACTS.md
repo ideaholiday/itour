@@ -57,11 +57,11 @@ All API endpoints follow RESTful design principles and are served under the `/ap
   ```
 
 ### 1.2 Product Details, Pickup Suggestions & Live Availability
-- **`GET /api/activities/:id`**: Returns published tour/transfer listing with 5-product-type models (`product_type`, `product_sub_type`, ticket tiers, vehicle options, SIC hubs, hotel tiers, itinerary items) and location rules.
+- **`GET /api/activities/:id`**: Returns published tour/transfer listing with 5-product-type models (`product_type`, `product_sub_type`, ticket tiers, vehicle options, SIC hubs, hotel tiers, itinerary items) and location rules. `country` (the city's), `timeZone`, `timeLabel` (`IST`, `ICT`) and `gstFree` (`true` in Thailand) drive the traveler's time and tax labels (ADR 023).
 - **`GET /api/activities/:id/pickup-suggestions?q=Airport`**: Returns product-scoped anchor points matching `canonical_locations`.
 - **`POST /api/activities/:id/validate-pickup`**: Validates whether coordinates or address fall within the tour's pickup bounds. An invalid point returns `valid: false` with `code` `INVALID_PICKUP_POINT` or `INVALID_DROP_POINT` and `detail.allowed_area`, `detail.allowed_state`, `detail.suggestion` (`locationValidationService.js`).
 - **`GET /api/availability/native/:productId?date=YYYY-MM-DD&optionId=...`**:
-  - Uncached live departure availability for a product and option.
+  - Uncached live departure availability for a product and option. `timeZone` and `timeLabel` follow the product's city (`Asia/Bangkok`, `ICT` in Thailand).
   - **Response (200 OK)**:
     ```json
     {
@@ -75,6 +75,7 @@ All API endpoints follow RESTful design principles and are served under the `/ap
           "localDateTimeStart": "2026-09-20T09:00:00+05:30",
           "utcCutoffAt": "2026-09-20T01:30:00.000Z",
           "timeZone": "Asia/Kolkata",
+          "timeLabel": "IST",
           "capacity": 20,
           "vacancies": 14,
           "available": true,

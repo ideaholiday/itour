@@ -1096,7 +1096,9 @@ export default function Checkout() {
                   <div className="flex justify-between"><span>Selected option</span><span className="max-w-[180px] text-right text-stone-900 font-semibold">{variant}</span></div>
                   <div className="flex justify-between"><span>Server-verified fare</span><span className="text-stone-900 font-semibold">{formatPrice(rawBaseFare)}</span></div>
                   {fastagTolls > 0 && <div className="flex justify-between"><span>Tolls / route taxes</span><span className="text-stone-900 font-semibold">{formatPrice(fastagTolls)}</span></div>}
-                  <div className="flex justify-between"><span>GST</span><span className="text-stone-900 font-semibold">{formatPrice(gstTax)}</span></div>
+                  {activity?.gstFree
+                    ? <div className="flex justify-between"><span>GST</span><span className="text-stone-900 font-semibold">Not charged in {activity.country}</span></div>
+                    : <div className="flex justify-between"><span>GST</span><span className="text-stone-900 font-semibold">{formatPrice(gstTax)}</span></div>}
 
                   {/* Selected Add-On Extras */}
                   {addonCalculation.addons.length > 0 && (

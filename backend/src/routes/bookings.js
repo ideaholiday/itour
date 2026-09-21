@@ -36,6 +36,7 @@ import {
   redeemWalletCredit,
 } from "../services/referralService.js";
 import { localDateTimeMs, productTime } from "../lib/localTime.js";
+import { productCountry } from "../lib/productTax.js";
 
 const router = Router();
 router.use(optionalAuthMiddleware);
@@ -753,7 +754,7 @@ router.patch("/:id/status", authenticate, requireRoles("ADMIN", "STAFF"), valida
 });
 
 function bookingDocumentRecord(ref) {
-  return db.prepare(`
+  const booking = db.prepare(`
     SELECT b.*, p.title AS product_title, s.company_name AS supplier_name, s.phone AS supplier_phone,
       s.public_slug AS supplier_public_slug, s.profile_status AS supplier_profile_status, s.kyb_status AS supplier_kyb_status,
       da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number
@@ -763,6 +764,9 @@ function bookingDocumentRecord(ref) {
     LEFT JOIN driver_assignments da ON da.booking_id = b.id
     WHERE b.ref = ? OR b.id = ?
   `).get(ref, ref);
+  // The product's country sets the document's time zone and whether it is a GST invoice (ADR 023).
+  if (booking) booking.product_country = productCountry(db, booking.product_id);
+  return booking;
 }
 
 function requestOrigin(req) {
