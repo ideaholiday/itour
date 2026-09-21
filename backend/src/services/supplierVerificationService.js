@@ -77,6 +77,23 @@ export function kybRulesFor(country) {
   return KYB_COUNTRY_RULES[country] || UNLISTED_COUNTRY_RULES;
 }
 
+/**
+ * The vehicle document a supplier must upload before a transfer can go live,
+ * or null when none is needed or it is on file. Checked at publication too, so a
+ * supplier approved as a tour operator can't sell a transfer without it (ADR 023).
+ */
+export function missingTransferDocument(database, supplier) {
+  const required = kybRulesFor(supplierCountry(database, supplier)).required.find((doc) => doc.transfersOnly);
+  if (!required) return null;
+  const documents = database.prepare("SELECT doc_type, doc_url FROM kyb_documents WHERE supplier_id = ?").all(supplier.id);
+  const uploaded = documents.some((doc) => required.acceptedTypes.includes(normalizeId(doc.doc_type)) && hasKybFile(doc));
+  return uploaded ? null : required.label;
+}
+
+export function transferDocumentError(label) {
+  return `Upload your ${label} in Compliance before publishing a transfer.`;
+}
+
 function listsTransfers(database, supplierId) {
   return Boolean(database.prepare("SELECT 1 FROM products WHERE supplier_id = ? AND UPPER(COALESCE(product_type, '')) = 'TRANSFER' LIMIT 1").get(supplierId));
 }

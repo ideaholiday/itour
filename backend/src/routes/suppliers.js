@@ -31,7 +31,7 @@ import {
   sendGuestBookingNotification,
 } from "../services/notificationService.js";
 import { KYB_FILE_SCHEME, kybFileName, sendKybDocumentFile } from "../services/kybFileService.js";
-import { autoApproveSupplierKyb, getKybApprovalReadiness, kybRulesFor, supplierCountry } from "../services/supplierVerificationService.js";
+import { autoApproveSupplierKyb, getKybApprovalReadiness, kybRulesFor, missingTransferDocument, supplierCountry, transferDocumentError } from "../services/supplierVerificationService.js";
 import {
   assignDriverToBooking,
   getDispatchTimeline,
@@ -82,6 +82,14 @@ function applyKybAutoApproval(req, supplierId) {
     logger.error("Supplier KYB auto-approval failed", { requestId: req.requestId, supplierId, error });
     return { approved: false, supplier: null, identity: null };
   }
+}
+
+// A transfer goes live only once its supplier's vehicle document is on file
+// where their country requires one (Thailand, ADR 023). Returns the error or null.
+function transferPublishRefusal(supplierId) {
+  const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
+  const missing = supplier && missingTransferDocument(db, supplier);
+  return missing ? transferDocumentError(missing) : null;
 }
 
 // Cashfree SecureID checks Indian GSTIN and PAN only; suppliers abroad are
@@ -870,6 +878,8 @@ router.post("/:id/products/v2", (req, res) => {
 
     const supplier = db.prepare("SELECT id FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const transferRefusal = normType === "TRANSFER" && status !== "DRAFT" && transferPublishRefusal(id);
+    if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
 
     const typeCode = normType.slice(0, 3).toLowerCase();
     const cityCode = city.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 4);
@@ -1035,6 +1045,8 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
     if (!["TRANSFER", "DAY_TOUR", "MULTI_DAY_PACKAGE"].includes(normalizedProductType)) {
       return res.status(400).json({ error: "Choose a valid product type" });
     }
+    const transferRefusal = normalizedProductType === "TRANSFER" && transferPublishRefusal(id);
+    if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
     if (!title?.trim() || !city?.trim()) {
       return res.status(400).json({ error: "Title and city are required" });
     }
@@ -1311,6 +1323,8 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
 
     const isPublished = Boolean(req.body?.isPublished);
     const status = isPublished ? "PUBLISHED" : "DRAFT";
+    const transferRefusal = isPublished && String(product.product_type).toUpperCase() === "TRANSFER" && transferPublishRefusal(id);
+    if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
     db.prepare("UPDATE products SET is_published = ?, status = ? WHERE id = ? AND supplier_id = ?")
       .run(isPublished ? 1 : 0, status, productId, id);
 
@@ -2138,6 +2152,13 @@ router.post("/:id/products/bulk-action", optionalAuthMiddleware, requireSupplier
 
   if (!Array.isArray(productIds) || productIds.length === 0) {
     return res.status(400).json({ error: "PRODUCT_IDS_REQUIRED" });
+  }
+
+  if (action === "publish") {
+    const placeholders = productIds.map(() => "?").join(", ");
+    const transfers = db.prepare(`SELECT 1 FROM products WHERE supplier_id = ? AND id IN (${placeholders}) AND UPPER(COALESCE(product_type, '')) = 'TRANSFER' LIMIT 1`).get(id, ...productIds);
+    const transferRefusal = transfers && transferPublishRefusal(id);
+    if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
   }
 
   let updatedCount = 0;
