@@ -250,7 +250,7 @@ export default function FinanceOverviewView() {
           <div className="text-2xl font-bold font-mono text-emerald-700">
             ₹{loading ? "..." : (finance?.gmv || 0).toLocaleString()}
           </div>
-          <p className="text-[10px] text-stone-500 font-mono">Total gross booking volume across India</p>
+          <p className="text-[10px] text-stone-500 font-mono">Total gross booking volume across all countries</p>
         </div>
 
         {/* Net Commission */}

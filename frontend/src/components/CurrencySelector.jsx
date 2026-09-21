@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { ChevronDown, Check, Globe } from "lucide-react";
-import { useCurrency } from "../lib/currency.jsx";
+import { rateToInrLabel, useCurrency } from "../lib/currency.jsx";
 
 export default function CurrencySelector({ className = "" }) {
-  const { currency, setCurrency, currencies } = useCurrency();
+  const { currency, setCurrency, currencies, rateLabel } = useCurrency();
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -68,6 +68,7 @@ export default function CurrencySelector({ className = "" }) {
                     <div>
                       <div className="font-bold font-mono leading-tight">{c.code} ({c.symbol})</div>
                       <div className="text-[10px] text-stone-600 dark:text-stone-400 leading-tight">{c.name}</div>
+                      {rateToInrLabel(c) && <div className="text-[10px] font-mono text-stone-500 dark:text-stone-500 leading-tight">{rateToInrLabel(c)}</div>}
                     </div>
                   </div>
                   {isSelected && <Check className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />}
@@ -77,7 +78,7 @@ export default function CurrencySelector({ className = "" }) {
           </div>
 
           <div className="mt-1 pt-1.5 border-t border-stone-100 dark:border-stone-800 px-2 text-[9px] text-stone-600 dark:text-stone-400 text-center">
-            Checkout is processed in INR (₹)
+            Checkout is processed in INR (₹){rateLabel && <><br />Display rate: {rateLabel}</>}
           </div>
         </div>
       )}

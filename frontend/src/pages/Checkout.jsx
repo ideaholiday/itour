@@ -51,7 +51,7 @@ function locationFromParams(params, name) {
 }
 
 export default function Checkout() {
-  const { formatPrice, currency } = useCurrency();
+  const { formatPrice, currency, rateLabel } = useCurrency();
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -1032,7 +1032,7 @@ export default function Checkout() {
             </button>
             {currency !== "INR" && (
               <p className="text-center text-[10px] text-stone-500 font-mono">
-                ℹ️ Displayed estimate: {formatPrice(payableTotal)}. Final transaction will be settled in INR (₹{payableTotal.toLocaleString("en-IN")}) in compliance with RBI regulations.
+                ℹ️ Displayed estimate: {formatPrice(payableTotal)}{rateLabel ? ` at ${rateLabel}` : ""}. Final transaction will be settled in INR (₹{payableTotal.toLocaleString("en-IN")}) in compliance with RBI regulations.
               </p>
             )}
             <p className="text-center text-[11px] text-stone-500">By confirming, you agree to the experience’s cancellation terms and Idea Holiday booking terms.</p>

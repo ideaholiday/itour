@@ -584,11 +584,11 @@ export default function AffiliateDashboardPage() {
                   <div>
                     <span className="font-bold text-stone-700 dark:text-stone-300 block mb-1">📸 Instagram Story / Bio</span>
                     <p className="text-stone-500 leading-relaxed">
-                      "Planning your next India trip? Use my code <strong>{data.affiliateCode}</strong> on @IdeaHoliday for {discountText} off tours, airport cabs & activities across India! Link in bio: {defaultShareUrl}"
+                      "Planning your next trip? Use my code <strong>{data.affiliateCode}</strong> on @IdeaHoliday for {discountText} off tours, airport cabs & activities across India and Thailand! Link in bio: {defaultShareUrl}"
                     </p>
                   </div>
                   <button
-                    onClick={() => copyText(`Planning your next India trip? Use my code ${data.affiliateCode} on @IdeaHoliday for ${discountText} off tours, airport cabs & activities across India! Link in bio: ${defaultShareUrl}`, "link")}
+                    onClick={() => copyText(`Planning your next trip? Use my code ${data.affiliateCode} on @IdeaHoliday for ${discountText} off tours, airport cabs & activities across India and Thailand! Link in bio: ${defaultShareUrl}`, "link")}
                     className="mt-3 py-1.5 px-3 rounded-lg bg-stone-200 dark:bg-stone-700 text-[11px] font-bold self-start cursor-pointer hover:bg-stone-300"
                   >
                     Copy Template

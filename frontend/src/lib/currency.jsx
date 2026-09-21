@@ -6,16 +6,25 @@ export const DEFAULT_CURRENCIES = [
   { code: "EUR", symbol: "€", name: "Euro", flag: "🇪🇺", decimals: 2, rateToInr: 92.80 },
   { code: "GBP", symbol: "£", name: "British Pound", flag: "🇬🇧", decimals: 2, rateToInr: 108.90 },
   { code: "AED", symbol: "د.إ", name: "UAE Dirham", flag: "🇦🇪", decimals: 2, rateToInr: 23.55 },
+  { code: "THB", symbol: "฿", name: "Thai Baht", flag: "🇹🇭", decimals: 0, rateToInr: 2.87 },
   { code: "SGD", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬", decimals: 2, rateToInr: 64.20 },
   { code: "AUD", symbol: "A$", name: "Australian Dollar", flag: "🇦🇺", decimals: 2, rateToInr: 55.40 },
   { code: "CAD", symbol: "C$", name: "Canadian Dollar", flag: "🇨🇦", decimals: 2, rateToInr: 61.80 },
 ];
+
+/** The display rate in rupees, e.g. `1 THB = ₹2.87`; empty for INR or a missing rate. */
+export function rateToInrLabel(info) {
+  const rate = Number(info?.rateToInr);
+  if (!info || info.code === "INR" || !(rate > 0)) return "";
+  return `1 ${info.code} = ₹${rate.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 const CurrencyContext = createContext({
   currency: "INR",
   setCurrency: () => {},
   currencies: DEFAULT_CURRENCIES,
   rates: {},
+  rateLabel: "",
   formatPrice: (val) => `₹${Number(val || 0).toLocaleString("en-IN")}`,
   convertPrice: (val) => ({ amount: Number(val || 0), symbol: "₹", formatted: `₹${Number(val || 0).toLocaleString("en-IN")}` }),
 });
@@ -107,6 +116,7 @@ export function CurrencyProvider({ children }) {
         setCurrency,
         currencies: currencyList,
         rates: ratesData?.rates || {},
+        rateLabel: rateToInrLabel(currencyMap[currency]),
         convertPrice,
         formatPrice,
       }}

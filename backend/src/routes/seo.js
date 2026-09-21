@@ -30,7 +30,7 @@ router.get(["/activity/:id", "/activity/:slug/:id"], (req, res, next) => {
 });
 
 /** Products and cities with something bookable today (see liveProductSql). */
-export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = []) {
+export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = [], countries = []) {
   const staticUrls = [
     { loc: `${baseUrl}/`, priority: "1.0", changefreq: "daily" },
     { loc: `${baseUrl}/transfers`, priority: "0.9", changefreq: "daily" },
@@ -43,11 +43,14 @@ export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = [
     { loc: `${baseUrl}/privacy-policy`, priority: "0.5", changefreq: "monthly" },
   ];
 
-  const destinationUrls = (cities || []).map((city) => ({
-    loc: `${baseUrl}${citySearchPath(city.name)}`,
-    priority: "0.8",
-    changefreq: "weekly",
-  }));
+  const destinationUrls = [
+    ...(countries || []).map((country) => ({ loc: `${baseUrl}/search?country=${encodeURIComponent(country)}`, priority: "0.8", changefreq: "weekly" })),
+    ...(cities || []).map((city) => ({
+      loc: `${baseUrl}${citySearchPath(city.name)}`,
+      priority: "0.8",
+      changefreq: "weekly",
+    })),
+  ];
 
   // No <lastmod>: products carry no edit time, and a guessed date teaches
   // Google to ignore the field for the whole site.
@@ -264,8 +267,8 @@ export function supplierDirectoryPage(database, citySlug, template, baseUrl = BA
     return {
       status: 200,
       html: renderSeoHtml(template, {
-        title: "Tour and travel operators in India | Idea Holiday",
-        description: "Find local tour operators, transfer companies and activity providers across India. See which are verified, read reviews and send an enquiry.",
+        title: "Tour and travel operators in India and Thailand | Idea Holiday",
+        description: "Find local tour operators, transfer companies and activity providers across India and Thailand. See which are verified, read reviews and send an enquiry.",
         canonical: `${baseUrl}/suppliers`,
       }),
     };
@@ -296,6 +299,15 @@ export function liveProductSql(alias = "p") {
 
 export function citySearchPath(city) {
   return `/search?destination=${encodeURIComponent(city)}`;
+}
+
+/** Countries open for listing (ADR 023) with at least one live product. */
+export function liveCountries(database) {
+  const rows = database.prepare(`
+    SELECT DISTINCT COALESCE(d.country, 'India') AS country FROM products p JOIN destinations d ON LOWER(d.name) = LOWER(TRIM(p.city))
+    WHERE ${liveProductSql("p")}
+  `).all();
+  return LISTING_COUNTRIES.filter((country) => rows.some((row) => row.country === country));
 }
 
 /** Cities with at least one live product, named the way most of their listings spell them. */
@@ -387,10 +399,7 @@ export function searchPage(database, query, template, baseUrl = BASE_URL) {
   if (country && keys.length === 1) {
     // A country page (?country=Thailand) is indexable once that country has a live product (ADR 023).
     const name = LISTING_COUNTRIES.find((entry) => entry.toLowerCase() === country.toLowerCase()) || displayCity(country);
-    const live = LISTING_COUNTRIES.includes(name) && database.prepare(`
-      SELECT 1 FROM products p JOIN destinations d ON LOWER(d.name) = LOWER(TRIM(p.city))
-      WHERE ${liveProductSql("p")} AND COALESCE(d.country, 'India') = ? LIMIT 1
-    `).get(name);
+    const live = liveCountries(database).includes(name);
     return {
       status: 200,
       html: renderSeoHtml(template, {
@@ -522,18 +531,21 @@ router.get("/sitemap.xml", (req, res) => {
   try {
     let products = [];
     let cities = [];
+    let countries = [];
     try {
       products = db
         .prepare(`SELECT p.id, p.title FROM products p WHERE ${liveProductSql("p")} ORDER BY p.id DESC`)
         .all() || [];
       cities = liveCities(db);
+      countries = liveCountries(db);
     } catch (dbErr) {
       logger.warn("Sitemap database fallback failed", { requestId: req.requestId, error: dbErr });
       products = [];
       cities = [];
+      countries = [];
     }
 
-    const xml = generateSitemapXml(products, BASE_URL, cities);
+    const xml = generateSitemapXml(products, BASE_URL, cities, countries);
     res.header("Content-Type", "application/xml");
     res.send(xml);
   } catch (err) {

@@ -110,7 +110,7 @@ export default function Login({ initialMode = "login" }) {
           Book remarkable trips. Keep every ticket close.
         </h1>
         <p className="mt-5 max-w-lg text-base leading-7 text-stone-600">
-          Save favorites, manage bookings, and get trip updates from verified local travel partners across India.
+          Save favorites, manage bookings, and get trip updates from verified local travel partners across India and Thailand.
         </p>
         <div className="mt-8 flex gap-6 text-sm font-semibold text-stone-700">
           <span className="flex items-center gap-1.5"><span className="text-emerald-600 font-bold">✓</span> Secure checkout</span>

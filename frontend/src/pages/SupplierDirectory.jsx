@@ -78,7 +78,7 @@ export default function SupplierDirectory() {
     setSearchParams(next);
   };
 
-  const heading = city ? `Tour operators in ${city.city}` : "Tour and travel operators in India";
+  const heading = city ? `Tour operators in ${city.city}` : "Tour and travel operators in India and Thailand";
   const canonical = city ? `${ORIGIN}${city.path}` : `${ORIGIN}/suppliers`;
 
   return (
@@ -87,7 +87,7 @@ export default function SupplierDirectory() {
         title={`${heading} | Idea Holiday`}
         description={city
           ? `Local tour operators, transfer companies and activity providers in ${city.city}. See who is verified, read reviews and send an enquiry.`
-          : "Find local tour operators, transfer companies and activity providers across India. See which are verified, read reviews and send an enquiry."}
+          : "Find local tour operators, transfer companies and activity providers across India and Thailand. See which are verified, read reviews and send an enquiry."}
         canonical={canonical}
         noindex={status === "missing" || (city && !city.indexable) || Boolean(q) || verifiedOnly || page > 1}
       />

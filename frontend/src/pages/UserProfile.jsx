@@ -268,6 +268,7 @@ export function UserProfile() {
                 <option value="EUR">EUR (€) - Euro</option>
                 <option value="GBP">GBP (£) - British Pound</option>
                 <option value="AED">AED (د.إ) - UAE Dirham</option>
+                <option value="THB">THB (฿) - Thai Baht</option>
                 <option value="SGD">SGD (S$) - Singapore Dollar</option>
               </select>
             </div>

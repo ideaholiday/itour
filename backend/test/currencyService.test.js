@@ -21,6 +21,7 @@ describe("Multi-Currency Service", () => {
     assert.ok(codes.includes("SGD"));
     assert.ok(codes.includes("AUD"));
     assert.ok(codes.includes("CAD"));
+    assert.ok(codes.includes("THB"));
 
     const inr = currencies.find((c) => c.code === "INR");
     assert.equal(inr.symbol, "₹");
@@ -76,5 +77,13 @@ describe("Multi-Currency Service", () => {
     const zero = convertFromInr(0, "USD");
     assert.equal(zero.amount, 0);
     assert.equal(zero.formatted, "$0.00");
+  });
+
+  it("shows Thai baht in whole baht (ADR 023)", () => {
+    const thb = convertFromInr(2870, "THB");
+    assert.equal(thb.currency, "THB");
+    assert.equal(thb.amount, 1000);
+    assert.equal(thb.formatted, "฿1,000");
+    assert.equal(thb.baseInr, 2870);
   });
 });

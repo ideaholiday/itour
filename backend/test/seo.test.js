@@ -143,7 +143,7 @@ test("the supplier sitemap lists the directory, cities and profiles", () => {
 
 // ── Activities, city search pages, 404s ───────────────────────
 import Database from "better-sqlite3";
-import { activityPage, liveCities, notFoundPage, searchPage } from "../src/routes/seo.js";
+import { activityPage, liveCities, liveCountries, notFoundPage, searchPage } from "../src/routes/seo.js";
 import { isKnownSpaPath, SPA_ROUTES } from "../../shared/spaRoutes.js";
 
 function catalogDatabase() {
@@ -230,8 +230,12 @@ test("a country page is indexable once that country has a live product (ADR 023)
   assert.match(empty, /<title>Thailand Tours, Transfers &amp; Experiences \| Idea Holiday<\/title>/);
   assert.match(empty, /<link rel="canonical" href="https:\/\/ideaholiday.in\/search\?country=Thailand" \/>/);
   assert.match(empty, /content="noindex, follow"/, "nothing bookable in Thailand yet");
+  assert.deepEqual(liveCountries(db), ["India"]);
 
   db.prepare("UPDATE products SET city = 'Bangkok' WHERE id = 'p_scuba'").run();
+  assert.deepEqual(liveCountries(db), ["Thailand"], "Lucknow is not in this catalogue; Goa has no live product left");
+  const xml = generateSitemapXml([], "https://ideaholiday.in", [], liveCountries(db));
+  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/search\?country=Thailand<\/loc>/);
   assert.match(headOf(searchPage(db, { country: "Thailand" }, INDEX_TEMPLATE).html), /content="index, follow"/);
   assert.match(headOf(searchPage(db, { country: "United Arab Emirates" }, INDEX_TEMPLATE).html), /content="noindex, follow"/, "the UAE is not open for listing");
   assert.match(headOf(searchPage(db, { country: "Thailand", q: "scuba" }, INDEX_TEMPLATE).html), /content="noindex, follow"/);

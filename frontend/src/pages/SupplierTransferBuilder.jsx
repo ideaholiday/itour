@@ -395,7 +395,7 @@ export default function SupplierTransferBuilder() {
           <div className="mt-6 rounded-3xl border border-emerald-300 bg-emerald-50 p-10 text-center animate-in fade-in zoom-in-95">
             <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
             <h2 className="mt-4 font-display text-2xl font-bold text-emerald-950">Transfer listing published</h2>
-            <p className="mt-2 text-sm text-emerald-800">It is now live in your supplier inventory and bookable across India.</p>
+            <p className="mt-2 text-sm text-emerald-800">It is now live in your supplier inventory and bookable on Idea Holiday.</p>
           </div>
         ) : (
           <form onSubmit={publish} className="mt-6 space-y-6">

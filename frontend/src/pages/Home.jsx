@@ -27,7 +27,7 @@ import SearchBar from "../components/SearchBar.jsx";
 import SeoHead from "../components/SeoHead.jsx";
 import { SkeletonCard } from "../components/ui/SkeletonLoader.jsx";
 import { api } from "../lib/api.js";
-import { destinationParam } from "../lib/destinations.js";
+import { destinationParam, featuredDestinations, withImageList } from "../lib/destinations.js";
 import { useCurrency } from "../lib/currency.jsx";
 
 const HERO_IMAGES = [
@@ -57,15 +57,6 @@ const FALLBACK_DESTINATIONS = [
   { id: "kerala", name: "Kerala", tagline: "Backwaters & green escapes", hero_image: "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=900&q=85" },
   { id: "agra", name: "Agra", tagline: "Timeless wonder", hero_image: "https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=900&q=85" },
   { id: "ladakh", name: "Ladakh", tagline: "High roads & clear skies", hero_image: "https://images.unsplash.com/photo-1581791538302-03537b9c97bf?auto=format&fit=crop&w=900&q=85" },
-];
-
-const FALLBACK_EXPERIENCES = [
-  { id: "taj-sunrise", title: "Taj Mahal Sunrise Tour with Local Storyteller", destination_name: "Agra", category: "Heritage", rating: 4.9, review_count: 1284, price_inr: 2499, duration_hours: 4, images: ["https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=600&q=80"], bestseller: true },
-  { id: "jaipur-private", title: "Private Jaipur Forts, Palaces & Bazaar Full Day", destination_name: "Jaipur", category: "Sightseeing", rating: 4.8, review_count: 842, price_inr: 3199, duration_hours: 8, images: ["https://images.unsplash.com/photo-1599661046827-dacde6976549?auto=format&fit=crop&w=600&q=80"], bestseller: false },
-  { id: "kerala-houseboat", title: "Alleppey Backwater Houseboat Overnight Experience", destination_name: "Kerala", category: "Backwaters", rating: 4.9, review_count: 635, price_inr: 4850, duration_hours: 24, images: ["https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=600&q=80"], bestseller: true },
-  { id: "goa-sunset", title: "Goa Sunset Cruise with Live Music & Local Bites", destination_name: "Goa", category: "Cruises", rating: 4.7, review_count: 519, price_inr: 1599, duration_hours: 3, images: ["https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=600&q=80"], bestseller: false },
-  { id: "delhi-walk", title: "Old Delhi Street Food Walk & Chandni Chowk Tour", destination_name: "Delhi", category: "Food & Culture", rating: 4.8, review_count: 720, price_inr: 1299, duration_hours: 3, images: ["https://images.unsplash.com/photo-1587474260584-136574528ed5?auto=format&fit=crop&w=600&q=80"], bestseller: true },
-  { id: "varanasi-ghats", title: "Varanasi Sunrise Boat Ride & Ghat Walk", destination_name: "Varanasi", category: "Spiritual", rating: 4.9, review_count: 910, price_inr: 999, duration_hours: 3, images: ["https://images.unsplash.com/photo-1561361058-c24e40f406b8?auto=format&fit=crop&w=600&q=80"], bestseller: true },
 ];
 
 const TRUST_ITEMS = [
@@ -181,9 +172,15 @@ function ExperienceCard({ activity, index = 0 }) {
             {title}
           </h3>
           <div className="mt-2 flex items-center gap-1.5">
-            <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
-            <span className="text-xs font-bold text-stone-800 dark:text-stone-200">{rating}</span>
-            <span className="text-xs text-stone-400 dark:text-stone-500">({(review_count || 0).toLocaleString("en-IN")})</span>
+            {rating ? (
+              <>
+                <Star className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
+                <span className="text-xs font-bold text-stone-800 dark:text-stone-200">{rating}</span>
+                <span className="text-xs text-stone-400 dark:text-stone-500">({(review_count || 0).toLocaleString("en-IN")})</span>
+              </>
+            ) : (
+              <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">New listing</span>
+            )}
           </div>
           <div className="mt-3 flex items-end justify-between border-t border-stone-100 dark:border-stone-800 pt-3">
             <div>
@@ -248,11 +245,12 @@ export default function Home() {
   useEffect(() => {
     Promise.all([api.getDestinations(), api.getActivities({ sort: "bestseller" })])
       .then(([destData, actData]) => {
-        setDestinations(destData?.length ? destData : FALLBACK_DESTINATIONS);
-        const featured = (actData || []).filter((a) => a.is_published !== false).slice(0, 8);
-        setBestsellers(featured.length ? featured : FALLBACK_EXPERIENCES);
+        // /search answers { products, facets }, not a bare list.
+        const products = Array.isArray(actData) ? actData : (actData?.products || []);
+        setDestinations(featuredDestinations(destData, actData?.facets?.cities, FALLBACK_DESTINATIONS));
+        setBestsellers(products.filter((a) => a.is_published !== false).slice(0, 8).map(withImageList));
       })
-      .catch(() => { setDestinations(FALLBACK_DESTINATIONS); setBestsellers(FALLBACK_EXPERIENCES); })
+      .catch(() => { setDestinations(FALLBACK_DESTINATIONS); setBestsellers([]); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -424,11 +422,11 @@ export default function Home() {
       </section>
 
       {/* ─── BESTSELLER EXPERIENCES ───────────────────────────────── */}
-      <section ref={bestRef} className="reveal-up bg-warm-50 dark:bg-stone-900 border-y border-stone-200 dark:border-stone-800 py-16 sm:py-20">
+      <section ref={bestRef} className={`${!loading && !bestsellers.length ? "hidden " : ""}reveal-up bg-warm-50 dark:bg-stone-900 border-y border-stone-200 dark:border-stone-800 py-16 sm:py-20`}>
         <div className="mx-auto max-w-7xl px-5 sm:px-8">
           <div className="mb-10 flex items-end justify-between gap-5">
             <div>
-              <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.2em] text-emerald-700 dark:text-emerald-400">Loved by travelers across India</p>
+              <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.2em] text-emerald-700 dark:text-emerald-400">Loved by travelers across India and Thailand</p>
               <h2 className="font-display text-3xl text-stone-900 dark:text-stone-100 sm:text-5xl">Experiences worth every rupee</h2>
             </div>
             <Link to="/search" className="hidden items-center gap-2 text-sm font-extrabold text-amber-700 dark:text-amber-400 transition hover:text-amber-800 sm:flex">
@@ -566,7 +564,7 @@ export default function Home() {
                 Stay Inspired. Get Secret Deals & Itineraries.
               </h2>
               <p className="text-sm text-stone-300 max-w-xl leading-relaxed">
-                Join 10,000+ travelers receiving weekly curated adventures, seasonal discounts, and handpicked local guide recommendations across India.
+                Join 10,000+ travelers receiving weekly curated adventures, seasonal discounts, and handpicked local guide recommendations across India and Thailand.
               </p>
             </div>
 
