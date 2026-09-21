@@ -1,6 +1,7 @@
 import { checkNativeInventory, normalizeUnitItems, priceUnitItems } from "./nativeInventoryService.js";
 import crypto from "crypto";
 import { computeTransferQuote, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
+import { isGstFreeProduct } from "../lib/productTax.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
 import { isSupplierKybApproved, isSupplierSubscriptionCovered } from "./supplierKybGate.js";
@@ -214,6 +215,8 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     ["TICKET_ONLY", "SIC", "TICKET_SIC"].includes(product.product_sub_type);
   if (!nativeSlot && !isNonVehicleProduct) validateCapacity(vehicleCategory, passengers, luggage);
   const commissionRate = resolveCommissionRate(db, product.supplier_id, product.id);
+  // No GST on products in Thailand (ADR 023); India keeps its rates.
+  const gstFree = isGstFreeProduct(db, product.id);
   let baseAmount;
   let tolls = 0;
   let stateTax = 0;
@@ -247,7 +250,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     baseAmount = transferQuote.costBreakdown.baseFare + nightAllowance;
     tolls = transferQuote.costBreakdown.fastagTolls;
     stateTax = transferQuote.costBreakdown.stateBorderTax;
-    gstAmount = roundMoney((baseAmount + tolls + stateTax) * 0.05);
+    gstAmount = gstFree ? 0 : roundMoney((baseAmount + tolls + stateTax) * 0.05);
     totalAmount = baseAmount + tolls + stateTax + gstAmount;
     variantName = transferQuote.vehicleDisplayName;
   } else {
@@ -307,7 +310,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
 
     tolls = roundMoney(variant?.estimated_fastag_tolls);
     stateTax = roundMoney(variant?.estimated_state_tax);
-    const taxRate = Number(variant?.tax_percentage ?? 5);
+    const taxRate = gstFree ? 0 : Number(variant?.tax_percentage ?? 5);
     gstAmount = roundMoney((baseAmount + tolls + stateTax) * taxRate / 100);
     totalAmount = baseAmount + tolls + stateTax + gstAmount;
   }
@@ -320,7 +323,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     } else {
       baseAmount = priceUnitItems(unitBreakdown.items, nativeSlot.unitPrices || { ADULT: nativeSlot.adultPrice, CHILD: nativeSlot.childPrice });
     }
-    tolls = 0; stateTax = 0; gstAmount = roundMoney(baseAmount * 0.05);
+    tolls = 0; stateTax = 0; gstAmount = gstFree ? 0 : roundMoney(baseAmount * 0.05);
     totalAmount = baseAmount + gstAmount;
     pricingModel = "PER_PERSON";
   }

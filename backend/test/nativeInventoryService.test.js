@@ -708,3 +708,15 @@ test("an explicitly empty departure time means the whole day", t => {
   // A malformed time is still rejected.
   assert.throws(() => saveSlotOverride(db, "p", "o", { localDate: future, localTime: "99:99" }));
 });
+
+test("a hold's frozen price adds 5% GST in India and none in Thailand (ADR 023)", t => {
+  const db = fixture(t); const hold = reserve(db); const b = booking(db);
+  assert.throws(() => attachNativeReservation(db, hold.id, { ...b, amount_inr: 2400 }, "u"), error => error.code === "PRICE_CHANGED");
+  attachNativeReservation(db, hold.id, { ...b, amount_inr: 2520 }, "u");
+
+  db.exec("ALTER TABLE products ADD COLUMN city TEXT; UPDATE products SET city = 'Bangkok'; CREATE TABLE destinations (name TEXT, country TEXT); INSERT INTO destinations VALUES ('Bangkok', 'Thailand');");
+  const thai = reserve(db, { localTime: "14:00", adults: 1, children: 0, ownerId: "v", requestKey: "thai" });
+  const tb = { ...booking(db, "tb"), pickup_time: "14:00", adults: 1, children: 0 };
+  assert.throws(() => attachNativeReservation(db, thai.id, { ...tb, amount_inr: 1050 }, "v"), error => error.code === "PRICE_CHANGED");
+  attachNativeReservation(db, thai.id, { ...tb, amount_inr: 1000 }, "v");
+});
