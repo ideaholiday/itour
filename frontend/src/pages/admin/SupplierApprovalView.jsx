@@ -448,95 +448,97 @@ export default function SupplierApprovalView() {
                 </div>
               </div>
 
-              {/* Cashfree SecureID KYB Verification Suite Section */}
-              <div className="bg-gradient-to-br from-amber-500/10 via-amber-50 to-emerald-500/10 border border-amber-300 rounded-2xl p-5 space-y-4 shadow-xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-amber-700" />
-                    <div>
-                      <h3 className="text-xs font-mono font-bold text-stone-900 uppercase tracking-wider">
-                        Cashfree SecureID KYB Engine
-                      </h3>
-                      <span className="text-[10px] text-stone-500">Real-Time GSTIN, PAN & Bank Account Verification</span>
+              {/* Cashfree SecureID KYB Verification Suite Section: Indian suppliers only (ADR 023) */}
+              {selectedSupplier.kybReadiness?.cashfree !== false && (
+                <div className="bg-gradient-to-br from-amber-500/10 via-amber-50 to-emerald-500/10 border border-amber-300 rounded-2xl p-5 space-y-4 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-5 h-5 text-amber-700" />
+                      <div>
+                        <h3 className="text-xs font-mono font-bold text-stone-900 uppercase tracking-wider">
+                          Cashfree SecureID KYB Engine
+                        </h3>
+                        <span className="text-[10px] text-stone-500">Real-Time GSTIN, PAN & Bank Account Verification</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={autoVerifying}
+                      onClick={handleRunAutoVerify}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs transition shadow-xs disabled:opacity-50"
+                    >
+                      {autoVerifying ? (
+                        <>
+                          <Clock className="w-3.5 h-3.5 animate-spin" />
+                          <span>Auditing…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Run SecureID Audit</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2.5 text-xs font-mono">
+                    {/* GSTIN Badge */}
+                    <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-stone-500 block">GSTIN STATUS</span>
+                      <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.gstin_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                        {selectedSupplier.gstin_verified === 1 ? `Active (${selectedSupplier.gstin_verified_status || "Valid"})` : "Unverified"}
+                      </span>
+                      {selectedSupplier.gstin_verified_name && (
+                        <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.gstin_verified_name}>
+                          {selectedSupplier.gstin_verified_name}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* PAN Badge */}
+                    <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-stone-500 block">PAN STATUS</span>
+                      <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.pan_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                        {selectedSupplier.pan_verified === 1 ? `Valid (${selectedSupplier.pan_type || "Company"})` : "Unverified"}
+                      </span>
+                      {selectedSupplier.pan_verified_name && (
+                        <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.pan_verified_name}>
+                          {selectedSupplier.pan_verified_name}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Bank Penny Drop Badge */}
+                    <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-stone-500 block">BANK PENNY-DROP</span>
+                      <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.bank_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                        {selectedSupplier.bank_verified === 1 ? `Match: ${selectedSupplier.bank_match_score || 100}%` : "Unverified"}
+                      </span>
+                      {selectedSupplier.bank_verified_name && (
+                        <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.bank_verified_name}>
+                          {selectedSupplier.bank_verified_name}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    disabled={autoVerifying}
-                    onClick={handleRunAutoVerify}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs transition shadow-xs disabled:opacity-50"
-                  >
-                    {autoVerifying ? (
-                      <>
-                        <Clock className="w-3.5 h-3.5 animate-spin" />
-                        <span>Auditing…</span>
-                      </>
+
+                  {selectedSupplier.kybReadiness?.identity && (
+                    selectedSupplier.kybReadiness.identity.verified ? (
+                      <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                        GSTIN and PAN verified by Cashfree SecureID, and the GSTIN is registered to this PAN.
+                        {selectedSupplier.kyb_status === "PENDING" ? " Approval will apply automatically." : ""}
+                      </p>
                     ) : (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Run SecureID Audit</span>
-                      </>
-                    )}
-                  </button>
+                      <div className="text-[11px] text-amber-900 bg-white/80 border border-amber-200 rounded-xl px-3 py-2">
+                        <span className="font-bold block">Not eligible for automatic approval:</span>
+                        <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                          {selectedSupplier.kybReadiness.identity.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                        </ul>
+                      </div>
+                    )
+                  )}
                 </div>
-
-                <div className="grid grid-cols-3 gap-2.5 text-xs font-mono">
-                  {/* GSTIN Badge */}
-                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
-                    <span className="text-[10px] text-stone-500 block">GSTIN STATUS</span>
-                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.gstin_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
-                      {selectedSupplier.gstin_verified === 1 ? `Active (${selectedSupplier.gstin_verified_status || "Valid"})` : "Unverified"}
-                    </span>
-                    {selectedSupplier.gstin_verified_name && (
-                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.gstin_verified_name}>
-                        {selectedSupplier.gstin_verified_name}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* PAN Badge */}
-                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
-                    <span className="text-[10px] text-stone-500 block">PAN STATUS</span>
-                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.pan_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
-                      {selectedSupplier.pan_verified === 1 ? `Valid (${selectedSupplier.pan_type || "Company"})` : "Unverified"}
-                    </span>
-                    {selectedSupplier.pan_verified_name && (
-                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.pan_verified_name}>
-                        {selectedSupplier.pan_verified_name}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Bank Penny Drop Badge */}
-                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
-                    <span className="text-[10px] text-stone-500 block">BANK PENNY-DROP</span>
-                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.bank_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
-                      {selectedSupplier.bank_verified === 1 ? `Match: ${selectedSupplier.bank_match_score || 100}%` : "Unverified"}
-                    </span>
-                    {selectedSupplier.bank_verified_name && (
-                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.bank_verified_name}>
-                        {selectedSupplier.bank_verified_name}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {selectedSupplier.kybReadiness?.identity && (
-                  selectedSupplier.kybReadiness.identity.verified ? (
-                    <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
-                      GSTIN and PAN verified by Cashfree SecureID, and the GSTIN is registered to this PAN.
-                      {selectedSupplier.kyb_status === "PENDING" ? " Approval will apply automatically." : ""}
-                    </p>
-                  ) : (
-                    <div className="text-[11px] text-amber-900 bg-white/80 border border-amber-200 rounded-xl px-3 py-2">
-                      <span className="font-bold block">Not eligible for automatic approval:</span>
-                      <ul className="list-disc pl-4 mt-1 space-y-0.5">
-                        {selectedSupplier.kybReadiness.identity.reasons.map((reason) => <li key={reason}>{reason}</li>)}
-                      </ul>
-                    </div>
-                  )
-                )}
-              </div>
+              )}
 
               {/* Tax & Legal Documents (GSTIN, PAN) */}
               <div className="bg-[#FAF9F6] border border-stone-200 rounded-2xl p-5 space-y-3">
@@ -583,7 +585,7 @@ export default function SupplierApprovalView() {
               {/* KYB Documents uploaded by the supplier */}
               <div className="bg-[#FAF9F6] border border-stone-200 rounded-2xl p-5 space-y-3">
                 <h3 className="text-xs font-mono font-bold text-amber-800 uppercase tracking-wider flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-amber-600" /> KYB Documents
+                  <ShieldCheck className="w-4 h-4 text-amber-600" /> KYB Documents{selectedSupplier.kybReadiness?.country ? ` · ${selectedSupplier.kybReadiness.country}` : ""}
                 </h3>
 
                 {(selectedSupplier.kybReadiness?.requiredDocuments || []).length > 0 && (
@@ -653,7 +655,7 @@ export default function SupplierApprovalView() {
               {selectedSupplier.kyb_status !== "APPROVED" && selectedSupplier.kybReadiness && !selectedSupplier.kybReadiness.canApprove && (
                 <div role="note" className="text-xs text-rose-900 bg-rose-50 border border-rose-200 rounded-2xl px-4 py-3">
                   <strong>Approval is blocked.</strong> Missing: {selectedSupplier.kybReadiness.missingDocuments.join(", ")}.
-                  The supplier must upload these, or verify their GSTIN and PAN with Cashfree SecureID.
+                  {selectedSupplier.kybReadiness.cashfree ? "The supplier must upload these, or verify their GSTIN and PAN with Cashfree SecureID." : "The supplier must upload these."}
                 </div>
               )}
 

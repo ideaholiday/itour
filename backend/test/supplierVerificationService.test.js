@@ -185,6 +185,62 @@ test("auto-approval refuses a GSTIN from another PAN, a failed or outdated check
   }
 });
 
+// A supplier based in a catalogue city abroad (ADR 023).
+function abroadDatabase(city, country) {
+  const database = verificationDatabase();
+  database.exec(`
+    ALTER TABLE suppliers ADD COLUMN city TEXT;
+    CREATE TABLE destinations (name TEXT, country TEXT);
+    CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT, product_type TEXT);
+  `);
+  database.prepare("INSERT INTO destinations VALUES (?, ?)").run(city, country);
+  database.prepare("UPDATE suppliers SET city = ?").run(city);
+  return database;
+}
+
+test("a Thai supplier is approved by hand from Thai documents, never from an Indian PAN or Cashfree (ADR 023)", async () => {
+  const database = abroadDatabase("Bangkok", "Thailand");
+  const readiness = () => getKybApprovalReadiness(database, supplierRow(database));
+  assert.equal(readiness().country, "Thailand");
+  assert.equal(readiness().cashfree, false);
+  assert.equal(readiness().identity, null);
+  assert.deepEqual(readiness().missingDocuments, [
+    "Company registration certificate (DBD affidavit)",
+    "TAT tour operator licence",
+    "Passport or Thai ID of the authorised director",
+  ], "no PAN or Indian transport licence; no vehicle document until they list a transfer");
+
+  // Verified GSTIN and PAN on file do not approve a supplier abroad, by hand or automatically.
+  addCheck(database, "GSTIN");
+  addCheck(database, "PAN");
+  assert.equal(autoApproveSupplierKyb(database, "supplier-1").approved, false);
+  assert.throws(
+    () => saveSupplierVerification(database, { supplierId: "supplier-1", action: "APPROVED" }),
+    (error) => error.status === 409 && /Missing: Company registration/.test(error.message) && !/Cashfree/.test(error.message),
+  );
+
+  await addDocument(database, "th-1", "COMPANY_REGISTRATION");
+  await addDocument(database, "th-2", "TOUR_OPERATOR_LICENSE");
+  await addDocument(database, "th-3", "DIRECTOR_ID");
+  assert.equal(readiness().canApprove, true);
+
+  database.prepare("INSERT INTO products VALUES ('p-1', 'supplier-1', 'TRANSFER')").run();
+  assert.deepEqual(readiness().missingDocuments, ["Commercial vehicle registration or public transport permit"], "a transfer supplier also needs its vehicle papers");
+  await addDocument(database, "th-4", "VEHICLE_REGISTRATION");
+  const result = saveSupplierVerification(database, { supplierId: "supplier-1", action: "APPROVED" });
+  assert.equal(result.supplier.kyb_status, "APPROVED");
+  assert.equal(result.supplier.kyb_approval_source, "ADMIN");
+  database.close();
+});
+
+test("a supplier from a country without a document list needs at least one uploaded document", async () => {
+  const database = abroadDatabase("Dubai", "United Arab Emirates");
+  assert.deepEqual(getKybApprovalReadiness(database, supplierRow(database)).missingDocuments, ["At least one business document from United Arab Emirates"]);
+  await addDocument(database, "ae-1", "COMPANY_REGISTRATION");
+  assert.equal(getKybApprovalReadiness(database, supplierRow(database)).canApprove, true);
+  database.close();
+});
+
 test("simulated Cashfree answers never approve a supplier in production", (t) => {
   const previous = process.env.NODE_ENV;
   t.after(() => { process.env.NODE_ENV = previous; });

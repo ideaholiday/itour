@@ -54,6 +54,10 @@ const DOC_TYPES = [
 export default function SupplierCompliancePanel({ supplierData, supplierId, onRefresh }) {
   const supplier = supplierData?.supplier || {};
   const kybDocs = supplierData?.kybDocs || [];
+  // Documents and checks for the country of the supplier's base city (ADR 023).
+  const kybReadiness = supplierData?.kybReadiness;
+  const docTypes = kybReadiness?.documentTypes?.map((type) => ({ value: type.docType, label: type.label })) || DOC_TYPES;
+  const cashfree = kybReadiness?.cashfree !== false;
   const bankDetails = parseBankDetails(supplier.payout_bank_details);
 
   const [copiedRef, setCopiedRef] = useState("");
@@ -434,17 +438,17 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                   <UploadCloud className="mx-auto h-8 w-8 text-amber-600" />
                   <h3 className="mt-2 text-sm font-bold text-stone-800">No documents submitted yet</h3>
                   <p className="mt-1 text-xs text-stone-500 max-w-sm mx-auto">
-                    Upload your Commercial Transport Permit, PAN copy, or GSTIN certificate to start receiving marketplace bookings.
+                    {cashfree ? "Upload your Commercial Transport Permit, PAN copy, or GSTIN certificate to start receiving marketplace bookings." : `Upload your business documents from ${kybReadiness.country} to start receiving marketplace bookings.`}
                   </p>
                   <button
                     onClick={() => {
-                      setPresetDocType("COMMERCIAL_TRANSPORT_LICENSE");
+                      setPresetDocType(docTypes[0].value);
                       setUploadModalOpen(true);
                     }}
                     className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-stone-950 hover:bg-amber-400 shadow-sm"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    <span>Upload Commercial Permit</span>
+                    <span>Upload {cashfree ? "Commercial Permit" : docTypes[0].label}</span>
                   </button>
                 </div>
               )}
@@ -457,7 +461,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
               Recommended Document Checklist
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {DOC_TYPES.slice(0, 4).map((type) => {
+              {docTypes.slice(0, 4).map((type) => {
                 const uploaded = kybDocs.find((d) => d.doc_type === type.value);
                 return (
                   <button
@@ -507,39 +511,41 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
               </span>
             </div>
 
-            {/* Cashfree SecureID 1-Click Verification Trigger */}
-            <div className="mt-4 p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-amber-100 text-amber-900 shrink-0">
-                  <Shield className="h-4 w-4 text-amber-700" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-stone-900">Cashfree SecureID KYB</span>
-                    <span className="text-[9px] font-mono font-bold bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded">API ACTIVE</span>
+            {cashfree && (<>
+              {/* Cashfree SecureID 1-Click Verification Trigger */}
+              <div className="mt-4 p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-100 text-amber-900 shrink-0">
+                    <Shield className="h-4 w-4 text-amber-700" />
                   </div>
-                  <p className="text-[10px] text-stone-600">Instant real-time GSTIN, PAN & Bank Penny-Drop Validation</p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-stone-900">Cashfree SecureID KYB</span>
+                      <span className="text-[9px] font-mono font-bold bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded">API ACTIVE</span>
+                    </div>
+                    <p className="text-[10px] text-stone-600">Instant real-time GSTIN, PAN & Bank Penny-Drop Validation</p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  disabled={Boolean(verifyingField)}
+                  onClick={handleVerifyAll}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 px-3 py-2 text-xs font-bold transition shadow-xs disabled:opacity-50 shrink-0"
+                >
+                  {verifyingField === "all" ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Verifying…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Verify All</span>
+                    </>
+                  )}
+                </button>
               </div>
-              <button
-                type="button"
-                disabled={Boolean(verifyingField)}
-                onClick={handleVerifyAll}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 px-3 py-2 text-xs font-bold transition shadow-xs disabled:opacity-50 shrink-0"
-              >
-                {verifyingField === "all" ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>Verifying…</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-3.5 w-3.5" />
-                    <span>Verify All</span>
-                  </>
-                )}
-              </button>
-            </div>
+            </>)}
 
             <div className="mt-5 space-y-4">
               {/* Row 1: Business Verification */}
@@ -564,87 +570,89 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                 </div>
               </div>
 
-              {/* Row 2: GSTIN */}
-              <div className="flex items-center justify-between border-b border-stone-100 pb-3 text-sm">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-stone-700 font-medium">GSTIN on file</span>
-                    {supplier.gstin_verified === 1 && (
-                      <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
-                        VERIFIED ({supplier.gstin_verified_status || "Active"})
-                      </span>
-                    )}
+              {cashfree && (<>
+                {/* Row 2: GSTIN */}
+                <div className="flex items-center justify-between border-b border-stone-100 pb-3 text-sm">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-stone-700 font-medium">GSTIN on file</span>
+                      {supplier.gstin_verified === 1 && (
+                        <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                          VERIFIED ({supplier.gstin_verified_status || "Active"})
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] font-mono text-stone-400">
+                      {supplier.gstin ? supplier.gstin : "Not provided"}
+                      {supplier.gstin_verified_name && (
+                        <span className="block text-emerald-700 font-sans text-[10px] font-semibold">
+                          Legal Entity: {supplier.gstin_verified_name}
+                        </span>
+                      )}
+                    </p>
                   </div>
-                  <p className="text-[11px] font-mono text-stone-400">
-                    {supplier.gstin ? supplier.gstin : "Not provided"}
-                    {supplier.gstin_verified_name && (
-                      <span className="block text-emerald-700 font-sans text-[10px] font-semibold">
-                        Legal Entity: {supplier.gstin_verified_name}
-                      </span>
+                  <div className="flex items-center gap-2">
+                    {supplier.gstin && supplier.gstin_verified !== 1 && (
+                      <button
+                        type="button"
+                        disabled={verifyingField === "gstin"}
+                        onClick={handleVerifyGstin}
+                        className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
+                      >
+                        {verifyingField === "gstin" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
+                        <span>Verify GSTIN</span>
+                      </button>
                     )}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {supplier.gstin && supplier.gstin_verified !== 1 && (
                     <button
-                      type="button"
-                      disabled={verifyingField === "gstin"}
-                      onClick={handleVerifyGstin}
-                      className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
+                      onClick={() => setTaxModalOpen(true)}
+                      className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700 hover:bg-amber-100 hover:text-amber-900 border border-stone-300 transition"
                     >
-                      {verifyingField === "gstin" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
-                      <span>Verify GSTIN</span>
+                      {hasGstin ? "Edit" : "+ Add"}
                     </button>
-                  )}
-                  <button
-                    onClick={() => setTaxModalOpen(true)}
-                    className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700 hover:bg-amber-100 hover:text-amber-900 border border-stone-300 transition"
-                  >
-                    {hasGstin ? "Edit" : "+ Add"}
-                  </button>
+                  </div>
                 </div>
-              </div>
 
-              {/* Row 3: PAN */}
-              <div className="flex items-center justify-between border-b border-stone-100 pb-3 text-sm">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-stone-700 font-medium">PAN on file</span>
-                    {supplier.pan_verified === 1 && (
-                      <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
-                        VERIFIED ({supplier.pan_type || "Business"})
-                      </span>
-                    )}
+                {/* Row 3: PAN */}
+                <div className="flex items-center justify-between border-b border-stone-100 pb-3 text-sm">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-stone-700 font-medium">PAN on file</span>
+                      {supplier.pan_verified === 1 && (
+                        <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                          VERIFIED ({supplier.pan_type || "Business"})
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] font-mono text-stone-400">
+                      {supplier.pan_number ? supplier.pan_number : "Not provided"}
+                      {supplier.pan_verified_name && (
+                        <span className="block text-emerald-700 font-sans text-[10px] font-semibold">
+                          Registered Name: {supplier.pan_verified_name}
+                        </span>
+                      )}
+                    </p>
                   </div>
-                  <p className="text-[11px] font-mono text-stone-400">
-                    {supplier.pan_number ? supplier.pan_number : "Not provided"}
-                    {supplier.pan_verified_name && (
-                      <span className="block text-emerald-700 font-sans text-[10px] font-semibold">
-                        Registered Name: {supplier.pan_verified_name}
-                      </span>
+                  <div className="flex items-center gap-2">
+                    {supplier.pan_number && supplier.pan_verified !== 1 && (
+                      <button
+                        type="button"
+                        disabled={verifyingField === "pan"}
+                        onClick={handleVerifyPan}
+                        className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
+                      >
+                        {verifyingField === "pan" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
+                        <span>Verify PAN</span>
+                      </button>
                     )}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {supplier.pan_number && supplier.pan_verified !== 1 && (
                     <button
-                      type="button"
-                      disabled={verifyingField === "pan"}
-                      onClick={handleVerifyPan}
-                      className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
+                      onClick={() => setTaxModalOpen(true)}
+                      className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700 hover:bg-amber-100 hover:text-amber-900 border border-stone-300 transition"
                     >
-                      {verifyingField === "pan" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
-                      <span>Verify PAN</span>
+                      {hasPan ? "Edit" : "+ Add"}
                     </button>
-                  )}
-                  <button
-                    onClick={() => setTaxModalOpen(true)}
-                    className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700 hover:bg-amber-100 hover:text-amber-900 border border-stone-300 transition"
-                  >
-                    {hasPan ? "Edit" : "+ Add"}
-                  </button>
+                  </div>
                 </div>
-              </div>
+              </>)}
 
               {/* Row 4: Payout Account */}
               <div className="flex items-center justify-between pb-1 text-sm">
@@ -699,12 +707,12 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                 <h3 className="font-display text-lg font-bold text-stone-900">Tax & Bank Profile</h3>
               </div>
               <div className="flex items-center gap-1.5">
-                <button
+                {cashfree && <button
                   onClick={() => setTaxModalOpen(true)}
                   className="rounded-lg border border-stone-300 bg-stone-50 px-2.5 py-1 text-xs font-bold text-stone-700 hover:bg-stone-100 transition"
                 >
                   Edit Tax Info
-                </button>
+                </button>}
                 <button
                   onClick={() => setPayoutModalOpen(true)}
                   className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 transition"
@@ -715,42 +723,45 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-              <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-stone-400 block">GSTIN</span>
-                  {supplier.gstin_verified === 1 && (
-                    <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-300">
-                      Active
+              {cashfree && (<>
+                {/* GSTIN and PAN tiles */}
+                <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-stone-400 block">GSTIN</span>
+                    {supplier.gstin_verified === 1 && (
+                      <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-300">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <strong className="mt-1 block font-mono text-xs text-stone-900 truncate">
+                    {supplier.gstin || "—"}
+                  </strong>
+                  {supplier.gstin_verified_name && (
+                    <span className="mt-0.5 block text-[10px] text-emerald-700 font-medium truncate">
+                      {supplier.gstin_verified_name}
                     </span>
                   )}
                 </div>
-                <strong className="mt-1 block font-mono text-xs text-stone-900 truncate">
-                  {supplier.gstin || "—"}
-                </strong>
-                {supplier.gstin_verified_name && (
-                  <span className="mt-0.5 block text-[10px] text-emerald-700 font-medium truncate">
-                    {supplier.gstin_verified_name}
-                  </span>
-                )}
-              </div>
-              <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-stone-400 block">PAN Number</span>
-                  {supplier.pan_verified === 1 && (
-                    <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-300">
-                      Valid
+                <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-stone-400 block">PAN Number</span>
+                    {supplier.pan_verified === 1 && (
+                      <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-300">
+                        Valid
+                      </span>
+                    )}
+                  </div>
+                  <strong className="mt-1 block font-mono text-xs text-stone-900 truncate">
+                    {supplier.pan_number || "—"}
+                  </strong>
+                  {supplier.pan_verified_name && (
+                    <span className="mt-0.5 block text-[10px] text-emerald-700 font-medium truncate">
+                      {supplier.pan_verified_name}
                     </span>
                   )}
                 </div>
-                <strong className="mt-1 block font-mono text-xs text-stone-900 truncate">
-                  {supplier.pan_number || "—"}
-                </strong>
-                {supplier.pan_verified_name && (
-                  <span className="mt-0.5 block text-[10px] text-emerald-700 font-medium truncate">
-                    {supplier.pan_verified_name}
-                  </span>
-                )}
-              </div>
+              </>)}
               <div className="col-span-2 rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
                 <div className="flex justify-between items-start">
                   <div>
@@ -832,6 +843,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
           onClose={() => setUploadModalOpen(false)}
           supplierId={supplierId}
           presetType={presetDocType}
+          docTypes={docTypes}
           onSuccess={() => {
             setUploadModalOpen(false);
             showToast("success", "Document submitted for verification");
@@ -1224,8 +1236,8 @@ function PayoutBankModal({ isOpen, onClose, supplier, supplierId, bankDetails, o
 // -------------------------------------------------------------
 // Sub-component Modal: Document Upload
 // -------------------------------------------------------------
-function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, onSuccess }) {
-  const [docType, setDocType] = useState(presetType || "COMMERCIAL_TRANSPORT_LICENSE");
+function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, docTypes = DOC_TYPES, onSuccess }) {
+  const [docType, setDocType] = useState(presetType || docTypes[0].value);
   const [docNumber, setDocNumber] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState("");
@@ -1347,7 +1359,7 @@ function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, onSucces
               onChange={(e) => setDocType(e.target.value)}
               className="w-full rounded-xl border border-stone-300 px-3.5 py-2.5 text-xs bg-white focus:border-amber-500 focus:outline-hidden"
             >
-              {DOC_TYPES.map((t) => (
+              {docTypes.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
                 </option>

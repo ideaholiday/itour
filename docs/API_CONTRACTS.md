@@ -558,6 +558,7 @@ Scoped to the caller: a traveler sees their own threads, a supplier the threads 
 - **`POST …/profile-verification`**: `{ "action": "GRANT", "checks": ["BUSINESS_IDENTITY", "BANK_ACCOUNT", "BUSINESS_ADDRESS", "OWNER_CALL"], "reason": "…" }` → `201`,
   or `{ "action": "REVOKE", "reason": "…" }`. `409` when KYB is not approved.
 - **`PATCH …/profile-status`**: `{ "suspended": true, "reason": "…" }` or `{ "suspended": false }`.
+- **KYB readiness** (ADR 009, ADR 023): supplier `GET /api/suppliers/:id` and admin `GET /api/admin/suppliers` return `kybReadiness: { country, cashfree, documentTypes, requiredDocuments, missingDocuments, identity, canApprove }`; `identity` (the Cashfree GSTIN/PAN status) is `null` outside India. For a supplier outside India, `POST /api/suppliers/:id/kyb/verify-gstin|verify-pan|verify-all` and `POST /api/admin/suppliers/:id/kyb/auto-verify` → `400 CASHFREE_INDIA_ONLY`.
 
 ### 10.4.1 Team (`/api/admin/team`, requires `ADMIN`)
 `ADMIN` and `STAFF` users; all receive booking and operations alerts.

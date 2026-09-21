@@ -31,7 +31,7 @@ import {
   sendGuestBookingNotification,
 } from "../services/notificationService.js";
 import { KYB_FILE_SCHEME, kybFileName, sendKybDocumentFile } from "../services/kybFileService.js";
-import { autoApproveSupplierKyb } from "../services/supplierVerificationService.js";
+import { autoApproveSupplierKyb, getKybApprovalReadiness, kybRulesFor, supplierCountry } from "../services/supplierVerificationService.js";
 import {
   assignDriverToBooking,
   getDispatchTimeline,
@@ -82,6 +82,13 @@ function applyKybAutoApproval(req, supplierId) {
     logger.error("Supplier KYB auto-approval failed", { requestId: req.requestId, supplierId, error });
     return { approved: false, supplier: null, identity: null };
   }
+}
+
+// Cashfree SecureID checks Indian GSTIN and PAN only; suppliers abroad are
+// approved by an admin from their own country's documents (ADR 023).
+function cashfreeIdentityRefusal(supplier) {
+  const country = supplierCountry(db, supplier);
+  return kybRulesFor(country).cashfree ? null : `GSTIN and PAN checks are for Indian suppliers. Suppliers in ${country} upload their documents for an admin to review.`;
 }
 
 const autoApprovalMessage = "Your GSTIN and PAN are verified, so your account is now approved and your published listings can be booked.";
@@ -271,6 +278,7 @@ router.get("/:id", (req, res) => {
       supplier: { ...supplier, commission_rate_effective: resolveCommissionRate(db, supplier.id) },
       subscription: getSubscriptionStatus(db, supplier.id),
       kybDocs,
+      kybReadiness: getKybApprovalReadiness(db, supplier),
       geoFences,
       products: products.map((product) => ({ ...product, commission_rate_effective: resolveCommissionRate(db, supplier.id, product.id) })),
       bookings,
@@ -388,6 +396,8 @@ router.post("/:id/kyb/verify-gstin", validateBody(supplierSchemas.verifyGstin), 
     const { gstin, businessName, business_name } = req.body;
     const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const refusal = cashfreeIdentityRefusal(supplier);
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
 
     const targetGstin = (gstin || supplier.gstin || "").trim().toUpperCase();
     const targetName = businessName || business_name || supplier.company_name;
@@ -442,6 +452,8 @@ router.post("/:id/kyb/verify-pan", validateBody(supplierSchemas.verifyPan), asyn
     const { pan, name } = req.body;
     const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const refusal = cashfreeIdentityRefusal(supplier);
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
 
     const targetPan = (pan || supplier.pan_number || "").trim().toUpperCase();
     const targetName = name || supplier.contact_name || supplier.company_name;
@@ -586,6 +598,9 @@ router.get("/:id/kyb/verifications", (req, res) => {
 router.post("/:id/kyb/verify-all", async (req, res) => {
   try {
     const { id } = req.params;
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+    const refusal = supplier && cashfreeIdentityRefusal(supplier);
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
     const report = await runComprehensiveSupplierKyb(db, {
       supplierId: id,
       actorId: req.user?.id || id,

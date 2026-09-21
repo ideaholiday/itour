@@ -14,6 +14,73 @@ export const REQUIRED_KYB_DOCUMENTS = Object.freeze([
   { docType: "PAN", label: "PAN Card", acceptedTypes: ["PAN"] },
 ]);
 
+/**
+ * KYB documents by the country of the supplier's base city (ADR 022, ADR 023).
+ * `required` blocks manual approval until uploaded; `transfersOnly` applies once
+ * the supplier lists a transfer. `documentTypes` is what the upload form offers.
+ * Only India has Cashfree SecureID checks and automatic approval.
+ */
+export const KYB_COUNTRY_RULES = Object.freeze({
+  India: Object.freeze({
+    cashfree: true,
+    required: REQUIRED_KYB_DOCUMENTS,
+    documentTypes: Object.freeze([
+      { docType: "COMMERCIAL_TRANSPORT_LICENSE", label: "Commercial Transport License / Permit" },
+      { docType: "GSTIN", label: "GSTIN Certificate" },
+      { docType: "PAN", label: "PAN Card (Business / Proprietor)" },
+      { docType: "BANK_CANCELLED_CHEQUE", label: "Cancelled Cheque / Bank Passbook" },
+      { docType: "TOURISM_LICENSE", label: "Tourism Department Registration" },
+      { docType: "OTHER", label: "Other Identity / Trade Document" },
+    ]),
+  }),
+  Thailand: Object.freeze({
+    cashfree: false,
+    required: Object.freeze([
+      { docType: "COMPANY_REGISTRATION", label: "Company registration certificate (DBD affidavit)", acceptedTypes: ["COMPANY_REGISTRATION"] },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "TAT tour operator licence", acceptedTypes: ["TOUR_OPERATOR_LICENSE"] },
+      { docType: "DIRECTOR_ID", label: "Passport or Thai ID of the authorised director", acceptedTypes: ["DIRECTOR_ID"] },
+      { docType: "VEHICLE_REGISTRATION", label: "Commercial vehicle registration or public transport permit", acceptedTypes: ["VEHICLE_REGISTRATION", "COMMERCIAL_PERMIT"], transfersOnly: true },
+    ]),
+    documentTypes: Object.freeze([
+      { docType: "COMPANY_REGISTRATION", label: "Company registration certificate (DBD affidavit)" },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "TAT tour operator licence" },
+      { docType: "DIRECTOR_ID", label: "Passport or Thai ID of the authorised director" },
+      { docType: "VEHICLE_REGISTRATION", label: "Commercial vehicle registration or public transport permit" },
+      { docType: "OTHER", label: "Other business document" },
+    ]),
+  }),
+});
+
+// A country whose document list isn't set yet (the UAE): an admin reviews
+// whatever the supplier uploaded, but never approves with nothing on file.
+const UNLISTED_COUNTRY_RULES = Object.freeze({
+  cashfree: false,
+  required: Object.freeze([]),
+  documentTypes: Object.freeze([
+    { docType: "COMPANY_REGISTRATION", label: "Company registration document" },
+    { docType: "DIRECTOR_ID", label: "Passport of the authorised director" },
+    { docType: "OTHER", label: "Other business document" },
+  ]),
+});
+
+/** The country of a supplier's base city; India when the city isn't in the catalogue. */
+export function supplierCountry(database, supplier) {
+  if (!supplier?.city) return "India";
+  try {
+    return database.prepare("SELECT country FROM destinations WHERE LOWER(name) = LOWER(?) LIMIT 1").get(String(supplier.city).trim())?.country || "India";
+  } catch {
+    return "India";
+  }
+}
+
+export function kybRulesFor(country) {
+  return KYB_COUNTRY_RULES[country] || UNLISTED_COUNTRY_RULES;
+}
+
+function listsTransfers(database, supplierId) {
+  return Boolean(database.prepare("SELECT 1 FROM products WHERE supplier_id = ? AND UPPER(COALESCE(product_type, '')) = 'TRANSFER' LIMIT 1").get(supplierId));
+}
+
 export const UPDATE_SUPPLIER_VERIFICATION_SQL = `
   UPDATE suppliers
   SET kyb_status = ?,
@@ -101,23 +168,31 @@ export function getCashfreeIdentityStatus(database, supplier) {
 }
 
 /**
- * What an admin needs to decide on a supplier: which required documents have a
- * real uploaded file, and whether Cashfree has verified their GSTIN and PAN.
- * An admin may approve once either is complete.
+ * What an admin needs to decide on a supplier: which of their country's required
+ * documents have a real uploaded file and, for Indian suppliers, whether Cashfree
+ * has verified their GSTIN and PAN. An admin may approve once either is complete.
  */
 export function getKybApprovalReadiness(database, supplier) {
+  const country = supplierCountry(database, supplier);
+  const rules = kybRulesFor(country);
   const documents = database.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ?").all(supplier.id);
-  const requiredDocuments = REQUIRED_KYB_DOCUMENTS.map((required) => {
-    const uploaded = documents.find((doc) => required.acceptedTypes.includes(normalizeId(doc.doc_type)) && hasKybFile(doc));
+  const withFile = documents.filter((doc) => hasKybFile(doc));
+  const transfers = rules.required.some((required) => required.transfersOnly) && listsTransfers(database, supplier.id);
+  const requiredDocuments = rules.required.filter((required) => !required.transfersOnly || transfers).map((required) => {
+    const uploaded = withFile.find((doc) => required.acceptedTypes.includes(normalizeId(doc.doc_type)));
     return { docType: required.docType, label: required.label, uploaded: Boolean(uploaded), documentId: uploaded?.id || null };
   });
   const missingDocuments = requiredDocuments.filter((doc) => !doc.uploaded).map((doc) => doc.label);
-  const identity = getCashfreeIdentityStatus(database, supplier);
+  if (!rules.required.length && !withFile.length) missingDocuments.push(`At least one business document from ${country}`);
+  const identity = rules.cashfree ? getCashfreeIdentityStatus(database, supplier) : null;
   return {
+    country,
+    cashfree: rules.cashfree,
+    documentTypes: rules.documentTypes,
     requiredDocuments,
     missingDocuments,
     identity,
-    canApprove: missingDocuments.length === 0 || identity.verified,
+    canApprove: missingDocuments.length === 0 || Boolean(identity?.verified),
   };
 }
 
@@ -145,7 +220,7 @@ export function saveSupplierVerification(database, {
     if (!readiness.canApprove) {
       throw verificationError(
         `This supplier cannot be approved yet. Missing: ${readiness.missingDocuments.join(", ")}. `
-        + "Ask them to upload these, or to verify their GSTIN and PAN with Cashfree SecureID.",
+        + (readiness.cashfree ? "Ask them to upload these, or to verify their GSTIN and PAN with Cashfree SecureID." : "Ask them to upload these."),
         409,
       );
     }
@@ -210,6 +285,8 @@ export function autoApproveSupplierKyb(database, supplierId, { notify } = {}) {
 
   const status = normalizeId(supplier.kyb_status) || "PENDING";
   if (status !== "PENDING") return { approved: false, supplier, identity: null };
+  // Suppliers abroad are approved by an admin from their documents (ADR 023).
+  if (!kybRulesFor(supplierCountry(database, supplier)).cashfree) return { approved: false, supplier, identity: null };
 
   const identity = getCashfreeIdentityStatus(database, supplier);
   if (!identity.verified) return { approved: false, supplier, identity };

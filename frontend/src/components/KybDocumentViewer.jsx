@@ -9,6 +9,10 @@ export const KYB_DOC_LABELS = {
   PAN: "PAN Card",
   BANK_CANCELLED_CHEQUE: "Cancelled Cheque / Bank Passbook",
   TOURISM_LICENSE: "Tourism Department Registration",
+  COMPANY_REGISTRATION: "Company Registration Certificate",
+  TOUR_OPERATOR_LICENSE: "Tour Operator Licence",
+  DIRECTOR_ID: "Director's Passport / ID",
+  VEHICLE_REGISTRATION: "Commercial Vehicle Registration / Permit",
   OTHER: "Other Document",
 };
 

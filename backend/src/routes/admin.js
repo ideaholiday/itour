@@ -22,7 +22,7 @@ import {
   verifyPan,
   verifyBankAccount,
 } from "../services/cashfreeSecureIdService.js";
-import { autoApproveSupplierKyb, getKybApprovalReadiness, saveSupplierVerification } from "../services/supplierVerificationService.js";
+import { autoApproveSupplierKyb, getKybApprovalReadiness, kybRulesFor, saveSupplierVerification, supplierCountry } from "../services/supplierVerificationService.js";
 import { hasKybFile, sendKybDocumentFile } from "../services/kybFileService.js";
 import {
   autoCreateAllSettlementBatches,
@@ -274,6 +274,9 @@ router.post("/suppliers/:id/kyb/auto-verify", optionalAuthMiddleware, requireAdm
     const { id } = req.params;
     const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    // Suppliers abroad have no GSTIN or PAN to check; review their documents (ADR 023).
+    const country = supplierCountry(db, supplier);
+    if (!kybRulesFor(country).cashfree) return res.status(400).json({ error: `Cashfree checks are for Indian suppliers. Review this ${country} supplier's documents and approve by hand.`, code: "CASHFREE_INDIA_ONLY" });
 
     const auditReport = await runComprehensiveSupplierKyb(db, {
       supplierId: id,
