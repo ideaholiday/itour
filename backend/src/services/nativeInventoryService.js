@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { localDateTimeMs, productTime } from "../lib/localTime.js";
+import { localDateTimeMs, offsetOn, productTime } from "../lib/localTime.js";
 import { productGstPercent } from "../lib/productTax.js";
 
 export const NATIVE_HOLD_MINUTES = 10;
@@ -393,7 +393,7 @@ function slotView(db, rules, localDate, time, excludeId = "", promoContext = {})
   const id = `${rules.option_id}:${localDate}:${time}`;
   // The city's zone, not the rule's stored time_zone (which defaults to India).
   const zone = productTime(db, rules.product_id);
-  const start = `${localDate}T${time}:00${zone.offset}`;
+  const start = `${localDate}T${time}:00${offsetOn(zone, localDate, time)}`;
   const cutoff = new Date(Date.parse(start) - Number(rules.cutoff_minutes) * 60000).toISOString();
   const override = resolveOverride(db, rules.option_id, localDate, time);
   const pricing = resolvePricing(db, rules, localDate);

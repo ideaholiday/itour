@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { listNativeAvailability, reserveNativeInventory, confirmNativeReservation, releaseNativeReservation } from "./nativeInventoryService.js";
 import { getChannelAdapter, ResTechAdapter } from "./channels/channelRegistry.js";
-import { productTime } from "../lib/localTime.js";
+import { offsetOn, productTime } from "../lib/localTime.js";
 
 // The core owns payments and customer identity; a provider owns availability and reservations.
 // Remote adapters implement these same operations and persist external identities in
@@ -169,7 +169,7 @@ export function octoReservationView(db, reservationId, ownerId) {
     id: row.id, uuid: row.id, productId: row.product_id, optionId: row.option_id,
     availabilityId: row.availability_slot, status, utcCreatedAt: row.created_at,
     utcExpiresAt: status === "ON_HOLD" ? row.utc_expires_at : null,
-    availability: { id: row.availability_slot, localDateTimeStart: `${row.local_date}T${row.local_time}:00${productTime(db, row.product_id).offset}` },
+    availability: { id: row.availability_slot, localDateTimeStart: `${row.local_date}T${row.local_time}:00${offsetOn(productTime(db, row.product_id), row.local_date, row.local_time)}` },
     unitItems: [
       ...Array.from({ length: row.adults }, (_, i) => ({ uuid: stableUnitUuid(`${row.id}:adult:${i}`), unitId: `${row.option_id}:adult`, unitType: "ADULT" })),
       ...Array.from({ length: row.children }, (_, i) => ({ uuid: stableUnitUuid(`${row.id}:child:${i}`), unitId: `${row.option_id}:child`, unitType: "CHILD" })),
