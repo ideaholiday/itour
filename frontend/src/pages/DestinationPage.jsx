@@ -7,6 +7,7 @@ import SeoHead from "../components/SeoHead.jsx";
 import TicketCard from "../components/TicketCard.jsx";
 import { useCurrency } from "../lib/currency.jsx";
 import { destinationSeo } from "../../../shared/destinationSeo.js";
+import { BlogPostCard } from "./BlogIndex.jsx";
 
 // "Things to do in <city>": a landing page for search engines and shared links.
 // The server writes the same head tags (routes/seo.js) before this loads.
@@ -15,6 +16,7 @@ export default function DestinationPage() {
   const { formatPrice } = useCurrency();
   const [page, setPage] = useState(null);
   const [status, setStatus] = useState("loading");
+  const [guides, setGuides] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -24,6 +26,15 @@ export default function DestinationPage() {
       .catch(() => { if (!cancelled) setStatus("missing"); });
     return () => { cancelled = true; };
   }, [citySlug]);
+
+  useEffect(() => {
+    if (!page?.name) return undefined;
+    let cancelled = false;
+    api.getBlogPosts({ city: page.name })
+      .then((res) => { if (!cancelled) setGuides((res.posts || []).slice(0, 3)); })
+      .catch(() => { if (!cancelled) setGuides([]); });
+    return () => { cancelled = true; };
+  }, [page?.name]);
 
   if (status === "loading") {
     return <div className="mx-auto max-w-6xl px-4 py-16 text-center text-stone-500">Loading…</div>;
@@ -96,6 +107,15 @@ export default function DestinationPage() {
         <Link to={searchLink} className="mt-8 inline-flex items-center gap-2 font-extrabold text-amber-700 hover:text-amber-800 dark:text-amber-400">
           Filter by date, price and type <ArrowRight className="h-4 w-4" />
         </Link>
+
+        {guides.length > 0 && (
+          <section className="mt-12">
+            <h2 className="font-display text-2xl text-stone-900 dark:text-stone-100 sm:text-3xl">{page.name} travel guides</h2>
+            <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {guides.map((post) => <BlogPostCard key={post.id} post={post} />)}
+            </div>
+          </section>
+        )}
 
         {page.faqs.length > 0 && (
           <section className="mt-12 max-w-3xl">

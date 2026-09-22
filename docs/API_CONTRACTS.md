@@ -571,9 +571,5 @@ Scoped to the caller: a traveler sees their own threads, a supplier the threads 
 - **`POST /api/admin/team`** `{ name, email, phone, role: STAFF|ADMIN }` → `201 { member, temporaryPassword, promotedExistingAccount }`. A traveler account is promoted (password kept, `temporaryPassword: null`); `409` if already on the team or a supplier; `400` if the phone isn't WhatsApp-deliverable (stored `+<cc><number>`).
 - **`PATCH …/:id`** `{ name?, phone?, role? }`; **`DELETE …/:id`** (role → `TRAVELER`); **`POST …/:id/reset-password`** → `{ temporaryPassword }`. `409` for yourself or the last `ADMIN`.
 
-### 10.5 Pages and sitemap (served by `routes/seo.js`)
-- **`GET /suppliers`, `/suppliers/in/:citySlug`, `/suppliers/:slug`, `/things-to-do/:citySlug`**
-  (ADR 025): `index.html` with the page's head tags and JSON-LD. `301` for renamed
-  or miscased slugs, `noindex` 404 for unknown/hidden ones. City data:
-  `GET /api/destination-pages/:slug` → `{ name, productCount, fromPriceInr, categories, faqs, products }`.
-- **`GET /sitemap-suppliers.xml`**: the directory, indexable city pages and indexable profiles. Listed in `robots.txt`.
+### 10.5 Pages and sitemap
+Moved to [`API_PAGES.md`](API_PAGES.md): server-rendered pages, city pages, the blog and sitemaps.

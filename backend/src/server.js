@@ -120,6 +120,7 @@ import seoRouter, { indexTemplate, notFoundPage } from "./routes/seo.js";
 import { isKnownSpaPath } from "../../shared/spaRoutes.js";
 import { driverAppAssetLinks } from "./lib/androidAppLinks.js";
 import publicSuppliersRouter from "./routes/publicSuppliers.js";
+import blogRouter from "./routes/blog.js";
 import { goRouter, shareRouter } from "./routes/shareKit.js";
 import enquiriesRouter from "./routes/enquiries.js";
 import securityTxtRouter from "./routes/securityTxt.js";
@@ -206,6 +207,7 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/bookings`, bookingsRouter);
   app.use(`${prefix}/transfers`, transfersRouter);
   app.use(`${prefix}/public/suppliers`, publicSuppliersRouter);
+  app.use(`${prefix}/blog`, blogRouter);
   app.use(`${prefix}/share`, shareRouter);
   app.use(`${prefix}/enquiries`, enquiriesRouter);
   app.use(`${prefix}/suppliers`, suppliersRouter);

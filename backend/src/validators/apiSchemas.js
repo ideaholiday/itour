@@ -338,6 +338,16 @@ export const adminSchemas = {
     productTypes: z.array(text(1, 40)).max(20).optional(), productIds: z.array(text(1, 160)).max(200).optional(),
     supplierIds: z.array(text(1, 160)).max(200).optional(), isActive: z.boolean().optional(),
   }),
+  blogPost: object({
+    title: text(3, 160), slug: optionalText(100), excerpt: optionalText(300), body: z.string().max(60_000).default(""),
+    coverImage: optionalText(500), city: optionalText(80), productIds: z.array(text(1, 160)).max(12).optional(),
+    status: z.enum(["DRAFT", "PUBLISHED"]).optional(),
+  }),
+  blogPostUpdate: object({
+    title: text(3, 160).optional(), slug: optionalText(100), excerpt: optionalText(300), body: z.string().max(60_000).optional(),
+    coverImage: optionalText(500), city: optionalText(80), productIds: z.array(text(1, 160)).max(12).optional(),
+    status: z.enum(["DRAFT", "PUBLISHED"]).optional(),
+  }),
   clearCommissionOverrides: object({ includeProducts: z.boolean().default(false), notify: z.boolean().default(true), reason: text(3, 500) }),
   programSettings: object({ settings: z.record(z.string(), z.unknown()), reason: text(3, 500), notify: z.boolean().optional() }),
   publication: object({ isPublished: booleanValue.optional(), status: optionalText(40), notifySupplier: booleanValue.optional() }),

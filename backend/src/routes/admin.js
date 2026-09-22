@@ -43,6 +43,7 @@ import { adminSchemas, checkoutSchemas, profileSchemas } from "../validators/api
 import { addTeamMember, listTeam, removeTeamMember, resetTeamMemberPassword, updateTeamMember } from "../services/teamService.js";
 import { listPrograms, listSettingsAudit, updateSettings } from "../services/programSettingsService.js";
 import { createCoupon, listCouponRedemptions, listCoupons, updateCoupon } from "../services/couponService.js";
+import { createPost, deletePost, listAllPosts, updatePost } from "../services/blogService.js";
 import { listVerificationQueue, rejectPurchasedVerification, retryCheckRefund } from "../services/supplierPlanPaymentService.js";
 import {
   getSubscriptionStatus, grantSubscriptionWaiver, listSupplierSubscriptions, revokeSubscription, syncLaunchWaivers,
@@ -583,6 +584,40 @@ router.get("/coupons/:id/redemptions", (req, res) => {
     res.json({ success: true, ...listCouponRedemptions(db, req.params.id) });
   } catch (error) {
     commissionFailure(res, req, error, "Could not load the coupon's uses");
+  }
+});
+
+// Staff blog (ADR 026). Drafts stay private until published.
+router.get("/blog", (req, res) => {
+  try {
+    res.json({ success: true, posts: listAllPosts(db) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not load blog posts");
+  }
+});
+
+router.post("/blog", validateBody(adminSchemas.blogPost), (req, res) => {
+  try {
+    res.status(201).json({ success: true, post: createPost(db, req.body, { actorId: req.user.id }) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not create the post");
+  }
+});
+
+router.patch("/blog/:id", validateBody(adminSchemas.blogPostUpdate), (req, res) => {
+  try {
+    res.json({ success: true, post: updatePost(db, req.params.id, req.body) });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not update the post");
+  }
+});
+
+router.delete("/blog/:id", (req, res) => {
+  try {
+    deletePost(db, req.params.id);
+    res.json({ success: true });
+  } catch (error) {
+    commissionFailure(res, req, error, "Could not delete the post");
   }
 });
 

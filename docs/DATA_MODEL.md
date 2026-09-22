@@ -487,6 +487,9 @@ Every phone that WhatsApp or SMS reaches is stored as E.164 with `+`: `users.pho
 
 - `phone_e164_backup` (048): `table_name`, `column_name`, `row_id`, `original`, `cleaned`, `converted`. The value each converted row had before 048, so `@down` can restore it. Holds phone numbers; drop it in a later migration once the conversion is confirmed in production.
 
+### 2.18 Staff Blog (`blog_posts`, 059)
+Travel guides at `/blog/:slug` (ADR 026). `id` (`post_…`), `slug` (unique, lowercase-hyphenated), `previous_slugs` (JSON list: addresses a published post had before a rename, which `301` to the current one and can't be reused), `title`, `excerpt`, `body` (Markdown subset, `shared/blogMarkdown.js`), `cover_image` (`https://` or a site path), `city` (links to `/things-to-do/:city`), `product_ids` (JSON list, ≤ 12; only live ones are shown), `status` (`DRAFT` | `PUBLISHED`), `author_id`, `author_name` (copied from `users.name`), `published_at` (set on first publish, kept if unpublished), `created_at`, `updated_at`.
+
 ## 3. Sensitive Data & Security Controls
 1. **Pickup OTPs**:
    - Never stored in plaintext.

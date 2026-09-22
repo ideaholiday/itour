@@ -313,3 +313,16 @@ This document records significant technical and product architectural decisions.
   - The page is built only from live listings: product list, starting price, categories and FAQs. No hand-written or invented copy. `CollectionPage` + `ItemList`, `BreadcrumbList` and `FAQPage` markup match what the page shows.
   - A catalogue city with nothing live has a `noindex` page; an unknown slug is a `noindex` 404.
 - **Consequences**: Activity-page breadcrumbs and Home's live featured cities link to the city page. Editorial content (the blog) can later link into these pages.
+
+---
+
+## ADR 026: Staff Blog
+- **Date**: 2026-09-22
+- **Context**: Second step to grow organic visits after city pages (ADR 025): travel guides written by the team (city guides, festivals, pilgrimages) that link to bookable listings.
+- **Decision Made**:
+  - Posts live in `blog_posts` (migration 059) and are written in the admin panel (`/admin/blog`). Only `ADMIN` accounts can write; a writer who shouldn't have other admin powers needs a narrower role later.
+  - Posts are drafts until published. Public pages are `/blog` and `/blog/:slug`, with `BlogPosting` markup, in the sitemap once published.
+  - Body is a small Markdown subset rendered as React elements (no HTML, no new library). Links go only to `https://` or site paths; outside links are `nofollow`.
+  - A post may name a city (shown on that city's page, links back to it) and up to 12 listings; only listings live at read time are shown.
+  - A renamed published post keeps its old address as a `301`.
+- **Consequences**: API: [`API_PAGES.md`](API_PAGES.md) §2. The pages-and-sitemap section moved there from `API_CONTRACTS.md` (size cap).

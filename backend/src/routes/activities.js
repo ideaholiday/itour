@@ -37,7 +37,7 @@ function safeJsonParse(data, fallback = []) {
  * Batch-resolves all relational data for a list of product rows in a single pass.
  * Replaces N+1 single queries (which caused 150+ roundtrips) with 5 batch queries.
  */
-function parseProductRows(rows = []) {
+export function parseProductRows(rows = []) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
 
   const productIds = rows.map((r) => r.id).filter(Boolean);

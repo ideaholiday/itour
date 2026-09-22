@@ -42,6 +42,7 @@ const footerGroups = [
     title: "Discover",
     links: [
       ["Things to do", "/search"],
+      ["Travel guides", "/blog"],
       ["Find tour operators", "/suppliers"],
       ["List your business", "/supplier/signup"],
       ["Plan Circuit 🗺️", "/circuit-planner"],

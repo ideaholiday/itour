@@ -9,6 +9,9 @@ import { LISTING_COUNTRIES } from "../lib/locationCatalog.js";
 import { activityPath } from "../../../shared/activityUrl.js";
 import { activitySeo, displayCity } from "../../../shared/activitySeo.js";
 import { destinationPath, destinationSeo, destinationSlug } from "../../../shared/destinationSeo.js";
+import { blogIndexSeo, blogPostSeo } from "../../../shared/blogSeo.js";
+import { blogPath } from "../../../shared/blogMarkdown.js";
+import { findPublishedPost, sitemapBlogEntries } from "../services/blogService.js";
 import {
   findDirectoryCity, isProfileVisible, profilePath, publicSupplierView, resolveProfileSlug, sitemapSupplierEntries,
 } from "../services/supplierProfileService.js";
@@ -31,7 +34,7 @@ router.get(["/activity/:id", "/activity/:slug/:id"], (req, res, next) => {
 });
 
 /** Products and cities with something bookable today (see liveProductSql). */
-export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = [], countries = []) {
+export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = [], countries = [], posts = []) {
   const staticUrls = [
     { loc: `${baseUrl}/`, priority: "1.0", changefreq: "daily" },
     { loc: `${baseUrl}/transfers`, priority: "0.9", changefreq: "daily" },
@@ -61,7 +64,12 @@ export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = [
     changefreq: "weekly",
   }));
 
-  const allUrls = [...staticUrls, ...destinationUrls, ...productUrls];
+  const blogUrls = (posts || []).length ? [
+    { loc: `${baseUrl}/blog`, priority: "0.7", changefreq: "daily" },
+    ...posts.map((post) => ({ loc: `${baseUrl}${post.path}`, priority: "0.7", changefreq: "monthly" })),
+  ] : [];
+
+  const allUrls = [...staticUrls, ...destinationUrls, ...productUrls, ...blogUrls];
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
   xml += `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`;
@@ -431,6 +439,15 @@ export function destinationPage(database, slug, template, baseUrl = BASE_URL) {
   return { status: 200, html: renderSeoHtml(template, destinationSeo(view, { baseUrl })) };
 }
 
+/** What /blog/:slug answers before the SPA loads: the post's head, a 301 after a rename, or a noindex 404. */
+export function blogPostPage(database, slug, template, baseUrl = BASE_URL) {
+  const found = findPublishedPost(database, slug);
+  if (!found) return { status: 404, html: renderSeoHtml(template, notFoundSeo(baseUrl, blogPath(slug), "Post not found | Idea Holiday")) };
+  if (found.redirectTo) return { status: 301, location: blogPath(found.redirectTo) };
+  if (slug !== found.post.slug) return { status: 301, location: found.post.path };
+  return { status: 200, html: renderSeoHtml(template, blogPostSeo(found.post, { baseUrl })) };
+}
+
 /**
  * /search head tags. A city page (?destination= alone) is indexable when that
  * city has live products; keyword searches and filtered views are noindex so
@@ -538,6 +555,24 @@ router.get("/search", (req, res, next) => {
   }
 });
 
+router.get("/blog", (req, res, next) => {
+  const template = indexTemplate();
+  if (!template) return next();
+  const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+  return sendPage(res, { status: 200, html: renderSeoHtml(template, blogIndexSeo({ baseUrl: BASE_URL, page })) });
+});
+
+router.get("/blog/:slug", (req, res, next) => {
+  const template = indexTemplate();
+  if (!template) return next();
+  try {
+    return sendPage(res, blogPostPage(db, req.params.slug, template, BASE_URL));
+  } catch (error) {
+    logger.error("Blog post page render failed", { requestId: req.requestId, error });
+    return next();
+  }
+});
+
 router.get("/things-to-do/:citySlug", (req, res, next) => {
   const template = indexTemplate();
   if (!template) return next();
@@ -598,12 +633,14 @@ router.get("/sitemap.xml", (req, res) => {
     let products = [];
     let cities = [];
     let countries = [];
+    let posts = [];
     try {
       products = db
         .prepare(`SELECT p.id, p.title FROM products p WHERE ${liveProductSql("p")} ORDER BY p.id DESC`)
         .all() || [];
       cities = liveCities(db);
       countries = liveCountries(db);
+      posts = sitemapBlogEntries(db);
     } catch (dbErr) {
       logger.warn("Sitemap database fallback failed", { requestId: req.requestId, error: dbErr });
       products = [];
@@ -611,7 +648,7 @@ router.get("/sitemap.xml", (req, res) => {
       countries = [];
     }
 
-    const xml = generateSitemapXml(products, BASE_URL, cities, countries);
+    const xml = generateSitemapXml(products, BASE_URL, cities, countries, posts);
     res.header("Content-Type", "application/xml");
     res.send(xml);
   } catch (err) {

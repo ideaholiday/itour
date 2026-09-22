@@ -60,6 +60,12 @@ function cachedFetch(url, options = {}, ttlMs = 30000) {
 export const api = {
   getDestinations: () => cachedFetch(`${BASE}/destinations`, {}, 300000), // 5 min cache
   getDestinationPage: (slug) => fetch(`${BASE}/destination-pages/${encodeURIComponent(slug)}`).then(handle),
+  getBlogPosts: ({ city, page } = {}) => fetch(`${BASE}/blog?${new URLSearchParams({ ...(city ? { city } : {}), ...(page > 1 ? { page: String(page) } : {}) })}`).then(handle),
+  getBlogPost: (slug) => fetch(`${BASE}/blog/${encodeURIComponent(slug)}`).then(handle),
+  adminListBlogPosts: () => fetch(`${BASE}/admin/blog`, { headers: authHeaders() }).then(handle),
+  adminCreateBlogPost: (payload) => fetch(`${BASE}/admin/blog`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  adminUpdateBlogPost: (id, payload) => fetch(`${BASE}/admin/blog/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  adminDeleteBlogPost: (id) => fetch(`${BASE}/admin/blog/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
   getCities: () => cachedFetch(`${BASE}/cities`, {}, 300000),
   search: (params = {}) => {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))).toString();

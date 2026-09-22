@@ -49,6 +49,8 @@ const UserProfile = React.lazy(() => import("./pages/UserProfile.jsx"));
 const WishlistPage = React.lazy(() => import("./pages/WishlistPage.jsx"));
 const TravelerMessages = React.lazy(() => import("./pages/TravelerMessages.jsx"));
 const SupplierProfile = React.lazy(() => import("./pages/SupplierProfile.jsx"));
+const BlogIndex = React.lazy(() => import("./pages/BlogIndex.jsx"));
+const BlogPost = React.lazy(() => import("./pages/BlogPost.jsx"));
 const DestinationPage = React.lazy(() => import("./pages/DestinationPage.jsx"));
 const SupplierDirectory = React.lazy(() => import("./pages/SupplierDirectory.jsx"));
 const TripSummary = React.lazy(() => import("./pages/TripSummary.jsx"));
@@ -143,6 +145,8 @@ function AppContent() {
             <Route path="/profile" element={<UserProfile />} />
             <Route path="/wishlist" element={<WishlistPage />} />
             <Route path="/messages" element={<TravelerMessages />} />
+            <Route path="/blog" element={<BlogIndex />} />
+            <Route path="/blog/:slug" element={<BlogPost />} />
             <Route path="/things-to-do/:citySlug" element={<DestinationPage />} />
             <Route path="/suppliers" element={<SupplierDirectory />} />
             <Route path="/suppliers/in/:citySlug" element={<SupplierDirectory />} />
@@ -171,6 +175,7 @@ function AppContent() {
             <Route path="/admin/team" element={<AdminPanel view="team" />} />
             <Route path="/admin/programs" element={<AdminPanel view="programs" />} />
             <Route path="/admin/coupons" element={<AdminPanel view="coupons" />} />
+            <Route path="/admin/blog" element={<AdminPanel view="blog" />} />
             <Route path="/admin/verifications" element={<AdminPanel view="verifications" />} />
             <Route path="/ops" element={<OpsPanel view="live" />} />
             <Route path="/ops/live" element={<OpsPanel view="live" />} />
