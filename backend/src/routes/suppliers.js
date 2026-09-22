@@ -31,7 +31,7 @@ import {
   sendGuestBookingNotification,
 } from "../services/notificationService.js";
 import { KYB_FILE_SCHEME, kybFileName, sendKybDocumentFile } from "../services/kybFileService.js";
-import { autoApproveSupplierKyb, getKybApprovalReadiness, kybRulesFor, missingTransferDocument, supplierCountry, transferDocumentError } from "../services/supplierVerificationService.js";
+import { autoApproveSupplierKyb, getKybApprovalReadiness, isIndividualOwner, missingTransferDocument, supplierCountry, supplierKybRules, transferDocumentError } from "../services/supplierVerificationService.js";
 import {
   assignDriverToBooking,
   getDispatchTimeline,
@@ -104,10 +104,12 @@ function transferPublishRefusal(supplierId, cities = []) {
 }
 
 // Cashfree SecureID checks Indian GSTIN and PAN only; suppliers abroad are
-// approved by an admin from their own country's documents (ADR 023).
+// approved by an admin from their own country's documents (ADR 023), and so are
+// individual vehicle owners, who have no GSTIN (ADR 024).
 function cashfreeIdentityRefusal(supplier) {
-  const country = supplierCountry(db, supplier);
-  return kybRulesFor(country).cashfree ? null : `GSTIN and PAN checks are for Indian suppliers. Suppliers in ${country} upload their documents for an admin to review.`;
+  if (supplierKybRules(db, supplier).cashfree) return null;
+  if (isIndividualOwner(supplier)) return "GSTIN checks are for registered businesses. Individual vehicle owners upload their documents for an admin to review.";
+  return `GSTIN and PAN checks are for Indian suppliers. Suppliers in ${supplierCountry(db, supplier)} upload their documents for an admin to review.`;
 }
 
 const autoApprovalMessage = "Your GSTIN and PAN are verified, so your account is now approved and your published listings can be booked.";
@@ -339,6 +341,10 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
     const docNumber = String(req.body.docNumber || req.body.doc_number || "").trim() || null;
     const docUrl = String(req.body.docUrl || req.body.doc_url || "").trim();
     const docId = `kyb_${nanoid(10)}`;
+    // The full Aadhaar number is never stored; at most its last 4 digits (ADR 024).
+    if (docType === "AADHAAR_MASKED" && docNumber && !/^\d{4}$/.test(docNumber)) {
+      return res.status(400).json({ error: "Enter only the last 4 digits of your Aadhaar number." });
+    }
 
     // A document is only accepted with a file this supplier uploaded as KYB,
     // so an admin never reviews a placeholder link or someone else's file.

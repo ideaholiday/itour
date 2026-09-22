@@ -438,7 +438,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                   <UploadCloud className="mx-auto h-8 w-8 text-amber-600" />
                   <h3 className="mt-2 text-sm font-bold text-stone-800">No documents submitted yet</h3>
                   <p className="mt-1 text-xs text-stone-500 max-w-sm mx-auto">
-                    {cashfree ? "Upload your Commercial Transport Permit, PAN copy, or GSTIN certificate to start receiving marketplace bookings." : `Upload your business documents from ${kybReadiness.country} to start receiving marketplace bookings.`}
+                    {cashfree ? "Upload your Commercial Transport Permit, PAN copy, or GSTIN certificate to start receiving marketplace bookings." : kybReadiness.supplierKind === "INDIVIDUAL_OWNER" ? "Upload your PAN, masked Aadhaar, driving licence and vehicle documents to start receiving marketplace bookings." : `Upload your business documents from ${kybReadiness.country} to start receiving marketplace bookings.`}
                   </p>
                   <button
                     onClick={() => {

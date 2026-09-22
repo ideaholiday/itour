@@ -22,7 +22,7 @@ import {
   verifyPan,
   verifyBankAccount,
 } from "../services/cashfreeSecureIdService.js";
-import { autoApproveSupplierKyb, getKybApprovalReadiness, kybRulesFor, saveSupplierVerification, supplierCountry } from "../services/supplierVerificationService.js";
+import { autoApproveSupplierKyb, getKybApprovalReadiness, saveSupplierVerification, supplierCountry, supplierKybRules } from "../services/supplierVerificationService.js";
 import { hasKybFile, sendKybDocumentFile } from "../services/kybFileService.js";
 import {
   autoCreateAllSettlementBatches,
@@ -276,7 +276,10 @@ router.post("/suppliers/:id/kyb/auto-verify", optionalAuthMiddleware, requireAdm
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
     // Suppliers abroad have no GSTIN or PAN to check; review their documents (ADR 023).
     const country = supplierCountry(db, supplier);
-    if (!kybRulesFor(country).cashfree) return res.status(400).json({ error: `Cashfree checks are for Indian suppliers. Review this ${country} supplier's documents and approve by hand.`, code: "CASHFREE_INDIA_ONLY" });
+    if (!supplierKybRules(db, supplier, country).cashfree) {
+      const error = country === "India" ? "This supplier is an individual vehicle owner with no GSTIN. Review their documents and approve by hand." : `Cashfree checks are for Indian suppliers. Review this ${country} supplier's documents and approve by hand.`;
+      return res.status(400).json({ error, code: "CASHFREE_INDIA_ONLY" });
+    }
 
     const auditReport = await runComprehensiveSupplierKyb(db, {
       supplierId: id,

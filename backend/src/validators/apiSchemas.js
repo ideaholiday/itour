@@ -23,7 +23,7 @@ export const identifierParams = object({ id: id.optional(), ref: id.optional(), 
 
 export const authSchemas = {
   signup: object({ name: text(2, 120), email, password: z.string().min(6).max(128), phone: phone.optional(), referralCode: optionalText(60), visitorId: optionalText(120) }),
-  supplierSignup: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100), password: z.string().min(6).max(128) }),
+  supplierSignup: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100), password: z.string().min(6).max(128), supplierKind: z.enum(["BUSINESS", "INDIVIDUAL_OWNER"]).optional() }),
   login: object({ email, password: z.string().min(1).max(128) }),
 };
 

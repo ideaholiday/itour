@@ -22,6 +22,7 @@ import PhoneInput from "../components/PhoneInput.jsx";
 import { phoneCountryForName } from "../lib/phone.js";
 
 const initialForm = {
+  supplierKind: "BUSINESS",
   companyName: "",
   contactName: "",
   email: "",
@@ -123,6 +124,7 @@ export default function SupplierSignup() {
         city: form.city.trim(),
         state: form.state.trim(),
         password: form.password,
+        supplierKind: form.supplierKind,
       });
       analytics.trackSupplierSignup(form.city.trim());
       login(result.token, result.user);
@@ -180,7 +182,19 @@ export default function SupplierSignup() {
           </div>
 
           <form onSubmit={submit} className="space-y-4">
-            <Field id="supplier-company" label="Business or company name">
+            {/* Individual vehicle owners (no GSTIN) register in India only (ADR 024). */}
+            <fieldset>
+              <legend className="mb-1.5 block text-xs font-bold text-slate-700">I am registering as</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[["BUSINESS", "A company or firm"], ["INDIVIDUAL_OWNER", "An individual vehicle owner (no GST)"]].map(([value, label]) => (
+                  <label key={value} className={`flex cursor-pointer items-center gap-2 rounded-2xl border p-3 text-xs font-semibold ${form.supplierKind === value ? "border-amber-700 bg-amber-50 text-stone-900" : "border-stone-200 text-stone-600"}`}>
+                    <input type="radio" name="supplierKind" value={value} checked={form.supplierKind === value} onChange={() => setForm((current) => ({ ...current, supplierKind: value, ...(value === "INDIVIDUAL_OWNER" && current.country && current.country !== "India" ? { cityId: "", city: "", state: "", country: "" } : {}) }))} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <Field id="supplier-company" label={form.supplierKind === "INDIVIDUAL_OWNER" ? "Display name for travelers" : "Business or company name"}>
               <div className="relative"><Building2 className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" /><input id="supplier-company" required autoComplete="organization" value={form.companyName} onChange={update("companyName")} placeholder="e.g. Coastal Trails Goa" className={`${inputClass} pl-10`} /></div>
             </Field>
 
@@ -203,7 +217,7 @@ export default function SupplierSignup() {
                     <optgroup label="India tourism cities">
                       {indiaCities.filter((city) => city.category !== "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
                     </optgroup>
-                    {abroadCountries.map((country) => (
+                    {form.supplierKind !== "INDIVIDUAL_OWNER" && abroadCountries.map((country) => (
                       <optgroup key={country} label={country}>
                         {cities.filter((city) => city.country === country).map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
                       </optgroup>

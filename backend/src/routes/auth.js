@@ -73,6 +73,7 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   const requestedCity = normalizeText(req.body.city);
   const requestedState = normalizeText(req.body.state);
   const password = String(req.body.password || "");
+  const supplierKind = req.body.supplierKind === "INDIVIDUAL_OWNER" ? "INDIVIDUAL_OWNER" : "BUSINESS";
 
   if (!companyName || !contactName || !email || !phone || !requestedCity || !requestedState || !password) {
     return res.status(400).json({ error: "All supplier signup fields are required" });
@@ -85,7 +86,7 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   }
 
   const approvedCity = db.prepare(`
-    SELECT name, state FROM destinations
+    SELECT name, state, country FROM destinations
     WHERE LOWER(name) = LOWER(?) AND LOWER(state) = LOWER(?) AND COALESCE(is_active, 1) = 1
   `).get(requestedCity, requestedState);
   if (!approvedCity) {
@@ -93,6 +94,10 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   }
   const city = approvedCity.name;
   const state = approvedCity.state;
+  // Individual vehicle owners register in India only (ADR 024).
+  if (supplierKind === "INDIVIDUAL_OWNER" && (approvedCity.country || "India") !== "India") {
+    return res.status(400).json({ error: "Individual vehicle owners can register in India only. Businesses abroad sign up as a company." });
+  }
 
   const existingUser = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(email);
   const existingSupplier = db.prepare("SELECT id FROM suppliers WHERE LOWER(email) = ?").get(email);
@@ -106,9 +111,9 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   try {
     db.transaction(() => {
       db.prepare(
-        `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, kyb_status, is_verified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0)`
-      ).run(supplierId, supplierId, companyName, contactName, email, phone, city, state);
+        `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, kyb_status, is_verified, supplier_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?)`
+      ).run(supplierId, supplierId, companyName, contactName, email, phone, city, state, supplierKind);
       ensurePublicSlug(db, { id: supplierId, company_name: companyName, city });
       // A supplier signing up now needs a subscription; the launch waiver covers it for free (ADR 017).
       ensureLaunchWaiver(db, supplierId);

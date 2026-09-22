@@ -63,6 +63,47 @@ const UNLISTED_COUNTRY_RULES = Object.freeze({
   ]),
 });
 
+export const SUPPLIER_KINDS = Object.freeze(["BUSINESS", "INDIVIDUAL_OWNER"]);
+
+/**
+ * An individual in India with one or more vehicles and no GSTIN (ADR 024, C1).
+ * Aadhaar is uploaded masked: only the last 4 digits may be visible.
+ * Admins approve by hand until the Cashfree checks (C3) and auto-approval (C4) land.
+ */
+export const INDIVIDUAL_OWNER_RULES = Object.freeze({
+  cashfree: false,
+  required: Object.freeze([
+    { docType: "PAN", label: "PAN card", acceptedTypes: ["PAN"] },
+    { docType: "AADHAAR_MASKED", label: "Masked Aadhaar (only the last 4 digits visible)", acceptedTypes: ["AADHAAR_MASKED"] },
+    { docType: "DRIVING_LICENSE", label: "Commercial driving licence", acceptedTypes: ["DRIVING_LICENSE"] },
+    { docType: "VEHICLE_REGISTRATION", label: "Vehicle registration certificate (RC)", acceptedTypes: ["VEHICLE_REGISTRATION"] },
+    { docType: "COMMERCIAL_PERMIT", label: "Commercial vehicle permit", acceptedTypes: ["COMMERCIAL_PERMIT", "COMMERCIAL_TRANSPORT_LICENSE"] },
+    { docType: "VEHICLE_INSURANCE", label: "Vehicle insurance", acceptedTypes: ["VEHICLE_INSURANCE"] },
+    { docType: "BANK_CANCELLED_CHEQUE", label: "Cancelled cheque or bank passbook", acceptedTypes: ["BANK_CANCELLED_CHEQUE"] },
+  ]),
+  documentTypes: Object.freeze([
+    { docType: "PAN", label: "PAN card" },
+    { docType: "AADHAAR_MASKED", label: "Masked Aadhaar (only the last 4 digits visible)" },
+    { docType: "DRIVING_LICENSE", label: "Commercial driving licence" },
+    { docType: "VEHICLE_REGISTRATION", label: "Vehicle registration certificate (RC)" },
+    { docType: "COMMERCIAL_PERMIT", label: "Commercial vehicle permit" },
+    { docType: "VEHICLE_INSURANCE", label: "Vehicle insurance" },
+    { docType: "VEHICLE_FITNESS", label: "Vehicle fitness certificate" },
+    { docType: "BANK_CANCELLED_CHEQUE", label: "Cancelled cheque or bank passbook" },
+    { docType: "OTHER", label: "Other document" },
+  ]),
+});
+
+export function isIndividualOwner(supplier) {
+  return String(supplier?.supplier_kind || "").toUpperCase() === "INDIVIDUAL_OWNER";
+}
+
+/** The KYB rules for this supplier in a country (their own by default): individual owners in India get their own list. */
+export function supplierKybRules(database, supplier, country = supplierCountry(database, supplier)) {
+  if (country === "India" && isIndividualOwner(supplier)) return INDIVIDUAL_OWNER_RULES;
+  return kybRulesFor(country);
+}
+
 /** The country of a supplier's base city; India when the city isn't in the catalogue. */
 export function supplierCountry(database, supplier) {
   if (!supplier?.city) return "India";
@@ -85,7 +126,7 @@ export function kybRulesFor(country) {
  * so an Indian supplier's Phuket transfer needs the Thai document (ADR 024).
  */
 export function missingTransferDocument(database, supplier, country = supplierCountry(database, supplier)) {
-  const required = kybRulesFor(country).required.find((doc) => doc.transfersOnly);
+  const required = supplierKybRules(database, supplier, country).required.find((doc) => doc.transfersOnly);
   if (!required) return null;
   const documents = database.prepare("SELECT doc_type, doc_url FROM kyb_documents WHERE supplier_id = ?").all(supplier.id);
   const uploaded = documents.some((doc) => required.acceptedTypes.includes(normalizeId(doc.doc_type)) && hasKybFile(doc));
@@ -193,7 +234,7 @@ export function getCashfreeIdentityStatus(database, supplier) {
  */
 export function getKybApprovalReadiness(database, supplier) {
   const country = supplierCountry(database, supplier);
-  const rules = kybRulesFor(country);
+  const rules = supplierKybRules(database, supplier, country);
   const documents = database.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ?").all(supplier.id);
   const withFile = documents.filter((doc) => hasKybFile(doc));
   const transfers = rules.required.some((required) => required.transfersOnly) && listsTransfers(database, supplier.id);
@@ -206,6 +247,7 @@ export function getKybApprovalReadiness(database, supplier) {
   const identity = rules.cashfree ? getCashfreeIdentityStatus(database, supplier) : null;
   return {
     country,
+    supplierKind: isIndividualOwner(supplier) ? "INDIVIDUAL_OWNER" : "BUSINESS",
     cashfree: rules.cashfree,
     documentTypes: rules.documentTypes,
     requiredDocuments,
@@ -305,7 +347,7 @@ export function autoApproveSupplierKyb(database, supplierId, { notify } = {}) {
   const status = normalizeId(supplier.kyb_status) || "PENDING";
   if (status !== "PENDING") return { approved: false, supplier, identity: null };
   // Suppliers abroad are approved by an admin from their documents (ADR 023).
-  if (!kybRulesFor(supplierCountry(database, supplier)).cashfree) return { approved: false, supplier, identity: null };
+  if (!supplierKybRules(database, supplier).cashfree) return { approved: false, supplier, identity: null };
 
   const identity = getCashfreeIdentityStatus(database, supplier);
   if (!identity.verified) return { approved: false, supplier, identity };

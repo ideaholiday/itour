@@ -71,6 +71,7 @@ erDiagram
   - `contact_name`, `email`, `phone`, `city`, `state`.
   - `gstin`, `pan_number`: Legal tax identifiers.
   - `kyb_status`: `PENDING`, `APPROVED`, `REJECTED`. Only `APPROVED` vendors can publish listings.
+  - `supplier_kind` (migration 050): `BUSINESS` (default) or `INDIVIDUAL_OWNER` — one person in India with one or more vehicles and no GSTIN. Picks the KYB document list (`supplierKybRules`, ADR 024).
   - `commission_rate`: Legacy percentage, no longer used to price bookings.
   - `commission_override_rate`: The supplier's own commission %, or `NULL` for the platform default (BUSINESS_RULES §3.2).
   - `payout_bank_details`: JSON object with `{ account_number, ifsc, bank_name, beneficiary_name, upi_id }`.
