@@ -12,7 +12,7 @@ Nothing here starts until the owner answers §0 and it is recorded in `DECISIONS
 
 | # | Question | Why it blocks |
 | :--- | :--- | :--- |
-| D1 | Can an Indian supplier sell in **any** listing country, or only where they hold that country's licence (e.g. TAT for Thailand)? | Decides whether A needs extra documents. |
+| D1 | **Decided 2026-09-22:** Indian KYB (GSTIN + PAN, optional CIN, or admin approval) is enough to sell in any listing country; no foreign licence or vehicle document. | A2's document check was removed; A3 needs no permits table. |
 | D2 | ~~GST when an Indian supplier sells abroad~~ **Decided: 18% GST, no TDS** (ADR 024). | Tax must key on supplier country + product country, not product city alone. |
 | D3 | **Decided:** UAE, Singapore, Thailand (live), Indonesia, Maldives, Bhutan, Japan, Vietnam, China, Nepal; Europe last (ADR 024). | Each country needs its own document list, time zone and tax rule. |
 | D4 | **Europe payouts.** PRODUCT non-goal 3 says everything settles in INR. EU suppliers realistically need EUR payouts. | Contradicts a non-goal — owner must lift it or keep INR-only for Europe. |

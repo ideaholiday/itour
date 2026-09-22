@@ -30,6 +30,7 @@ export const KYB_COUNTRY_RULES = Object.freeze({
       { docType: "PAN", label: "PAN Card (Business / Proprietor)" },
       { docType: "BANK_CANCELLED_CHEQUE", label: "Cancelled Cheque / Bank Passbook" },
       { docType: "TOURISM_LICENSE", label: "Tourism Department Registration" },
+      { docType: "CIN", label: "Certificate of Incorporation (CIN), optional" },
       { docType: "OTHER", label: "Other Identity / Trade Document" },
     ]),
   }),
@@ -122,10 +123,11 @@ export function kybRulesFor(country) {
  * The vehicle document a supplier must upload before a transfer can go live,
  * or null when none is needed or it is on file. Checked at publication too, so a
  * supplier approved as a tour operator can't sell a transfer without it (ADR 023).
- * `country` is the transfer's country when it differs from the supplier's own,
- * so an Indian supplier's Phuket transfer needs the Thai document (ADR 024).
+ * The supplier's own country decides: an Indian supplier's transfer abroad needs
+ * no foreign vehicle document (owner decision 2026-09-22, ADR 024).
  */
-export function missingTransferDocument(database, supplier, country = supplierCountry(database, supplier)) {
+export function missingTransferDocument(database, supplier) {
+  const country = supplierCountry(database, supplier);
   const required = supplierKybRules(database, supplier, country).required.find((doc) => doc.transfersOnly);
   if (!required) return null;
   const documents = database.prepare("SELECT doc_type, doc_url FROM kyb_documents WHERE supplier_id = ?").all(supplier.id);
