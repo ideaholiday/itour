@@ -1,5 +1,5 @@
-/** Countries whose products carry no Indian GST when a local supplier sells them: 0% in Thailand (ADR 023), the UAE, Singapore, Indonesia and the Maldives (ADR 024). */
-export const GST_FREE_COUNTRIES = Object.freeze(["Thailand", "United Arab Emirates", "Singapore", "Indonesia", "Maldives"]);
+/** Countries whose products carry no Indian GST when a local supplier sells them: 0% in Thailand (ADR 023), the UAE, Singapore, Indonesia, the Maldives and Bhutan (ADR 024). */
+export const GST_FREE_COUNTRIES = Object.freeze(["Thailand", "United Arab Emirates", "Singapore", "Indonesia", "Maldives", "Bhutan"]);
 
 /** The country of a product's catalogue city; India when the city (or the country column) is unknown. */
 export function productCountry(db, productId) {

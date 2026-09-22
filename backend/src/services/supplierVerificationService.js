@@ -120,6 +120,23 @@ export const KYB_COUNTRY_RULES = Object.freeze({
       { docType: "OTHER", label: "Other business document" },
     ]),
   }),
+  // ADR 024: approved by an admin by hand.
+  Bhutan: Object.freeze({
+    cashfree: false,
+    required: Object.freeze([
+      { docType: "TOUR_OPERATOR_LICENSE", label: "Department of Tourism licensed tour operator certificate", acceptedTypes: ["TOUR_OPERATOR_LICENSE"] },
+      { docType: "TRADE_LICENSE", label: "Trade licence", acceptedTypes: ["TRADE_LICENSE"] },
+      { docType: "DIRECTOR_ID", label: "Director's CID or passport", acceptedTypes: ["DIRECTOR_ID"] },
+      { docType: "VEHICLE_REGISTRATION", label: "RSTA vehicle registration or permit", acceptedTypes: ["VEHICLE_REGISTRATION", "COMMERCIAL_PERMIT"], transfersOnly: true },
+    ]),
+    documentTypes: Object.freeze([
+      { docType: "TOUR_OPERATOR_LICENSE", label: "Department of Tourism licensed tour operator certificate" },
+      { docType: "TRADE_LICENSE", label: "Trade licence" },
+      { docType: "DIRECTOR_ID", label: "Director's CID or passport" },
+      { docType: "VEHICLE_REGISTRATION", label: "RSTA vehicle registration or permit" },
+      { docType: "OTHER", label: "Other business document" },
+    ]),
+  }),
 });
 
 // A country whose document list isn't set yet: an admin reviews

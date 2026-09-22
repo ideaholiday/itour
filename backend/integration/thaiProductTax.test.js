@@ -70,4 +70,13 @@ test("a product in Bangkok quotes 18% GST from an Indian supplier, none from a T
   assert.equal((await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown.gstAmount, 0);
   const male = (await requestJson(api.baseUrl, `/api/activities/${product.id}`)).data;
   assert.deepEqual([male.country, male.timeLabel, male.gstFree], ["Maldives", "MVT", true]);
+
+  // Bhutan: a Paro supplier's product is 0%, in Bhutan time; an Indian supplier's is 18%.
+  db.prepare("UPDATE products SET city = 'Paro', state = 'Paro' WHERE id = ?").run(product.id);
+  db.prepare("UPDATE suppliers SET city = 'Paro', state = 'Paro' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
+  assert.equal((await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown.gstAmount, 0);
+  assert.equal((await requestJson(api.baseUrl, `/api/activities/${product.id}`)).data.timeLabel, "BTT");
+  db.prepare("UPDATE suppliers SET city = 'Goa', state = 'Goa' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
+  const paroFromIndia = (await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown;
+  assert.equal(paroFromIndia.gstAmount, Math.round((paroFromIndia.baseAmount + paroFromIndia.fastagTolls + paroFromIndia.stateTax) * 0.18));
 });
