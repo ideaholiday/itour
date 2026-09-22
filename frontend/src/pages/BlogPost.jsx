@@ -7,12 +7,13 @@ import SeoHead from "../components/SeoHead.jsx";
 import TicketCard from "../components/TicketCard.jsx";
 import BlogBody from "../components/BlogBody.jsx";
 import WhatsAppShare from "../components/WhatsAppShare.jsx";
-import { blogPostSeo } from "../../../shared/blogSeo.js";
+import { blogPostSeo, isoDate } from "../../../shared/blogSeo.js";
 import { blogPath } from "../../../shared/blogMarkdown.js";
 
-export const formatPostDate = (value) => (value
-  ? new Date(`${String(value).replace(" ", "T")}Z`).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })
-  : "");
+export const formatPostDate = (value) => {
+  const iso = isoDate(value);
+  return iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "";
+};
 
 export default function BlogPost() {
   const { slug } = useParams();

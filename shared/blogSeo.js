@@ -12,10 +12,15 @@ function excerpt(text, max = 155) {
   return `${clean.slice(0, max - 1).replace(/\s+\S*$/, "")}…`;
 }
 
-/** SQLite "2026-09-22 10:00:00" (UTC) → ISO 8601. */
-function isoDate(value) {
+/**
+ * A stored timestamp → ISO 8601. SQLite writes "2026-09-22 10:00:00" (UTC);
+ * Postgres fills TEXT defaults as "2026-09-22 10:00:00.123456+00".
+ */
+export function isoDate(value) {
   if (!value) return undefined;
-  const date = new Date(`${String(value).replace(" ", "T")}${/Z|[+-]\d\d:?\d\d$/.test(value) ? "" : "Z"}`);
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : undefined;
+  const text = String(value).trim().replace(" ", "T").replace(/(T[\d:.]+[+-]\d\d)$/, "$1:00");
+  const date = new Date(/(Z|[+-]\d\d:?\d\d)$/.test(text) ? text : `${text}Z`);
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 

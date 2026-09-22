@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import { executeMigrationSql } from "../src/services/migrationRunner.js";
 import { createPost, deletePost, findPublishedPost, listPublishedPosts, liveLinkedProducts, sitemapBlogEntries, updatePost } from "../src/services/blogService.js";
 import { blogPlainText, parseBlogBody, readingMinutes, safeHref } from "../../shared/blogMarkdown.js";
-import { blogPostSeo } from "../../shared/blogSeo.js";
+import { blogPostSeo, isoDate } from "../../shared/blogSeo.js";
 import { blogPostPage, generateSitemapXml } from "../src/routes/seo.js";
 
 const INDEX_TEMPLATE = fs.readFileSync(new URL("../../frontend/index.html", import.meta.url), "utf8");
@@ -108,4 +108,15 @@ test("a post page gets BlogPosting markup, a 301 after a rename, and a noindex 4
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/blog\/kedarnath-2026<\/loc>/);
   assert.doesNotMatch(generateSitemapXml([], "https://ideaholiday.in"), /\/blog/, "no empty blog in the sitemap");
   db.close();
+});
+
+test("stored timestamps from either engine read as the same instant", () => {
+  assert.equal(isoDate("2026-09-22 15:45:40"), "2026-09-22T15:45:40.000Z", "SQLite");
+  assert.equal(isoDate("2026-09-22 15:45:40.292191+00"), "2026-09-22T15:45:40.292Z", "Postgres TEXT default");
+  assert.equal(isoDate("2026-09-22T21:15:40+05:30"), "2026-09-22T15:45:40.000Z");
+  assert.equal(isoDate(new Date("2026-09-22T15:45:40Z")), "2026-09-22T15:45:40.000Z");
+  assert.equal(isoDate("2026-09-22"), "2026-09-22T00:00:00.000Z", "a bare date is not read as an offset");
+  for (const bad of [null, "", "not a date"]) assert.equal(isoDate(bad), undefined);
+  const seo = blogPostSeo({ title: "T", path: "/blog/t", body: "x", publishedAt: "2026-09-22 10:00:00", updatedAt: "2026-09-23 08:00:00.5+00" });
+  assert.equal(seo.jsonLd["@graph"][0].dateModified, "2026-09-23T08:00:00.500Z");
 });
