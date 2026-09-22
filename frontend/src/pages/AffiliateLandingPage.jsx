@@ -189,7 +189,7 @@ export default function AffiliateLandingPage() {
     <div className="min-h-screen bg-[#FAF9F6] dark:bg-stone-950 text-stone-900 dark:text-stone-100">
       <SeoHead
         title="Creator & Influencer Affiliate Program | Idea Holiday"
-        description="Partner with Idea Holiday. Share your coupon code, recommend travel experiences across India and Thailand, give your followers a discount and earn commission on every completed booking."
+        description="Partner with Idea Holiday. Share your coupon code, recommend travel experiences in India and across Asia, give your followers a discount and earn commission on every completed booking."
       />
 
       {/* Hero Section */}

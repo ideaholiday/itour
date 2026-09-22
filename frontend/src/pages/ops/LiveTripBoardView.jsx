@@ -191,7 +191,7 @@ export default function LiveTripBoardView() {
             Live 24-Hour Trip Fulfillment & Dispatch Center
           </h1>
           <p className="text-xs text-stone-600 dark:text-stone-400 mt-1 max-w-2xl">
-            Real-time fleet tracking, traveler OTP check-in, and Kanban dispatch board tracking ground fulfillment stages across India and Thailand.
+            Real-time fleet tracking, traveler OTP check-in, and Kanban dispatch board tracking ground fulfillment stages in India and across Asia.
           </p>
         </div>
 

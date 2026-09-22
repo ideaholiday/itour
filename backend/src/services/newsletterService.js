@@ -152,7 +152,7 @@ export async function subscribeNewsletter({
   const welcomeText = `Hello ${cleanName || "Traveler"},\n\n`
     + `Thank you for subscribing to Idea Holiday updates!\n\n`
     + `You will be the first to know about:\n`
-    + `• Handpicked hidden gems & cultural experiences across India and Thailand\n`
+    + `• Handpicked hidden gems & cultural experiences in India and across Asia\n`
     + `• Exclusive seasonal discounts & secret promoter vouchers\n`
     + `• Verified airport transfer tips & holiday itineraries\n\n`
     + `Explore trending experiences: ${baseUrl}/search\n\n`
@@ -168,7 +168,7 @@ export async function subscribeNewsletter({
       <div style="padding:32px 24px;color:#292524;line-height:1.6;">
         <h2 style="font-size:20px;color:#1c1917;margin-top:0;margin-bottom:16px;">Welcome aboard${cleanName ? `, ${cleanName}` : ""}! 🎉</h2>
         <p style="font-size:15px;color:#44403c;margin-bottom:20px;">
-          Thank you for joining our community of passionate travelers. You're now on the insider list for thoughtfully curated experiences and authentic local adventures across India and Thailand.
+          Thank you for joining our community of passionate travelers. You're now on the insider list for thoughtfully curated experiences and authentic local adventures in India and across Asia.
         </p>
         <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:16px 20px;margin-bottom:24px;">
           <h3 style="margin:0 0 10px;font-size:14px;color:#92400E;text-transform:uppercase;letter-spacing:0.05em;font-weight:700;">What you will receive:</h3>

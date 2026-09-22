@@ -37,7 +37,7 @@ const initialForm = {
 };
 
 const benefits = [
-  [BarChart3, "Reach more travelers", "Sell tours and transfers to guests planning trips across India and Thailand."],
+  [BarChart3, "Reach more travelers", "Sell tours and transfers to guests planning trips in India and across Asia."],
   [ShieldCheck, "Secure partner tools", "Manage bookings, pricing, fleet readiness and payouts from one workspace."],
   [Headphones, "Local support", "Get onboarding and operations support when you need a hand."],
 ];
@@ -156,7 +156,7 @@ export default function SupplierSignup() {
             Turn your local expertise into unforgettable trips.
           </h1>
           <p className="mt-5 max-w-xl text-base leading-7 text-stone-600">
-            Join the growing network of tour operators in India and Thailand and mobility partners. Publish experiences, manage every booking, and grow from a single partner workspace.
+            Join the growing network of tour operators and mobility partners in India and across Asia. Publish experiences, manage every booking, and grow from a single partner workspace.
           </p>
 
           <div className="mt-9 space-y-5">

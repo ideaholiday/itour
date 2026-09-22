@@ -383,7 +383,7 @@ export default function Search() {
         </div>
       </FilterSection>
 
-      {/* Country (ADR 023: listings in India and Thailand) */}
+      {/* Country (ADR 023: listings in India and across Asia) */}
       {(facets?.countries?.length > 1 || country) && (
         <FilterSection title="Country">
           <div className="space-y-1">
@@ -511,7 +511,7 @@ export default function Search() {
     </div>
   );
 
-  const where = country || "India and Thailand";
+  const where = country || "India and across Asia";
   const searchTitle = q
     ? `Search results for "${q}" | Idea Holiday`
     : destination
@@ -522,7 +522,7 @@ export default function Search() {
     ? `Airport & Outstation Cabs in ${where} | Idea Holiday`
     : country
     ? `${country} Tours, Transfers & Experiences | Idea Holiday`
-    : "Explore Tours & Travel Experiences in India and Thailand | Idea Holiday";
+    : "Explore Tours & Travel Experiences in India and across Asia | Idea Holiday";
 
   const searchDesc = destination
     ? `Book top-rated tours, day sightseeing, water sports, and airport cabs in ${destinationName} with verified local operators on Idea Holiday.`

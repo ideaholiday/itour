@@ -250,7 +250,7 @@ export default function HowItWorks() {
               Ready to Explore Curated Experiences?
             </h3>
             <p className="mt-1 text-sm text-stone-800 font-medium">
-              Discover verified day tours, cultural excursions, and private airport transfers across India and Thailand.
+              Discover verified day tours, cultural excursions, and private airport transfers in India and across Asia.
             </p>
           </div>
           <Link

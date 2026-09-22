@@ -888,7 +888,7 @@ export default function MyBookings() {
                 : "No Historical Trips Found"}
             </h2>
             <p className="mx-auto mt-2 max-w-md text-sm text-stone-500 leading-relaxed">
-              When you book curated tours, transfers, or cultural experiences across India and Thailand, every detail, voucher, and driver assignment will appear here.
+              When you book curated tours, transfers, or cultural experiences in India and across Asia, every detail, voucher, and driver assignment will appear here.
             </p>
             <Link
               to="/search"
