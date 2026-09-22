@@ -259,6 +259,17 @@ test("a Singapore supplier needs ACRA, STB and a director's ID, and an LTA permi
   database.close();
 });
 
+test("an Indonesian supplier needs NIB, TDUP and a director's ID, and a vehicle paper for transfers (ADR 024)", async () => {
+  const database = abroadDatabase("Bali", "Indonesia");
+  const readiness = () => getKybApprovalReadiness(database, supplierRow(database));
+  assert.deepEqual(readiness().missingDocuments, ["NIB business registration", "Tourism business licence (TDUP)", "Director's passport or KTP"]);
+  for (const [id, type] of [["id-1", "COMPANY_REGISTRATION"], ["id-2", "TOUR_OPERATOR_LICENSE"], ["id-3", "DIRECTOR_ID"]]) await addDocument(database, id, type);
+  assert.equal(readiness().canApprove, true);
+  database.prepare("INSERT INTO products VALUES ('id-transfer', 'supplier-1', 'TRANSFER')").run();
+  assert.deepEqual(readiness().missingDocuments, ["Vehicle registration (STNK) or transport permit"]);
+  database.close();
+});
+
 test("a supplier from a country without a document list needs at least one uploaded document", async () => {
   const database = abroadDatabase("Kathmandu", "Nepal");
   assert.deepEqual(getKybApprovalReadiness(database, supplierRow(database)).missingDocuments, ["At least one business document from Nepal"]);

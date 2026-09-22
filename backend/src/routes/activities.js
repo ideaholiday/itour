@@ -9,7 +9,7 @@ import { ensureDefaultProductOption, getBookingQuestions, getProductOptions } fr
 import { priorMeanRating } from "../services/reviewService.js";
 import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { listingOpenIn } from "../lib/locationCatalog.js";
-import { countryTime } from "../lib/localTime.js";
+import { cityTime } from "../lib/localTime.js";
 import { isGstFreeProduct, productCountry } from "../lib/productTax.js";
 
 const router = Router();
@@ -495,8 +495,10 @@ router.get("/activities/:id", (req, res) => {
     const product = parseProductRow(row);
     // The city's country sets the traveler's time zone and tax labels (ADR 023).
     product.country = productCountry(db, row.id);
-    product.timeZone = countryTime(product.country).timeZone;
-    product.timeLabel = countryTime(product.country).label;
+    // The city's zone, since Bali and Jakarta differ (ADR 024).
+    const time = cityTime(db, row.city);
+    product.timeZone = time.timeZone;
+    product.timeLabel = time.label;
     product.gstFree = isGstFreeProduct(db, row.id);
     const context = getProductLocationContext(db, row.id);
     product.locationRules = context?.rules?.map((rule) => ({

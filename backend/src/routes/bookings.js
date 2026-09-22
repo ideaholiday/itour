@@ -768,6 +768,7 @@ function bookingDocumentRecord(ref) {
   if (booking) {
     booking.product_country = productCountry(db, booking.product_id);
     booking.gst_free = isGstFreeProduct(db, booking.product_id);
+    booking.product_time_label = productTime(db, booking.product_id).label;
   }
   return booking;
 }

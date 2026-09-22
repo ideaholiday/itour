@@ -8,6 +8,14 @@ export const COUNTRY_TIME = Object.freeze({
   Thailand: Object.freeze({ timeZone: "Asia/Bangkok", offset: "+07:00", label: "ICT" }),
   "United Arab Emirates": Object.freeze({ timeZone: "Asia/Dubai", offset: "+04:00", label: "GST" }),
   Singapore: Object.freeze({ timeZone: "Asia/Singapore", offset: "+08:00", label: "SGT" }),
+  // Western Indonesia time; cities in other zones are listed in CITY_TIME.
+  Indonesia: Object.freeze({ timeZone: "Asia/Jakarta", offset: "+07:00", label: "WIB" }),
+});
+
+/** Cities whose zone differs from their country's (ADR 024): Bali is on Central Indonesia time. */
+export const CITY_TIME = Object.freeze({
+  bali: Object.freeze({ timeZone: "Asia/Makassar", offset: "+08:00", label: "WITA" }),
+  denpasar: Object.freeze({ timeZone: "Asia/Makassar", offset: "+08:00", label: "WITA" }),
 });
 
 export const INDIA_TIME = COUNTRY_TIME.India;
@@ -19,6 +27,8 @@ export function countryTime(country) {
 /** The time zone of a catalogue city; India when the city (or the country column) is unknown. */
 export function cityTime(db, city) {
   if (!db || !city) return INDIA_TIME;
+  const own = CITY_TIME[String(city).trim().toLowerCase()];
+  if (own) return own;
   try {
     const row = db.prepare("SELECT country FROM destinations WHERE LOWER(name) = LOWER(?) LIMIT 1").get(String(city).trim());
     return countryTime(row?.country);

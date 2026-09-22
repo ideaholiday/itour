@@ -26,6 +26,13 @@ test("Singapore mobiles are 8 digits starting 8 or 9 (ADR 024)", () => {
   assert.equal(toE164("+65 6123 4567"), null, "a Singapore landline is not a mobile");
 });
 
+test("Indonesian mobiles are 9 to 12 digits after the trunk 0 (ADR 024)", () => {
+  assert.equal(toE164("0812 3456 7890", "ID"), "+6281234567890");
+  assert.equal(toE164("+62 812 3456 789"), "+628123456789");
+  assert.equal(toE164("+62 21 1234 5678"), null, "a Jakarta landline is not a mobile");
+  assert.equal(toE164("+62 812 3456 7890 12"), null, "too long");
+});
+
 test("a typed country code wins over the selected country", () => {
   assert.equal(toE164("+66 81 234 5678", "IN"), "+66812345678");
   assert.equal(toE164("+66 081 234 5678"), "+66812345678");

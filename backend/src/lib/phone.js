@@ -8,6 +8,8 @@ export const PHONE_COUNTRIES = Object.freeze([
   { iso: "TH", dialCode: "66", name: "Thailand", length: 9, mobilePrefix: /^[689]/ },
   { iso: "AE", dialCode: "971", name: "United Arab Emirates", length: 9, mobilePrefix: /^5/ },
   { iso: "SG", dialCode: "65", name: "Singapore", length: 8, mobilePrefix: /^[89]/ },
+  // Indonesian mobiles are 9 to 12 digits after the trunk 0 (0812 3456 7890).
+  { iso: "ID", dialCode: "62", name: "Indonesia", length: 9, maxLength: 12, mobilePrefix: /^8/ },
 ]);
 
 /** Look a country up by ISO code (`TH`) or dial code (`66`, `+66`). */
@@ -20,7 +22,8 @@ export function phoneCountry(code) {
 // A local number drops its trunk 0: Thai 081 234 5678 is +66 81 234 5678.
 function nationalNumber(country, digits) {
   const number = digits.startsWith("0") ? digits.slice(1) : digits;
-  return number.length === country.length && country.mobilePrefix.test(number) ? number : null;
+  const fits = number.length >= country.length && number.length <= (country.maxLength || country.length);
+  return fits && country.mobilePrefix.test(number) ? number : null;
 }
 
 function internationalNumber(digits) {

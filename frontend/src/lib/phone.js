@@ -7,17 +7,18 @@ export const PHONE_COUNTRIES = Object.freeze([
   { iso: "TH", dialCode: "66", name: "Thailand", flag: "🇹🇭", length: 9, mobilePrefix: /^[689]/, example: "81 234 5678" },
   { iso: "AE", dialCode: "971", name: "UAE", flag: "🇦🇪", length: 9, mobilePrefix: /^5/, example: "50 123 4567" },
   { iso: "SG", dialCode: "65", name: "Singapore", flag: "🇸🇬", length: 8, mobilePrefix: /^[89]/, example: "8123 4567" },
+  { iso: "ID", dialCode: "62", name: "Indonesia", flag: "🇮🇩", length: 9, maxLength: 12, mobilePrefix: /^8/, example: "812 3456 7890" },
 ]);
 
 export const OTHER_COUNTRY = "OTHER";
 
-const CURRENCY_COUNTRY = { INR: "IN", THB: "TH", AED: "AE", SGD: "SG" };
+const CURRENCY_COUNTRY = { INR: "IN", THB: "TH", AED: "AE", SGD: "SG", IDR: "ID" };
 
 export function phoneCountry(iso) {
   return PHONE_COUNTRIES.find((country) => country.iso === iso) || null;
 }
 
-const COUNTRY_NAME = { India: "IN", Thailand: "TH", "United Arab Emirates": "AE", Singapore: "SG" };
+const COUNTRY_NAME = { India: "IN", Thailand: "TH", "United Arab Emirates": "AE", Singapore: "SG", Indonesia: "ID" };
 
 /** The picker's country for a destination's `country` (`Thailand` → `TH`). */
 export function phoneCountryForName(name) {
@@ -31,7 +32,8 @@ export function countryForCurrency(currency) {
 
 function nationalNumber(country, digits) {
   const number = digits.startsWith("0") ? digits.slice(1) : digits;
-  return number.length === country.length && country.mobilePrefix.test(number) ? number : null;
+  const fits = number.length >= country.length && number.length <= (country.maxLength || country.length);
+  return fits && country.mobilePrefix.test(number) ? number : null;
 }
 
 function internationalNumber(digits) {
