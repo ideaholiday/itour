@@ -85,4 +85,10 @@ test("a product in Bangkok quotes 18% GST from an Indian supplier, none from a T
   db.prepare("UPDATE suppliers SET city = 'Tokyo', state = 'Tokyo' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
   assert.equal((await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown.gstAmount, 0);
   assert.equal((await requestJson(api.baseUrl, `/api/activities/${product.id}`)).data.timeLabel, "JST");
+
+  // Vietnam: a Hanoi supplier's product is 0%, in Vietnam time.
+  db.prepare("UPDATE products SET city = 'Hanoi', state = 'Hanoi' WHERE id = ?").run(product.id);
+  db.prepare("UPDATE suppliers SET city = 'Hanoi', state = 'Hanoi' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
+  assert.equal((await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown.gstAmount, 0);
+  assert.equal((await requestJson(api.baseUrl, `/api/activities/${product.id}`)).data.timeZone, "Asia/Ho_Chi_Minh");
 });

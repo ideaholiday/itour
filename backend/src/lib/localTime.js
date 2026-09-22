@@ -13,6 +13,7 @@ export const COUNTRY_TIME = Object.freeze({
   Maldives: Object.freeze({ timeZone: "Indian/Maldives", offset: "+05:00", label: "MVT" }),
   Bhutan: Object.freeze({ timeZone: "Asia/Thimphu", offset: "+06:00", label: "BTT" }),
   Japan: Object.freeze({ timeZone: "Asia/Tokyo", offset: "+09:00", label: "JST" }),
+  Vietnam: Object.freeze({ timeZone: "Asia/Ho_Chi_Minh", offset: "+07:00", label: "ICT" }),
 });
 
 /** Cities whose zone differs from their country's (ADR 024): Bali is on Central Indonesia time. */

@@ -97,6 +97,10 @@ describe("Multi-Currency Service", () => {
     assert.equal(convertFromInr(1000, "JPY").amount, 1700);
   });
 
+  it("shows Vietnamese dong at 295 per rupee, in whole dong (ADR 024)", () => {
+    assert.equal(convertFromInr(1000, "VND").amount, 295000);
+  });
+
   it("shows Singapore dollars at the fixed ₹78 rate (ADR 024)", () => {
     const sgd = convertFromInr(7800, "SGD");
     assert.equal(sgd.amount, 100);

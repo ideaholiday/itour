@@ -154,6 +154,23 @@ export const KYB_COUNTRY_RULES = Object.freeze({
       { docType: "OTHER", label: "Other business document (never My Number)" },
     ]),
   }),
+  // ADR 024: approved by an admin by hand.
+  Vietnam: Object.freeze({
+    cashfree: false,
+    required: Object.freeze([
+      { docType: "COMPANY_REGISTRATION", label: "Enterprise Registration Certificate", acceptedTypes: ["COMPANY_REGISTRATION"] },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "International Travel Service Business Licence", acceptedTypes: ["TOUR_OPERATOR_LICENSE"] },
+      { docType: "DIRECTOR_ID", label: "Legal representative's passport or CCCD", acceptedTypes: ["DIRECTOR_ID"] },
+      { docType: "VEHICLE_REGISTRATION", label: "Road transport business licence", acceptedTypes: ["VEHICLE_REGISTRATION", "COMMERCIAL_PERMIT"], transfersOnly: true },
+    ]),
+    documentTypes: Object.freeze([
+      { docType: "COMPANY_REGISTRATION", label: "Enterprise Registration Certificate" },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "International Travel Service Business Licence" },
+      { docType: "DIRECTOR_ID", label: "Legal representative's passport or CCCD" },
+      { docType: "VEHICLE_REGISTRATION", label: "Road transport business licence" },
+      { docType: "OTHER", label: "Other business document" },
+    ]),
+  }),
 });
 
 // A country whose document list isn't set yet: an admin reviews

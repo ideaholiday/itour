@@ -49,6 +49,11 @@ test("Japan mobiles are 10 digits starting 70, 80 or 90 (ADR 024)", () => {
   assert.equal(toE164("+81 3 1234 5678"), null, "a Tokyo landline is not a mobile");
 });
 
+test("Vietnam mobiles are 9 digits starting 3, 5, 7, 8 or 9 (ADR 024)", () => {
+  assert.equal(toE164("091 234 5678", "VN"), "+84912345678");
+  assert.equal(toE164("+84 24 1234 5678"), null, "a Hanoi landline is not a mobile");
+});
+
 test("a typed country code wins over the selected country", () => {
   assert.equal(toE164("+66 81 234 5678", "IN"), "+66812345678");
   assert.equal(toE164("+66 081 234 5678"), "+66812345678");
