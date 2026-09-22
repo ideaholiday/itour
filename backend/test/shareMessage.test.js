@@ -33,3 +33,13 @@ test("the WhatsApp link carries the whole message, encoded", () => {
   assert.ok(url.startsWith("https://wa.me/?text="));
   assert.equal(decodeURIComponent(url.slice("https://wa.me/?text=".length)), "Goa & more — ₹499\nhttps://ideaholiday.in/x?a=1&b=2");
 });
+
+test("a creator's own code rides along as ?ref= with sub=whatsapp; anything else is left out (ADR 030)", () => {
+  const link = (code) => shareUrl("https://ideaholiday.in/things-to-do/goa", code);
+  assert.equal(link("goa10"), "https://ideaholiday.in/things-to-do/goa?ref=GOA10&sub=whatsapp&utm_source=whatsapp&utm_medium=share");
+  for (const bad of [null, "", "ab", "REF-ABC123", "x y", "<script>", "A".repeat(41)]) {
+    assert.equal(link(bad).includes("ref="), false, String(bad));
+  }
+  assert.match(shareMessage("activity", { ...ACTIVITY, creatorCode: "PRIYA10" }, "hi"), /\?ref=PRIYA10&sub=whatsapp&utm_source=whatsapp/);
+  assert.match(shareMessage("blog", { title: "Goa", url: "https://ideaholiday.in/blog/goa", creatorCode: "PRIYA10" }), /ref=PRIYA10/);
+});

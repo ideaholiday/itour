@@ -4,9 +4,18 @@
 
 const rupees = (value) => `₹${Math.round(Number(value)).toLocaleString("en-IN")}`;
 
-/** The shared link, tagged so a visit from it shows up as WhatsApp in analytics. */
-export function shareUrl(url) {
+/**
+ * The shared link, tagged so a visit from it shows up as WhatsApp in analytics.
+ * A creator's own code rides along as `?ref=` with `sub=whatsapp` (ADR 030); the
+ * server still decides whether that click earns anything.
+ */
+export function shareUrl(url, creatorCode = null) {
   const link = new URL(url);
+  const code = String(creatorCode || "").trim().toUpperCase();
+  if (/^[A-Z0-9][A-Z0-9_-]{2,39}$/.test(code) && !code.startsWith("REF-")) {
+    link.searchParams.set("ref", code);
+    link.searchParams.set("sub", "whatsapp");
+  }
   link.searchParams.set("utm_source", "whatsapp");
   link.searchParams.set("utm_medium", "share");
   return link.toString();
@@ -24,13 +33,13 @@ function activityFacts(data, lang) {
 }
 
 /**
- * @param kind  "activity" { title, city, priceInr, rating, reviewCount, url }
+ * @param kind  "activity" { title, city, priceInr, rating, reviewCount, url, creatorCode? }
  *              "city" { name, productCount, fromPriceInr, url }
  *              "blog" { title, url }
  */
 export function shareMessage(kind, data, lang = "en") {
   const hi = lang === "hi";
-  const url = shareUrl(data.url);
+  const url = shareUrl(data.url, data.creatorCode);
   if (kind === "activity") {
     const facts = activityFacts(data, lang);
     const where = data.city ? (hi ? `${data.city} में ` : ` in ${data.city}`) : "";

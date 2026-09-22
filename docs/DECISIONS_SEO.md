@@ -54,3 +54,14 @@
   - Messages (`shared/shareMessage.js`) hold only what the page shows: price and rating only when the listing has them. A Hindi city message links to the Hindi page; activity and blog messages link to the (English) page.
   - Shared links carry `utm_source=whatsapp&utm_medium=share`, so visits from shares show in analytics and campaign attribution. Each tap sends a GA4 `share` event (`method: whatsapp`, `content_type`, `item_id`, `language`).
 - **Consequences**: No new service or library. Creator (affiliate) links are not added to shares; that would be its own decision.
+
+---
+
+## ADR 030: Creator Codes in WhatsApp Shares
+- **Date**: 2026-09-22
+- **Context**: Creators share pages on WhatsApp too; with ADR 029 their shares earned nothing.
+- **Decision Made**:
+  - When the signed-in user is an `ACTIVE` creator (`GET /api/affiliate/me`), the share link carries their code: `?ref=CODE&sub=whatsapp`, the same format as dashboard links, so their stats show WhatsApp as the channel. The button says "Your code CODE is in the link".
+  - The browser only adds the code. The server decides the credit as before (click window, self-referral rejected, suspended creators earn nothing).
+  - The GA4 `share` event adds `creator_link: true|false`.
+- **Consequences**: Travelers who aren't creators, and signed-out visitors, get the plain link from ADR 029; the lookup runs once per signed-in user, never for signed-out visitors.
