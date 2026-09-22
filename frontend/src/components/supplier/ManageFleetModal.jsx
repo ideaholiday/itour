@@ -1,4 +1,13 @@
 import React, { useState } from "react";
+
+// Expiry dates of the driver's and vehicle's papers; an expired one blocks assigning the vehicle (ADR 024).
+const EXPIRY_FIELDS = [
+  ["licenseExpiry", "license_expiry", "Driving licence valid until"],
+  ["permitExpiry", "permit_expiry", "Permit valid until"],
+  ["insuranceExpiry", "insurance_expiry", "Insurance valid until"],
+  ["fitnessExpiry", "fitness_expiry", "Fitness certificate valid until"],
+];
+const NO_EXPIRIES = { licenseExpiry: "", permitExpiry: "", insuranceExpiry: "", fitnessExpiry: "" };
 import { Users, X, Plus, Phone, Car, Shield, Star, AlertTriangle, Check, Search } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
 import PhoneInput from "../PhoneInput.jsx";
@@ -13,6 +22,7 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
   const [vehicleModel, setVehicleModel] = useState("Swift Dzire VXI (Sedan)");
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
+  const [expiries, setExpiries] = useState(NO_EXPIRIES);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
@@ -43,7 +53,8 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
           driverPhone,
           vehicleModel,
           vehicleNumber,
-          licenseNumber
+          licenseNumber,
+          ...expiries
         })
       });
 
@@ -54,6 +65,7 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
         setDriverPhone("");
         setVehicleNumber("");
         setLicenseNumber("");
+        setExpiries(NO_EXPIRIES);
         setActiveTab("LIST");
         if (onRefresh) onRefresh();
       } else {
@@ -162,9 +174,12 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
             e.preventDefault();
             try {
               const r = await fetch(`/api/suppliers/${supplierId}/drivers/${editingContact.id}/contact`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ driverEmail: editingContact.driver_email, seatCapacity: Number(editingContact.seat_capacity), dispatchPriority: Number(editingContact.dispatch_priority || 0) }) });
-              const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not update driver'); setSuccessMsg('Driver dispatch details saved'); setEditingContact(null); onRefresh?.();
+              const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not update driver');
+              const papers = await fetch(`/api/suppliers/${supplierId}/drivers/${editingContact.id}/documents`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(Object.fromEntries(EXPIRY_FIELDS.map(([key, column]) => [key, editingContact[column] || null]))) });
+              if (!papers.ok) throw new Error((await papers.json()).error || 'Could not save document dates');
+              setSuccessMsg('Driver dispatch details saved'); setEditingContact(null); onRefresh?.();
             } catch (e) { setError(e.message); }
-          }}><label className="text-xs">Email<input aria-label="Existing driver email" type="email" required value={editingContact.driver_email || ''} onChange={e => setEditingContact({ ...editingContact, driver_email: e.target.value })} className="block rounded border p-2" /></label><label className="text-xs">Seats<input aria-label="Existing vehicle seats" type="number" min="1" max="100" required value={editingContact.seat_capacity || ''} onChange={e => setEditingContact({ ...editingContact, seat_capacity: e.target.value })} className="block rounded border p-2" /></label><button type="submit" className="rounded border px-3">Save dispatch details</button></form>}
+          }}><label className="text-xs">Email<input aria-label="Existing driver email" type="email" required value={editingContact.driver_email || ''} onChange={e => setEditingContact({ ...editingContact, driver_email: e.target.value })} className="block rounded border p-2" /></label><label className="text-xs">Seats<input aria-label="Existing vehicle seats" type="number" min="1" max="100" required value={editingContact.seat_capacity || ''} onChange={e => setEditingContact({ ...editingContact, seat_capacity: e.target.value })} className="block rounded border p-2" /></label>{EXPIRY_FIELDS.map(([key, column, label]) => <label key={key} className="text-xs">{label}<input aria-label={`Existing ${label}`} type="date" value={editingContact[column] || ''} onChange={e => setEditingContact({ ...editingContact, [column]: e.target.value })} className="block rounded border p-2" /></label>)}<button type="submit" className="rounded border px-3">Save dispatch details</button></form>}
         </div>
         <div className="p-6 space-y-4 overflow-y-auto">
           {error && (
@@ -248,6 +263,12 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                           <span className="text-stone-500">Plate Number:</span>
                           <span className="font-mono font-bold text-stone-900">{d.vehicle_number}</span>
                         </div>
+                        {EXPIRY_FIELDS.filter(([, column]) => d[column]).map(([key, column, label]) => (
+                          <div key={key} className={`flex justify-between text-[11px] ${d[column] < new Date().toISOString().slice(0, 10) ? "font-bold text-red-700" : "text-stone-500"}`}>
+                            <span>{label}:</span>
+                            <span className="font-mono">{d[column]}</span>
+                          </div>
+                        ))}
                         {d.license_number && (
                           <div className="flex justify-between text-stone-500 text-[11px]">
                             <span>License No:</span>
@@ -340,6 +361,12 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                     className="w-full bg-white border border-stone-300 text-stone-900 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
+                {EXPIRY_FIELDS.map(([key, , label]) => (
+                  <label key={key} className="block text-xs font-bold text-stone-700">
+                    {label} (optional)
+                    <input type="date" value={expiries[key]} onChange={(e) => setExpiries((current) => ({ ...current, [key]: e.target.value }))} className="mt-1 w-full bg-white border border-stone-300 text-stone-900 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500" />
+                  </label>
+                ))}
               </div>
 
               <div className="flex justify-end gap-3 pt-2">

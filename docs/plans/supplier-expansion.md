@@ -92,7 +92,7 @@ automatic approval needs **GSTIN + PAN**. A single cab owner without GST can onl
    - Bank account (cancelled cheque / penny-drop)
    - Name match: PAN name = Aadhaar name = bank holder = RC owner (or an owner-authorisation letter)
    - **Confirm Cashfree SecureID offers DL and RC checks on our plan — UNKNOWN until checked.**
-3. **Vehicles as records.** Reuse `resources` (migration 023, "one vehicle") — add registration number,
+3. **Vehicles as records.** Reuse the fleet, `supplier_drivers` (done, C2: migration 051) — add registration number,
    vehicle_type, seats, RC/permit/insurance doc refs and expiry dates in a new migration. Multi-vehicle owners
    add several. A vehicle with an expired document can't be assigned to a trip.
 4. **Auto-approval (decided):** PAN + Aadhaar + DL + RC all verified and names match → KYB `APPROVED`,

@@ -294,6 +294,8 @@ erDiagram
   - `vehicle_model`, `vehicle_number`.
   - `assignment_status`: `ASSIGNED`, `EN_ROUTE`, `ARRIVED`, `COMPLETED`.
   - `last_lat`, `last_lng`, `last_accuracy_m`, `last_speed_kmh`, `last_heading`, `last_location_source` (`DRIVER` | `OPS`), `last_location_at`: the newest driver position (migration 035). Cleared after 30 days.
+- **`supplier_drivers`**: a supplier's fleet, one row per driver and vehicle (`driver_name`, `driver_phone`, `vehicle_model`, `vehicle_number`, `license_number`, `seat_capacity`, `status`).
+  - `license_expiry`, `permit_expiry`, `insurance_expiry`, `fitness_expiry` (migration 051): `YYYY-MM-DD` or `NULL`. A vehicle with any of these before the trip's `activity_date` can't be assigned, by hand or by automatic dispatch (ADR 024).
 - **`driver_location_pings`** (migration 035): every accepted driver position.
   - `assignment_id`, `booking_id`, `supplier_id`.
   - `lat`, `lng`, `accuracy_m`, `speed_kmh`, `heading`.

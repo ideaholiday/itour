@@ -1382,6 +1382,15 @@ router.patch("/:id/drivers/:driverId/contact", optionalAuthMiddleware, requireSu
   res.status(result.changes ? 200 : 404).json({ success: Boolean(result.changes) });
 });
 
+// Expiry dates of a fleet vehicle's papers, updated when they are renewed (ADR 024).
+const fleetDocumentDate = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal(""), z.null()]).optional();
+router.patch("/:id/drivers/:driverId/documents", optionalAuthMiddleware, requireSupplierAccess, validateBody(z.object({ licenseExpiry: fleetDocumentDate, permitExpiry: fleetDocumentDate, insuranceExpiry: fleetDocumentDate, fitnessExpiry: fleetDocumentDate }).strict()), (req, res) => {
+  const v = req.body;
+  const result = db.prepare("UPDATE supplier_drivers SET license_expiry = ?, permit_expiry = ?, insurance_expiry = ?, fitness_expiry = ? WHERE id = ? AND supplier_id = ?")
+    .run(v.licenseExpiry || null, v.permitExpiry || null, v.insuranceExpiry || null, v.fitnessExpiry || null, req.params.driverId, req.params.id);
+  res.status(result.changes ? 200 : 404).json({ success: Boolean(result.changes) });
+});
+
 // POST /api/suppliers/:id/assign-driver - Dispatch driver and vehicle to booking
 router.post("/:id/assign-driver", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.assignment), (req, res) => {
   try {
@@ -1594,6 +1603,8 @@ router.post("/:id/drivers", optionalAuthMiddleware, requireSupplierAccess, valid
     ).run(driverId, id, driverName.trim(), phone, vehicleModel || "Commercial Cab", plate, licenseNumber?.trim() || null);
 
     db.prepare("UPDATE supplier_drivers SET driver_email = ?, seat_capacity = ?, dispatch_priority = ? WHERE id = ?").run(driverEmail || null, seatCapacity || 0, dispatchPriority || 0, driverId);
+    db.prepare("UPDATE supplier_drivers SET license_expiry = ?, permit_expiry = ?, insurance_expiry = ?, fitness_expiry = ? WHERE id = ?")
+      .run(req.body.licenseExpiry || null, req.body.permitExpiry || null, req.body.insuranceExpiry || null, req.body.fitnessExpiry || null, driverId);
     res.json({ success: true, driverId, message: `Driver ${driverName} added to fleet.` });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || "Failed to add driver to fleet" });

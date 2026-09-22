@@ -197,6 +197,9 @@ const locationRuleSchema = object({
   errorMessage: optionalText(1_000), suggestion: optionalText(1_000),
 });
 
+// A fleet document expiry date (ADR 024); empty clears it.
+const fleetDate = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date"), z.literal(""), z.null()]).optional();
+
 export const supplierSchemas = {
   registration: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100) }),
   kyb: object({
@@ -239,7 +242,7 @@ export const supplierSchemas = {
   publication: object({ isPublished: booleanValue.optional(), status: optionalText(40) }),
   confirmDriver: object({ note: text(3, 500) }),
   assignment: object({ confirmedByPhone: booleanValue.optional(), supplierDriverId: id.optional(), driverName: optionalText(120), driverPhone: phone.optional(), driverEmail: email.optional(), seatCapacity: z.coerce.number().int().min(1).max(100).optional(), vehicleModel: optionalText(120), vehicleNumber: optionalText(40), bookingId: id.optional(), driverId: id.optional(), action: optionalText(80), reason: optionalText(1_000), note: optionalText(1_000) }),
-  driver: object({ driverEmail: email.optional(), seatCapacity: z.coerce.number().int().min(1).max(100).optional(), dispatchPriority: z.coerce.number().int().min(0).max(100).optional(), driverName: text(2, 120), driverPhone: phone, vehicleNumber: text(3, 40), vehicleModel: optionalText(120), vehicleCategory: optionalText(80), licenseNumber: optionalText(80) }),
+  driver: object({ driverEmail: email.optional(), seatCapacity: z.coerce.number().int().min(1).max(100).optional(), dispatchPriority: z.coerce.number().int().min(0).max(100).optional(), driverName: text(2, 120), driverPhone: phone, vehicleNumber: text(3, 40), vehicleModel: optionalText(120), vehicleCategory: optionalText(80), licenseNumber: optionalText(80), licenseExpiry: fleetDate, permitExpiry: fleetDate, insuranceExpiry: fleetDate, fitnessExpiry: fleetDate }),
   dispatch: object({ bookingId: id, pickup: object({ address: text(2, 500), instructions: optionalText(1_000), lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180) }), drop: object({ address: text(2, 500), instructions: optionalText(1_000), lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180) }), flight: z.object({ number: optionalText(40), scheduledArrival: optionalText(80), terminalGate: optionalText(80) }).passthrough().optional().nullable() }),
   status: object({ status: text(2, 80), reason: optionalText(1_000) }),
   blockDates: object({ dates: z.array(date).min(1).max(366).optional(), startDate: date.optional(), endDate: date.optional(), reason: optionalText(500), capacity: count.optional() }),

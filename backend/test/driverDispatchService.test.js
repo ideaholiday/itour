@@ -83,6 +83,22 @@ test("assigns a compatible roster driver and records an audit event", () => {
   db.close();
 });
 
+test("a vehicle whose papers expire before the trip can't be assigned (ADR 024)", () => {
+  const db = database();
+  executeMigrationSql(db, fs.readFileSync(new URL('../migrations/051_fleet_document_expiry.sql', import.meta.url), 'utf8').split('-- @down')[0]);
+  addBooking(db, "booking-1", "09:00");
+  db.prepare("UPDATE supplier_drivers SET insurance_expiry = '2026-09-09', license_expiry = '2027-01-01'").run();
+  const fleet = getFleetAvailability(db, { supplierId: "supplier-1", bookingId: "booking-1" })[0];
+  assert.equal(fleet.available, false);
+  assert.match(fleet.reason, /vehicle insurance expired on 2026-09-09/);
+  assert.throws(() => assignDriverToBooking(db, { supplierId: "supplier-1", bookingId: "booking-1", supplierDriverId: "driver-1" }), /vehicle insurance expired/);
+  // Valid on the trip date itself, and no date entered, both allow the trip.
+  db.prepare("UPDATE supplier_drivers SET insurance_expiry = '2026-09-10', license_expiry = NULL").run();
+  assert.equal(getFleetAvailability(db, { supplierId: "supplier-1", bookingId: "booking-1" })[0].available, true);
+  assert.doesNotThrow(() => assignDriverToBooking(db, { supplierId: "supplier-1", bookingId: "booking-1", supplierDriverId: "driver-1" }));
+  db.close();
+});
+
 test("blocks overlapping driver or vehicle assignments and allows a later trip", () => {
   const db = database();
   addBooking(db, "booking-1", "09:00");

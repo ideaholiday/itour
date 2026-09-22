@@ -128,6 +128,20 @@ function event(database, assignment, values) {
   );
 }
 
+const FLEET_DOCUMENT_EXPIRIES = [
+  ["license_expiry", "driving licence"],
+  ["permit_expiry", "vehicle permit"],
+  ["insurance_expiry", "vehicle insurance"],
+  ["fitness_expiry", "fitness certificate"],
+];
+
+/** The first of the driver's or vehicle's papers that has expired by the trip date, or null (ADR 024). */
+export function expiredFleetDocument(driver, tripDate) {
+  if (!tripDate) return null;
+  const expired = FLEET_DOCUMENT_EXPIRIES.find(([column]) => driver?.[column] && String(driver[column]) < String(tripDate));
+  return expired ? `The ${expired[1]} expired on ${driver[expired[0]]}` : null;
+}
+
 export function getFleetAvailability(database, { supplierId, bookingId }) {
   const booking = bookingWithDuration(database, bookingId, supplierId);
   if (!booking) throw dispatchError("Booking was not found for this supplier", 404);
@@ -136,9 +150,12 @@ export function getFleetAvailability(database, { supplierId, bookingId }) {
     const rosterStatus = String(driver.status || "AVAILABLE").toUpperCase();
     const compatible = vehicleModelSupportsCategory(driver.vehicle_model, booking.vehicle_category) && Number(driver.seat_capacity) >= Number(booking.adults || 0) + Number(booking.children || 0) && Boolean(driver.driver_email);
     const conflicts = unavailableFleetStatuses.has(rosterStatus) ? [] : assignmentConflicts(database, booking, driver);
-    const available = !unavailableFleetStatuses.has(rosterStatus) && compatible && conflicts.length === 0;
+    const expired = expiredFleetDocument(driver, booking.activity_date);
+    const available = !unavailableFleetStatuses.has(rosterStatus) && compatible && !expired && conflicts.length === 0;
     const reason = unavailableFleetStatuses.has(rosterStatus)
       ? `Fleet status is ${rosterStatus.replaceAll("_", " ").toLowerCase()}`
+      : expired
+        ? expired
       : !compatible
         ? `Vehicle does not match ${booking.vehicle_category || "the booked category"}`
         : conflicts.length
@@ -166,6 +183,8 @@ function assignDriverLocked(database, { supplierId, bookingId, supplierDriverId,
     driver = database.prepare("SELECT * FROM supplier_drivers WHERE id = ? AND supplier_id = ?").get(supplierDriverId, supplierId);
     if (!driver) throw dispatchError("Choose a driver from your own fleet", 404);
     if (unavailableFleetStatuses.has(String(driver.status || "").toUpperCase())) throw dispatchError(`This driver is ${String(driver.status).toLowerCase()} and cannot be assigned`, 409);
+    const expired = expiredFleetDocument(driver, booking.activity_date);
+    if (expired) throw dispatchError(`${expired}, before this trip. Update it in your fleet to assign this vehicle`, 409);
     source = automatic ? "AUTOMATIC" : "FLEET";
   } else {
     driver = {
