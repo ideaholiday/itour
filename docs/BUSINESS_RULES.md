@@ -51,6 +51,7 @@ $$\text{Vacancies} = \text{Configured Max Capacity} - \text{Confirmed Seats} - \
    - Point-to-point and airport transfer routes priced by vehicle category (`product_vehicle_options` or dynamic transfer engine):
      $$\text{Total Price} = \max(\text{Base Fare}, \text{Calculated KM} \times \text{Per-KM Rate}) + \text{Tolls} + \text{Interstate Permit} + \text{GST (5\%)}$$
      Where $\text{Calculated KM} = \text{Haversine Distance} \times 1.25$.
+   - **GST by country** (`productGstPercent` in `backend/src/lib/productTax.js`), for every product type: a product in India keeps its rate (5%, or the variant's `tax_percentage`); an **Indian supplier's product abroad pays 18%** on the same base, with no TDS (ADR 024); a supplier abroad selling in its own country pays **0%** and the traveler gets a booking receipt instead of a GST invoice (ADR 023). The supplier's country is its base city's.
 3. **Day Sightseeing Tours (`TOUR`)**:
    - Private tours priced per vehicle category (`SEDAN`, `SUV`, `TEMPO`).
    - Shared tours (SIC) priced per seat from designated `product_sic_hubs`.

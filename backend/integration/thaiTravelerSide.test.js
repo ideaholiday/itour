@@ -19,6 +19,8 @@ test("a traveler booking in Bangkok sees Thailand time and gets a receipt, not a
   assert.deepEqual([india.data.country, india.data.timeZone, india.data.timeLabel, india.data.gstFree], ["India", "Asia/Kolkata", "IST", false]);
 
   db.prepare("UPDATE products SET city = 'Bangkok', state = 'Bangkok' WHERE id = ?").run(product.id);
+  // A Thai supplier's product in Thailand: no GST, so a receipt (an Indian supplier's would carry 18%, ADR 024).
+  db.prepare("UPDATE suppliers SET city = 'Bangkok', state = 'Bangkok' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
   db.prepare("DELETE FROM product_location_rules WHERE product_id = ?").run(product.id); // the seed's Goa pickup area
   const thai = await requestJson(api.baseUrl, `/api/activities/${product.id}`);
   assert.deepEqual([thai.data.country, thai.data.timeZone, thai.data.timeLabel, thai.data.gstFree], ["Thailand", "Asia/Bangkok", "ICT", true]);

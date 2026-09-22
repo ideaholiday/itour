@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { localDateTimeMs, productTime } from "../lib/localTime.js";
-import { isGstFreeProduct } from "../lib/productTax.js";
+import { productGstPercent } from "../lib/productTax.js";
 
 export const NATIVE_HOLD_MINUTES = 10;
 
@@ -513,7 +513,7 @@ export function attachNativeReservation(db, holdId, booking, ownerId) {
     const base = pricing.unitTotal != null
       ? Number(pricing.unitTotal)
       : Number(pricing.adultPrice) * Number(hold.adults) + Number(pricing.childPrice) * Number(hold.children);
-    if (Number(booking.amount_inr) !== base + (isGstFreeProduct(db, booking.product_id) ? 0 : Math.round(base * 0.05))) throw inventoryError("Price changed before seats were reserved. Recheck the price.", "PRICE_CHANGED");
+    if (Number(booking.amount_inr) !== base + Math.round(base * productGstPercent(db, booking.product_id, 5) / 100)) throw inventoryError("Price changed before seats were reserved. Recheck the price.", "PRICE_CHANGED");
   }
   const updated = db.prepare("UPDATE native_reservations SET booking_id = ? WHERE id = ? AND booking_id IS NULL AND status = 'ON_HOLD'").run(booking.id, hold.id);
   if (!updated.changes && hold.booking_id !== booking.id) throw inventoryError("Reservation already attached", "HOLD_MISMATCH");

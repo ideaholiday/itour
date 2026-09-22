@@ -13,7 +13,7 @@ import { octoReservationView } from "./reservationProviders.js";
 import logger from "../config/logger.js";
 import { approvedSupplierSql } from "./supplierKybGate.js";
 import { productTime } from "../lib/localTime.js";
-import { isGstFreeProduct } from "../lib/productTax.js";
+import { productGstPercent } from "../lib/productTax.js";
 
 // Channel partners see and book only what travelers can: published products
 // whose supplier is KYB-approved.
@@ -337,7 +337,7 @@ export function confirmOctoReservation(db, input) {
     ? Number(snapshot.unitTotal)
     : Number(snapshot.adultPrice || 0) * Number(reservation.adults || 0)
       + Number(snapshot.childPrice || 0) * Number(reservation.children || 0);
-  const amountInr = base > 0 ? base + (isGstFreeProduct(db, slot.product_id) ? 0 : Math.round(base * 0.05)) : 0;
+  const amountInr = base > 0 ? base + Math.round(base * productGstPercent(db, slot.product_id, 5) / 100) : 0;
 
   // bookings.ref, product_type and pickup_location are NOT NULL: an OCTo
   // confirmation has to populate the same required shape as a native booking.

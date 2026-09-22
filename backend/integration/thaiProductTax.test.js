@@ -3,8 +3,9 @@ import { test } from "node:test";
 import Database from "better-sqlite3";
 import { requestJson, startTestServer } from "./helpers/serverHarness.js";
 
-// ADR 023 step L4: no GST on products in Thailand; Indian products keep theirs.
-test("a product in Bangkok quotes without GST, the same product in India with it", async t => {
+// ADR 023 step L4: no GST on a Thai supplier's product in Thailand; Indian products keep theirs.
+// ADR 024 step A4: an Indian supplier's product abroad pays 18%.
+test("a product in Bangkok quotes 18% GST from an Indian supplier, none from a Thai one, and India's rate in India", async t => {
   const api = await startTestServer(); t.after(() => api.stop());
   const db = new Database(api.databasePath); t.after(() => db.close());
 
@@ -24,6 +25,15 @@ test("a product in Bangkok quotes without GST, the same product in India with it
   assert.ok(india.data.quote.breakdown.gstAmount > 0);
 
   db.prepare("UPDATE products SET city = 'Bangkok', state = 'Bangkok' WHERE id = ?").run(product.id);
+  // ADR 024 A4: while its supplier is Indian, the product abroad pays 18% GST instead of India's rate.
+  const abroad = await requestJson(api.baseUrl, "/api/bookings/quote", { body: input });
+  assert.equal(abroad.response.status, 200, JSON.stringify(abroad.data));
+  const taxed = abroad.data.quote.breakdown;
+  assert.equal(taxed.gstAmount, Math.round((taxed.baseAmount + taxed.fastagTolls + taxed.stateTax) * 0.18));
+  assert.equal((await requestJson(api.baseUrl, `/api/activities/${product.id}`)).data.gstFree, false);
+
+  // A Thai supplier's product in Thailand pays none (ADR 023).
+  db.prepare("UPDATE suppliers SET city = 'Bangkok', state = 'Bangkok' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
   const thailand = await requestJson(api.baseUrl, "/api/bookings/quote", { body: input });
   assert.equal(thailand.response.status, 200, JSON.stringify(thailand.data));
   const { baseAmount, fastagTolls, stateTax, gstAmount, totalAmount } = thailand.data.quote.breakdown;

@@ -709,12 +709,20 @@ test("an explicitly empty departure time means the whole day", t => {
   assert.throws(() => saveSlotOverride(db, "p", "o", { localDate: future, localTime: "99:99" }));
 });
 
-test("a hold's frozen price adds 5% GST in India and none in Thailand (ADR 023)", t => {
+test("a hold's frozen price adds 5% GST in India, 18% from an Indian supplier abroad and none from a Thai one (ADR 023, ADR 024)", t => {
   const db = fixture(t); const hold = reserve(db); const b = booking(db);
   assert.throws(() => attachNativeReservation(db, hold.id, { ...b, amount_inr: 2400 }, "u"), error => error.code === "PRICE_CHANGED");
   attachNativeReservation(db, hold.id, { ...b, amount_inr: 2520 }, "u");
 
-  db.exec("ALTER TABLE products ADD COLUMN city TEXT; UPDATE products SET city = 'Bangkok'; CREATE TABLE destinations (name TEXT, country TEXT); INSERT INTO destinations VALUES ('Bangkok', 'Thailand');");
+  db.exec("ALTER TABLE products ADD COLUMN city TEXT; UPDATE products SET city = 'Bangkok'; CREATE TABLE destinations (name TEXT, country TEXT); INSERT INTO destinations VALUES ('Bangkok', 'Thailand'), ('Goa', 'India'); ALTER TABLE suppliers ADD COLUMN city TEXT; UPDATE suppliers SET city = 'Goa';");
+  // An Indian supplier's product abroad: 18% (ADR 024).
+  const abroad = reserve(db, { localTime: "14:00", adults: 1, children: 0, ownerId: "w", requestKey: "abroad" });
+  const ab = { ...booking(db, "ab"), pickup_time: "14:00", adults: 1, children: 0 };
+  assert.throws(() => attachNativeReservation(db, abroad.id, { ...ab, amount_inr: 1050 }, "w"), error => error.code === "PRICE_CHANGED");
+  attachNativeReservation(db, abroad.id, { ...ab, amount_inr: 1180 }, "w");
+
+  // A Thai supplier's product in Thailand: none.
+  db.exec("UPDATE suppliers SET city = 'Bangkok'");
   const thai = reserve(db, { localTime: "14:00", adults: 1, children: 0, ownerId: "v", requestKey: "thai" });
   const tb = { ...booking(db, "tb"), pickup_time: "14:00", adults: 1, children: 0 };
   assert.throws(() => attachNativeReservation(db, thai.id, { ...tb, amount_inr: 1050 }, "v"), error => error.code === "PRICE_CHANGED");

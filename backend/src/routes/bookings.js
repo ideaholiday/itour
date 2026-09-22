@@ -36,7 +36,7 @@ import {
   redeemWalletCredit,
 } from "../services/referralService.js";
 import { localDateTimeMs, productTime } from "../lib/localTime.js";
-import { productCountry } from "../lib/productTax.js";
+import { isGstFreeProduct, productCountry } from "../lib/productTax.js";
 
 const router = Router();
 router.use(optionalAuthMiddleware);
@@ -764,8 +764,11 @@ function bookingDocumentRecord(ref) {
     LEFT JOIN driver_assignments da ON da.booking_id = b.id
     WHERE b.ref = ? OR b.id = ?
   `).get(ref, ref);
-  // The product's country sets the document's time zone and whether it is a GST invoice (ADR 023).
-  if (booking) booking.product_country = productCountry(db, booking.product_id);
+  // The product's country sets the document's time zone; its GST decides invoice or receipt (ADR 023, ADR 024).
+  if (booking) {
+    booking.product_country = productCountry(db, booking.product_id);
+    booking.gst_free = isGstFreeProduct(db, booking.product_id);
+  }
   return booking;
 }
 

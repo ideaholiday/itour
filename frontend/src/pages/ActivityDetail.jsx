@@ -149,7 +149,7 @@ function QuoteSummary({ serverQuote, quoteLoading, formatPrice, addonsTotalInr, 
           </div>
           {(serverQuote.breakdown?.gstAmount ?? 0) > 0 && (
             <div className="flex justify-between text-[11px] text-stone-500">
-              <span>GST 5%</span>
+              <span>GST</span>
               <span className="font-mono">{formatPrice(serverQuote.breakdown.gstAmount)}</span>
             </div>
           )}
