@@ -8,6 +8,7 @@ import TicketCard from "../components/TicketCard.jsx";
 import { useCurrency } from "../lib/currency.jsx";
 import { destinationPath, destinationSeo } from "../../../shared/destinationSeo.js";
 import { BlogPostCard } from "./BlogIndex.jsx";
+import WhatsAppShare from "../components/WhatsAppShare.jsx";
 
 // Page text in English and Hindi (ADR 028). Listing titles stay as suppliers wrote them.
 const TEXT = {
@@ -113,6 +114,14 @@ export default function DestinationPage({ lang = "en" }) {
               {page.fromPriceInr > 0 ? ` · ${t.from(formatPrice(page.fromPriceInr))}` : ""}
             </p>
           )}
+          <WhatsAppShare
+            kind="city"
+            itemId={page.slug}
+            defaultLang={lang}
+            className="mt-4"
+            urls={{ en: `https://ideaholiday.in${destinationPath(page.name, "en")}`, hi: `https://ideaholiday.in${destinationPath(page.name, "hi")}` }}
+            data={{ name: page.name, productCount: page.productCount, fromPriceInr: page.fromPriceInr }}
+          />
         </div>
       </section>
 

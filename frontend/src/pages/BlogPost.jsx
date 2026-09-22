@@ -6,6 +6,7 @@ import { withImageList } from "../lib/destinations.js";
 import SeoHead from "../components/SeoHead.jsx";
 import TicketCard from "../components/TicketCard.jsx";
 import BlogBody from "../components/BlogBody.jsx";
+import WhatsAppShare from "../components/WhatsAppShare.jsx";
 import { blogPostSeo } from "../../../shared/blogSeo.js";
 import { blogPath } from "../../../shared/blogMarkdown.js";
 
@@ -55,6 +56,7 @@ export default function BlogPost() {
           <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {post.readingMinutes} min read</span>
           {post.city && <Link to={post.cityPath} className="inline-flex items-center gap-1 font-semibold text-amber-700 hover:text-amber-800"><MapPin className="h-3.5 w-3.5" /> {post.city}</Link>}
         </p>
+        <WhatsAppShare kind="blog" itemId={post.slug} className="mt-4" urls={{ en: seo.canonical }} data={{ title: post.title }} />
       </div>
       {post.coverImage && (
         <div className="mx-auto mt-6 max-w-4xl px-4">

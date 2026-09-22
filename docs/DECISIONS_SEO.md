@@ -43,3 +43,14 @@
   - City names, listing titles and supplier text stay as written (English): a guessed transliteration could name the wrong place.
   - Other pages (activities, blog, search, checkout) stay English for now; a Hindi page links into them unchanged.
 - **Consequences**: A language is added by adding its strings and a path prefix. Hindi activity pages and Hindi blog posts are later, separate decisions.
+
+---
+
+## ADR 029: WhatsApp Share Button with an English or Hindi Message
+- **Date**: 2026-09-22
+- **Context**: Most Indian trip sharing happens on WhatsApp. Activity, city and blog pages had no share button.
+- **Decision Made**:
+  - A "Share on WhatsApp" button (`components/WhatsAppShare.jsx`) on activity, city and blog pages opens `wa.me` with a ready-made message. The traveler picks English or Hindi; it starts in the page's language.
+  - Messages (`shared/shareMessage.js`) hold only what the page shows: price and rating only when the listing has them. A Hindi city message links to the Hindi page; activity and blog messages link to the (English) page.
+  - Shared links carry `utm_source=whatsapp&utm_medium=share`, so visits from shares show in analytics and campaign attribution. Each tap sends a GA4 `share` event (`method: whatsapp`, `content_type`, `item_id`, `language`).
+- **Consequences**: No new service or library. Creator (affiliate) links are not added to shares; that would be its own decision.

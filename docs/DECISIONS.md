@@ -305,5 +305,5 @@ This document records significant technical and product architectural decisions.
 
 ---
 
-## ADR 025–028: SEO and content
-Moved to [`DECISIONS_SEO.md`](DECISIONS_SEO.md): city pages, the staff blog, link previews, Hindi pages. Add new SEO and content ADRs there.
+## ADR 025 onward: SEO and content
+Moved to [`DECISIONS_SEO.md`](DECISIONS_SEO.md): city pages, the staff blog, link previews, Hindi pages, WhatsApp sharing. Add new SEO and content ADRs there.

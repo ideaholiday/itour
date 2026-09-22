@@ -25,6 +25,7 @@ import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import SeoHead from "../components/SeoHead.jsx";
 import { activitySeo } from "../../../shared/activitySeo.js";
+import WhatsAppShare from "../components/WhatsAppShare.jsx";
 import StarRating from "../components/StarRating.jsx";
 import SupplierBadge from "../components/supplier/SupplierBadge.jsx";
 import DatePicker from "../components/ui/DatePicker.jsx";
@@ -950,6 +951,18 @@ export default function ActivityDetail() {
               <SupplierBadge verified={activity.supplierVerified} />
             </span>
             {activity.bestseller && <span className="rounded-full bg-amber-400 px-2.5 py-1 text-[10px] font-black uppercase text-stone-950">Bestseller</span>}
+            <WhatsAppShare
+              kind="activity"
+              itemId={activity.id}
+              urls={{ en: seo.canonical }}
+              data={{
+                title: activity.title,
+                city: activity.city,
+                priceInr: activity.priceInr ?? activity.price_inr,
+                rating: reviewData.quality?.average_rating,
+                reviewCount: reviewData.quality?.review_count,
+              }}
+            />
           </div>
         </header>
 
