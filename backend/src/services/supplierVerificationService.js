@@ -51,9 +51,27 @@ export const KYB_COUNTRY_RULES = Object.freeze({
       { docType: "OTHER", label: "Other business document" },
     ]),
   }),
+  // ADR 024: approved by an admin by hand; the manager's ID is optional.
+  "United Arab Emirates": Object.freeze({
+    cashfree: false,
+    required: Object.freeze([
+      { docType: "TRADE_LICENSE", label: "Trade licence", acceptedTypes: ["TRADE_LICENSE"] },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "DTCM tour operator licence", acceptedTypes: ["TOUR_OPERATOR_LICENSE"] },
+      { docType: "OWNER_ID", label: "Owner's passport or Emirates ID", acceptedTypes: ["OWNER_ID"] },
+      { docType: "VEHICLE_REGISTRATION", label: "RTA vehicle permit", acceptedTypes: ["VEHICLE_REGISTRATION", "COMMERCIAL_PERMIT"], transfersOnly: true },
+    ]),
+    documentTypes: Object.freeze([
+      { docType: "TRADE_LICENSE", label: "Trade licence" },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "DTCM tour operator licence" },
+      { docType: "OWNER_ID", label: "Owner's passport or Emirates ID" },
+      { docType: "MANAGER_ID", label: "Manager's passport or Emirates ID (optional)" },
+      { docType: "VEHICLE_REGISTRATION", label: "RTA vehicle permit" },
+      { docType: "OTHER", label: "Other business document" },
+    ]),
+  }),
 });
 
-// A country whose document list isn't set yet (the UAE): an admin reviews
+// A country whose document list isn't set yet: an admin reviews
 // whatever the supplier uploaded, but never approves with nothing on file.
 const UNLISTED_COUNTRY_RULES = Object.freeze({
   cashfree: false,

@@ -1,5 +1,5 @@
-/** Countries whose catalogue cities can hold a product (ADR 023). Dubai is signup-only for now. */
-export const LISTING_COUNTRIES = Object.freeze(["India", "Thailand"]);
+/** Countries whose catalogue cities can hold a product (ADR 023, ADR 024). */
+export const LISTING_COUNTRIES = Object.freeze(["India", "Thailand", "United Arab Emirates"]);
 
 export function listingOpenIn(country) {
   return LISTING_COUNTRIES.includes(country || "India");

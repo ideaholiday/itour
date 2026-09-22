@@ -237,7 +237,7 @@ test("a country page is indexable once that country has a live product (ADR 023)
   const xml = generateSitemapXml([], "https://ideaholiday.in", [], liveCountries(db));
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/search\?country=Thailand<\/loc>/);
   assert.match(headOf(searchPage(db, { country: "Thailand" }, INDEX_TEMPLATE).html), /content="index, follow"/);
-  assert.match(headOf(searchPage(db, { country: "United Arab Emirates" }, INDEX_TEMPLATE).html), /content="noindex, follow"/, "the UAE is not open for listing");
+  assert.match(headOf(searchPage(db, { country: "United Arab Emirates" }, INDEX_TEMPLATE).html), /content="noindex, follow"/, "nothing bookable in the UAE yet");
   assert.match(headOf(searchPage(db, { country: "Thailand", q: "scuba" }, INDEX_TEMPLATE).html), /content="noindex, follow"/);
   db.close();
 });

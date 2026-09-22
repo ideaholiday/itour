@@ -40,4 +40,13 @@ test("a product in Bangkok quotes 18% GST from an Indian supplier, none from a T
   assert.equal(gstAmount, 0);
   assert.equal(totalAmount, baseAmount + fastagTolls + stateTax);
   assert.equal(totalAmount, india.data.quote.breakdown.totalAmount - india.data.quote.breakdown.gstAmount);
+
+  // ADR 024: Dubai follows the same rule: 0% from a UAE supplier, 18% from an Indian one.
+  db.prepare("UPDATE products SET city = 'Dubai', state = 'Dubai' WHERE id = ?").run(product.id);
+  db.prepare("UPDATE suppliers SET city = 'Dubai', state = 'Dubai' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
+  const uae = (await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown;
+  assert.equal(uae.gstAmount, 0);
+  db.prepare("UPDATE suppliers SET city = ?, state = 'Goa' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run("Goa", product.id);
+  const fromIndia = (await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown;
+  assert.equal(fromIndia.gstAmount, Math.round((fromIndia.baseAmount + fromIndia.fastagTolls + fromIndia.stateTax) * 0.18));
 });

@@ -4,8 +4,8 @@ import Database from "better-sqlite3";
 import jwt from "jsonwebtoken";
 import { requestJson, startTestServer } from "./helpers/serverHarness.js";
 
-// ADR 023 step L1: products can be listed in Thai cities; Dubai is signup-only.
-test("a supplier lists in Bangkok, not yet in Dubai, and the city decides the country", async t => {
+// ADR 023 step L1: products can be listed in Thai cities; ADR 024 opens Dubai.
+test("a supplier lists in Bangkok and Dubai, and the city decides the country", async t => {
   const api = await startTestServer(); t.after(() => api.stop());
   const db = new Database(api.databasePath); t.after(() => db.close());
   const user = db.prepare("SELECT * FROM users WHERE role = 'SUPPLIER' LIMIT 1").get();
@@ -18,7 +18,7 @@ test("a supplier lists in Bangkok, not yet in Dubai, and the city decides the co
   const byName = Object.fromEntries(cities.data.map(city => [city.name, city]));
   assert.equal(byName.Bangkok.country, "Thailand");
   assert.equal(byName.Bangkok.listing_open, true);
-  assert.equal(byName.Dubai.listing_open, false);
+  assert.equal(byName.Dubai.listing_open, true);
 
   const tour = { productType: "DAY_TOUR", title: "Bangkok Temples Day Tour", city: "bangkok", state: "Bangkok", priceInr: 2499, shortDesc: "Grand Palace, Wat Pho and Wat Arun with hotel pickup.", itinerary: [] };
   const created = await requestJson(api.baseUrl, base, { token, body: tour });
@@ -34,14 +34,12 @@ test("a supplier lists in Bangkok, not yet in Dubai, and the city decides the co
   assert.match(mismatch.data.error, /Bangkok is in Thailand/);
 
   const dubai = await requestJson(api.baseUrl, base, { token, body: { ...tour, title: "Dubai Desert Safari", city: "Dubai", state: "Dubai" } });
-  assert.equal(dubai.response.status, 400);
-  assert.match(dubai.data.error, /United Arab Emirates open soon/);
+  assert.equal(dubai.response.status, 201, JSON.stringify(dubai.data));
 
   const v2 = { productType: "TOUR", productSubType: "PRIVATE", title: "Phuket Island Hopping", city: "Phuket", state: "Phuket", priceInr: 3999, status: "PUBLISHED" };
   const createdV2 = await requestJson(api.baseUrl, `${base}/v2`, { token, body: v2 });
   assert.equal(createdV2.response.status, 201, JSON.stringify(createdV2.data));
   const dubaiV2 = await requestJson(api.baseUrl, `${base}/v2`, { token, body: { ...v2, title: "Dubai City Tour", city: "Dubai", state: "Dubai" } });
-  assert.equal(dubaiV2.response.status, 400);
-  assert.match(dubaiV2.data.error, /United Arab Emirates open soon/);
-  assert.equal(db.prepare("SELECT count(*) AS n FROM products WHERE city = 'Dubai'").get().n, 0);
+  assert.equal(dubaiV2.response.status, 201, JSON.stringify(dubaiV2.data));
+  assert.equal(db.prepare("SELECT count(*) AS n FROM products WHERE city = 'Dubai'").get().n, 2);
 });
