@@ -81,9 +81,11 @@ export function kybRulesFor(country) {
  * The vehicle document a supplier must upload before a transfer can go live,
  * or null when none is needed or it is on file. Checked at publication too, so a
  * supplier approved as a tour operator can't sell a transfer without it (ADR 023).
+ * `country` is the transfer's country when it differs from the supplier's own,
+ * so an Indian supplier's Phuket transfer needs the Thai document (ADR 024).
  */
-export function missingTransferDocument(database, supplier) {
-  const required = kybRulesFor(supplierCountry(database, supplier)).required.find((doc) => doc.transfersOnly);
+export function missingTransferDocument(database, supplier, country = supplierCountry(database, supplier)) {
+  const required = kybRulesFor(country).required.find((doc) => doc.transfersOnly);
   if (!required) return null;
   const documents = database.prepare("SELECT doc_type, doc_url FROM kyb_documents WHERE supplier_id = ?").all(supplier.id);
   const uploaded = documents.some((doc) => required.acceptedTypes.includes(normalizeId(doc.doc_type)) && hasKybFile(doc));

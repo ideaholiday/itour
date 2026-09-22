@@ -86,10 +86,21 @@ function applyKybAutoApproval(req, supplierId) {
 
 // A transfer goes live only once its supplier's vehicle document is on file
 // where their country requires one (Thailand, ADR 023). Returns the error or null.
-function transferPublishRefusal(supplierId) {
+// Checks the rules of the supplier's own country and of each transfer's city,
+// so a transfer abroad needs that country's vehicle document (ADR 024).
+function transferPublishRefusal(supplierId, cities = []) {
   const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
-  const missing = supplier && missingTransferDocument(db, supplier);
-  return missing ? transferDocumentError(missing) : null;
+  if (!supplier) return null;
+  const countries = new Set([supplierCountry(db, supplier)]);
+  for (const city of cities) {
+    const row = city && db.prepare("SELECT country FROM destinations WHERE LOWER(name) = LOWER(?) LIMIT 1").get(String(city).trim());
+    if (row?.country) countries.add(row.country);
+  }
+  for (const country of countries) {
+    const missing = missingTransferDocument(db, supplier, country);
+    if (missing) return transferDocumentError(missing);
+  }
+  return null;
 }
 
 // Cashfree SecureID checks Indian GSTIN and PAN only; suppliers abroad are
@@ -878,7 +889,7 @@ router.post("/:id/products/v2", (req, res) => {
 
     const supplier = db.prepare("SELECT id FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
-    const transferRefusal = normType === "TRANSFER" && status !== "DRAFT" && transferPublishRefusal(id);
+    const transferRefusal = normType === "TRANSFER" && status !== "DRAFT" && transferPublishRefusal(id, [city]);
     if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
 
     const typeCode = normType.slice(0, 3).toLowerCase();
@@ -1045,7 +1056,7 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
     if (!["TRANSFER", "DAY_TOUR", "MULTI_DAY_PACKAGE"].includes(normalizedProductType)) {
       return res.status(400).json({ error: "Choose a valid product type" });
     }
-    const transferRefusal = normalizedProductType === "TRANSFER" && transferPublishRefusal(id);
+    const transferRefusal = normalizedProductType === "TRANSFER" && transferPublishRefusal(id, [city]);
     if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
     if (!title?.trim() || !city?.trim()) {
       return res.status(400).json({ error: "Title and city are required" });
@@ -1323,7 +1334,7 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
 
     const isPublished = Boolean(req.body?.isPublished);
     const status = isPublished ? "PUBLISHED" : "DRAFT";
-    const transferRefusal = isPublished && String(product.product_type).toUpperCase() === "TRANSFER" && transferPublishRefusal(id);
+    const transferRefusal = isPublished && String(product.product_type).toUpperCase() === "TRANSFER" && transferPublishRefusal(id, [product.city]);
     if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
     db.prepare("UPDATE products SET is_published = ?, status = ? WHERE id = ? AND supplier_id = ?")
       .run(isPublished ? 1 : 0, status, productId, id);
@@ -2156,8 +2167,8 @@ router.post("/:id/products/bulk-action", optionalAuthMiddleware, requireSupplier
 
   if (action === "publish") {
     const placeholders = productIds.map(() => "?").join(", ");
-    const transfers = db.prepare(`SELECT 1 FROM products WHERE supplier_id = ? AND id IN (${placeholders}) AND UPPER(COALESCE(product_type, '')) = 'TRANSFER' LIMIT 1`).get(id, ...productIds);
-    const transferRefusal = transfers && transferPublishRefusal(id);
+    const transfers = db.prepare(`SELECT city FROM products WHERE supplier_id = ? AND id IN (${placeholders}) AND UPPER(COALESCE(product_type, '')) = 'TRANSFER'`).all(id, ...productIds);
+    const transferRefusal = transfers.length > 0 && transferPublishRefusal(id, transfers.map((row) => row.city));
     if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
   }
 
