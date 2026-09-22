@@ -63,4 +63,11 @@ test("a product in Bangkok quotes 18% GST from an Indian supplier, none from a T
   assert.equal((await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown.gstAmount, 0);
   const bali = (await requestJson(api.baseUrl, `/api/activities/${product.id}`)).data;
   assert.deepEqual([bali.country, bali.timeZone, bali.timeLabel, bali.gstFree], ["Indonesia", "Asia/Makassar", "WITA", true]);
+
+  // The Maldives: a Malé supplier's product is 0%, in Maldives time.
+  db.prepare("UPDATE products SET city = 'Malé', state = 'Malé' WHERE id = ?").run(product.id);
+  db.prepare("UPDATE suppliers SET city = 'Malé', state = 'Malé' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
+  assert.equal((await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown.gstAmount, 0);
+  const male = (await requestJson(api.baseUrl, `/api/activities/${product.id}`)).data;
+  assert.deepEqual([male.country, male.timeLabel, male.gstFree], ["Maldives", "MVT", true]);
 });

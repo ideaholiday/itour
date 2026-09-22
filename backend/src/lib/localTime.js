@@ -10,6 +10,7 @@ export const COUNTRY_TIME = Object.freeze({
   Singapore: Object.freeze({ timeZone: "Asia/Singapore", offset: "+08:00", label: "SGT" }),
   // Western Indonesia time; cities in other zones are listed in CITY_TIME.
   Indonesia: Object.freeze({ timeZone: "Asia/Jakarta", offset: "+07:00", label: "WIB" }),
+  Maldives: Object.freeze({ timeZone: "Indian/Maldives", offset: "+05:00", label: "MVT" }),
 });
 
 /** Cities whose zone differs from their country's (ADR 024): Bali is on Central Indonesia time. */

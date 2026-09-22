@@ -39,13 +39,13 @@ describe("Multi-Currency Service", () => {
   });
 
   it("converts INR amounts accurately to foreign currencies", () => {
-    // 8650 INR -> approx 100 USD (at 86.50 rate)
-    const usd = convertFromInr(8650, "USD");
+    // 9700 INR -> 100 USD (fixed at 97, owner decision 2026-09-22)
+    const usd = convertFromInr(9700, "USD");
     assert.equal(usd.currency, "USD");
     assert.equal(usd.symbol, "$");
     assert.equal(usd.amount, 100);
     assert.equal(usd.formatted, "$100.00");
-    assert.equal(usd.baseInr, 8650);
+    assert.equal(usd.baseInr, 9700);
 
     // 9280 INR -> approx 100 EUR (at 92.80 rate)
     const eur = convertFromInr(9280, "EUR");

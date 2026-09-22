@@ -270,6 +270,16 @@ test("an Indonesian supplier needs NIB, TDUP and a director's ID, and a vehicle 
   database.close();
 });
 
+test("a Maldives supplier needs registration, a tourism licence and a director's ID, and a vessel or vehicle paper for transfers (ADR 024)", async () => {
+  const database = abroadDatabase("Malé", "Maldives");
+  const readiness = () => getKybApprovalReadiness(database, supplierRow(database));
+  assert.deepEqual(readiness().missingDocuments, ["Business registration certificate", "Ministry of Tourism tour operator or travel agency licence", "Director's passport or Maldivian ID"]);
+  for (const [id, type] of [["mv-1", "COMPANY_REGISTRATION"], ["mv-2", "TOUR_OPERATOR_LICENSE"], ["mv-3", "DIRECTOR_ID"]]) await addDocument(database, id, type);
+  database.prepare("INSERT INTO products VALUES ('mv-transfer', 'supplier-1', 'TRANSFER')").run();
+  assert.deepEqual(readiness().missingDocuments, ["Vessel or vehicle registration (Transport Authority)"]);
+  database.close();
+});
+
 test("a supplier from a country without a document list needs at least one uploaded document", async () => {
   const database = abroadDatabase("Kathmandu", "Nepal");
   assert.deepEqual(getKybApprovalReadiness(database, supplierRow(database)).missingDocuments, ["At least one business document from Nepal"]);

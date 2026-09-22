@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from "
 
 export const DEFAULT_CURRENCIES = [
   { code: "INR", symbol: "₹", name: "Indian Rupee", flag: "🇮🇳", decimals: 0, rateToInr: 1.0 },
-  { code: "USD", symbol: "$", name: "US Dollar", flag: "🇺🇸", decimals: 2, rateToInr: 86.50 },
+  { code: "USD", symbol: "$", name: "US Dollar", flag: "🇺🇸", decimals: 2, rateToInr: 97 },
   { code: "EUR", symbol: "€", name: "Euro", flag: "🇪🇺", decimals: 2, rateToInr: 92.80 },
   { code: "GBP", symbol: "£", name: "British Pound", flag: "🇬🇧", decimals: 2, rateToInr: 108.90 },
   { code: "AED", symbol: "د.إ", name: "UAE Dirham", flag: "🇦🇪", decimals: 2, rateToInr: 23.55 },

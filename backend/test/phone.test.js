@@ -33,6 +33,11 @@ test("Indonesian mobiles are 9 to 12 digits after the trunk 0 (ADR 024)", () => 
   assert.equal(toE164("+62 812 3456 7890 12"), null, "too long");
 });
 
+test("Maldives mobiles are 7 digits starting 7 or 9 (ADR 024)", () => {
+  assert.equal(toE164("791 2345", "MV"), "+9607912345");
+  assert.equal(toE164("+960 331 2345"), null, "a Malé landline is not a mobile");
+});
+
 test("a typed country code wins over the selected country", () => {
   assert.equal(toE164("+66 81 234 5678", "IN"), "+66812345678");
   assert.equal(toE164("+66 081 234 5678"), "+66812345678");

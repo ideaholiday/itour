@@ -10,6 +10,7 @@ export const PHONE_COUNTRIES = Object.freeze([
   { iso: "SG", dialCode: "65", name: "Singapore", length: 8, mobilePrefix: /^[89]/ },
   // Indonesian mobiles are 9 to 12 digits after the trunk 0 (0812 3456 7890).
   { iso: "ID", dialCode: "62", name: "Indonesia", length: 9, maxLength: 12, mobilePrefix: /^8/ },
+  { iso: "MV", dialCode: "960", name: "Maldives", length: 7, mobilePrefix: /^[79]/ },
 ]);
 
 /** Look a country up by ISO code (`TH`) or dial code (`66`, `+66`). */
