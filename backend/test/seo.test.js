@@ -17,6 +17,7 @@ test("sitemap.xml lists public routes, cities with live products, and products w
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/privacy-policy<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/things-to-do\/goa<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/things-to-do\/navi-mumbai<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/hi\/things-to-do\/goa<\/loc>/, "each city's Hindi page too");
   assert.doesNotMatch(xml, /search\?destination=/, "a city is listed once, at its own page");
   assert.doesNotMatch(xml, /search\?q=/, "no hard-coded cities that may have nothing to book");
   assert.doesNotMatch(xml, /<lastmod>/);
@@ -311,5 +312,42 @@ test("a things-to-do page lists a city's live products with its own head, FAQ an
   assert.equal(missing.status, 404);
   assert.match(headOf(missing.html), /content="noindex, follow"/);
   assert.equal(destinationPage(db, "jaipur", INDEX_TEMPLATE).status, 404, "a pending supplier's city has no page");
+  db.close();
+});
+
+test("a Hindi city page has Hindi copy, lang=hi, and hreflang links to both versions (ADR 028)", () => {
+  const db = catalogDatabase();
+  db.exec(`CREATE TABLE destinations (id TEXT, name TEXT, state TEXT, tagline TEXT, hero_image TEXT, category TEXT, is_active INTEGER DEFAULT 1, country TEXT);
+    INSERT INTO destinations VALUES ('lucknow', 'Lucknow', 'Uttar Pradesh', NULL, NULL, 'METRO', 1, 'India');`);
+
+  const page = destinationPage(db, "lucknow", INDEX_TEMPLATE, "https://ideaholiday.in", "hi");
+  assert.equal(page.status, 200);
+  assert.match(page.html, /<html lang="hi">/);
+  const head = headOf(page.html);
+  assert.match(head, /<title>Lucknow में करने लायक चीज़ें: टूर, एक्टिविटी और कैब \| Idea Holiday<\/title>/);
+  assert.match(head, /<meta name="description" content="Lucknow, Uttar Pradesh में 2 अनुभव। ₹900 से शुरू।/);
+  assert.match(head, /<link rel="canonical" href="https:\/\/ideaholiday.in\/hi\/things-to-do\/lucknow" \/>/);
+  assert.match(head, /<meta property="og:locale" content="hi_IN" \/>/);
+  assert.equal(count(head, /og:locale/g), 1, "the template's en_IN is replaced");
+  assert.match(head, /<link rel="alternate" hreflang="en-IN" href="https:\/\/ideaholiday.in\/things-to-do\/lucknow" \/>/);
+  assert.match(head, /<link rel="alternate" hreflang="hi-IN" href="https:\/\/ideaholiday.in\/hi\/things-to-do\/lucknow" \/>/);
+  assert.match(head, /<link rel="alternate" hreflang="x-default" href="https:\/\/ideaholiday.in\/things-to-do\/lucknow" \/>/);
+  const graph = JSON.parse(head.match(/id="structured-data-json-ld">([\s\S]*?)<\/script>/)[1])["@graph"];
+  assert.equal(graph[0].inLanguage, "hi-IN");
+  const hindiFaqs = destinationFaqs(destinationView(db, "lucknow"), "hi");
+  assert.deepEqual(graph.find((node) => node["@type"] === "FAQPage").mainEntity.map((question) => question.name), hindiFaqs.map((faq) => faq.question));
+  assert.match(hindiFaqs[0].question, /Lucknow में करने लायक सबसे अच्छी चीज़ें/);
+  assert.ok(hindiFaqs.some((faq) => /₹900 से शुरू/.test(faq.answer)));
+
+  const english = destinationPage(db, "lucknow", INDEX_TEMPLATE, "https://ideaholiday.in");
+  assert.match(english.html, /<html lang="en">/);
+  assert.match(headOf(english.html), /<link rel="alternate" hreflang="hi-IN" href="https:\/\/ideaholiday.in\/hi\/things-to-do\/lucknow" \/>/, "the English page points at its Hindi version");
+  assert.match(headOf(english.html), /<meta property="og:locale" content="en_IN" \/>/);
+
+  assert.deepEqual(destinationPage(db, "Lucknow", INDEX_TEMPLATE, "https://ideaholiday.in", "hi"), { status: 301, location: "/hi/things-to-do/lucknow" });
+  const missing = destinationPage(db, "atlantis", INDEX_TEMPLATE, "https://ideaholiday.in", "hi");
+  assert.equal(missing.status, 404);
+  assert.match(headOf(missing.html), /hi\/things-to-do\/atlantis/);
+  assert.equal(headOf(activityPage(db, "p_scuba", INDEX_TEMPLATE).html).includes('hreflang'), false, "no translations claimed for pages that have none");
   db.close();
 });

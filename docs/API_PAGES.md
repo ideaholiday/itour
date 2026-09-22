@@ -11,7 +11,8 @@ through to the SPA when `frontend/dist` is not built.
 ## 1. Supplier and city pages
 - **`GET /suppliers`, `/suppliers/in/:citySlug`, `/suppliers/:slug`**: JSON-LD `TravelAgency` + `BreadcrumbList`.
 - **`GET /things-to-do/:citySlug`** (ADR 025): `CollectionPage` + `ItemList`, `BreadcrumbList`, `FAQPage`; `noindex` when nothing is live there.
-- **`GET /api/destination-pages/:slug`** → `{ name, slug, path, state, country, tagline, heroImage, productCount, fromPriceInr, categories: [{ name, count }], faqs: [{ question, answer }], products }` (products shaped as `GET /api/activities`); `404 DESTINATION_NOT_FOUND`.
+- **`GET /hi/things-to-do/:citySlug`** (ADR 028): the Hindi version: `<html lang="hi">`, `og:locale` `hi_IN`, Hindi title, description and FAQs. Both versions carry `hreflang` links (`en-IN`, `hi-IN`, `x-default` → English).
+- **`GET /api/destination-pages/:slug?lang=hi`** → `{ name, slug, path, state, country, tagline, heroImage, productCount, fromPriceInr, categories: [{ name, count }], faqs: [{ question, answer }], products }` (products shaped as `GET /api/activities`); `404 DESTINATION_NOT_FOUND`.
 
 ## 2. Blog (ADR 026)
 - **`GET /blog`**, **`GET /blog/:slug`**: pages; a post has `BlogPosting` + `BreadcrumbList`. A draft is a `noindex` 404; a renamed post `301`s from its old slug.
@@ -23,5 +24,5 @@ through to the SPA when `frontend/dist` is not built.
 - Body format: the Markdown subset in `shared/blogMarkdown.js` (`##`/`###`, lists, `>` quotes, `**bold**`, `[text](https://… or /path)`), rendered as React elements, never HTML.
 
 ## 3. Sitemaps
-- **`GET /sitemap.xml`**: static pages, country pages, one `/things-to-do/:city` per city with live products, live activities, and `/blog` plus each published post (when there is one).
+- **`GET /sitemap.xml`**: static pages, country pages, one `/things-to-do/:city` and one `/hi/things-to-do/:city` per city with live products, live activities, and `/blog` plus each published post (when there is one).
 - **`GET /sitemap-suppliers.xml`**: the directory, indexable city pages and indexable profiles. Both are listed in `robots.txt`.

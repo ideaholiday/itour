@@ -280,14 +280,15 @@ router.get("/destinations", (req, res) => {
   }
 });
 
-// GET /api/destination-pages/:slug - a "things to do" city page: summary, FAQs and its live products.
+// GET /api/destination-pages/:slug?lang=hi - a "things to do" city page: summary, FAQs (English or Hindi) and its live products.
 router.get("/destination-pages/:slug", (req, res) => {
   try {
     const view = destinationView(db, req.params.slug);
     if (!view) return res.status(404).json({ error: "Destination not found", code: "DESTINATION_NOT_FOUND", requestId: req.requestId });
     const { products, ...summary } = view;
     res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
-    res.json({ ...summary, faqs: destinationFaqs(view), products: parseProductRows(products) });
+    const lang = req.query.lang === "hi" ? "hi" : "en";
+    res.json({ ...summary, faqs: destinationFaqs(view, lang), products: parseProductRows(products) });
   } catch (err) {
     logger.error("Destination page lookup failed", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to load destination" });

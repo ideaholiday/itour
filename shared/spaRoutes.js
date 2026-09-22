@@ -4,7 +4,7 @@
 export const SPA_ROUTES = [
   "/", "/driver/trip", "/track/:ref", "/review/:token", "/r/:slug",
   "/search", "/transfers", "/profile", "/wishlist", "/messages",
-  "/things-to-do/:citySlug", "/blog", "/blog/:slug",
+  "/things-to-do/:citySlug", "/hi/things-to-do/:citySlug", "/blog", "/blog/:slug",
   "/suppliers", "/suppliers/in/:citySlug", "/suppliers/:slug",
   "/supplier", "/supplier/signup", "/supplier/dashboard", "/supplier/bookings", "/supplier/portal",
   "/supplier/coverage", "/supplier/channels", "/supplier/login",

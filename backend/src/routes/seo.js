@@ -54,6 +54,11 @@ export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = [
       priority: "0.8",
       changefreq: "weekly",
     })),
+    ...(cities || []).map((city) => ({
+      loc: `${baseUrl}${destinationPath(city.name, "hi")}`,
+      priority: "0.7",
+      changefreq: "weekly",
+    })),
   ];
 
   // No <lastmod>: products carry no edit time, and a guessed date teaches
@@ -152,6 +157,8 @@ const HEAD_TAG_PATTERNS = [
   /<meta\s+property="og:(?:title|description|image|image:alt|type|url)"[^>]*>\s*/gi,
   /<meta\s+name="twitter:(?:title|description|image)"[^>]*>\s*/gi,
   /<link\s+rel="canonical"[^>]*>\s*/i,
+  /<link\s+rel="alternate"\s+hreflang="[^"]*"[^>]*>\s*/gi,
+  /<meta\s+property="og:locale"[^>]*>\s*/i,
   /<script[^>]+id="structured-data-json-ld"[\s\S]*?<\/script>\s*/i,
 ];
 
@@ -162,9 +169,10 @@ const HEAD_TAG_PATTERNS = [
  * shared profile would preview as the home page. SeoHead updates the same tags
  * in the browser afterwards.
  */
-export function renderSeoHtml(template, { title, description, canonical, image = DEFAULT_SOCIAL_IMAGE, imageAlt = null, robots = "index, follow", type = "website", jsonLd = null }) {
+export function renderSeoHtml(template, { title, description, canonical, image = DEFAULT_SOCIAL_IMAGE, imageAlt = null, robots = "index, follow", type = "website", jsonLd = null, lang = "en", alternates = [] }) {
   let html = String(template);
   for (const pattern of HEAD_TAG_PATTERNS) html = html.replace(pattern, "");
+  html = html.replace(/<html\b[^>]*>/i, `<html lang="${lang === "hi" ? "hi" : "en"}">`);
   const tags = [
     `<title>${escapeHtml(title)}</title>`,
     `<meta name="description" content="${escapeHtml(description)}" />`,
@@ -176,6 +184,8 @@ export function renderSeoHtml(template, { title, description, canonical, image =
     imageAlt ? `<meta property="og:image:alt" content="${escapeHtml(imageAlt)}" />` : null,
     `<meta property="og:type" content="${escapeHtml(type)}" />`,
     `<meta property="og:url" content="${escapeHtml(canonical)}" />`,
+    `<meta property="og:locale" content="${lang === "hi" ? "hi_IN" : "en_IN"}" />`,
+    ...alternates.map((alternate) => `<link rel="alternate" hreflang="${escapeHtml(alternate.hreflang)}" href="${escapeHtml(alternate.href)}" />`),
     `<meta name="twitter:title" content="${escapeHtml(title)}" />`,
     `<meta name="twitter:description" content="${escapeHtml(description)}" />`,
     `<meta name="twitter:image" content="${escapeHtml(image)}" />`,
@@ -430,14 +440,14 @@ export function destinationView(database, slug) {
   };
 }
 
-/** What /things-to-do/:citySlug answers before the SPA loads. */
-export function destinationPage(database, slug, template, baseUrl = BASE_URL) {
+/** What /things-to-do/:citySlug (and the Hindi /hi/things-to-do/:citySlug) answers before the SPA loads. */
+export function destinationPage(database, slug, template, baseUrl = BASE_URL, lang = "en") {
   const view = destinationView(database, slug);
   if (!view) {
-    return { status: 404, html: renderSeoHtml(template, notFoundSeo(baseUrl, `/things-to-do/${encodeURIComponent(slug)}`, "Destination not found | Idea Holiday")) };
+    return { status: 404, html: renderSeoHtml(template, { ...notFoundSeo(baseUrl, `${lang === "hi" ? "/hi" : ""}/things-to-do/${encodeURIComponent(slug)}`, "Destination not found | Idea Holiday"), lang }) };
   }
-  if (slug !== view.slug) return { status: 301, location: view.path };
-  return { status: 200, html: renderSeoHtml(template, destinationSeo(view, { baseUrl })) };
+  if (slug !== view.slug) return { status: 301, location: destinationPath(view.name, lang) };
+  return { status: 200, html: renderSeoHtml(template, destinationSeo(view, { baseUrl, lang })) };
 }
 
 /** What /blog/:slug answers before the SPA loads: the post's head, a 301 after a rename, or a noindex 404. */
@@ -574,11 +584,11 @@ router.get("/blog/:slug", (req, res, next) => {
   }
 });
 
-router.get("/things-to-do/:citySlug", (req, res, next) => {
+router.get(["/things-to-do/:citySlug", "/hi/things-to-do/:citySlug"], (req, res, next) => {
   const template = indexTemplate();
   if (!template) return next();
   try {
-    return sendPage(res, destinationPage(db, req.params.citySlug, template, BASE_URL));
+    return sendPage(res, destinationPage(db, req.params.citySlug, template, BASE_URL, req.path.startsWith("/hi/") ? "hi" : "en"));
   } catch (error) {
     logger.error("Destination page render failed", { requestId: req.requestId, error });
     return next();

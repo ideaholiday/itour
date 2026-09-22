@@ -148,6 +148,7 @@ function AppContent() {
             <Route path="/blog" element={<BlogIndex />} />
             <Route path="/blog/:slug" element={<BlogPost />} />
             <Route path="/things-to-do/:citySlug" element={<DestinationPage />} />
+            <Route path="/hi/things-to-do/:citySlug" element={<DestinationPage lang="hi" />} />
             <Route path="/suppliers" element={<SupplierDirectory />} />
             <Route path="/suppliers/in/:citySlug" element={<SupplierDirectory />} />
             <Route path="/suppliers/:slug" element={<SupplierProfile />} />

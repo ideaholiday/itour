@@ -10,6 +10,8 @@ export default function SeoHead({
   canonical = "https://ideaholiday.in/",
   image = "https://ideaholiday.in/idea-holiday-social.png",
   imageAlt = null,
+  lang = "en",
+  alternates = null,
   type = "website",
   jsonLd = null,
   noindex = false,
@@ -60,6 +62,18 @@ export default function SeoHead({
     setMetaTag("name", "twitter:description", description);
     setMetaTag("name", "twitter:image", image);
 
+    // Page language and its translations (hreflang), as the server writes them.
+    document.documentElement.lang = lang;
+    setMetaTag("property", "og:locale", lang === "hi" ? "hi_IN" : "en_IN");
+    document.querySelectorAll('link[rel="alternate"][hreflang]').forEach((element) => element.remove());
+    for (const alternate of alternates || []) {
+      const element = document.createElement("link");
+      element.setAttribute("rel", "alternate");
+      element.setAttribute("hreflang", alternate.hreflang);
+      element.setAttribute("href", alternate.href);
+      document.head.appendChild(element);
+    }
+
     // 6. Inject / Update Schema.org JSON-LD
     let scriptTag = document.getElementById("structured-data-json-ld");
     if (jsonLd) {
@@ -73,7 +87,12 @@ export default function SeoHead({
     } else if (scriptTag) {
       scriptTag.remove();
     }
-  }, [title, description, keywords, canonical, image, imageAlt, type, jsonLd, noindex]);
+    // A Hindi page's language must not stay on the next page, whatever it renders.
+    return () => {
+      document.documentElement.lang = "en";
+      document.querySelectorAll('link[rel="alternate"][hreflang]').forEach((element) => element.remove());
+    };
+  }, [title, description, keywords, canonical, image, imageAlt, lang, alternates, type, jsonLd, noindex]);
 
   return null;
 }

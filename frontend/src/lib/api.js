@@ -59,7 +59,7 @@ function cachedFetch(url, options = {}, ttlMs = 30000) {
 
 export const api = {
   getDestinations: () => cachedFetch(`${BASE}/destinations`, {}, 300000), // 5 min cache
-  getDestinationPage: (slug) => fetch(`${BASE}/destination-pages/${encodeURIComponent(slug)}`).then(handle),
+  getDestinationPage: (slug, lang = "en") => fetch(`${BASE}/destination-pages/${encodeURIComponent(slug)}${lang === "hi" ? "?lang=hi" : ""}`).then(handle),
   getBlogPosts: ({ city, page } = {}) => fetch(`${BASE}/blog?${new URLSearchParams({ ...(city ? { city } : {}), ...(page > 1 ? { page: String(page) } : {}) })}`).then(handle),
   getBlogPost: (slug) => fetch(`${BASE}/blog/${encodeURIComponent(slug)}`).then(handle),
   adminListBlogPosts: () => fetch(`${BASE}/admin/blog`, { headers: authHeaders() }).then(handle),
