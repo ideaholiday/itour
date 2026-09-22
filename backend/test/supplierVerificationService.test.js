@@ -248,10 +248,21 @@ test("a UAE supplier needs a trade licence, DTCM licence and owner's ID; the man
   database.close();
 });
 
-test("a supplier from a country without a document list needs at least one uploaded document", async () => {
+test("a Singapore supplier needs ACRA, STB and a director's ID, and an LTA permit for transfers (ADR 024)", async () => {
   const database = abroadDatabase("Singapore", "Singapore");
-  assert.deepEqual(getKybApprovalReadiness(database, supplierRow(database)).missingDocuments, ["At least one business document from Singapore"]);
-  await addDocument(database, "sg-1", "COMPANY_REGISTRATION");
+  const readiness = () => getKybApprovalReadiness(database, supplierRow(database));
+  assert.deepEqual(readiness().missingDocuments, ["ACRA BizFile company profile", "STB travel agent licence", "Director's passport or NRIC"]);
+  for (const [id, type] of [["sg-1", "COMPANY_REGISTRATION"], ["sg-2", "TOUR_OPERATOR_LICENSE"], ["sg-3", "DIRECTOR_ID"]]) await addDocument(database, id, type);
+  assert.equal(readiness().canApprove, true);
+  database.prepare("INSERT INTO products VALUES ('sg-transfer', 'supplier-1', 'TRANSFER')").run();
+  assert.deepEqual(readiness().missingDocuments, ["LTA vehicle licence or permit"]);
+  database.close();
+});
+
+test("a supplier from a country without a document list needs at least one uploaded document", async () => {
+  const database = abroadDatabase("Kathmandu", "Nepal");
+  assert.deepEqual(getKybApprovalReadiness(database, supplierRow(database)).missingDocuments, ["At least one business document from Nepal"]);
+  await addDocument(database, "np-1", "COMPANY_REGISTRATION");
   assert.equal(getKybApprovalReadiness(database, supplierRow(database)).canApprove, true);
   database.close();
 });

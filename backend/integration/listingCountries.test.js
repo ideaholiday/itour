@@ -19,6 +19,7 @@ test("a supplier lists in Bangkok and Dubai, and the city decides the country", 
   assert.equal(byName.Bangkok.country, "Thailand");
   assert.equal(byName.Bangkok.listing_open, true);
   assert.equal(byName.Dubai.listing_open, true);
+  assert.deepEqual([byName.Singapore.country, byName.Singapore.listing_open], ["Singapore", true]);
 
   const tour = { productType: "DAY_TOUR", title: "Bangkok Temples Day Tour", city: "bangkok", state: "Bangkok", priceInr: 2499, shortDesc: "Grand Palace, Wat Pho and Wat Arun with hotel pickup.", itinerary: [] };
   const created = await requestJson(api.baseUrl, base, { token, body: tour });

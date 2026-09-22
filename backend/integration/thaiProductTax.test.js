@@ -49,4 +49,11 @@ test("a product in Bangkok quotes 18% GST from an Indian supplier, none from a T
   db.prepare("UPDATE suppliers SET city = ?, state = 'Goa' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run("Goa", product.id);
   const fromIndia = (await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown;
   assert.equal(fromIndia.gstAmount, Math.round((fromIndia.baseAmount + fromIndia.fastagTolls + fromIndia.stateTax) * 0.18));
+
+  // Singapore too: 18% from the Indian supplier, 0% once the supplier is in Singapore.
+  db.prepare("UPDATE products SET city = 'Singapore', state = 'Singapore' WHERE id = ?").run(product.id);
+  const sgFromIndia = (await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown;
+  assert.equal(sgFromIndia.gstAmount, Math.round((sgFromIndia.baseAmount + sgFromIndia.fastagTolls + sgFromIndia.stateTax) * 0.18));
+  db.prepare("UPDATE suppliers SET city = 'Singapore', state = 'Singapore' WHERE id = (SELECT supplier_id FROM products WHERE id = ?)").run(product.id);
+  assert.equal((await requestJson(api.baseUrl, "/api/bookings/quote", { body: input })).data.quote.breakdown.gstAmount, 0);
 });

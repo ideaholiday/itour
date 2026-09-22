@@ -7,6 +7,7 @@ export const PHONE_COUNTRIES = Object.freeze([
   { iso: "IN", dialCode: "91", name: "India", length: 10, mobilePrefix: /^[6-9]/ },
   { iso: "TH", dialCode: "66", name: "Thailand", length: 9, mobilePrefix: /^[689]/ },
   { iso: "AE", dialCode: "971", name: "United Arab Emirates", length: 9, mobilePrefix: /^5/ },
+  { iso: "SG", dialCode: "65", name: "Singapore", length: 8, mobilePrefix: /^[89]/ },
 ]);
 
 /** Look a country up by ISO code (`TH`) or dial code (`66`, `+66`). */

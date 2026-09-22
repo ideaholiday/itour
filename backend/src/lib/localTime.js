@@ -7,6 +7,7 @@ export const COUNTRY_TIME = Object.freeze({
   India: Object.freeze({ timeZone: "Asia/Kolkata", offset: "+05:30", label: "IST" }),
   Thailand: Object.freeze({ timeZone: "Asia/Bangkok", offset: "+07:00", label: "ICT" }),
   "United Arab Emirates": Object.freeze({ timeZone: "Asia/Dubai", offset: "+04:00", label: "GST" }),
+  Singapore: Object.freeze({ timeZone: "Asia/Singapore", offset: "+08:00", label: "SGT" }),
 });
 
 export const INDIA_TIME = COUNTRY_TIME.India;

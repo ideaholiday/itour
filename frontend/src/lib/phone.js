@@ -6,17 +6,18 @@ export const PHONE_COUNTRIES = Object.freeze([
   { iso: "IN", dialCode: "91", name: "India", flag: "🇮🇳", length: 10, mobilePrefix: /^[6-9]/, example: "98765 43210" },
   { iso: "TH", dialCode: "66", name: "Thailand", flag: "🇹🇭", length: 9, mobilePrefix: /^[689]/, example: "81 234 5678" },
   { iso: "AE", dialCode: "971", name: "UAE", flag: "🇦🇪", length: 9, mobilePrefix: /^5/, example: "50 123 4567" },
+  { iso: "SG", dialCode: "65", name: "Singapore", flag: "🇸🇬", length: 8, mobilePrefix: /^[89]/, example: "8123 4567" },
 ]);
 
 export const OTHER_COUNTRY = "OTHER";
 
-const CURRENCY_COUNTRY = { INR: "IN", THB: "TH", AED: "AE" };
+const CURRENCY_COUNTRY = { INR: "IN", THB: "TH", AED: "AE", SGD: "SG" };
 
 export function phoneCountry(iso) {
   return PHONE_COUNTRIES.find((country) => country.iso === iso) || null;
 }
 
-const COUNTRY_NAME = { India: "IN", Thailand: "TH", "United Arab Emirates": "AE" };
+const COUNTRY_NAME = { India: "IN", Thailand: "TH", "United Arab Emirates": "AE", Singapore: "SG" };
 
 /** The picker's country for a destination's `country` (`Thailand` → `TH`). */
 export function phoneCountryForName(name) {

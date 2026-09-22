@@ -20,6 +20,12 @@ test("Thai and UAE local numbers get their own country code, never +91", () => {
   assert.equal(normalizeWhatsAppPhone("0812345678"), null);
 });
 
+test("Singapore mobiles are 8 digits starting 8 or 9 (ADR 024)", () => {
+  assert.equal(toE164("8123 4567", "SG"), "+6581234567");
+  assert.equal(toE164("+65 9123 4567"), "+6591234567");
+  assert.equal(toE164("+65 6123 4567"), null, "a Singapore landline is not a mobile");
+});
+
 test("a typed country code wins over the selected country", () => {
   assert.equal(toE164("+66 81 234 5678", "IN"), "+66812345678");
   assert.equal(toE164("+66 081 234 5678"), "+66812345678");

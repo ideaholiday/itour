@@ -86,4 +86,10 @@ describe("Multi-Currency Service", () => {
     assert.equal(thb.formatted, "฿1,000");
     assert.equal(thb.baseInr, 2870);
   });
+
+  it("shows Singapore dollars at the fixed ₹78 rate (ADR 024)", () => {
+    const sgd = convertFromInr(7800, "SGD");
+    assert.equal(sgd.amount, 100);
+    assert.equal(sgd.formatted, "S$100.00");
+  });
 });
