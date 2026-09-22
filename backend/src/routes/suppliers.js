@@ -86,6 +86,13 @@ function applyKybAutoApproval(req, supplierId) {
   }
 }
 
+// An individual owner whose checks already passed is approved when the last
+// required document arrives (ADR 024 C4). Businesses still approve on GSTIN + PAN.
+function ownerDocumentAutoApproval(req, supplierId) {
+  const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
+  return isIndividualOwner(supplier) ? applyKybAutoApproval(req, supplierId).approved : false;
+}
+
 // A transfer goes live only once its supplier's vehicle document is on file
 // where their country requires one (Thailand, ADR 023). Returns the error or null.
 // Checks the supplier's own country only: an Indian supplier's transfer abroad
@@ -363,7 +370,7 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
       ).run(docNumber, docUrl, existing.id);
 
       const updatedDoc = db.prepare("SELECT * FROM kyb_documents WHERE id = ?").get(existing.id);
-      return res.json({ success: true, docId: existing.id, document: updatedDoc, message: "KYB Document re-submitted for review." });
+      return res.json({ success: true, docId: existing.id, document: updatedDoc, kybAutoApproved: ownerDocumentAutoApproval(req, id), message: "KYB Document re-submitted for review." });
     }
 
     db.prepare(
@@ -372,7 +379,7 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
     ).run(docId, id, docType, docNumber, docUrl);
 
     const createdDoc = db.prepare("SELECT * FROM kyb_documents WHERE id = ?").get(docId);
-    res.json({ success: true, docId, document: createdDoc, message: "KYB Document submitted for review." });
+    res.json({ success: true, docId, document: createdDoc, kybAutoApproved: ownerDocumentAutoApproval(req, id), message: "KYB Document submitted for review." });
   } catch (err) {
     logger.error("Failed to submit KYB document", { requestId: req.requestId, error: err });
     res.status(500).json({ error: err.message || "Failed to submit KYB document" });
@@ -494,10 +501,11 @@ router.post("/:id/kyb/verify-dl", validateBody(supplierSchemas.verifyDrivingLice
 
     const result = await verifyDrivingLicence({ licenseNumber: req.body.licenseNumber, dob: req.body.dob });
     recordSecureIdCheck(req, id, "DRIVING_LICENSE", result, { licenseNumber: result.licenseNumber, driverId: driver?.id || null });
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
     if (result.valid && driver) {
       db.prepare("UPDATE supplier_drivers SET license_number = ?, license_expiry = COALESCE(?, license_expiry) WHERE id = ?").run(result.licenseNumber, result.validUntil, driver.id);
     }
-    res.json({ success: true, verification: { valid: result.valid, name: result.name, validUntil: result.validUntil, simulated: result.simulated }, message: result.valid ? `Driving licence verified${result.validUntil ? `, valid until ${result.validUntil}` : ""}` : "The driving licence could not be verified" });
+    res.json({ success: true, kybAutoApproved: autoApproval.approved, verification: { valid: result.valid, name: result.name, validUntil: result.validUntil, simulated: result.simulated }, message: result.valid ? `Driving licence verified${result.validUntil ? `, valid until ${result.validUntil}` : ""}` : "The driving licence could not be verified" });
   } catch (err) {
     logger.error("Driving licence verification failed", { requestId: req.requestId, error: err.message });
     res.status(400).json({ error: err.message || "Failed to verify the driving licence" });
@@ -517,10 +525,11 @@ router.post("/:id/kyb/verify-rc", validateBody(supplierSchemas.verifyVehicleRc),
 
     const result = await verifyVehicleRc({ registrationNumber: req.body.registrationNumber });
     recordSecureIdCheck(req, id, "VEHICLE_RC", result, { registrationNumber: result.registrationNumber, driverId: driver?.id || null });
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
     if (result.valid && driver) {
       db.prepare("UPDATE supplier_drivers SET insurance_expiry = COALESCE(?, insurance_expiry), permit_expiry = COALESCE(?, permit_expiry) WHERE id = ?").run(result.insuranceValidUntil, result.permitValidUntil, driver.id);
     }
-    res.json({ success: true, verification: { valid: result.valid, owner: result.owner, commercial: result.commercial, insuranceValidUntil: result.insuranceValidUntil, permitValidUntil: result.permitValidUntil, simulated: result.simulated }, message: result.valid ? `Vehicle ${result.registrationNumber} verified${result.owner ? `, owner ${result.owner}` : ""}` : "The vehicle registration could not be verified" });
+    res.json({ success: true, kybAutoApproved: autoApproval.approved, verification: { valid: result.valid, owner: result.owner, commercial: result.commercial, insuranceValidUntil: result.insuranceValidUntil, permitValidUntil: result.permitValidUntil, simulated: result.simulated }, message: result.valid ? `Vehicle ${result.registrationNumber} verified${result.owner ? `, owner ${result.owner}` : ""}` : "The vehicle registration could not be verified" });
   } catch (err) {
     logger.error("Vehicle RC verification failed", { requestId: req.requestId, error: err.message });
     res.status(400).json({ error: err.message || "Failed to verify the vehicle registration" });

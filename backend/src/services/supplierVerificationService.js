@@ -1,4 +1,5 @@
 import { hasKybFile } from "./kybFileService.js";
+import { calculateNameMatchScore } from "./cashfreeSecureIdService.js";
 import { resolveCommissionRate } from "./financeService.js";
 
 const ALLOWED_ACTIONS = new Set(["APPROVED", "REJECTED", "SUSPENDED"]);
@@ -229,6 +230,54 @@ export function getCashfreeIdentityStatus(database, supplier) {
   };
 }
 
+// Names on the PAN, licence and RC count as the same person at this score or above:
+// what one name fully inside the other scores ("Ramesh Kumar" / "RAMESH K").
+export const OWNER_NAME_MATCH_MIN = 85;
+
+// The newest valid Cashfree check of a type, with the name it reported.
+function latestValidCheck(database, supplierId, type, nameOf) {
+  const row = database.prepare(`
+    SELECT response_data FROM supplier_kyb_verifications
+    WHERE supplier_id = ? AND verification_type = ? AND status = 'VALID'
+    ORDER BY created_at DESC LIMIT 1
+  `).get(supplierId, type);
+  if (!row) return null;
+  const response = parseJson(row.response_data);
+  return { name: nameOf(response) || null, simulated: Boolean(response.simulated) };
+}
+
+/**
+ * Whether an individual owner passes every automatic check (ADR 024 C4): Cashfree
+ * verified their current PAN, a driving licence and a vehicle RC, the three names
+ * are the same person, and every required document is uploaded. Anything failed
+ * or missing leaves them for an admin to approve by hand.
+ */
+export function getOwnerIdentityStatus(database, supplier) {
+  const reasons = [];
+  const panNumber = normalizeId(supplier?.pan_number);
+  const panCheck = latestCheck(database, supplier.id, "PAN", "pan", panNumber);
+  const pan = panCheck?.valid ? { name: panCheck.name, simulated: panCheck.simulated } : null;
+  const licence = latestValidCheck(database, supplier.id, "DRIVING_LICENSE", (r) => r.name);
+  const vehicle = latestValidCheck(database, supplier.id, "VEHICLE_RC", (r) => r.owner);
+  const allowSimulated = simulatedResultsCount();
+  for (const [label, check] of [["PAN", pan], ["Driving licence", licence], ["Vehicle RC", vehicle]]) {
+    if (!check) reasons.push(`${label} has not been verified with Cashfree SecureID`);
+    else if (check.simulated && !allowSimulated) reasons.push(`${label} check was simulated, not a real Cashfree result`);
+  }
+  const names = [pan?.name, licence?.name, vehicle?.name];
+  if (pan && licence && vehicle) {
+    if (names.some((name) => !name)) reasons.push("Cashfree did not return a name for every check");
+    else if (calculateNameMatchScore(names[0], names[1]) < OWNER_NAME_MATCH_MIN || calculateNameMatchScore(names[0], names[2]) < OWNER_NAME_MATCH_MIN) {
+      reasons.push("The names on the PAN, driving licence and vehicle RC don't match");
+    }
+  }
+  const documents = database.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ?").all(supplier.id).filter((doc) => hasKybFile(doc));
+  for (const required of INDIVIDUAL_OWNER_RULES.required) {
+    if (!documents.some((doc) => required.acceptedTypes.includes(normalizeId(doc.doc_type)))) reasons.push(`${required.label} is not uploaded`);
+  }
+  return { verified: reasons.length === 0, names: { pan: names[0], licence: names[1], vehicle: names[2] }, reasons };
+}
+
 /**
  * What an admin needs to decide on a supplier: which of their country's required
  * documents have a real uploaded file and, for Indian suppliers, whether Cashfree
@@ -333,6 +382,7 @@ export function saveSupplierVerification(database, {
   };
 }
 
+export const OWNER_AUTO_APPROVAL_REASON = "Your PAN, driving licence and vehicle were verified with Cashfree SecureID. Your published listings can now be booked.";
 export const AUTO_APPROVAL_REASON = "Your GSTIN and PAN were verified with Cashfree SecureID. Your published listings can now be booked.";
 
 /**
@@ -348,10 +398,12 @@ export function autoApproveSupplierKyb(database, supplierId, { notify } = {}) {
 
   const status = normalizeId(supplier.kyb_status) || "PENDING";
   if (status !== "PENDING") return { approved: false, supplier, identity: null };
-  // Suppliers abroad are approved by an admin from their documents (ADR 023).
-  if (!supplierKybRules(database, supplier).cashfree) return { approved: false, supplier, identity: null };
+  // Individual owners in India pass on PAN, licence, RC and matching names (ADR 024);
+  // suppliers abroad are approved by an admin from their documents (ADR 023).
+  const owner = isIndividualOwner(supplier) && supplierCountry(database, supplier) === "India";
+  if (!owner && !supplierKybRules(database, supplier).cashfree) return { approved: false, supplier, identity: null };
 
-  const identity = getCashfreeIdentityStatus(database, supplier);
+  const identity = owner ? getOwnerIdentityStatus(database, supplier) : getCashfreeIdentityStatus(database, supplier);
   if (!identity.verified) return { approved: false, supplier, identity };
 
   // The status condition keeps two checks finishing together from approving twice.
@@ -364,7 +416,7 @@ export function autoApproveSupplierKyb(database, supplierId, { notify } = {}) {
   const updated = database.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
   const approved = Number(result.changes) > 0;
   if (approved && notify) {
-    notify({ supplier: updated, action: "APPROVED", reason: AUTO_APPROVAL_REASON, commissionRate: updated.commission_rate });
+    notify({ supplier: updated, action: "APPROVED", reason: owner ? OWNER_AUTO_APPROVAL_REASON : AUTO_APPROVAL_REASON, commissionRate: updated.commission_rate });
   }
   return { approved, supplier: updated, identity };
 }
