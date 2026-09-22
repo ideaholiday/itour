@@ -896,6 +896,7 @@ export default function ActivityDetail() {
         description={seo.description}
         canonical={seo.canonical}
         image={seo.image}
+        imageAlt={seo.imageAlt}
         type={seo.type}
         jsonLd={seo.jsonLd}
       />

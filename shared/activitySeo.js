@@ -75,11 +75,20 @@ export function activitySeo(product, { baseUrl = SITE, isPackage = false, catego
     { name: title, item: canonical },
   ];
 
+  // Link previews (WhatsApp shows the title and the start of this) lead with
+  // the price and verified rating, so a shared link answers "how much?".
+  const facts = [
+    price > 0 ? `From ₹${Math.round(price).toLocaleString("en-IN")}` : null,
+    reviewCount > 0 && product.rating ? `★ ${Number(product.rating).toFixed(1)} (${reviewCount} review${reviewCount === 1 ? "" : "s"})` : null,
+  ].filter(Boolean).join(" · ");
+  const about = String(product.shortDesc || "").replace(/\s+/g, " ").trim() || `Book ${title}${inCity} on Idea Holiday. See live availability and prices.`;
+
   return {
     title: `${title}${inCity} - Book on Idea Holiday`,
-    description: excerpt(product.shortDesc) || `Book ${title}${inCity} on Idea Holiday. See live availability and prices.`,
+    description: excerpt(facts ? `${facts}. ${about}` : about),
     canonical,
     image,
+    imageAlt: `${title}${inCity}`,
     type: "product",
     jsonLd: {
       "@context": "https://schema.org",

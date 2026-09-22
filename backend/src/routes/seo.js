@@ -149,7 +149,7 @@ const HEAD_TAG_PATTERNS = [
   /<title>[\s\S]*?<\/title>\s*/i,
   /<meta\s+name="description"[^>]*>\s*/i,
   /<meta\s+name="robots"[^>]*>\s*/i,
-  /<meta\s+property="og:(?:title|description|image|type|url)"[^>]*>\s*/gi,
+  /<meta\s+property="og:(?:title|description|image|image:alt|type|url)"[^>]*>\s*/gi,
   /<meta\s+name="twitter:(?:title|description|image)"[^>]*>\s*/gi,
   /<link\s+rel="canonical"[^>]*>\s*/i,
   /<script[^>]+id="structured-data-json-ld"[\s\S]*?<\/script>\s*/i,
@@ -162,7 +162,7 @@ const HEAD_TAG_PATTERNS = [
  * shared profile would preview as the home page. SeoHead updates the same tags
  * in the browser afterwards.
  */
-export function renderSeoHtml(template, { title, description, canonical, image = DEFAULT_SOCIAL_IMAGE, robots = "index, follow", type = "website", jsonLd = null }) {
+export function renderSeoHtml(template, { title, description, canonical, image = DEFAULT_SOCIAL_IMAGE, imageAlt = null, robots = "index, follow", type = "website", jsonLd = null }) {
   let html = String(template);
   for (const pattern of HEAD_TAG_PATTERNS) html = html.replace(pattern, "");
   const tags = [
@@ -173,6 +173,7 @@ export function renderSeoHtml(template, { title, description, canonical, image =
     `<meta property="og:title" content="${escapeHtml(title)}" />`,
     `<meta property="og:description" content="${escapeHtml(description)}" />`,
     `<meta property="og:image" content="${escapeHtml(image)}" />`,
+    imageAlt ? `<meta property="og:image:alt" content="${escapeHtml(imageAlt)}" />` : null,
     `<meta property="og:type" content="${escapeHtml(type)}" />`,
     `<meta property="og:url" content="${escapeHtml(canonical)}" />`,
     `<meta name="twitter:title" content="${escapeHtml(title)}" />`,

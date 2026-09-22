@@ -326,3 +326,11 @@ This document records significant technical and product architectural decisions.
   - A post may name a city (shown on that city's page, links back to it) and up to 12 listings; only listings live at read time are shown.
   - A renamed published post keeps its old address as a `301`.
 - **Consequences**: API: [`API_PAGES.md`](API_PAGES.md) §2. The pages-and-sitemap section moved there from `API_CONTRACTS.md` (size cap).
+
+---
+
+## ADR 027: Activity Link Previews Carry the Price in Text
+- **Date**: 2026-09-22
+- **Context**: Activity links are shared mostly on WhatsApp. A generated preview image (photo + price) needs an image library (`sharp`) and a bundled font.
+- **Decision Made**: No image library. The preview keeps the activity photo, and the description leads with the price and verified rating (`From ₹2,999 · ★ 4.5 (4 reviews). …`), built in `shared/activitySeo.js` for both the server and the browser. No price or rating is shown when the listing has none. `og:image:alt` is set.
+- **Consequences**: Google's snippet shows the same line. A drawn preview image stays possible later, as its own decision.

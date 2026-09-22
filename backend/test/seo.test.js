@@ -178,7 +178,9 @@ test("an activity page is served with its own title, preview image, canonical an
   assert.equal(page.status, 200);
   const head = headOf(page.html);
   assert.match(head, /<title>Grande Island Scuba Dive in Goa - Book on Idea Holiday<\/title>/);
-  assert.match(head, /<meta name="description" content="A 30 minute guided dive for beginners." \/>/);
+  assert.match(head, /<meta name="description" content="From ₹2,999 · ★ 4.5 \(4 reviews\). A 30 minute guided dive for beginners." \/>/, "a link preview leads with price and rating");
+  assert.match(head, /<meta property="og:description" content="From ₹2,999 · ★ 4.5/);
+  assert.match(head, /<meta property="og:image:alt" content="Grande Island Scuba Dive in Goa" \/>/);
   assert.match(head, /<link rel="canonical" href="https:\/\/ideaholiday.in\/activity\/Grande-Island-Scuba-Dive\/p_scuba" \/>/);
   assert.match(head, /<meta property="og:image" content="https:\/\/ideaholiday.in\/uploads\/scuba.jpg" \/>/);
   assert.match(head, /<meta property="og:type" content="product" \/>/);
@@ -195,6 +197,7 @@ test("an activity page is served with its own title, preview image, canonical an
   assert.match(zoo, /<title>Lucknow Zoo Entry - Book on Idea Holiday<\/title>/, "city already in the title is not repeated");
   assert.match(zoo, /og:image" content="https:\/\/ideaholiday.in\/idea-holiday-social.png"/);
   assert.equal(zoo.includes('"offers"'), false, "no price, no offer markup");
+  assert.match(zoo, /<meta name="description" content="Book Lucknow Zoo Entry on Idea Holiday. See live availability and prices." \/>/, "no made-up price or rating in the preview");
   assert.equal(zoo.includes("aggregateRating"), false);
 
   for (const id of ["p_draft", "p_hidden", "p_pending", "p_lapsed", "missing"]) {

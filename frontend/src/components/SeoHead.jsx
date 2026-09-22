@@ -9,6 +9,7 @@ export default function SeoHead({
   keywords = "India tours, airport transfers, Goa water sports, Taj Mahal sunrise tour, Jaipur sightseeing, Kerala backwaters, Rishikesh river rafting, Golden triangle tour",
   canonical = "https://ideaholiday.in/",
   image = "https://ideaholiday.in/idea-holiday-social.png",
+  imageAlt = null,
   type = "website",
   jsonLd = null,
   noindex = false,
@@ -49,6 +50,8 @@ export default function SeoHead({
     setMetaTag("property", "og:title", title);
     setMetaTag("property", "og:description", description);
     setMetaTag("property", "og:image", image);
+    if (imageAlt) setMetaTag("property", "og:image:alt", imageAlt);
+    else document.querySelector('meta[property="og:image:alt"]')?.remove();
     setMetaTag("property", "og:url", canonical);
     setMetaTag("property", "og:type", type);
 
@@ -70,7 +73,7 @@ export default function SeoHead({
     } else if (scriptTag) {
       scriptTag.remove();
     }
-  }, [title, description, keywords, canonical, image, type, jsonLd, noindex]);
+  }, [title, description, keywords, canonical, image, imageAlt, type, jsonLd, noindex]);
 
   return null;
 }
