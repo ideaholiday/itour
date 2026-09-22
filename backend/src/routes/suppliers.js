@@ -56,6 +56,8 @@ import {
   verifyPan,
   verifyBankAccount,
   verifyPanToGstin,
+  verifyDrivingLicence,
+  verifyVehicleRc,
   runComprehensiveSupplierKyb,
 } from "../services/cashfreeSecureIdService.js";
 import { nanoid } from "nanoid";
@@ -97,8 +99,11 @@ function transferPublishRefusal(supplierId) {
 // Cashfree SecureID checks Indian GSTIN and PAN only; suppliers abroad are
 // approved by an admin from their own country's documents (ADR 023), and so are
 // individual vehicle owners, who have no GSTIN (ADR 024).
-function cashfreeIdentityRefusal(supplier) {
+// `check` is GSTIN (the default), PAN, DRIVING_LICENSE or VEHICLE_RC: every Indian
+// supplier may check PAN, licences and vehicles; only businesses check a GSTIN.
+function cashfreeIdentityRefusal(supplier, check = "GSTIN") {
   if (supplierKybRules(db, supplier).cashfree) return null;
+  if (isIndividualOwner(supplier) && supplierCountry(db, supplier) === "India" && check !== "GSTIN") return null;
   if (isIndividualOwner(supplier)) return "GSTIN checks are for registered businesses. Individual vehicle owners upload their documents for an admin to review.";
   return `GSTIN and PAN checks are for Indian suppliers. Suppliers in ${supplierCountry(db, supplier)} upload their documents for an admin to review.`;
 }
@@ -461,6 +466,67 @@ router.post("/:id/kyb/verify-gstin", validateBody(supplierSchemas.verifyGstin), 
   }
 });
 
+// Records a SecureID check in the audit table, as the GSTIN and PAN checks do.
+function recordSecureIdCheck(req, supplierId, type, result, input) {
+  db.prepare(`
+    INSERT INTO supplier_kyb_verifications (
+      id, supplier_id, verification_type, reference_id, status, input_data, response_data, score, verified_at, actor_id, actor_role, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 100, datetime('now'), ?, ?, datetime('now'))
+  `).run(`ver_${type.toLowerCase()}_${nanoid(8)}`, supplierId, type, String(result.raw?.reference_id || ""), result.valid ? "VALID" : "INVALID",
+    JSON.stringify(input), JSON.stringify(result), req.user?.id || supplierId, req.user?.role || "SUPPLIER");
+}
+
+// A fleet row of this supplier, when the check names one; its expiry dates follow a valid result (ADR 024 C2, C3).
+function ownFleetRow(supplierId, driverId) {
+  return driverId ? db.prepare("SELECT id FROM supplier_drivers WHERE id = ? AND supplier_id = ?").get(driverId, supplierId) : null;
+}
+
+// POST /api/suppliers/:id/kyb/verify-dl - Cashfree SecureID driving licence check (ADR 024 C3)
+router.post("/:id/kyb/verify-dl", validateBody(supplierSchemas.verifyDrivingLicence), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const refusal = cashfreeIdentityRefusal(supplier, "DRIVING_LICENSE");
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
+    const driver = ownFleetRow(id, req.body.driverId);
+    if (req.body.driverId && !driver) return res.status(404).json({ error: "Choose a driver from your own fleet" });
+
+    const result = await verifyDrivingLicence({ licenseNumber: req.body.licenseNumber, dob: req.body.dob });
+    recordSecureIdCheck(req, id, "DRIVING_LICENSE", result, { licenseNumber: result.licenseNumber, driverId: driver?.id || null });
+    if (result.valid && driver) {
+      db.prepare("UPDATE supplier_drivers SET license_number = ?, license_expiry = COALESCE(?, license_expiry) WHERE id = ?").run(result.licenseNumber, result.validUntil, driver.id);
+    }
+    res.json({ success: true, verification: { valid: result.valid, name: result.name, validUntil: result.validUntil, simulated: result.simulated }, message: result.valid ? `Driving licence verified${result.validUntil ? `, valid until ${result.validUntil}` : ""}` : "The driving licence could not be verified" });
+  } catch (err) {
+    logger.error("Driving licence verification failed", { requestId: req.requestId, error: err.message });
+    res.status(400).json({ error: err.message || "Failed to verify the driving licence" });
+  }
+});
+
+// POST /api/suppliers/:id/kyb/verify-rc - Cashfree SecureID vehicle RC check (ADR 024 C3)
+router.post("/:id/kyb/verify-rc", validateBody(supplierSchemas.verifyVehicleRc), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const refusal = cashfreeIdentityRefusal(supplier, "VEHICLE_RC");
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
+    const driver = ownFleetRow(id, req.body.driverId);
+    if (req.body.driverId && !driver) return res.status(404).json({ error: "Choose a vehicle from your own fleet" });
+
+    const result = await verifyVehicleRc({ registrationNumber: req.body.registrationNumber });
+    recordSecureIdCheck(req, id, "VEHICLE_RC", result, { registrationNumber: result.registrationNumber, driverId: driver?.id || null });
+    if (result.valid && driver) {
+      db.prepare("UPDATE supplier_drivers SET insurance_expiry = COALESCE(?, insurance_expiry), permit_expiry = COALESCE(?, permit_expiry) WHERE id = ?").run(result.insuranceValidUntil, result.permitValidUntil, driver.id);
+    }
+    res.json({ success: true, verification: { valid: result.valid, owner: result.owner, commercial: result.commercial, insuranceValidUntil: result.insuranceValidUntil, permitValidUntil: result.permitValidUntil, simulated: result.simulated }, message: result.valid ? `Vehicle ${result.registrationNumber} verified${result.owner ? `, owner ${result.owner}` : ""}` : "The vehicle registration could not be verified" });
+  } catch (err) {
+    logger.error("Vehicle RC verification failed", { requestId: req.requestId, error: err.message });
+    res.status(400).json({ error: err.message || "Failed to verify the vehicle registration" });
+  }
+});
+
 // POST /api/suppliers/:id/kyb/verify-pan - Instant Cashfree SecureID PAN Verification
 router.post("/:id/kyb/verify-pan", validateBody(supplierSchemas.verifyPan), async (req, res) => {
   try {
@@ -468,7 +534,7 @@ router.post("/:id/kyb/verify-pan", validateBody(supplierSchemas.verifyPan), asyn
     const { pan, name } = req.body;
     const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
-    const refusal = cashfreeIdentityRefusal(supplier);
+    const refusal = cashfreeIdentityRefusal(supplier, "PAN");
     if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
 
     const targetPan = (pan || supplier.pan_number || "").trim().toUpperCase();

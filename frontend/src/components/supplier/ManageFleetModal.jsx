@@ -23,6 +23,7 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
   const [expiries, setExpiries] = useState(NO_EXPIRIES);
+  const [licenceDob, setLicenceDob] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
@@ -76,6 +77,16 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
     } finally {
       setLoading(false);
     }
+  };
+
+  const verifyFleetDocument = async (check, body) => {
+    setError(""); setSuccessMsg("");
+    try {
+      const r = await fetch(`/api/suppliers/${supplierId}/kyb/${check}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Verification failed");
+      if (d.verification?.valid) { setSuccessMsg(d.message); setEditingContact(null); onRefresh?.(); } else setError(d.message);
+    } catch (e) { setError(e.message); }
   };
 
   const handleFleetStatus = async (driverId, status) => {
@@ -180,6 +191,14 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
               setSuccessMsg('Driver dispatch details saved'); setEditingContact(null); onRefresh?.();
             } catch (e) { setError(e.message); }
           }}><label className="text-xs">Email<input aria-label="Existing driver email" type="email" required value={editingContact.driver_email || ''} onChange={e => setEditingContact({ ...editingContact, driver_email: e.target.value })} className="block rounded border p-2" /></label><label className="text-xs">Seats<input aria-label="Existing vehicle seats" type="number" min="1" max="100" required value={editingContact.seat_capacity || ''} onChange={e => setEditingContact({ ...editingContact, seat_capacity: e.target.value })} className="block rounded border p-2" /></label>{EXPIRY_FIELDS.map(([key, column, label]) => <label key={key} className="text-xs">{label}<input aria-label={`Existing ${label}`} type="date" value={editingContact[column] || ''} onChange={e => setEditingContact({ ...editingContact, [column]: e.target.value })} className="block rounded border p-2" /></label>)}<button type="submit" className="rounded border px-3">Save dispatch details</button></form>}
+          {editingContact && (
+            <div className="mt-2 flex flex-wrap items-end gap-2 text-xs">
+              {/* Cashfree checks for Indian suppliers; a valid result fills the expiry dates (ADR 024). */}
+              <label className="text-xs">Driver's date of birth<input aria-label="Driver date of birth" type="date" value={licenceDob} onChange={e => setLicenceDob(e.target.value)} className="block rounded border p-2" /></label>
+              <button type="button" className="rounded border px-3 py-2" disabled={!licenceDob || !editingContact.license_number} title={editingContact.license_number ? "" : "Add the licence number first"} onClick={() => verifyFleetDocument("verify-dl", { licenseNumber: editingContact.license_number, dob: licenceDob, driverId: editingContact.id })}>Verify licence</button>
+              <button type="button" className="rounded border px-3 py-2" onClick={() => verifyFleetDocument("verify-rc", { registrationNumber: editingContact.vehicle_number, driverId: editingContact.id })}>Verify vehicle RC</button>
+            </div>
+          )}
         </div>
         <div className="p-6 space-y-4 overflow-y-auto">
           {error && (

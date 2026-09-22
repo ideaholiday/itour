@@ -294,6 +294,15 @@ export const supplierSchemas = {
     pan: text(10, 10),
     name: optionalText(180),
   }),
+  verifyDrivingLicence: object({
+    licenseNumber: text(8, 30),
+    dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date"),
+    driverId: optionalText(80),
+  }),
+  verifyVehicleRc: object({
+    registrationNumber: text(6, 20),
+    driverId: optionalText(80),
+  }),
   verifyBankAccount: object({
     accountNumber: text(5, 40),
     account_number: optionalText(40),

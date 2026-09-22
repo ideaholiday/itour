@@ -295,6 +295,18 @@ function simulateSecureIdResponse(path, body = {}, query = {}) {
     };
   }
 
+  // Driving licence and vehicle RC (ADR 024 C3): valid unless the number ends in "0000".
+  if (path.includes("/driving-license")) {
+    const number = String(body.dl_number || "").toUpperCase();
+    const valid = number.length >= 8 && !number.endsWith("0000");
+    return { verification_id: body.verification_id, reference_id: referenceId, status: valid ? "VALID" : "INVALID", dl_number: number, dob: body.dob, details_of_driving_licence: valid ? { name: "Ramesh K", status: "ACTIVE", date_of_issue: "2018-01-10", cov_details: [{ cov: "TRANS" }] } : null, dl_validity: valid ? { transport: { to: "2031-01-09" }, non_transport: { to: "2038-01-09" } } : null };
+  }
+  if (path.includes("/vehicle-rc")) {
+    const number = String(body.vehicle_number || "").toUpperCase();
+    const valid = number.length >= 6 && !number.endsWith("0000");
+    return { verification_id: body.verification_id, reference_id: referenceId, status: valid ? "VALID" : "INVALID", reg_no: valid ? number : null, owner: valid ? "RAMESH K" : null, rc_status: valid ? "ACTIVE" : null, is_commercial: valid, vehicle_seat_capacity: valid ? "5" : null, rc_expiry_date: valid ? "23/12/2036" : null, vehicle_insurance_upto: valid ? "14/12/2027" : null, permit_valid_upto: valid ? "31/03/2028" : null };
+  }
+
   if (path.includes("/pan")) {
     const isValidPan = typeof panInput === "string" && panInput.length === 10;
     const fourthChar = (panInput && panInput[3]) ? panInput[3].toUpperCase() : "C";
@@ -332,6 +344,57 @@ function simulateSecureIdResponse(path, body = {}, query = {}) {
   }
 
   return { valid: true, reference_id: referenceId };
+}
+
+/** Cashfree dates come as DD/MM/YYYY or YYYY-MM-DD; returns YYYY-MM-DD or null. */
+export function secureIdDate(value) {
+  const text = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const match = text.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
+}
+
+const verificationId = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+
+/**
+ * Driving licence (ADR 024 C3). POST /verification/driving-license.
+ * Request and response field names differ between Cashfree's doc versions, so
+ * both shapes are read; confirm against the sandbox before going live.
+ */
+export async function verifyDrivingLicence({ licenseNumber, dob } = {}) {
+  const number = String(licenseNumber || "").replace(/[\s-]/g, "").toUpperCase();
+  if (number.length < 8) throw new Error("Enter the full driving licence number");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dob || ""))) throw new Error("Enter the date of birth as YYYY-MM-DD");
+  const raw = await secureIdRequest("/driving-license", { body: { verification_id: verificationId("dl"), dl_number: number, dob } });
+  const details = raw.details_of_driving_licence || raw.license_details || {};
+  const valid = String(raw.status || raw.verification_status || "").toUpperCase() === "VALID" || String(raw.verification_status || "").toUpperCase() === "SUCCESS";
+  const validUntil = secureIdDate(raw.dl_validity?.transport?.to) || secureIdDate(raw.dl_validity?.non_transport?.to) || secureIdDate(details.validity_date) || secureIdDate(raw.expiry_date);
+  return { success: true, valid, licenseNumber: number, name: details.name || raw.name || null, validUntil, raw, simulated: Boolean(raw.__simulated) };
+}
+
+/**
+ * Vehicle registration certificate (ADR 024 C3). POST /verification/vehicle-rc.
+ * Valid only when Cashfree says VALID and, where reported, the RC is ACTIVE.
+ */
+export async function verifyVehicleRc({ registrationNumber } = {}) {
+  const number = String(registrationNumber || "").replace(/[\s-]/g, "").toUpperCase();
+  if (number.length < 6) throw new Error("Enter the full vehicle registration number");
+  const raw = await secureIdRequest("/vehicle-rc", { body: { verification_id: verificationId("rc"), vehicle_number: number } });
+  const active = !raw.rc_status || /^active$/i.test(String(raw.rc_status).trim());
+  const valid = String(raw.status || raw.verification_status || "").toUpperCase().match(/^(VALID|SUCCESS)$/) !== null && active;
+  return {
+    success: true,
+    valid,
+    registrationNumber: number,
+    owner: raw.owner || raw.owner_details?.name || null,
+    commercial: raw.is_commercial ?? null,
+    seats: Number(raw.vehicle_seat_capacity || raw.vehicle_details?.seating_capacity) || null,
+    rcValidUntil: secureIdDate(raw.rc_expiry_date) || secureIdDate(raw.registration_details?.validity_date),
+    insuranceValidUntil: secureIdDate(raw.vehicle_insurance_upto),
+    permitValidUntil: secureIdDate(raw.permit_valid_upto) || secureIdDate(raw.national_permit_upto),
+    raw,
+    simulated: Boolean(raw.__simulated),
+  };
 }
 
 /**
