@@ -171,6 +171,25 @@ export const KYB_COUNTRY_RULES = Object.freeze({
       { docType: "OTHER", label: "Other business document" },
     ]),
   }),
+  // ADR 024: approved by an admin by hand.
+  Nepal: Object.freeze({
+    cashfree: false,
+    required: Object.freeze([
+      { docType: "COMPANY_REGISTRATION", label: "Company registration certificate (OCR)", acceptedTypes: ["COMPANY_REGISTRATION"] },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "Department of Tourism travel or trekking agency licence", acceptedTypes: ["TOUR_OPERATOR_LICENSE"] },
+      { docType: "TAX_REGISTRATION", label: "Nepal PAN/VAT registration certificate", acceptedTypes: ["TAX_REGISTRATION"] },
+      { docType: "DIRECTOR_ID", label: "Director's citizenship certificate or passport", acceptedTypes: ["DIRECTOR_ID"] },
+      { docType: "VEHICLE_REGISTRATION", label: "DoTM vehicle route permit", acceptedTypes: ["VEHICLE_REGISTRATION", "COMMERCIAL_PERMIT"], transfersOnly: true },
+    ]),
+    documentTypes: Object.freeze([
+      { docType: "COMPANY_REGISTRATION", label: "Company registration certificate (OCR)" },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "Department of Tourism travel or trekking agency licence" },
+      { docType: "TAX_REGISTRATION", label: "Nepal PAN/VAT registration certificate" },
+      { docType: "DIRECTOR_ID", label: "Director's citizenship certificate or passport" },
+      { docType: "VEHICLE_REGISTRATION", label: "DoTM vehicle route permit" },
+      { docType: "OTHER", label: "Other business document" },
+    ]),
+  }),
 });
 
 // A country whose document list isn't set yet: an admin reviews

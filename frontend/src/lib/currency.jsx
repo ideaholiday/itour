@@ -10,6 +10,7 @@ export const DEFAULT_CURRENCIES = [
   { code: "IDR", symbol: "Rp", name: "Indonesian Rupiah", flag: "🇮🇩", decimals: 0, rateToInr: 1 / 190 },
   { code: "JPY", symbol: "¥", name: "Japanese Yen", flag: "🇯🇵", decimals: 0, rateToInr: 1 / 1.7 },
   { code: "VND", symbol: "₫", name: "Vietnamese Dong", flag: "🇻🇳", decimals: 0, rateToInr: 1 / 295 },
+  { code: "NPR", symbol: "Rs", name: "Nepalese Rupee", flag: "🇳🇵", decimals: 0, rateToInr: 1 / 1.6 },
   { code: "SGD", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬", decimals: 2, rateToInr: 78 },
   { code: "AUD", symbol: "A$", name: "Australian Dollar", flag: "🇦🇺", decimals: 2, rateToInr: 55.40 },
   { code: "CAD", symbol: "C$", name: "Canadian Dollar", flag: "🇨🇦", decimals: 2, rateToInr: 61.80 },

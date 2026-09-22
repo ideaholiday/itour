@@ -12,17 +12,18 @@ export const PHONE_COUNTRIES = Object.freeze([
   { iso: "BT", dialCode: "975", name: "Bhutan", flag: "🇧🇹", length: 8, mobilePrefix: /^(17|77)/, example: "17 12 34 56" },
   { iso: "JP", dialCode: "81", name: "Japan", flag: "🇯🇵", length: 10, mobilePrefix: /^[789]0/, example: "90 1234 5678" },
   { iso: "VN", dialCode: "84", name: "Vietnam", flag: "🇻🇳", length: 9, mobilePrefix: /^[35789]/, example: "91 234 5678" },
+  { iso: "NP", dialCode: "977", name: "Nepal", flag: "🇳🇵", length: 10, mobilePrefix: /^9[78]/, example: "984 123 4567" },
 ]);
 
 export const OTHER_COUNTRY = "OTHER";
 
-const CURRENCY_COUNTRY = { INR: "IN", THB: "TH", AED: "AE", SGD: "SG", IDR: "ID", JPY: "JP", VND: "VN" };
+const CURRENCY_COUNTRY = { INR: "IN", THB: "TH", AED: "AE", SGD: "SG", IDR: "ID", JPY: "JP", VND: "VN", NPR: "NP" };
 
 export function phoneCountry(iso) {
   return PHONE_COUNTRIES.find((country) => country.iso === iso) || null;
 }
 
-const COUNTRY_NAME = { India: "IN", Thailand: "TH", "United Arab Emirates": "AE", Singapore: "SG", Indonesia: "ID", Maldives: "MV", Bhutan: "BT", Japan: "JP", Vietnam: "VN" };
+const COUNTRY_NAME = { India: "IN", Thailand: "TH", "United Arab Emirates": "AE", Singapore: "SG", Indonesia: "ID", Maldives: "MV", Bhutan: "BT", Japan: "JP", Vietnam: "VN", Nepal: "NP" };
 
 /** The picker's country for a destination's `country` (`Thailand` → `TH`). */
 export function phoneCountryForName(name) {

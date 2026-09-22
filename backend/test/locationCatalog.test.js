@@ -9,6 +9,7 @@ const catalog = [
   { id: "city_ae_dubai", name: "Dubai", state: "Dubai", country: "United Arab Emirates" },
   { id: "city_sg_singapore", name: "Singapore", state: "Singapore", country: "Singapore" },
   { id: "city_np_kathmandu", name: "Kathmandu", state: "Bagmati", country: "Nepal" },
+  { id: "city_cn_beijing", name: "Beijing", state: "Beijing", country: "China" },
 ];
 
 test("normalizes a supplier city to its canonical state and country", () => {
@@ -21,7 +22,8 @@ test("Thai, UAE and Singapore cities list in their country; a country not open y
   assert.deepEqual(resolveCatalogLocation(catalog, "bangkok", "Thailand").value.country, "Thailand");
   assert.equal(resolveCatalogLocation(catalog, "Dubai").value.country, "United Arab Emirates");
   assert.equal(resolveCatalogLocation(catalog, "Singapore").value.country, "Singapore");
-  assert.match(resolveCatalogLocation(catalog, "Kathmandu").error, /Nepal open soon/);
+  assert.equal(resolveCatalogLocation(catalog, "Kathmandu").value.country, "Nepal");
+  assert.match(resolveCatalogLocation(catalog, "Beijing").error, /China open soon/);
 });
 
 test("rejects misspelled cities and a country that doesn't match the city", () => {

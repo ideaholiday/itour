@@ -54,6 +54,11 @@ test("Vietnam mobiles are 9 digits starting 3, 5, 7, 8 or 9 (ADR 024)", () => {
   assert.equal(toE164("+84 24 1234 5678"), null, "a Hanoi landline is not a mobile");
 });
 
+test("Nepal mobiles are 10 digits starting 97 or 98 (ADR 024)", () => {
+  assert.equal(toE164("984 123 4567", "NP"), "+9779841234567");
+  assert.equal(toE164("+977 1 4123456"), null, "a Kathmandu landline is not a mobile");
+});
+
 test("a typed country code wins over the selected country", () => {
   assert.equal(toE164("+66 81 234 5678", "IN"), "+66812345678");
   assert.equal(toE164("+66 081 234 5678"), "+66812345678");

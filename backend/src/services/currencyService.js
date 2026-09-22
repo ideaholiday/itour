@@ -16,6 +16,8 @@ export const SUPPORTED_CURRENCIES = {
   JPY: { code: "JPY", symbol: "¥", name: "Japanese Yen", flag: "🇯🇵", decimals: 0, rateToInr: 1 / 1.7 },
   // Fixed at 295 dong per rupee (owner decision 2026-09-22, ADR 024).
   VND: { code: "VND", symbol: "₫", name: "Vietnamese Dong", flag: "🇻🇳", decimals: 0, rateToInr: 1 / 295 },
+  // Pegged at 1.6 rupees per Indian rupee (owner decision 2026-09-22, ADR 024).
+  NPR: { code: "NPR", symbol: "Rs", name: "Nepalese Rupee", flag: "🇳🇵", decimals: 0, rateToInr: 1 / 1.6 },
   SGD: { code: "SGD", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬", decimals: 2, rateToInr: 78 },
   AUD: { code: "AUD", symbol: "A$", name: "Australian Dollar", flag: "🇦🇺", decimals: 2, rateToInr: 55.40 },
   CAD: { code: "CAD", symbol: "C$", name: "Canadian Dollar", flag: "🇨🇦", decimals: 2, rateToInr: 61.80 },

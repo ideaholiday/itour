@@ -101,6 +101,10 @@ describe("Multi-Currency Service", () => {
     assert.equal(convertFromInr(1000, "VND").amount, 295000);
   });
 
+  it("shows Nepalese rupees at the 1.6 peg, in whole rupees (ADR 024)", () => {
+    assert.equal(convertFromInr(1000, "NPR").amount, 1600);
+  });
+
   it("shows Singapore dollars at the fixed ₹78 rate (ADR 024)", () => {
     const sgd = convertFromInr(7800, "SGD");
     assert.equal(sgd.amount, 100);
