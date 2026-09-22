@@ -49,6 +49,7 @@ const UserProfile = React.lazy(() => import("./pages/UserProfile.jsx"));
 const WishlistPage = React.lazy(() => import("./pages/WishlistPage.jsx"));
 const TravelerMessages = React.lazy(() => import("./pages/TravelerMessages.jsx"));
 const SupplierProfile = React.lazy(() => import("./pages/SupplierProfile.jsx"));
+const DestinationPage = React.lazy(() => import("./pages/DestinationPage.jsx"));
 const SupplierDirectory = React.lazy(() => import("./pages/SupplierDirectory.jsx"));
 const TripSummary = React.lazy(() => import("./pages/TripSummary.jsx"));
 const TravelAndEarn = React.lazy(() => import("./pages/TravelAndEarn.jsx"));
@@ -142,6 +143,7 @@ function AppContent() {
             <Route path="/profile" element={<UserProfile />} />
             <Route path="/wishlist" element={<WishlistPage />} />
             <Route path="/messages" element={<TravelerMessages />} />
+            <Route path="/things-to-do/:citySlug" element={<DestinationPage />} />
             <Route path="/suppliers" element={<SupplierDirectory />} />
             <Route path="/suppliers/in/:citySlug" element={<SupplierDirectory />} />
             <Route path="/suppliers/:slug" element={<SupplierProfile />} />

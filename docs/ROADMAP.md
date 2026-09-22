@@ -33,6 +33,7 @@ Do not rebuild these. Extend them if asked.
 | Analytics | `/admin/analytics` |
 | Money programs (ADR 017) | 30% commission per product, coupons, giveaway cap, Share & Earn and creator rate controls, creator earnings for travel, supplier subscriptions with waivers and payments |
 | Day-of-operations | Voucher QR check-in (camera or typed reference), no-shows, guest list per departure with CSV, cancel a whole departure with wallet refunds and calendar close |
+| Destination pages (ADR 025) | `/things-to-do/:city` landing pages built from live listings, with FAQ and ItemList markup; canonical for city searches and in the sitemap |
 | Supplier profiles | Public pages + directory, server-rendered SEO and sitemap, Verified badge (admin-granted), enquiries, share kit (QR, standee/sticker print, voucher QR, reviews widget, visit counts), paid plans (Verified check queue with refunds, Spotlights, Verified Plus) |
 
 ---

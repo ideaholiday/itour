@@ -11,6 +11,8 @@ import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { listingOpenIn } from "../lib/locationCatalog.js";
 import { cityTime } from "../lib/localTime.js";
 import { isGstFreeProduct, productCountry } from "../lib/productTax.js";
+import { destinationView } from "./seo.js";
+import { destinationFaqs } from "../../../shared/destinationSeo.js";
 
 const router = Router();
 
@@ -275,6 +277,20 @@ router.get("/destinations", (req, res) => {
   } catch (err) {
     logger.error("Destination lookup failed", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to fetch destinations" });
+  }
+});
+
+// GET /api/destination-pages/:slug - a "things to do" city page: summary, FAQs and its live products.
+router.get("/destination-pages/:slug", (req, res) => {
+  try {
+    const view = destinationView(db, req.params.slug);
+    if (!view) return res.status(404).json({ error: "Destination not found", code: "DESTINATION_NOT_FOUND", requestId: req.requestId });
+    const { products, ...summary } = view;
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    res.json({ ...summary, faqs: destinationFaqs(view), products: parseProductRows(products) });
+  } catch (err) {
+    logger.error("Destination page lookup failed", { requestId: req.requestId, error: err });
+    res.status(500).json({ error: "Failed to load destination" });
   }
 });
 

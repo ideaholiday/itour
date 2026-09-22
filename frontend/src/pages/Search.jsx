@@ -4,6 +4,7 @@ import TicketCard from "../components/TicketCard.jsx";
 import SeoHead from "../components/SeoHead.jsx";
 import { displayCity } from "../../../shared/activitySeo.js";
 import { destinationParam } from "../lib/destinations.js";
+import { destinationPath } from "../../../shared/destinationSeo.js";
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import {
@@ -532,7 +533,10 @@ export default function Search() {
   // page; keyword searches and filtered views stay out of search results.
   const activeParams = [...params.keys()].filter((key) => params.get(key));
   const searchNoindex = activeParams.length > 0 && !((destination || country) && activeParams.length === 1);
-  const searchCanonical = `https://ideaholiday.in/search${destination ? `?destination=${encodeURIComponent(displayCity(destinationName))}` : country ? `?country=${encodeURIComponent(country)}` : ""}`;
+  // A city with its own live listings points at its "things to do" page, as the server does.
+  const cityKey = displayCity(destinationName).toLowerCase();
+  const hasCityPage = Boolean(destination) && activities.some((a) => displayCity(a.city).toLowerCase() === cityKey);
+  const searchCanonical = hasCityPage ? `https://ideaholiday.in${destinationPath(destinationName)}` : `https://ideaholiday.in/search${destination ? `?destination=${encodeURIComponent(displayCity(destinationName))}` : country ? `?country=${encodeURIComponent(country)}` : ""}`;
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] dark:bg-stone-950 text-stone-900 dark:text-stone-100">

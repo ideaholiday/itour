@@ -1,4 +1,5 @@
 import { activityPath } from "./activityUrl.js";
+import { destinationPath } from "./destinationSeo.js";
 
 // Search and link-preview tags for an activity page. The server writes them into
 // the HTML (WhatsApp, Instagram and Facebook previews never run JavaScript) and
@@ -20,7 +21,7 @@ export function displayCity(value) {
   return city.toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (_m, gap, letter) => `${gap}${letter.toUpperCase()}`);
 }
 
-function absoluteImage(url, baseUrl) {
+export function absoluteImage(url, baseUrl) {
   const value = String(url || "").trim();
   if (/^https:\/\//i.test(value)) return value;
   if (value.startsWith("/")) return `${baseUrl}${value}`;
@@ -70,7 +71,7 @@ export function activitySeo(product, { baseUrl = SITE, isPackage = false, catego
   };
   const crumbs = [
     { name: "Home", item: `${baseUrl}/` },
-    ...(city ? [{ name: city, item: `${baseUrl}/search?destination=${encodeURIComponent(city)}` }] : []),
+    ...(city ? [{ name: city, item: `${baseUrl}${destinationPath(city)}` }] : []),
     { name: title, item: canonical },
   ];
 

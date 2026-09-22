@@ -59,6 +59,7 @@ function cachedFetch(url, options = {}, ttlMs = 30000) {
 
 export const api = {
   getDestinations: () => cachedFetch(`${BASE}/destinations`, {}, 300000), // 5 min cache
+  getDestinationPage: (slug) => fetch(`${BASE}/destination-pages/${encodeURIComponent(slug)}`).then(handle),
   getCities: () => cachedFetch(`${BASE}/cities`, {}, 300000),
   search: (params = {}) => {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))).toString();

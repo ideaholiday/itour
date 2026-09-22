@@ -302,3 +302,14 @@ This document records significant technical and product architectural decisions.
   - **UAE, Singapore, Indonesia, the Maldives, Bhutan, Japan, Vietnam and Nepal open**, each with its own KYB documents approved by an admin; a local supplier there pays 0%, an Indian supplier 18% GST. SGD displays at a fixed 78 INR, IDR at 190 rupiah per rupee, JPY at 1.7 yen per rupee, VND at 295 dong per rupee, NPR at the 1.6 peg. **China is skipped** for now (WhatsApp is blocked there; Chinese data law limits sending supplier data abroad). **Europe is skipped** for now (owner decision, 2026-09-22); only its time zones, with summer time, are in `localTime.js`. **USD is fixed at 97 INR** site-wide (was 86.50); the Maldives uses USD, not MVR; Bhutan shows INR (the ngultrum is pegged 1:1). Bhutan's Sustainable Development Fee is in the supplier's own price.
   - **Owners' Aadhaar:** only a masked copy; the full number is never stored.
 - **Consequences**: Built: A1, A3, A4, C1–C4, UAE, Singapore, Indonesia, Maldives, Bhutan, Japan, Vietnam, Nepal. Step-by-step record, open questions and tests: [`plans/supplier-expansion.md`](plans/supplier-expansion.md) §Progress. Cashfree DL/RC checks run in simulation until the plan and field names are confirmed in the sandbox.
+
+---
+
+## ADR 025: "Things to Do" City Pages for Search Traffic
+- **Date**: 2026-09-22
+- **Context**: City landing pages existed only as `/search?destination=X`, which got its own head tags but a generic search body. Owner chose destination pages as the first step to grow organic visits (ahead of a staff blog and more JSON-LD).
+- **Decision Made**:
+  - Each city gets `/things-to-do/:citySlug` (lowercase, hyphenated). It is the canonical page for a bookable city: the sitemap lists it instead of `/search?destination=`, and `/search?destination=X` alone points its canonical there.
+  - The page is built only from live listings: product list, starting price, categories and FAQs. No hand-written or invented copy. `CollectionPage` + `ItemList`, `BreadcrumbList` and `FAQPage` markup match what the page shows.
+  - A catalogue city with nothing live has a `noindex` page; an unknown slug is a `noindex` 404.
+- **Consequences**: Activity-page breadcrumbs and Home's live featured cities link to the city page. Editorial content (the blog) can later link into these pages.

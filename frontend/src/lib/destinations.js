@@ -11,7 +11,8 @@ export function destinationParam(destination) {
 /**
  * Home's featured destinations: the cities with the most live products (search
  * `facets.cities`, busiest first), each with the curated photo and tagline when
- * `curated` has one, then curated cities to fill five places.
+ * `curated` has one, then curated cities to fill five places. Live ones carry
+ * `live: true` and have a "things to do" page.
  */
 export function featuredDestinations(catalog, cityFacets, curated = [], count = 5) {
   const byName = new Map((catalog || []).map((d) => [String(d.name || "").toLowerCase(), d]));
@@ -21,7 +22,7 @@ export function featuredDestinations(catalog, cityFacets, curated = [], count = 
     const key = name.toLowerCase();
     const d = byName.get(key) || { id: name, name };
     const pick = curatedByName.get(key);
-    return { ...d, hero_image: pick?.hero_image || d.hero_image || curated[0]?.hero_image, tagline: pick?.tagline || d.tagline };
+    return { ...d, live: true, hero_image: pick?.hero_image || d.hero_image || curated[0]?.hero_image, tagline: pick?.tagline || d.tagline };
   });
   const names = new Set(live.map((d) => d.name.toLowerCase()));
   return [...live, ...curated.filter((d) => !names.has(d.name.toLowerCase()))].slice(0, count);

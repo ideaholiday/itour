@@ -15,8 +15,9 @@ test("sitemap.xml lists public routes, cities with live products, and products w
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/transfers<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/search<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/privacy-policy<\/loc>/);
-  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/search\?destination=Goa<\/loc>/);
-  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/search\?destination=Navi%20Mumbai<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/things-to-do\/goa<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/things-to-do\/navi-mumbai<\/loc>/);
+  assert.doesNotMatch(xml, /search\?destination=/, "a city is listed once, at its own page");
   assert.doesNotMatch(xml, /search\?q=/, "no hard-coded cities that may have nothing to book");
   assert.doesNotMatch(xml, /<lastmod>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/activity\/Goa-Scuba\/act_goa_scuba<\/loc>/);
@@ -143,7 +144,7 @@ test("the supplier sitemap lists the directory, cities and profiles", () => {
 
 // ── Activities, city search pages, 404s ───────────────────────
 import Database from "better-sqlite3";
-import { activityPage, liveCities, liveCountries, notFoundPage, searchPage } from "../src/routes/seo.js";
+import { activityPage, destinationPage, destinationView, liveCities, liveCountries, notFoundPage, searchPage } from "../src/routes/seo.js";
 import { isKnownSpaPath, SPA_ROUTES } from "../../shared/spaRoutes.js";
 
 function catalogDatabase() {
@@ -153,7 +154,8 @@ function catalogDatabase() {
     CREATE TABLE supplier_subscriptions (id TEXT PRIMARY KEY, supplier_id TEXT, status TEXT, starts_at TEXT, ends_at TEXT);
     CREATE TABLE products (
       id TEXT PRIMARY KEY, supplier_id TEXT, title TEXT, city TEXT, category TEXT, product_type TEXT, short_desc TEXT,
-      price_inr REAL, hero_image TEXT, images TEXT, status TEXT DEFAULT 'PUBLISHED', is_published INTEGER DEFAULT 1
+      price_inr REAL, hero_image TEXT, images TEXT, status TEXT DEFAULT 'PUBLISHED', is_published INTEGER DEFAULT 1,
+      bestseller INTEGER DEFAULT 0
     );
     CREATE TABLE quality_scores (entity_type TEXT, entity_id TEXT, review_count INTEGER, average_rating REAL);
     INSERT INTO suppliers VALUES ('sup_ok', 'APPROVED', 1), ('sup_pending', 'PENDING', 1), ('sup_lapsed', 'APPROVED', 0);
@@ -187,6 +189,7 @@ test("an activity page is served with its own title, preview image, canonical an
   assert.equal(product.offers.price, 2999);
   assert.deepEqual(product.aggregateRating, { "@type": "AggregateRating", ratingValue: 4.5, reviewCount: 4, bestRating: "5", worstRating: "1" });
   assert.deepEqual(jsonLd["@graph"][1].itemListElement.map((item) => item.name), ["Home", "Goa", "Grande Island Scuba Dive"]);
+  assert.equal(jsonLd["@graph"][1].itemListElement[1].item, "https://ideaholiday.in/things-to-do/goa");
 
   const zoo = headOf(activityPage(db, "p_zoo", INDEX_TEMPLATE, "https://ideaholiday.in").html);
   assert.match(zoo, /<title>Lucknow Zoo Entry - Book on Idea Holiday<\/title>/, "city already in the title is not repeated");
@@ -208,7 +211,7 @@ test("city pages are indexable only where something is bookable; keyword and fil
 
   const lucknow = headOf(searchPage(db, { destination: "lucknow" }, INDEX_TEMPLATE, "https://ideaholiday.in").html);
   assert.match(lucknow, /<title>Lucknow Tours, Cabs &amp; Experiences \| Idea Holiday<\/title>/);
-  assert.match(lucknow, /<link rel="canonical" href="https:\/\/ideaholiday.in\/search\?destination=Lucknow" \/>/);
+  assert.match(lucknow, /<link rel="canonical" href="https:\/\/ideaholiday.in\/things-to-do\/lucknow" \/>/, "a bookable city points at its own page");
   assert.match(lucknow, /content="index, follow"/);
 
   assert.match(headOf(searchPage(db, { destination: "Jaipur" }, INDEX_TEMPLATE).html), /content="noindex, follow"/);
@@ -256,4 +259,54 @@ test("a path the app has no page for is a noindex 404; every App.jsx route is kn
 
   for (const known of ["/", "/activity/Goa-Scuba/p1", "/About-Us/", "/checkout/verify", "/privacy-policy"]) assert.equal(isKnownSpaPath(known), true, known);
   for (const unknown of ["/my-trips", "/activity", "/assets/missing.js", "/admin/nope/deeper"]) assert.equal(isKnownSpaPath(unknown), false, unknown);
+});
+
+// ── "Things to do" city pages ─────────────────────────────────
+import { destinationFaqs, destinationPath, destinationSlug } from "../../shared/destinationSeo.js";
+
+test("city slugs are lowercase and hyphenated, and survive accents", () => {
+  assert.equal(destinationSlug("Navi Mumbai"), "navi-mumbai");
+  assert.equal(destinationSlug("  Ho Chi Minh City "), "ho-chi-minh-city");
+  assert.equal(destinationSlug("Pondichéry"), "pondichery");
+  assert.equal(destinationPath("Da Nang"), "/things-to-do/da-nang");
+});
+
+test("a things-to-do page lists a city's live products with its own head, FAQ and ItemList markup", () => {
+  const db = catalogDatabase();
+  db.exec(`CREATE TABLE destinations (id TEXT, name TEXT, state TEXT, tagline TEXT, hero_image TEXT, category TEXT, is_active INTEGER DEFAULT 1, country TEXT);
+    INSERT INTO destinations VALUES ('lucknow', 'Lucknow', 'Uttar Pradesh', 'City of Nawabs', '/uploads/lucknow.jpg', 'METRO', 1, 'India'),
+      ('agra', 'Agra', 'Uttar Pradesh', NULL, NULL, 'TOURISM', 1, 'India');`);
+
+  const view = destinationView(db, "lucknow");
+  assert.equal(view.name, "Lucknow");
+  assert.deepEqual(view.products.map((product) => product.id).sort(), ["p_cab", "p_zoo"], "both spellings of the city, nothing unpublished");
+  assert.equal(view.fromPriceInr, 900, "a free listing is not the starting price");
+
+  const page = destinationPage(db, "lucknow", INDEX_TEMPLATE, "https://ideaholiday.in");
+  assert.equal(page.status, 200);
+  const head = headOf(page.html);
+  assert.match(head, /<title>Things to Do in Lucknow: Tours, Activities &amp; Cabs \| Idea Holiday<\/title>/);
+  assert.match(head, /<link rel="canonical" href="https:\/\/ideaholiday.in\/things-to-do\/lucknow" \/>/);
+  assert.match(head, /content="index, follow"/);
+  assert.match(head, /og:image" content="https:\/\/ideaholiday.in\/uploads\/lucknow.jpg"/);
+  assert.match(head, /2 things to do in Lucknow, Uttar Pradesh/);
+  const graph = JSON.parse(head.match(/id="structured-data-json-ld">([\s\S]*?)<\/script>/)[1])["@graph"];
+  const list = graph.find((node) => node["@type"] === "CollectionPage").mainEntity;
+  assert.equal(list.numberOfItems, 2);
+  assert.ok(list.itemListElement.every((item) => item.url.startsWith("https://ideaholiday.in/activity/")));
+  const faq = graph.find((node) => node["@type"] === "FAQPage");
+  assert.deepEqual(faq.mainEntity.map((question) => question.name), destinationFaqs(view).map((entry) => entry.question), "markup matches the questions the page shows");
+  assert.ok(faq.mainEntity.some((question) => /₹900/.test(question.acceptedAnswer.text)));
+  assert.ok(faq.mainEntity.some((question) => /1 transfer/.test(question.acceptedAnswer.text)));
+
+  assert.deepEqual(destinationPage(db, "Lucknow", INDEX_TEMPLATE), { status: 301, location: "/things-to-do/lucknow" });
+  const agra = destinationPage(db, "agra", INDEX_TEMPLATE);
+  assert.equal(agra.status, 200, "a catalogue city with nothing live still has a page");
+  assert.match(headOf(agra.html), /content="noindex, follow"/);
+  assert.equal(destinationFaqs(destinationView(db, "agra")).length, 0, "no questions answered without listings");
+  const missing = destinationPage(db, "atlantis", INDEX_TEMPLATE);
+  assert.equal(missing.status, 404);
+  assert.match(headOf(missing.html), /content="noindex, follow"/);
+  assert.equal(destinationPage(db, "jaipur", INDEX_TEMPLATE).status, 404, "a pending supplier's city has no page");
+  db.close();
 });

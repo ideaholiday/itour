@@ -28,6 +28,7 @@ import SeoHead from "../components/SeoHead.jsx";
 import { SkeletonCard } from "../components/ui/SkeletonLoader.jsx";
 import { api } from "../lib/api.js";
 import { destinationParam, featuredDestinations, withImageList } from "../lib/destinations.js";
+import { destinationPath } from "../../../shared/destinationSeo.js";
 import { useCurrency } from "../lib/currency.jsx";
 
 const HERO_IMAGES = [
@@ -402,7 +403,7 @@ export default function Home() {
           {featuredDests.map((dest, i) => (
             <Link
               key={dest.id}
-              to={`/search?destination=${encodeURIComponent(destinationParam(dest))}`}
+              to={dest.live ? destinationPath(dest.name) : `/search?destination=${encodeURIComponent(destinationParam(dest))}`}
               className={`group relative overflow-hidden rounded-3xl ${i === 0 ? "col-span-2 row-span-2" : ""}`}
             >
               <img

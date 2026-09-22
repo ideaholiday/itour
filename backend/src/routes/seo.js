@@ -8,6 +8,7 @@ import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { LISTING_COUNTRIES } from "../lib/locationCatalog.js";
 import { activityPath } from "../../../shared/activityUrl.js";
 import { activitySeo, displayCity } from "../../../shared/activitySeo.js";
+import { destinationPath, destinationSeo, destinationSlug } from "../../../shared/destinationSeo.js";
 import {
   findDirectoryCity, isProfileVisible, profilePath, publicSupplierView, resolveProfileSlug, sitemapSupplierEntries,
 } from "../services/supplierProfileService.js";
@@ -46,7 +47,7 @@ export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = [
   const destinationUrls = [
     ...(countries || []).map((country) => ({ loc: `${baseUrl}/search?country=${encodeURIComponent(country)}`, priority: "0.8", changefreq: "weekly" })),
     ...(cities || []).map((city) => ({
-      loc: `${baseUrl}${citySearchPath(city.name)}`,
+      loc: `${baseUrl}${destinationPath(city.name)}`,
       priority: "0.8",
       changefreq: "weekly",
     })),
@@ -378,6 +379,59 @@ export function activityPage(database, id, template, baseUrl = BASE_URL) {
 }
 
 /**
+ * A "things to do" city: any catalogue destination or city with live products,
+ * found by slug, with its live products (bestsellers first). Indexable only
+ * when something is bookable there.
+ */
+export function destinationView(database, slug) {
+  const key = String(slug || "").toLowerCase();
+  let catalog = [];
+  try {
+    catalog = database.prepare("SELECT name, state, tagline, hero_image, COALESCE(country, 'India') AS country FROM destinations WHERE COALESCE(is_active, 1) = 1").all();
+  } catch {
+    catalog = [];
+  }
+  const live = liveCities(database).find((city) => destinationSlug(city.name) === key);
+  const row = catalog.find((entry) => destinationSlug(entry.name) === key);
+  if (!live && !row) return null;
+  const name = live?.name || displayCity(row.name);
+  const products = live ? database.prepare(`
+    SELECT p.* FROM products p
+    WHERE ${liveProductSql("p")} AND LOWER(TRIM(p.city)) = ?
+    ORDER BY COALESCE(p.bestseller, 0) DESC, p.price_inr ASC
+  `).all(name.toLowerCase()) : [];
+  const categories = new Map();
+  for (const product of products) {
+    const category = String(product.category || "").trim();
+    if (category) categories.set(category, (categories.get(category) || 0) + 1);
+  }
+  const prices = products.map((product) => Number(product.price_inr)).filter((price) => price > 0);
+  return {
+    name,
+    slug: destinationSlug(name),
+    path: destinationPath(name),
+    state: row?.state || null,
+    country: row?.country || "India",
+    tagline: row?.tagline || null,
+    heroImage: row?.hero_image || null,
+    products,
+    productCount: products.length,
+    fromPriceInr: prices.length ? Math.min(...prices) : null,
+    categories: [...categories].map(([category, count]) => ({ name: category, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+  };
+}
+
+/** What /things-to-do/:citySlug answers before the SPA loads. */
+export function destinationPage(database, slug, template, baseUrl = BASE_URL) {
+  const view = destinationView(database, slug);
+  if (!view) {
+    return { status: 404, html: renderSeoHtml(template, notFoundSeo(baseUrl, `/things-to-do/${encodeURIComponent(slug)}`, "Destination not found | Idea Holiday")) };
+  }
+  if (slug !== view.slug) return { status: 301, location: view.path };
+  return { status: 200, html: renderSeoHtml(template, destinationSeo(view, { baseUrl })) };
+}
+
+/**
  * /search head tags. A city page (?destination= alone) is indexable when that
  * city has live products; keyword searches and filtered views are noindex so
  * Google doesn't fill up with near-duplicate result pages.
@@ -413,7 +467,8 @@ export function searchPage(database, query, template, baseUrl = BASE_URL) {
   if (destination && keys.length === 1) {
     const city = liveCities(database).find((entry) => entry.name.toLowerCase() === displayCity(destination).toLowerCase());
     const name = city?.name || displayCity(destination);
-    const canonicalPath = citySearchPath(name);
+    // A bookable city's canonical page is its "things to do" page.
+    const canonicalPath = city ? destinationPath(name) : citySearchPath(name);
     return {
       status: 200,
       html: renderSeoHtml(template, {
@@ -479,6 +534,17 @@ router.get("/search", (req, res, next) => {
     return sendPage(res, searchPage(db, req.query, template, BASE_URL));
   } catch (error) {
     logger.error("Search page render failed", { requestId: req.requestId, error });
+    return next();
+  }
+});
+
+router.get("/things-to-do/:citySlug", (req, res, next) => {
+  const template = indexTemplate();
+  if (!template) return next();
+  try {
+    return sendPage(res, destinationPage(db, req.params.citySlug, template, BASE_URL));
+  } catch (error) {
+    logger.error("Destination page render failed", { requestId: req.requestId, error });
     return next();
   }
 });
