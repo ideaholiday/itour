@@ -93,6 +93,10 @@ describe("Multi-Currency Service", () => {
     assert.equal(idr.formatted, "Rp190,000");
   });
 
+  it("shows Japanese yen at 1.7 per rupee, in whole yen (ADR 024)", () => {
+    assert.equal(convertFromInr(1000, "JPY").amount, 1700);
+  });
+
   it("shows Singapore dollars at the fixed ₹78 rate (ADR 024)", () => {
     const sgd = convertFromInr(7800, "SGD");
     assert.equal(sgd.amount, 100);

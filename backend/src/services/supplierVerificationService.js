@@ -137,6 +137,23 @@ export const KYB_COUNTRY_RULES = Object.freeze({
       { docType: "OTHER", label: "Other business document" },
     ]),
   }),
+  // ADR 024: approved by an admin by hand. My Number is never asked for.
+  Japan: Object.freeze({
+    cashfree: false,
+    required: Object.freeze([
+      { docType: "COMPANY_REGISTRATION", label: "Certificate of company registration (tōki)", acceptedTypes: ["COMPANY_REGISTRATION"] },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "Travel Agency Registration certificate", acceptedTypes: ["TOUR_OPERATOR_LICENSE"] },
+      { docType: "DIRECTOR_ID", label: "Representative director's passport or residence card", acceptedTypes: ["DIRECTOR_ID"] },
+      { docType: "VEHICLE_REGISTRATION", label: "Passenger transport business permit (green plate)", acceptedTypes: ["VEHICLE_REGISTRATION", "COMMERCIAL_PERMIT"], transfersOnly: true },
+    ]),
+    documentTypes: Object.freeze([
+      { docType: "COMPANY_REGISTRATION", label: "Certificate of company registration (tōki)" },
+      { docType: "TOUR_OPERATOR_LICENSE", label: "Travel Agency Registration certificate" },
+      { docType: "DIRECTOR_ID", label: "Representative director's passport or residence card" },
+      { docType: "VEHICLE_REGISTRATION", label: "Passenger transport business permit (green plate)" },
+      { docType: "OTHER", label: "Other business document (never My Number)" },
+    ]),
+  }),
 });
 
 // A country whose document list isn't set yet: an admin reviews

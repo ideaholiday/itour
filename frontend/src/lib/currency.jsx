@@ -8,6 +8,7 @@ export const DEFAULT_CURRENCIES = [
   { code: "AED", symbol: "د.إ", name: "UAE Dirham", flag: "🇦🇪", decimals: 2, rateToInr: 23.55 },
   { code: "THB", symbol: "฿", name: "Thai Baht", flag: "🇹🇭", decimals: 0, rateToInr: 2.87 },
   { code: "IDR", symbol: "Rp", name: "Indonesian Rupiah", flag: "🇮🇩", decimals: 0, rateToInr: 1 / 190 },
+  { code: "JPY", symbol: "¥", name: "Japanese Yen", flag: "🇯🇵", decimals: 0, rateToInr: 1 / 1.7 },
   { code: "SGD", symbol: "S$", name: "Singapore Dollar", flag: "🇸🇬", decimals: 2, rateToInr: 78 },
   { code: "AUD", symbol: "A$", name: "Australian Dollar", flag: "🇦🇺", decimals: 2, rateToInr: 55.40 },
   { code: "CAD", symbol: "C$", name: "Canadian Dollar", flag: "🇨🇦", decimals: 2, rateToInr: 61.80 },

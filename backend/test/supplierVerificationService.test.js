@@ -290,6 +290,16 @@ test("a Bhutan supplier needs a tour operator certificate, trade licence and dir
   database.close();
 });
 
+test("a Japan supplier needs registration, a travel agency certificate and a director's ID, and a green-plate permit for transfers (ADR 024)", async () => {
+  const database = abroadDatabase("Kyoto", "Japan");
+  const readiness = () => getKybApprovalReadiness(database, supplierRow(database));
+  assert.deepEqual(readiness().missingDocuments, ["Certificate of company registration (tōki)", "Travel Agency Registration certificate", "Representative director's passport or residence card"]);
+  for (const [id, type] of [["jp-1", "COMPANY_REGISTRATION"], ["jp-2", "TOUR_OPERATOR_LICENSE"], ["jp-3", "DIRECTOR_ID"]]) await addDocument(database, id, type);
+  database.prepare("INSERT INTO products VALUES ('jp-transfer', 'supplier-1', 'TRANSFER')").run();
+  assert.deepEqual(readiness().missingDocuments, ["Passenger transport business permit (green plate)"]);
+  database.close();
+});
+
 test("a supplier from a country without a document list needs at least one uploaded document", async () => {
   const database = abroadDatabase("Kathmandu", "Nepal");
   assert.deepEqual(getKybApprovalReadiness(database, supplierRow(database)).missingDocuments, ["At least one business document from Nepal"]);
