@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import Database from "better-sqlite3";
-import sharedDb from "../src/db.js";
 import {
   activatePickupOtp,
   calculateBookingQuote,
@@ -17,6 +15,7 @@ import {
   withoutPickupOtpSecrets
 } from "../src/services/bookingService.js";
 import { saveInventoryRules } from "../src/services/nativeInventoryService.js";
+import { migratedDb } from "./helpers/migratedDb.js";
 
 test("pickup OTP is six digits, encrypted at rest and timing-safe verifiable", () => {
   const booking = { id: "bk_test", activity_date: "2030-01-15", pickup_time: "10:30" };
@@ -96,18 +95,11 @@ test("unknown booking statuses allow no transition, and OTP secrets are stripped
   );
 });
 
-// calculateBookingQuote runs against an in-memory copy of the prepared test
-// database, so the schema is the one the real migrations build.
+// calculateBookingQuote runs against a copy of the migrated test database.
 const TRIP_DATE = "2099-06-15";
 
 function quoteDb(t) {
-  const image = sharedDb.serialize();
-  // The shared file is in WAL mode, which an in-memory copy can't write; header
-  // bytes 18-19 are the read/write format versions, and 1 means rollback journal.
-  image[18] = 1;
-  image[19] = 1;
-  const db = new Database(image);
-  t.after(() => db.close());
+  const db = migratedDb(t);
   db.prepare(`INSERT INTO suppliers (id, company_name, contact_name, email, phone, city, state, kyb_status, subscription_exempt)
     VALUES ('sup_q', 'Quote Tours', 'Q', 'quote@example.test', '+919000000001', 'Goa', 'Goa', 'APPROVED', 1)`).run();
   return db;

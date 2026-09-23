@@ -63,15 +63,17 @@ Standing obligations that apply to every change:
 ## NEXT — ready to start, highest value first
 
 **1. Branch coverage on error paths** *(in progress)*
-Unit branch coverage is ~75% against ~90% line. Payment, channel, SLA, the
-provider boundary and the booking quote (`bookingService`, 36% → 89%) have had a
-pass, surfacing two refund bugs and six in the OCTo confirmation path. Still thin:
-`cashfreeSecureIdService`, `analyticsService`, `driverDispatchService`, and the
-six unimplemented adapters.
+Unit branch coverage is ~76% against ~91% line. Payment, channel, SLA, the
+provider boundary, the booking quote, Cashfree SecureID and analytics have had a
+pass, surfacing two refund bugs, six in the OCTo confirmation path and three in
+analytics (the overview and revenue breakdown read columns that don't exist;
+bookings dropping to zero raised no alert). Still thin: `driverDispatchService`
+and the six unimplemented adapters.
 
 A lesson worth keeping: the OCTo bugs were all masked by a unit-test fixture that
-hand-rolled a `bookings` table not matching production. Prefer fixtures built
-from the real migrations.
+hand-rolled a `bookings` table not matching production, and the analytics bugs
+the same way. Prefer fixtures built from the real migrations
+(`backend/test/helpers/migratedDb.js`).
 
 **2. Provider-specific adapters**
 `OCTO_GENERIC` now does availability, reserve, confirm and cancel, and the

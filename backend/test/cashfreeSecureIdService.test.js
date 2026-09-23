@@ -2,8 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import { generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   calculateNameMatchScore,
+  secureIdDate,
+  verifyDrivingLicence,
+  verifyVehicleRc,
   getSecureIdPublicKey,
   generate2faSignature,
   verifyGstin,
@@ -12,6 +18,7 @@ import {
   verifyPanToGstin,
   runComprehensiveSupplierKyb,
 } from "../src/services/cashfreeSecureIdService.js";
+import { migratedDb } from "./helpers/migratedDb.js";
 
 test("generate2faSignature creates valid base64 RSA OAEP encrypted signature", (t) => {
   // The real Cashfree key file is git-ignored, so use a generated key: the test
@@ -501,4 +508,246 @@ test("simulation fallback is off on Cloud Run even when NODE_ENV is unset", asyn
     if (originalNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalNodeEnv;
     if (originalService === undefined) delete process.env.K_SERVICE; else process.env.K_SERVICE = originalService;
   }
+});
+
+// Sets env vars for one test body (undefined deletes), then restores them.
+async function withEnv(vars, fn) {
+  const saved = Object.fromEntries(Object.keys(vars).map((key) => [key, process.env[key]]));
+  const apply = (values) => {
+    for (const [key, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+  apply(vars);
+  try {
+    return await fn();
+  } finally {
+    apply(saved);
+  }
+}
+
+// Replaces fetch for one test body, recording each call; restores it afterwards.
+async function withFetch(handler, fn) {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, body: options?.body ? JSON.parse(options.body) : undefined });
+    return handler(url, options);
+  };
+  try {
+    await fn(calls);
+  } finally {
+    global.fetch = originalFetch;
+  }
+}
+
+const respond = (payload, { ok = true, status = 200 } = {}) => async () => ({ ok, status, json: async () => payload });
+const DEV = { NODE_ENV: "test", K_SERVICE: undefined, CASHFREE_SECUREID_SIMULATE: undefined, CASHFREE_SECUREID_PROXY_URL: undefined, CASHFREE_SECUREID_ENV: "TEST" };
+const LIVE_ONLY = { ...DEV, CASHFREE_SECUREID_SIMULATION_FALLBACK: "false" };
+
+test("the public key is read as PEM, as base64 PEM, raw, or from a key file", async () => {
+  const pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).publicKey.export({ type: "spki", format: "pem" });
+  await withEnv({ CASHFREE_SECUREID_PUBLIC_KEY: Buffer.from(pem).toString("base64") }, () => {
+    assert.equal(getSecureIdPublicKey(), pem);
+  });
+  await withEnv({ CASHFREE_SECUREID_PUBLIC_KEY: "  not-a-key  " }, () => {
+    assert.equal(getSecureIdPublicKey(), "not-a-key");
+    assert.equal(generate2faSignature("CF123", "not-a-key"), null);
+  });
+  const keyFile = path.join(mkdtempSync(path.join(tmpdir(), "cf-key-")), "public.pem");
+  writeFileSync(keyFile, pem);
+  await withEnv({ CASHFREE_SECUREID_PUBLIC_KEY: undefined, CASHFREE_SECUREID_PUBLIC_KEY_PATH: keyFile }, () => {
+    assert.equal(getSecureIdPublicKey(), pem);
+  });
+});
+
+test("Cashfree dates are read as ISO or day-first, and anything else is null", () => {
+  assert.equal(secureIdDate("2031-01-09T00:00:00Z"), "2031-01-09");
+  assert.equal(secureIdDate(" 23/12/2036 "), "2036-12-23");
+  assert.equal(secureIdDate("23-12-2036"), "2036-12-23");
+  assert.equal(secureIdDate("12/2036"), null);
+  assert.equal(secureIdDate(null), null);
+});
+
+test("a driving licence check refuses short numbers and bad birth dates before calling Cashfree", async () => {
+  await withFetch(() => { throw new Error("must not be called"); }, async (calls) => {
+    await assert.rejects(() => verifyDrivingLicence({ licenseNumber: "DL-12 3", dob: "1990-01-09" }), /full driving licence number/);
+    await assert.rejects(() => verifyDrivingLicence({ licenseNumber: "MH1220180012345", dob: "09-01-1990" }), /YYYY-MM-DD/);
+    await assert.rejects(() => verifyDrivingLicence(), /full driving licence number/);
+    await assert.rejects(() => verifyVehicleRc({ registrationNumber: "MH 12" }), /full vehicle registration number/);
+    assert.equal(calls.length, 0);
+  });
+});
+
+test("a driving licence is read from either of Cashfree's response shapes", async () => {
+  await withEnv(LIVE_ONLY, async () => {
+    const current = { status: "VALID", details_of_driving_licence: { name: "Ramesh K" }, dl_validity: { transport: { to: "09/01/2031" }, non_transport: { to: "2038-01-09" } } };
+    await withFetch(respond(current), async (calls) => {
+      const result = await verifyDrivingLicence({ licenseNumber: "mh 12-2018 0012345", dob: "1990-01-09" });
+      assert.deepEqual([result.valid, result.licenseNumber, result.name, result.validUntil, result.simulated], [true, "MH1220180012345", "Ramesh K", "2031-01-09", false]);
+      assert.match(calls[0].url, /\/driving-license$/);
+      assert.equal(calls[0].body.dl_number, "MH1220180012345");
+      assert.equal(calls[0].body.dob, "1990-01-09");
+      assert.match(calls[0].body.verification_id, /^dl_/);
+    });
+    const older = { verification_status: "SUCCESS", license_details: { name: "Asha", validity_date: "15-03-2030" } };
+    await withFetch(respond(older), async () => {
+      const result = await verifyDrivingLicence({ licenseNumber: "KA0120150001234", dob: "1985-05-05" });
+      assert.deepEqual([result.valid, result.name, result.validUntil], [true, "Asha", "2030-03-15"]);
+    });
+    await withFetch(respond({ status: "VALID", name: "Top Level", dl_validity: { non_transport: { to: "2038-01-09" } } }), async () => {
+      const result = await verifyDrivingLicence({ licenseNumber: "KA0120150001234", dob: "1985-05-05" });
+      assert.deepEqual([result.name, result.validUntil], ["Top Level", "2038-01-09"]);
+    });
+    await withFetch(respond({ status: "INVALID", expiry_date: "2020-01-01" }), async () => {
+      const result = await verifyDrivingLicence({ licenseNumber: "KA0120150001234", dob: "1985-05-05" });
+      assert.deepEqual([result.valid, result.name, result.validUntil], [false, null, "2020-01-01"]);
+    });
+  });
+});
+
+test("a vehicle RC is valid only when Cashfree says so and the RC is active", async () => {
+  await withEnv(LIVE_ONLY, async () => {
+    await withFetch(respond({ status: "VALID", rc_status: "SUSPENDED", owner: "RAMESH K" }), async (calls) => {
+      const result = await verifyVehicleRc({ registrationNumber: "mh-12 ab 1234" });
+      assert.equal(result.valid, false);
+      assert.equal(result.registrationNumber, "MH12AB1234");
+      assert.equal(calls[0].body.vehicle_number, "MH12AB1234");
+    });
+    const older = {
+      verification_status: "success", owner_details: { name: "Asha" }, vehicle_details: { seating_capacity: "7" },
+      registration_details: { validity_date: "2036-12-23" }, national_permit_upto: "31/03/2028"
+    };
+    await withFetch(respond(older), async () => {
+      const result = await verifyVehicleRc({ registrationNumber: "KA01AB1234" });
+      assert.deepEqual(
+        [result.valid, result.owner, result.seats, result.commercial, result.rcValidUntil, result.insuranceValidUntil, result.permitValidUntil],
+        [true, "Asha", 7, null, "2036-12-23", null, "2028-03-31"]
+      );
+    });
+    await withFetch(respond({ status: "PENDING", rc_status: "ACTIVE" }), async () => {
+      const result = await verifyVehicleRc({ registrationNumber: "KA01AB1234" });
+      assert.deepEqual([result.valid, result.owner, result.seats], [false, null, null]);
+    });
+  });
+});
+
+test("offline simulation answers every check without calling Cashfree, and is refused in production", async () => {
+  await withEnv({ ...DEV, CASHFREE_SECUREID_SIMULATE: "true" }, async () => {
+    await withFetch(() => { throw new Error("must not be called"); }, async (calls) => {
+      const gstin = await verifyGstin({ gstin: "29AAACB8781B1Z5", businessName: "Goa Trails" });
+      assert.deepEqual([gstin.valid, gstin.simulated, gstin.tradeName, gstin.address.city], [true, true, "Goa Trails", "Bengaluru"]);
+
+      const lookup = await verifyPanToGstin({ pan: "aaacb8781b" });
+      assert.equal(lookup.found, true);
+      assert.deepEqual(lookup.gstinList.map((row) => row.gstin), ["29AAACB8781B1Z5", "27AAACB8781B1Z8"]);
+
+      const pan = await verifyPan({ pan: "ABCPK1234L", name: "Ramesh K" });
+      assert.deepEqual([pan.valid, pan.type, pan.nameMatchScore], [true, "Individual", 95]);
+
+      const bank = await verifyBankAccount({ accountNumber: "123456789", ifsc: "icic0000123" });
+      assert.deepEqual([bank.valid, bank.bankName], [true, "ICICI Bank"]);
+
+      const licence = await verifyDrivingLicence({ licenseNumber: "MH1220180012345", dob: "1990-01-09" });
+      assert.deepEqual([licence.valid, licence.validUntil, licence.simulated], [true, "2031-01-09", true]);
+      assert.equal((await verifyDrivingLicence({ licenseNumber: "MH1220180000", dob: "1990-01-09" })).valid, false);
+
+      const rc = await verifyVehicleRc({ registrationNumber: "MH12AB1234" });
+      assert.deepEqual(
+        [rc.valid, rc.seats, rc.rcValidUntil, rc.insuranceValidUntil, rc.permitValidUntil],
+        [true, 5, "2036-12-23", "2027-12-14", "2028-03-31"]
+      );
+      assert.equal((await verifyVehicleRc({ registrationNumber: "MH12AB0000" })).valid, false);
+      assert.equal(calls.length, 0);
+    });
+  });
+  await withEnv({ ...DEV, NODE_ENV: "production", CASHFREE_SECUREID_SIMULATE: "true" }, async () => {
+    await assert.rejects(() => verifyPan({ pan: "ABCPK1234L" }), /cannot be used in production/);
+  });
+});
+
+test("requests go to the sandbox, production or a configured proxy", async () => {
+  await withFetch(respond({ valid: true }), async (calls) => {
+    await withEnv(LIVE_ONLY, () => verifyPan({ pan: "ABCPK1234L" }));
+    await withEnv({ ...LIVE_ONLY, CASHFREE_SECUREID_ENV: "production" }, () => verifyPan({ pan: "ABCPK1234L" }));
+    await withEnv({ ...LIVE_ONLY, CASHFREE_SECUREID_PROXY_URL: "https://proxy.example.test/cf/" }, () => verifyPan({ pan: "ABCPK1234L" }));
+    assert.deepEqual(calls.map((call) => call.url), [
+      "https://sandbox.cashfree.com/verification/pan",
+      "https://api.cashfree.com/verification/pan",
+      "https://proxy.example.test/cf/pan",
+    ]);
+  });
+});
+
+test("outside production an unlisted IP or unreachable network falls back to simulation; other failures don't", async () => {
+  await withEnv({ ...DEV, CASHFREE_SECUREID_SIMULATION_FALLBACK: "true" }, async () => {
+    await withFetch(respond({ code: "ip_validation_failed", message: "IP not whitelisted: 1.2.3.4" }, { ok: false, status: 403 }), async () => {
+      assert.equal((await verifyPan({ pan: "ABCPK1234L" })).simulated, true);
+    });
+    await withFetch(() => { throw new Error("connect ECONNREFUSED 127.0.0.1:443"); }, async () => {
+      assert.equal((await verifyPan({ pan: "ABCPK1234L" })).simulated, true);
+    });
+    await withFetch(() => { throw new Error("socket hang up"); }, async () => {
+      await assert.rejects(() => verifyPan({ pan: "ABCPK1234L" }), /socket hang up/);
+    });
+  });
+  await withEnv({ ...LIVE_ONLY }, async () => {
+    await withFetch(respond({ code: "ip_validation_failed", message: "IP not whitelisted" }, { ok: false, status: 403 }), async () => {
+      await assert.rejects(() => verifyPan({ pan: "ABCPK1234L" }), /IP Whitelist Required/);
+    });
+  });
+});
+
+test("an API error without a body still says its status, and only server errors are retryable", async () => {
+  await withEnv(LIVE_ONLY, async () => {
+    const noBody = async () => ({ ok: false, status: 503, json: async () => { throw new SyntaxError("Unexpected end of JSON"); } });
+    await withFetch(noBody, async () => {
+      await assert.rejects(() => verifyPan({ pan: "ABCPK1234L" }), (err) =>
+        err.message === "Cashfree Verification failed with status 503" && err.code === null && err.retryable === true);
+    });
+    await withFetch(respond({ error: { message: "pan is malformed" }, type: "validation_error" }, { ok: false, status: 400 }), async () => {
+      await assert.rejects(() => verifyPan({ pan: "ABCPK1234L" }), (err) =>
+        err.message === "pan is malformed" && err.type === "validation_error" && err.retryable === false);
+    });
+  });
+});
+
+test("each check refuses malformed input before calling Cashfree", async () => {
+  await withFetch(() => { throw new Error("must not be called"); }, async (calls) => {
+    await assert.rejects(() => verifyGstin({ gstin: "29AAACB8781" }), /15-character GSTIN/);
+    await assert.rejects(() => verifyGstin(), /15-character GSTIN/);
+    await assert.rejects(() => verifyPan({ pan: "ABCPK" }), /10-character PAN/);
+    await assert.rejects(() => verifyPanToGstin({ pan: "" }), /10-character PAN/);
+    await assert.rejects(() => verifyBankAccount({ accountNumber: "123456789" }), /IFSC code are required/);
+    assert.equal(calls.length, 0);
+  });
+});
+
+test("a full KYB audit records each failed check as an error without marking anything verified", async (t) => {
+  const db = migratedDb(t);
+  await assert.rejects(() => runComprehensiveSupplierKyb(db, {}), /Supplier ID is required/);
+  await assert.rejects(() => runComprehensiveSupplierKyb(db, { supplierId: "sup_missing" }), /Supplier not found/);
+
+  db.prepare(`INSERT INTO suppliers (id, company_name, contact_name, email, phone, city, state, gstin, pan_number, payout_bank_details)
+    VALUES ('sup_kyb_fail', 'Goa Trails', 'Asha', 'kyb@example.test', '+919000000002', 'Goa', 'Goa', '30AAACB8781B1Z5', 'AAACB8781B', ?)`)
+    .run(JSON.stringify({ account_number: "50200012345678", ifsc: "HDFC0000123" }));
+  await withEnv(LIVE_ONLY, async () => {
+    await withFetch(() => { throw new Error("upstream down"); }, async (calls) => {
+      const report = await runComprehensiveSupplierKyb(db, { supplierId: "sup_kyb_fail" });
+      assert.equal(calls.length, 3);
+      for (const check of ["gstin", "pan", "bank"]) assert.deepEqual(report[check], { valid: false, error: "upstream down" });
+      assert.equal(report.overallVerified, false);
+    });
+  });
+  const supplier = db.prepare("SELECT gstin_verified, pan_verified, bank_verified FROM suppliers WHERE id = 'sup_kyb_fail'").get();
+  assert.deepEqual([supplier.gstin_verified, supplier.pan_verified, supplier.bank_verified].map(Number), [0, 0, 0]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM supplier_kyb_verifications WHERE supplier_id = 'sup_kyb_fail'").get().n, 0);
+
+  // Unreadable bank details and a too-short GSTIN are skipped, not sent.
+  db.prepare("UPDATE suppliers SET gstin = '30AAA', payout_bank_details = '{oops' WHERE id = 'sup_kyb_fail'").run();
+  await withEnv({ ...DEV, CASHFREE_SECUREID_SIMULATE: "true" }, async () => {
+    const report = await runComprehensiveSupplierKyb(db, { supplierId: "sup_kyb_fail" });
+    assert.deepEqual([report.gstin, report.bank, report.pan.valid], [null, null, true]);
+  });
 });
