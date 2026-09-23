@@ -309,7 +309,7 @@ This document records significant technical and product architectural decisions.
 - **Date**: 2026-09-23
 - **Context**: The product builder took City and State / Region as free text. A typo ("Gorahpur" for Gorakhpur) was only refused at Publish, because the backend already accepts catalogue cities only (`resolveCatalogLocation`).
 - **Decision Made**: The supplier picks the city from the catalogue list, grouped by country (open listing countries only), as at supplier signup. The state is filled from the city and can't be edited. A missing city is added to the catalogue by Idea Holiday; there is no free-text fallback (owner decision 2026-09-23).
-- **Consequences**: Gorakhpur (Uttar Pradesh) is added to `backend/src/data/indiaCities.js`. A saved draft whose city isn't in the catalogue has its city cleared, and the supplier is asked to choose again. Products already saved with a misspelled city are not changed.
+- **Consequences**: Production (Postgres) never runs the `INDIA_CITIES` refresh in `db.js`, which is SQLite-only, so a new Indian city needs a migration as well as a line in `backend/src/data/indiaCities.js`. Migration `060_more_india_cities.sql` adds Gorakhpur, Prayagraj and 27 other airport, pilgrimage and hill-station cities, and hides the old seed row `dest_goa`, which showed Goa twice. A saved draft whose city isn't in the catalogue has its city cleared, and the supplier is asked to choose again. Products already saved with a misspelled city are not changed.
 
 ---
 
