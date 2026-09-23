@@ -63,10 +63,11 @@ Standing obligations that apply to every change:
 ## NEXT — ready to start, highest value first
 
 **1. Branch coverage on error paths** *(in progress)*
-Branch coverage is ~65% against ~89% line. Payment, channel, SLA and the
-provider boundary have had a pass, surfacing two refund bugs and six in the OCTo
-confirmation path. Still thin: `bookingService`, `cashfreeSecureIdService`,
-`driverDispatchService`, `analyticsService`, and the six unimplemented adapters.
+Unit branch coverage is ~75% against ~90% line. Payment, channel, SLA, the
+provider boundary and the booking quote (`bookingService`, 36% → 89%) have had a
+pass, surfacing two refund bugs and six in the OCTo confirmation path. Still thin:
+`cashfreeSecureIdService`, `analyticsService`, `driverDispatchService`, and the
+six unimplemented adapters.
 
 A lesson worth keeping: the OCTo bugs were all masked by a unit-test fixture that
 hand-rolled a `bookings` table not matching production. Prefer fixtures built
