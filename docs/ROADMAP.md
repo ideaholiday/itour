@@ -71,6 +71,15 @@ don't exist; bookings dropping to zero raised no alert). The named services are
 done; what remains is the six unimplemented adapters, which need provider
 credentials (item 2).
 
+Found during the pass, left for later (owner to decide):
+- The conversion funnel on `/admin/analytics` fills a missing search or view
+  count with bookings × 15 or × 5 once any audit event exists, so it can show
+  made-up numbers (`getConversionFunnel` in `analyticsService.js`). Show only
+  real counts?
+- `runComprehensiveSupplierKyb` reports `overallVerified: true` when a supplier
+  has neither PAN nor bank details. Nothing reads it today (approval uses its
+  own readiness check), so it is harmless until something does.
+
 A lesson worth keeping: the OCTo bugs were all masked by a unit-test fixture that
 hand-rolled a `bookings` table not matching production, and the analytics bugs
 the same way. Prefer fixtures built from the real migrations
