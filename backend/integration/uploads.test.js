@@ -116,3 +116,22 @@ test("with MEDIA_STORAGE=supabase, photos go to the public bucket and KYB files 
   assert.equal(opened.headers.get("cache-control"), "private, no-store");
   assert.ok(Buffer.from(await opened.arrayBuffer()).equals(pdf), "served from the private bucket through the backend");
 });
+
+test("a refused KYB upload says why, so the supplier can fix it", async (t) => {
+  const api = await startTestServer();
+  t.after(() => api.stop());
+  const db = new Database(api.databasePath);
+  t.after(() => db.close());
+
+  const { token, supplierId } = await signupSupplier(api, db, { companyName: "Konkan KYB Tours", email: "ravi@konkankyb.example", phone: "+919845011224" });
+  const document = { data: `data:image/png;base64,${PNG_BASE64}`, filename: "pan.gif", entityType: "KYB", entityId: supplierId };
+
+  const wrongType = await requestJson(api.baseUrl, "/api/uploads", { token, body: { ...document, mimeType: "image/gif" } });
+  assert.equal(wrongType.response.status, 400);
+  assert.equal(wrongType.data.error, "KYB documents must be a PDF, PNG, JPG or WEBP file");
+  assert.equal(wrongType.data.code, "UNSUPPORTED_FILE_TYPE");
+
+  const otherSupplier = await requestJson(api.baseUrl, "/api/uploads", { token, body: { ...document, mimeType: "image/png", entityId: "sup_someone_else" } });
+  assert.equal(otherSupplier.response.status, 403);
+  assert.equal(otherSupplier.data.error, "KYB documents can only be uploaded for your own supplier account");
+});

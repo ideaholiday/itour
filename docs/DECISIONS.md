@@ -112,7 +112,7 @@ This document records significant technical and product architectural decisions.
 - **Decision Made**:
   - A product is bookable only when its supplier's KYB is `APPROVED` **and** the product is `PUBLISHED`. Approving KYB makes all of that supplier's published products bookable; suspending or rejecting KYB takes them all off sale.
   - When Cashfree SecureID has verified **both** GSTIN and PAN, the supplier is set to KYB `APPROVED` (and `is_verified`) automatically, with no admin click.
-  - Admins see the real KYB: no placeholder documents or numbers, every uploaded document is viewable, and manual approval is blocked while required documents (transport license, PAN) are missing. KYB files are never publicly reachable.
+  - Admins see the real KYB: no placeholder documents or numbers, every uploaded document is viewable, and manual approval is blocked while required documents are missing (PAN and GSTIN certificate in India since ADR 032; originally transport license and PAN). KYB files are never publicly reachable.
 - **Consequences**: KYB approval is separate from the yearly Verified badge (ADR 008). Auto-approval must never grant the badge.
 
 ---
@@ -310,6 +310,14 @@ This document records significant technical and product architectural decisions.
 - **Context**: The product builder took City and State / Region as free text. A typo ("Gorahpur" for Gorakhpur) was only refused at Publish, because the backend already accepts catalogue cities only (`resolveCatalogLocation`).
 - **Decision Made**: The supplier picks the city from the catalogue list, grouped by country (open listing countries only), as at supplier signup. The state is filled from the city and can't be edited. A missing city is added to the catalogue by Idea Holiday; there is no free-text fallback (owner decision 2026-09-23).
 - **Consequences**: Production (Postgres) never runs the `INDIA_CITIES` refresh in `db.js`, which is SQLite-only, so a new Indian city needs a migration as well as a line in `backend/src/data/indiaCities.js`. Migration `060_more_india_cities.sql` adds Gorakhpur, Prayagraj and 27 other airport, pilgrimage and hill-station cities, and hides the old seed row `dest_goa`, which showed Goa twice. A saved draft whose city isn't in the catalogue has its city cleared, and the supplier is asked to choose again. Products already saved with a misspelled city are not changed.
+
+---
+
+## ADR 032: Indian Suppliers Verify PAN and GSTIN, Then Upload Those Two Documents
+- **Date**: 2026-09-23
+- **Context**: Suppliers could not tell which KYB documents mattered, and a failed upload only said "please try again".
+- **Decision Made**: In India the supplier first enters and verifies their PAN, then uploads the PAN card; then enters and verifies their GSTIN, then uploads the GSTIN certificate. Those two documents are the only required ones; the transport licence and every other document are optional (owner decision 2026-09-23).
+- **Consequences**: Manual approval of an Indian supplier is blocked until the PAN card and GSTIN certificate are uploaded, unless Cashfree has verified both numbers (ADR 009 auto-approval is unchanged). A refused upload now shows its reason.
 
 ---
 

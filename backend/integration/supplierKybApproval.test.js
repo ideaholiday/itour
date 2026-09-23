@@ -92,13 +92,13 @@ test("KYB documents stay private, incomplete suppliers can't be approved, and Ca
   assert.equal((await fetchFile(api, `/uploads/${legacyName}`)).status, 404);
   assert.equal((await fetchFile(api, `/api/uploads/files/${legacyName}`)).status, 404);
 
-  // The admin dossier shows real data only, and approval is blocked while the permit is missing.
+  // The admin dossier shows real data only, and approval is blocked while the GSTIN certificate is missing.
   const list = await requestJson(api.baseUrl, "/api/admin/suppliers?status=PENDING", { token: adminToken });
   assert.equal(list.response.status, 200, JSON.stringify(list.data));
   const dossier = list.data.suppliers.find((row) => row.id === supplier.supplierId);
   assert.equal(dossier.attachments, undefined);
   assert.deepEqual(dossier.kybDocs.map((doc) => [doc.doc_type, doc.has_file, doc.doc_url]), [["PAN", true, undefined]]);
-  assert.deepEqual(dossier.kybReadiness.missingDocuments, ["Commercial Transport License / Permit"]);
+  assert.deepEqual(dossier.kybReadiness.missingDocuments, ["GSTIN Certificate"]);
   assert.equal(dossier.kybReadiness.canApprove, false);
   assert.deepEqual(dossier.bankDetails, {});
 
@@ -106,7 +106,7 @@ test("KYB documents stay private, incomplete suppliers can't be approved, and Ca
     token: adminToken, body: { action: "APPROVED", reason: "Looks fine" },
   });
   assert.equal(blocked.response.status, 409, JSON.stringify(blocked.data));
-  assert.match(blocked.data.error, /Commercial Transport License/);
+  assert.match(blocked.data.error, /GSTIN Certificate/);
 
   // Verifying GSTIN and PAN with Cashfree SecureID approves the supplier by itself.
   const profile = await requestJson(api.baseUrl, `/api/suppliers/${supplier.supplierId}/profile`, {

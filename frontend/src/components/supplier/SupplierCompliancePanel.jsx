@@ -71,6 +71,12 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
 
   // Pre-selected doc type when clicking upload for a specific slot
   const [presetDocType, setPresetDocType] = useState("");
+  const [presetDocNumber, setPresetDocNumber] = useState("");
+  const openUpload = (type = "", number = "") => {
+    setPresetDocType(type);
+    setPresetDocNumber(number);
+    setUploadModalOpen(true);
+  };
   const [viewingDoc, setViewingDoc] = useState(null);
 
   const handleCopyRef = (ref) => {
@@ -86,8 +92,9 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
   };
 
   // Cashfree SecureID verification triggers
-  const handleVerifyGstin = async () => {
-    if (!supplier.gstin) {
+  const handleVerifyGstin = async (typed) => {
+    const gstin = String(typed ?? supplier.gstin ?? "").trim().toUpperCase();
+    if (!gstin) {
       showToast("error", "Please add a GSTIN number before verifying.");
       return;
     }
@@ -96,7 +103,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       const res = await fetch(`/api/suppliers/${supplierId}/kyb/verify-gstin`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ gstin: supplier.gstin, businessName: supplier.company_name })
+        body: JSON.stringify({ gstin, businessName: supplier.company_name })
       });
       const data = await res.json();
       if (data.success && data.verification?.valid) {
@@ -112,8 +119,9 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
     }
   };
 
-  const handleVerifyPan = async () => {
-    if (!supplier.pan_number) {
+  const handleVerifyPan = async (typed) => {
+    const pan = String(typed ?? supplier.pan_number ?? "").trim().toUpperCase();
+    if (!pan) {
       showToast("error", "Please add a PAN number before verifying.");
       return;
     }
@@ -122,7 +130,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       const res = await fetch(`/api/suppliers/${supplierId}/kyb/verify-pan`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ pan: supplier.pan_number, name: supplier.contact_name || supplier.company_name })
+        body: JSON.stringify({ pan, name: supplier.contact_name || supplier.company_name })
       });
       const data = await res.json();
       if (data.success && data.verification?.valid) {
@@ -352,6 +360,41 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
               </button>
             </div>
 
+            {cashfree && (
+              <div className="mt-5 space-y-3">
+                <IdentityStep
+                  step={1}
+                  title="PAN"
+                  docType="PAN"
+                  placeholder="ABCDE1234F"
+                  pattern={/^[A-Z]{5}[0-9]{4}[A-Z]$/}
+                  savedNumber={supplier.pan_number}
+                  verified={supplier.pan_verified === 1}
+                  verifiedName={supplier.pan_verified_name}
+                  verifying={verifyingField === "pan"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={handleVerifyPan}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "PAN")}
+                  onUpload={openUpload}
+                />
+                <IdentityStep
+                  step={2}
+                  title="GSTIN"
+                  docType="GSTIN"
+                  placeholder="22ABCDE1234F1Z5"
+                  pattern={/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/}
+                  savedNumber={supplier.gstin}
+                  verified={supplier.gstin_verified === 1}
+                  verifiedName={supplier.gstin_verified_name}
+                  verifying={verifyingField === "gstin"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={handleVerifyGstin}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "GSTIN")}
+                  onUpload={openUpload}
+                />
+              </div>
+            )}
+
             {/* Documents List */}
             <div className="mt-5 space-y-3">
               {kybDocs.map((doc) => {
@@ -458,10 +501,10 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
           {/* Quick upload triggers for standard required documents */}
           <div className="mt-6 pt-5 border-t border-stone-200">
             <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 block mb-2">
-              Recommended Document Checklist
+              {cashfree ? "Other documents (optional)" : "Recommended Document Checklist"}
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {docTypes.slice(0, 4).map((type) => {
+              {docTypes.filter((type) => !cashfree || !["PAN", "GSTIN"].includes(type.value)).slice(0, 4).map((type) => {
                 const uploaded = kybDocs.find((d) => d.doc_type === type.value);
                 return (
                   <button
@@ -596,7 +639,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                       <button
                         type="button"
                         disabled={verifyingField === "gstin"}
-                        onClick={handleVerifyGstin}
+                        onClick={() => handleVerifyGstin()}
                         className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
                       >
                         {verifyingField === "gstin" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
@@ -637,7 +680,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                       <button
                         type="button"
                         disabled={verifyingField === "pan"}
-                        onClick={handleVerifyPan}
+                        onClick={() => handleVerifyPan()}
                         className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
                       >
                         {verifyingField === "pan" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
@@ -843,6 +886,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
           onClose={() => setUploadModalOpen(false)}
           supplierId={supplierId}
           presetType={presetDocType}
+          presetNumber={presetDocNumber}
           docTypes={docTypes}
           onSuccess={() => {
             setUploadModalOpen(false);
@@ -1233,12 +1277,88 @@ function PayoutBankModal({ isOpen, onClose, supplier, supplierId, bankDetails, o
   );
 }
 
+// The API sends a readable reason in `error` (its `message` is stripped from
+// error responses), so show that instead of a generic line.
+function uploadErrorMessage(status, body, fallback = "The file could not be uploaded. Please try again.") {
+  if (status === 401) return "Your session has expired. Please sign in again and retry.";
+  if (status === 413) return "The file is too large. Please upload a file under 5MB.";
+  if (status === 429) return "Too many uploads in the last hour. Please wait a few minutes and try again.";
+  if (status >= 500) return `${fallback}${body?.requestId ? ` (reference ${body.requestId})` : ""}`;
+  return body?.error || body?.message || fallback;
+}
+
+// A required identity check: enter the number, verify it with Cashfree, then
+// upload the matching document.
+function IdentityStep({ step, title, docType, placeholder, pattern, savedNumber, verified, verifiedName, verifying, busy, onVerify, uploadedDoc, onUpload }) {
+  const [value, setValue] = useState(savedNumber || "");
+  const number = value.trim().toUpperCase();
+  const valid = pattern.test(number);
+  const isVerified = verified && number === String(savedNumber || "").toUpperCase();
+
+  return (
+    <article className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-bold text-stone-900">
+          Step {step}: Verify {title}, then upload the {title} document
+        </h3>
+        <span className="text-[10px] font-bold uppercase text-rose-700">Required</span>
+      </div>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value.toUpperCase())}
+          placeholder={placeholder}
+          maxLength={15}
+          aria-label={`${title} number`}
+          className="min-w-0 flex-1 rounded-xl border border-stone-300 bg-white px-3 py-2 font-mono text-sm uppercase focus:border-amber-500 focus:outline-none"
+        />
+        {isVerified ? (
+          <span className="inline-flex items-center justify-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Verified
+          </span>
+        ) : (
+          <button
+            type="button"
+            disabled={!valid || busy}
+            onClick={() => onVerify(number)}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+          >
+            {verifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            <span>Verify {title}</span>
+          </button>
+        )}
+      </div>
+      {number && !valid && <p className="mt-1 text-[11px] text-rose-600">Enter a valid {title} ({placeholder}).</p>}
+      {isVerified && verifiedName && <p className="mt-1 text-[11px] text-emerald-800">Registered to {verifiedName}</p>}
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-stone-200 pt-3">
+        <span className="text-[11px] text-stone-600">
+          {uploadedDoc
+            ? `${title} document uploaded (${uploadedDoc.status || "PENDING"})`
+            : isVerified ? `Now upload a copy of your ${title} document.` : `Verify your ${title} first, then upload its document.`}
+        </span>
+        {!uploadedDoc && (
+          <button
+            type="button"
+            disabled={!isVerified}
+            onClick={() => onUpload(docType, number)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>Upload {title}</span>
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
 // -------------------------------------------------------------
 // Sub-component Modal: Document Upload
 // -------------------------------------------------------------
-function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, docTypes = DOC_TYPES, onSuccess }) {
+function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, presetNumber = "", docTypes = DOC_TYPES, onSuccess }) {
   const [docType, setDocType] = useState(presetType || docTypes[0].value);
-  const [docNumber, setDocNumber] = useState("");
+  const [docNumber, setDocNumber] = useState(presetNumber || "");
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1296,7 +1416,7 @@ function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, docTypes
 
       const uploadData = await uploadRes.json().catch(() => ({}));
       if (!uploadRes.ok || !uploadData.success || !uploadData.upload?.url) {
-        setError(uploadData.message || "The file could not be uploaded. Please try again.");
+        setError(uploadErrorMessage(uploadRes.status, uploadData));
         return;
       }
       const docUrl = uploadData.upload.url;
@@ -1312,11 +1432,11 @@ function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, docTypes
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.success) {
         onSuccess();
       } else {
-        setError(data.error || "Failed to submit document");
+        setError(uploadErrorMessage(res.status, data, "The document could not be submitted. Please try again."));
       }
     } catch {
       setError("Network error uploading document");

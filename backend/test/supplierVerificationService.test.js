@@ -64,8 +64,8 @@ const supplierRow = (database) => database.prepare("SELECT * FROM suppliers WHER
 
 test("supplier approval atomically verifies the supplier and its KYB documents", async () => {
   const database = verificationDatabase();
-  await addDocument(database, "document-1", "COMMERCIAL_TRANSPORT_LICENSE");
-  await addDocument(database, "document-2", "PAN");
+  await addDocument(database, "document-1", "PAN");
+  await addDocument(database, "document-2", "GSTIN");
   const result = saveSupplierVerification(database, {
     supplierId: "supplier-1",
     action: "APPROVED",
@@ -103,18 +103,20 @@ test("supplier rejection requires and records a reason", async () => {
 
 test("an admin cannot approve a supplier whose required documents are missing or only placeholder links", async () => {
   const database = verificationDatabase();
-  await addDocument(database, "document-1", "COMMERCIAL_TRANSPORT_LICENSE");
+  await addDocument(database, "document-1", "GSTIN");
   await addDocument(database, "document-2", "PAN", { withFile: false });
+  await addDocument(database, "document-3", "COMMERCIAL_TRANSPORT_LICENSE");
 
   assert.throws(
     () => saveSupplierVerification(database, { supplierId: "supplier-1", action: "APPROVED" }),
-    (error) => error.status === 409 && /Missing: PAN Card/.test(error.message),
+    (error) => error.status === 409 && /Missing: PAN Card\./.test(error.message),
   );
   assert.equal(supplierRow(database).kyb_status, "PENDING");
 
   const readiness = getKybApprovalReadiness(database, supplierRow(database));
   assert.equal(readiness.canApprove, false);
-  assert.deepEqual(readiness.requiredDocuments.map((doc) => doc.uploaded), [true, false]);
+  // PAN and GSTIN are required; the transport licence is optional (ADR 032).
+  assert.deepEqual(readiness.requiredDocuments.map((doc) => [doc.docType, doc.uploaded]), [["PAN", false], ["GSTIN", true]]);
   database.close();
 });
 

@@ -10,9 +10,11 @@ export const KYB_APPROVAL_SOURCES = Object.freeze({
 });
 
 // Documents a supplier must upload before an admin can approve them by hand.
+// The PAN card and GSTIN certificate back the two Cashfree checks; every other
+// document is optional (ADR 032).
 export const REQUIRED_KYB_DOCUMENTS = Object.freeze([
-  { docType: "COMMERCIAL_TRANSPORT_LICENSE", label: "Commercial Transport License / Permit", acceptedTypes: ["COMMERCIAL_TRANSPORT_LICENSE", "COMMERCIAL_PERMIT"] },
   { docType: "PAN", label: "PAN Card", acceptedTypes: ["PAN"] },
+  { docType: "GSTIN", label: "GSTIN Certificate", acceptedTypes: ["GSTIN"] },
 ]);
 
 /**
@@ -26,9 +28,9 @@ export const KYB_COUNTRY_RULES = Object.freeze({
     cashfree: true,
     required: REQUIRED_KYB_DOCUMENTS,
     documentTypes: Object.freeze([
-      { docType: "COMMERCIAL_TRANSPORT_LICENSE", label: "Commercial Transport License / Permit" },
-      { docType: "GSTIN", label: "GSTIN Certificate" },
       { docType: "PAN", label: "PAN Card (Business / Proprietor)" },
+      { docType: "GSTIN", label: "GSTIN Certificate" },
+      { docType: "COMMERCIAL_TRANSPORT_LICENSE", label: "Commercial Transport License / Permit (optional)" },
       { docType: "BANK_CANCELLED_CHEQUE", label: "Cancelled Cheque / Bank Passbook" },
       { docType: "TOURISM_LICENSE", label: "Tourism Department Registration" },
       { docType: "CIN", label: "Certificate of Incorporation (CIN), optional" },

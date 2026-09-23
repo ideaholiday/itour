@@ -52,11 +52,11 @@ router.post("/uploads", uploadLimiter, authenticateBearer, async (req, res) => {
       const role = String(req.user?.role || "").toUpperCase();
       const ownsSupplier = role === "SUPPLIER" && req.user.supplier_id && req.user.supplier_id === entityId;
       if (!entityId || !(ownsSupplier || ["ADMIN", "STAFF"].includes(role))) {
-        return res.status(403).json({ error: "FORBIDDEN", message: "KYB documents can only be uploaded for your own supplier account" });
+        return res.status(403).json({ error: "KYB documents can only be uploaded for your own supplier account", code: "FORBIDDEN" });
       }
       const kybMime = kybMimeType(mimeType);
       if (!kybMime) {
-        return res.status(400).json({ error: "UNSUPPORTED_FILE_TYPE", message: "KYB documents must be a PDF, PNG, JPG or WEBP file" });
+        return res.status(400).json({ error: "KYB documents must be a PDF, PNG, JPG or WEBP file", code: "UNSUPPORTED_FILE_TYPE" });
       }
       const stored = await saveKybFile(buffer, kybMime);
       const upload = UploadService.recordUpload({
