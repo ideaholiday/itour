@@ -64,11 +64,12 @@ Standing obligations that apply to every change:
 
 **1. Branch coverage on error paths** *(in progress)*
 Unit branch coverage is ~76% against ~91% line. Payment, channel, SLA, the
-provider boundary, the booking quote, Cashfree SecureID and analytics have had a
-pass, surfacing two refund bugs, six in the OCTo confirmation path and three in
-analytics (the overview and revenue breakdown read columns that don't exist;
-bookings dropping to zero raised no alert). Still thin: `driverDispatchService`
-and the six unimplemented adapters.
+provider boundary, the booking quote, Cashfree SecureID, analytics and driver
+dispatch have had a pass, surfacing two refund bugs, six in the OCTo confirmation
+path and three in analytics (the overview and revenue breakdown read columns that
+don't exist; bookings dropping to zero raised no alert). The named services are
+done; what remains is the six unimplemented adapters, which need provider
+credentials (item 2).
 
 A lesson worth keeping: the OCTo bugs were all masked by a unit-test fixture that
 hand-rolled a `bookings` table not matching production, and the analytics bugs
