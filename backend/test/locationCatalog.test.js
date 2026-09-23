@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveCatalogLocation } from "../src/lib/locationCatalog.js";
+import { INDIA_CITIES } from "../src/data/indiaCities.js";
 
 const catalog = [
   { id: "goa", name: "Goa", state: "Goa" },
@@ -30,4 +31,10 @@ test("rejects misspelled cities and a country that doesn't match the city", () =
   assert.match(resolveCatalogLocation(catalog, "Banglore").error, /city catalogue/i);
   assert.match(resolveCatalogLocation(catalog, "Goa", "Portugal").error, /Goa is in India/);
   assert.match(resolveCatalogLocation(catalog, "Bangkok", "India").error, /Bangkok is in Thailand/);
+});
+
+test("Gorakhpur is an Indian catalogue city in Uttar Pradesh", () => {
+  const india = INDIA_CITIES.map(([id, name, state]) => ({ id, name, state }));
+  assert.deepEqual(resolveCatalogLocation(india, "Gorakhpur").value, { city: "Gorakhpur", state: "Uttar Pradesh", country: "India" });
+  assert.match(resolveCatalogLocation(india, "Gorahpur").error, /city catalogue/i);
 });

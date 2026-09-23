@@ -37,3 +37,15 @@ export function withImageList(product) {
     return { ...product, images: [] };
   }
 }
+
+/**
+ * The catalogue city (from `/api/cities`) a product's `city` names, matched by
+ * name or id ignoring case, or null. A city whose country isn't open for
+ * listings yet doesn't count, the same as the backend's resolveCatalogLocation.
+ */
+export function catalogCity(cities, city) {
+  const wanted = String(city || "").trim().toLowerCase();
+  if (!wanted) return null;
+  return (cities || []).find((c) => c.listing_open !== false
+    && (String(c.name).toLowerCase() === wanted || String(c.id).toLowerCase() === wanted)) || null;
+}

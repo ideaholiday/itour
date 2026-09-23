@@ -8,7 +8,8 @@ import {
   Eye, DollarSign, Settings, FileText, Calendar, Image, Copy, ExternalLink
 } from "lucide-react";
 import { useAuth } from "../lib/auth.jsx";
-import { authHeaders } from "../lib/api.js";
+import { api, authHeaders } from "../lib/api.js";
+import { catalogCity } from "../lib/destinations.js";
 import { activityPath } from "../lib/activityUrl.js";
 import { uploadImage } from "../lib/imageUpload.js";
 
@@ -240,6 +241,40 @@ function StepBasicInfo({ data, onChange, errors, supplierId }) {
   const latest = useRef(data);
   latest.current = data;
   const gallery = data.images || [];
+  // City comes from the catalogue and sets the state, as at supplier signup;
+  // the backend refuses any other city.
+  const [cities, setCities] = useState([]);
+  const [citiesError, setCitiesError] = useState("");
+  const [unlistedCity, setUnlistedCity] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    api.getCities()
+      .then((rows) => {
+        if (!active) return;
+        const open = (Array.isArray(rows) ? rows : []).filter((c) => c.listing_open !== false);
+        setCities(open);
+        // A draft saved before the picker may hold a typed city; keep it only if the catalogue has it.
+        const current = latest.current;
+        if (!current.city) return;
+        const match = catalogCity(open, current.city);
+        if (!match) {
+          setUnlistedCity(current.city);
+          onChange({ ...current, city: "", state: "" });
+        } else if (match.name !== current.city || match.state !== current.state) {
+          onChange({ ...current, city: match.name, state: match.state });
+        }
+      })
+      .catch(() => active && setCitiesError("We could not load the city list. Please refresh and try again."));
+    return () => { active = false; };
+  }, []);
+
+  const countries = [...new Set(cities.map((c) => c.country || "India"))];
+  const selectCity = (e) => {
+    const picked = cities.find((c) => c.id === e.target.value);
+    onChange({ ...data, city: picked?.name || "", state: picked?.state || "" });
+    setUnlistedCity("");
+  };
 
   const uploadHero = async ([file]) => {
     setUploading("hero");
@@ -295,12 +330,22 @@ function StepBasicInfo({ data, onChange, errors, supplierId }) {
 
         <div>
           <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">City *</label>
-          <input
-            value={data.city || ""}
-            onChange={(e) => upd("city", e.target.value)}
-            placeholder="e.g. Goa, Bangkok, Pattaya"
-            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
-          />
+          <select
+            value={catalogCity(cities, data.city)?.id || ""}
+            onChange={selectCity}
+            disabled={!cities.length}
+            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:bg-stone-100"
+          >
+            <option value="">{cities.length || citiesError ? "Select a city" : "Loading cities…"}</option>
+            {countries.map((country) => (
+              <optgroup key={country} label={country}>
+                {cities.filter((c) => (c.country || "India") === country).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {citiesError && <p className="mt-1 text-xs text-red-500">{citiesError}</p>}
+          {unlistedCity && <p className="mt-1 text-xs text-red-500">"{unlistedCity}" isn't in the Idea Holiday city list. Choose the city from the list.</p>}
+          <p className="mt-1 text-xs text-stone-400">City not listed? Ask Idea Holiday support to add it.</p>
           {errors?.city && <p className="mt-1 text-xs text-red-500">{errors.city}</p>}
         </div>
 
@@ -308,9 +353,10 @@ function StepBasicInfo({ data, onChange, errors, supplierId }) {
           <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">State / Region *</label>
           <input
             value={data.state || ""}
-            onChange={(e) => upd("state", e.target.value)}
-            placeholder="e.g. Goa, Thailand"
-            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
+            readOnly
+            tabIndex={-1}
+            placeholder="Selected automatically"
+            className="w-full rounded-xl border border-stone-200 bg-[#FAF9F6] px-4 py-3 text-sm text-stone-600 focus:outline-none"
           />
           {errors?.state && <p className="mt-1 text-xs text-red-500">{errors.state}</p>}
         </div>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { destinationParam, featuredDestinations, withImageList } from "./destinations.js";
+import { catalogCity, destinationParam, featuredDestinations, withImageList } from "./destinations.js";
 
 test("a city abroad links by name; an Indian city by its id", () => {
   assert.equal(destinationParam({ id: "city_th_bangkok", name: "Bangkok", country: "Thailand" }), "Bangkok");
@@ -27,4 +27,16 @@ test("a search result's images string becomes a list", () => {
   assert.deepEqual(withImageList({ id: "p", images: '["a.jpg"]' }).images, ["a.jpg"]);
   assert.deepEqual(withImageList({ id: "p", images: "not json" }).images, []);
   assert.deepEqual(withImageList({ id: "p", images: ["b.jpg"] }).images, ["b.jpg"]);
+});
+
+test("a product city matches its catalogue city by name or id; a typo matches nothing", () => {
+  const cities = [
+    { id: "gorakhpur", name: "Gorakhpur", state: "Uttar Pradesh", country: "India", listing_open: true },
+    { id: "city_cn_beijing", name: "Beijing", state: "Beijing", country: "China", listing_open: false },
+  ];
+  assert.equal(catalogCity(cities, " gorakhpur ").state, "Uttar Pradesh");
+  assert.equal(catalogCity(cities, "GORAKHPUR").name, "Gorakhpur");
+  assert.equal(catalogCity(cities, "Gorahpur"), null);
+  assert.equal(catalogCity(cities, "Beijing"), null);
+  assert.equal(catalogCity(cities, ""), null);
 });

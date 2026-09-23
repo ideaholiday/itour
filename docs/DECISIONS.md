@@ -305,5 +305,13 @@ This document records significant technical and product architectural decisions.
 
 ---
 
+## ADR 031: Product City Comes From the Catalogue
+- **Date**: 2026-09-23
+- **Context**: The product builder took City and State / Region as free text. A typo ("Gorahpur" for Gorakhpur) was only refused at Publish, because the backend already accepts catalogue cities only (`resolveCatalogLocation`).
+- **Decision Made**: The supplier picks the city from the catalogue list, grouped by country (open listing countries only), as at supplier signup. The state is filled from the city and can't be edited. A missing city is added to the catalogue by Idea Holiday; there is no free-text fallback (owner decision 2026-09-23).
+- **Consequences**: Gorakhpur (Uttar Pradesh) is added to `backend/src/data/indiaCities.js`. A saved draft whose city isn't in the catalogue has its city cleared, and the supplier is asked to choose again. Products already saved with a misspelled city are not changed.
+
+---
+
 ## ADR 025 onward: SEO and content
 Moved to [`DECISIONS_SEO.md`](DECISIONS_SEO.md): city pages, the staff blog, link previews, Hindi pages, WhatsApp sharing. Add new SEO and content ADRs there.

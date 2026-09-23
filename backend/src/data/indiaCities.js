@@ -25,6 +25,7 @@ export const INDIA_CITIES = [
   ["dharamshala", "Dharamshala", "Himachal Pradesh", "TOURISM"],
   ["gangtok", "Gangtok", "Sikkim", "TOURISM"],
   ["goa", "Goa", "Goa", "TOURISM"],
+  ["gorakhpur", "Gorakhpur", "Uttar Pradesh", "TOURISM"],
   ["guwahati", "Guwahati", "Assam", "TOURISM"],
   ["hampi", "Hampi", "Karnataka", "TOURISM"],
   ["haridwar", "Haridwar", "Uttarakhand", "TOURISM"],
