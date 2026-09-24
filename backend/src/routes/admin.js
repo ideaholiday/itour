@@ -13,6 +13,7 @@ import {
   notifyPostTripReviewRequest,
   runAutomatedTripReminders,
   queueNotification,
+  notifyKybDocumentReupload,
 } from "../services/notificationService.js";
 import { initiateCashfreeTransfer } from "../services/cashfreeService.js";
 import { pendingRefundQuote, sendRefundToGateway } from "../services/bookingRefundService.js";
@@ -326,6 +327,25 @@ router.get("/suppliers/:id/kyb/:docId/file", optionalAuthMiddleware, requireAdmi
   } catch (err) {
     logger.error("Admin KYB document file failed", { requestId: req.requestId, error: err });
     return res.status(500).json({ error: "Could not open the document" });
+  }
+});
+
+// POST /api/admin/suppliers/:id/kyb/:docId/reupload - Ask the supplier to upload one document again
+// (e.g. a licence in another name). The supplier's KYB status is unchanged (owner decision 2026-09-24).
+router.post("/suppliers/:id/kyb/:docId/reupload", optionalAuthMiddleware, requireAdminAccess, validateBody(adminSchemas.kybReupload), (req, res) => {
+  try {
+    const doc = db.prepare("SELECT id, doc_type FROM kyb_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+    const reason = req.body.reason.trim();
+    db.prepare("UPDATE kyb_documents SET status = 'REJECTED', rejection_reason = ?, verified_at = datetime('now') WHERE id = ?").run(reason, doc.id);
+    // Tell the supplier by email and WhatsApp; a failed send never undoes the request.
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
+    const documentLabel = supplierKybRules(db, supplier).documentTypes.find((type) => type.docType === doc.doc_type)?.label || doc.doc_type.replaceAll("_", " ").toLowerCase();
+    queueNotification(notifyKybDocumentReupload(db, { supplier, documentId: doc.id, documentLabel, reason }), `KYB re-upload notification for ${supplier.id}`);
+    res.json({ success: true, document: db.prepare("SELECT id, doc_type, status, rejection_reason FROM kyb_documents WHERE id = ?").get(doc.id), message: "The supplier is asked to upload this document again." });
+  } catch (err) {
+    logger.error("Admin KYB re-upload request failed", { requestId: req.requestId, error: err });
+    res.status(500).json({ error: "Could not ask for the document again" });
   }
 });
 

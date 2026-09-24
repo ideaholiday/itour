@@ -24,6 +24,7 @@ stack map in `AGENTS.md`.
 | Node.js (`node:test`, runtime) | backend | `/nodejs/node/v22_20_0` |
 | Playwright | e2e | `/microsoft/playwright/v1.61.0` |
 | lucide-react | frontend, root app | `/websites/lucide_dev` |
+| MediaPipe tasks-vision (owner selfie face check; wasm served from `/mediapipe/`) | frontend | `/google-ai-edge/mediapipe` |
 
 ## Known traps
 

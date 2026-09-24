@@ -533,6 +533,24 @@ export async function notifySupplierVerification({ supplier, action, reason, com
   return { email, whatsapp, success: email.success || whatsapp.success };
 }
 
+// Staff sent one KYB document back (e.g. a licence in another name). Reuses the
+// SUPPLIER_STATUS WhatsApp template, so no new Meta template is needed.
+export async function notifyKybDocumentReupload(database, { supplier, documentId, documentLabel, reason }) {
+  const recipient = { id: supplier.id, role: "SUPPLIER", name: supplier.contact_name || supplier.company_name, email: supplier.email, phone: supplier.phone };
+  const message = `Hello ${recipient.name || "Partner"},\n\nPlease upload your ${documentLabel} again.\nReason: ${reason}\n\nOpen the Supplier Portal, go to Compliance, and upload it from the same step.`;
+  return sendRecipientChannels({
+    database,
+    eventType: "KYB_DOCUMENT_REUPLOAD",
+    eventKeyPrefix: `${documentId}:KYB_DOCUMENT_REUPLOAD:${Date.now()}`,
+    recipient,
+    subject: `Please upload your ${documentLabel} again`,
+    emailText: message,
+    whatsappText: message,
+    whatsappTemplate: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_SUPPLIER_STATUS, ["DOCUMENT NEEDED", `Upload your ${documentLabel} again: ${reason}`]),
+    metadata: { supplierId: supplier.id, documentId },
+  });
+}
+
 export async function notifyProductPublished(database, productId) {
   const product = database.prepare(`
     SELECT p.id, p.title, p.supplier_id, s.company_name, s.contact_name, s.email, s.phone

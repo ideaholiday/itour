@@ -319,6 +319,7 @@ export const adminSchemas = {
   review: object({ action: text(2, 40), reason: optionalText(1_000) }),
   verification: object({ action: optionalText(40), decision: optionalText(40), reason: optionalText(1_000), commissionRate: z.coerce.number().min(0).max(100).optional() }),
   autoVerify: object({ supplierId: id.optional() }),
+  kybReupload: object({ reason: text(5, 500) }),
   commission: object({ commissionRate: z.coerce.number().min(0).max(50).nullable().optional(), commission_rate: z.coerce.number().min(0).max(50).nullable().optional(), reason: text(3, 500) }),
   subscriptionWaiver: object({ until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), reason: text(3, 500) }),
   endSubscription: object({ reason: text(3, 500) }),

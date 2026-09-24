@@ -1,5 +1,4 @@
 import { hasKybFile } from "./kybFileService.js";
-import { calculateNameMatchScore } from "./cashfreeSecureIdService.js";
 import { resolveCommissionRate } from "./financeService.js";
 
 const ALLOWED_ACTIONS = new Set(["APPROVED", "REJECTED", "SUSPENDED"]);
@@ -215,18 +214,22 @@ export const SUPPLIER_KINDS = Object.freeze(["BUSINESS", "INDIVIDUAL_OWNER"]);
  */
 export const INDIVIDUAL_OWNER_RULES = Object.freeze({
   cashfree: false,
+  // Five steps (owner decision 2026-09-24): PAN verified with Cashfree then its
+  // card, a live selfie, masked Aadhaar front and back, driving licence and
+  // vehicle RC. Permit, insurance and the cancelled cheque are optional.
   required: Object.freeze([
     { docType: "PAN", label: "PAN card", acceptedTypes: ["PAN"] },
-    { docType: "AADHAAR_MASKED", label: "Masked Aadhaar (only the last 4 digits visible)", acceptedTypes: ["AADHAAR_MASKED"] },
+    { docType: "SELFIE", label: "Live selfie", acceptedTypes: ["SELFIE"] },
+    { docType: "AADHAAR_MASKED", label: "Masked Aadhaar front (only the last 4 digits visible)", acceptedTypes: ["AADHAAR_MASKED"] },
+    { docType: "AADHAAR_BACK", label: "Aadhaar back", acceptedTypes: ["AADHAAR_BACK"] },
     { docType: "DRIVING_LICENSE", label: "Commercial driving licence", acceptedTypes: ["DRIVING_LICENSE"] },
     { docType: "VEHICLE_REGISTRATION", label: "Vehicle registration certificate (RC)", acceptedTypes: ["VEHICLE_REGISTRATION"] },
-    { docType: "COMMERCIAL_PERMIT", label: "Commercial vehicle permit", acceptedTypes: ["COMMERCIAL_PERMIT", "COMMERCIAL_TRANSPORT_LICENSE"] },
-    { docType: "VEHICLE_INSURANCE", label: "Vehicle insurance", acceptedTypes: ["VEHICLE_INSURANCE"] },
-    { docType: "BANK_CANCELLED_CHEQUE", label: "Cancelled cheque or bank passbook", acceptedTypes: ["BANK_CANCELLED_CHEQUE"] },
   ]),
   documentTypes: Object.freeze([
     { docType: "PAN", label: "PAN card" },
-    { docType: "AADHAAR_MASKED", label: "Masked Aadhaar (only the last 4 digits visible)" },
+    { docType: "SELFIE", label: "Live selfie" },
+    { docType: "AADHAAR_MASKED", label: "Masked Aadhaar front (only the last 4 digits visible)" },
+    { docType: "AADHAAR_BACK", label: "Aadhaar back" },
     { docType: "DRIVING_LICENSE", label: "Commercial driving licence" },
     { docType: "VEHICLE_REGISTRATION", label: "Vehicle registration certificate (RC)" },
     { docType: "COMMERCIAL_PERMIT", label: "Commercial vehicle permit" },
@@ -371,10 +374,6 @@ export function getCashfreeIdentityStatus(database, supplier) {
   };
 }
 
-// Names on the PAN, licence and RC count as the same person at this score or above:
-// what one name fully inside the other scores ("Ramesh Kumar" / "RAMESH K").
-export const OWNER_NAME_MATCH_MIN = 85;
-
 // The newest valid Cashfree check of a type, with the name it reported.
 function latestValidCheck(database, supplierId, type, nameOf) {
   const row = database.prepare(`
@@ -387,11 +386,22 @@ function latestValidCheck(database, supplierId, type, nameOf) {
   return { name: nameOf(response) || null, simulated: Boolean(response.simulated) };
 }
 
+// The number from the latest valid Cashfree check of this type, e.g. a licence number.
+function latestValidNumber(database, supplierId, type, inputKey) {
+  const row = database.prepare(`
+    SELECT input_data FROM supplier_kyb_verifications
+    WHERE supplier_id = ? AND verification_type = ? AND status = 'VALID'
+    ORDER BY created_at DESC LIMIT 1
+  `).get(supplierId, type);
+  return row ? normalizeId(parseJson(row.input_data)[inputKey]) || null : null;
+}
+
 /**
- * Whether an individual owner passes every automatic check (ADR 024 C4): Cashfree
- * verified their current PAN, a driving licence and a vehicle RC, the three names
- * are the same person, and every required document is uploaded. Anything failed
- * or missing leaves them for an admin to approve by hand.
+ * Whether an individual owner is approved automatically (ADR 033): Cashfree
+ * verified their current PAN and every required document is uploaded (PAN card,
+ * selfie, Aadhaar front and back, driving licence, vehicle RC). Licence and RC
+ * checks and the names they return are shown to admins but never hold an owner
+ * back (owner decision 2026-09-24).
  */
 export function getOwnerIdentityStatus(database, supplier) {
   const reasons = [];
@@ -400,23 +410,15 @@ export function getOwnerIdentityStatus(database, supplier) {
   const pan = panCheck?.valid ? { name: panCheck.name, simulated: panCheck.simulated } : null;
   const licence = latestValidCheck(database, supplier.id, "DRIVING_LICENSE", (r) => r.name);
   const vehicle = latestValidCheck(database, supplier.id, "VEHICLE_RC", (r) => r.owner);
-  const allowSimulated = simulatedResultsCount();
-  for (const [label, check] of [["PAN", pan], ["Driving licence", licence], ["Vehicle RC", vehicle]]) {
-    if (!check) reasons.push(`${label} has not been verified with Cashfree SecureID`);
-    else if (check.simulated && !allowSimulated) reasons.push(`${label} check was simulated, not a real Cashfree result`);
-  }
-  const names = [pan?.name, licence?.name, vehicle?.name];
-  if (pan && licence && vehicle) {
-    if (names.some((name) => !name)) reasons.push("Cashfree did not return a name for every check");
-    else if (calculateNameMatchScore(names[0], names[1]) < OWNER_NAME_MATCH_MIN || calculateNameMatchScore(names[0], names[2]) < OWNER_NAME_MATCH_MIN) {
-      reasons.push("The names on the PAN, driving licence and vehicle RC don't match");
-    }
-  }
-  const documents = database.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ?").all(supplier.id).filter((doc) => hasKybFile(doc));
+  if (!pan) reasons.push("PAN has not been verified with Cashfree SecureID");
+  else if (pan.simulated && !simulatedResultsCount()) reasons.push("PAN check was simulated, not a real Cashfree result");
+  // A document an admin sent back for re-upload doesn't count until it is replaced.
+  const documents = database.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ?").all(supplier.id)
+    .filter((doc) => hasKybFile(doc) && normalizeId(doc.status) !== "REJECTED");
   for (const required of INDIVIDUAL_OWNER_RULES.required) {
     if (!documents.some((doc) => required.acceptedTypes.includes(normalizeId(doc.doc_type)))) reasons.push(`${required.label} is not uploaded`);
   }
-  return { verified: reasons.length === 0, names: { pan: names[0], licence: names[1], vehicle: names[2] }, reasons };
+  return { verified: reasons.length === 0, names: { pan: pan?.name || null, licence: licence?.name || null, vehicle: vehicle?.name || null }, reasons };
 }
 
 /**
@@ -437,6 +439,16 @@ export function getKybApprovalReadiness(database, supplier) {
   const missingDocuments = requiredDocuments.filter((doc) => !doc.uploaded).map((doc) => doc.label);
   if (!rules.required.length && !withFile.length) missingDocuments.push(`At least one business document from ${country}`);
   const identity = rules.cashfree ? getCashfreeIdentityStatus(database, supplier) : null;
+  const owner = rules === INDIVIDUAL_OWNER_RULES;
+  // An owner's PAN must be verified with Cashfree, even for a manual approval.
+  const panVerified = Number(supplier.pan_verified) === 1;
+  if (owner && !panVerified) missingDocuments.unshift("PAN verified with Cashfree SecureID");
+  const ownerChecks = owner ? {
+    pan: { verified: panVerified, number: supplier.pan_number || null, name: supplier.pan_verified_name || null },
+    // Names Cashfree returned, for an admin to compare with the PAN name.
+    licence: { number: latestValidNumber(database, supplier.id, "DRIVING_LICENSE", "licenseNumber"), name: latestValidCheck(database, supplier.id, "DRIVING_LICENSE", (r) => r.name)?.name || null },
+    vehicle: { number: latestValidNumber(database, supplier.id, "VEHICLE_RC", "registrationNumber"), name: latestValidCheck(database, supplier.id, "VEHICLE_RC", (r) => r.owner)?.name || null },
+  } : null;
   return {
     country,
     supplierKind: isIndividualOwner(supplier) ? "INDIVIDUAL_OWNER" : "BUSINESS",
@@ -445,6 +457,7 @@ export function getKybApprovalReadiness(database, supplier) {
     requiredDocuments,
     missingDocuments,
     identity,
+    ownerChecks,
     canApprove: missingDocuments.length === 0 || Boolean(identity?.verified),
   };
 }
@@ -523,7 +536,7 @@ export function saveSupplierVerification(database, {
   };
 }
 
-export const OWNER_AUTO_APPROVAL_REASON = "Your PAN, driving licence and vehicle were verified with Cashfree SecureID. Your published listings can now be booked.";
+export const OWNER_AUTO_APPROVAL_REASON = "Your PAN was verified with Cashfree SecureID and all your documents are uploaded. Your published listings can now be booked.";
 export const AUTO_APPROVAL_REASON = "Your GSTIN and PAN were verified with Cashfree SecureID. Your published listings can now be booked.";
 
 /**
@@ -539,7 +552,7 @@ export function autoApproveSupplierKyb(database, supplierId, { notify } = {}) {
 
   const status = normalizeId(supplier.kyb_status) || "PENDING";
   if (status !== "PENDING") return { approved: false, supplier, identity: null };
-  // Individual owners in India pass on PAN, licence, RC and matching names (ADR 024);
+  // Individual owners in India pass on a verified PAN and all their documents (ADR 033);
   // suppliers abroad are approved by an admin from their documents (ADR 023).
   const owner = isIndividualOwner(supplier) && supplierCountry(database, supplier) === "India";
   if (!owner && !supplierKybRules(database, supplier).cashfree) return { approved: false, supplier, identity: null };

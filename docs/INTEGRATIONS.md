@@ -37,7 +37,7 @@ and `whatsappService.js`.
 | `SUPPLIER_ACCEPTED` | booking ref, supplier name |
 | `DRIVER_ASSIGNED` | booking ref, driver name, driver phone, vehicle model, vehicle number, pickup time, pickup, voucher URL |
 | `DRIVER_TRIP` | booking ref, traveler name, traveler phone, date + time, pickup, drop, vehicle number |
-| `SUPPLIER_STATUS` | status/action, reason |
+| `SUPPLIER_STATUS` | status/action, reason (also `DOCUMENT NEEDED` when staff ask for a KYB re-upload) |
 | `OPS_ALERT` | booking ref, alert message |
 | `TRIP_STATUS` | booking ref, status, message |
 | `REFUND_STATUS` | booking ref, refund amount, refund percentage, gateway refund ID |

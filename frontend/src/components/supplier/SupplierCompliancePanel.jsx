@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
 import KybDocumentViewer, { kybDocLabel } from "../KybDocumentViewer.jsx";
+import SelfieCapture from "./SelfieCapture.jsx";
 
 const parseBankDetails = (raw) => {
   if (!raw) return null;
@@ -56,8 +57,11 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
   const kybDocs = supplierData?.kybDocs || [];
   // Documents and checks for the country of the supplier's base city (ADR 023).
   const kybReadiness = supplierData?.kybReadiness;
-  const docTypes = kybReadiness?.documentTypes?.map((type) => ({ value: type.docType, label: type.label })) || DOC_TYPES;
+  // The selfie is taken with the live camera only, never picked from the gallery.
+  const docTypes = kybReadiness?.documentTypes?.filter((type) => type.docType !== "SELFIE").map((type) => ({ value: type.docType, label: type.label })) || DOC_TYPES;
   const cashfree = kybReadiness?.cashfree !== false;
+  const isOwner = kybReadiness?.supplierKind === "INDIVIDUAL_OWNER";
+  const ownerChecks = kybReadiness?.ownerChecks;
   const bankDetails = parseBankDetails(supplier.payout_bank_details);
 
   const [copiedRef, setCopiedRef] = useState("");
@@ -68,6 +72,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
   const [taxModalOpen, setTaxModalOpen] = useState(false);
   const [payoutModalOpen, setPayoutModalOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [selfieOpen, setSelfieOpen] = useState(false);
 
   // Pre-selected doc type when clicking upload for a specific slot
   const [presetDocType, setPresetDocType] = useState("");
@@ -141,6 +146,32 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       }
     } catch {
       showToast("error", "Network error running PAN verification");
+    } finally {
+      setVerifyingField(null);
+    }
+  };
+
+  // Driving licence and vehicle RC checks for an individual owner. Optional:
+  // the document can be uploaded without them, but they speed up approval.
+  const handleVerifyOwnerDocument = async (kind, number, dob) => {
+    const path = kind === "licence" ? "verify-dl" : "verify-rc";
+    const body = kind === "licence" ? { licenseNumber: number, dob } : { registrationNumber: number };
+    setVerifyingField(kind);
+    try {
+      const res = await fetch(`/api/suppliers/${supplierId}/kyb/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.verification?.valid) {
+        showToast("success", data.message);
+        if (onRefresh) onRefresh();
+      } else {
+        showToast("error", data.error || data.message || "Verification failed");
+      }
+    } catch {
+      showToast("error", "Network error running the verification");
     } finally {
       setVerifyingField(null);
     }
@@ -390,6 +421,75 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                   busy={Boolean(verifyingField)}
                   onVerify={handleVerifyGstin}
                   uploadedDoc={kybDocs.find((d) => d.doc_type === "GSTIN")}
+                  onUpload={openUpload}
+                />
+              </div>
+            )}
+
+            {isOwner && (
+              <div className="mt-5 space-y-3">
+                <IdentityStep
+                  step={1}
+                  title="PAN"
+                  docType="PAN"
+                  placeholder="ABCDE1234F"
+                  pattern={/^[A-Z]{5}[0-9]{4}[A-Z]$/}
+                  savedNumber={supplier.pan_number}
+                  verified={supplier.pan_verified === 1}
+                  verifiedName={supplier.pan_verified_name}
+                  verifying={verifyingField === "pan"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={handleVerifyPan}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "PAN")}
+                  onUpload={openUpload}
+                />
+                <SelfieStep
+                  step={2}
+                  panVerified={supplier.pan_verified === 1}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "SELFIE")}
+                  onStart={() => setSelfieOpen(true)}
+                />
+                <NumberStep
+                  step={3}
+                  title="Aadhaar"
+                  docType="AADHAAR_MASKED"
+                  hint="Enter only the last 4 digits. Upload the front (only the last 4 digits visible) and the back of your Aadhaar."
+                  placeholder="Last 4 digits"
+                  pattern={/^\d{4}$/}
+                  maxLength={4}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "AADHAAR_MASKED")}
+                  uploadLabel="Aadhaar front"
+                  backDocType="AADHAAR_BACK"
+                  backUploadedDoc={kybDocs.find((d) => d.doc_type === "AADHAAR_BACK")}
+                  onUpload={openUpload}
+                />
+                <NumberStep
+                  step={4}
+                  title="Driving licence"
+                  docType="DRIVING_LICENSE"
+                  placeholder="UP3220180012345"
+                  pattern={/^[A-Z]{2}[0-9A-Z-]{6,18}$/}
+                  maxLength={20}
+                  askDob
+                  verifiedNumber={ownerChecks?.licence?.number}
+                  verifying={verifyingField === "licence"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={(number, dob) => handleVerifyOwnerDocument("licence", number, dob)}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "DRIVING_LICENSE")}
+                  onUpload={openUpload}
+                />
+                <NumberStep
+                  step={5}
+                  title="Vehicle RC"
+                  docType="VEHICLE_REGISTRATION"
+                  placeholder="UP32AB1234"
+                  pattern={/^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}$/}
+                  maxLength={12}
+                  verifiedNumber={ownerChecks?.vehicle?.number}
+                  verifying={verifyingField === "vehicle"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={(number) => handleVerifyOwnerDocument("vehicle", number)}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "VEHICLE_REGISTRATION")}
                   onUpload={openUpload}
                 />
               </div>
@@ -880,6 +980,17 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
         />
       )}
 
+      {selfieOpen && (
+        <SelfieCapture
+          supplierId={supplierId}
+          onClose={() => setSelfieOpen(false)}
+          onSuccess={(data) => {
+            setSelfieOpen(false);
+            showToast("success", data.kybAutoApproved ? "All checks passed. Your account is approved." : "Selfie submitted for verification");
+            if (onRefresh) onRefresh();
+          }}
+        />
+      )}
       {uploadModalOpen && (
         <DocumentUploadModal
           isOpen={uploadModalOpen}
@@ -1289,6 +1400,12 @@ function uploadErrorMessage(status, body, fallback = "The file could not be uplo
 
 // A required identity check: enter the number, verify it with Cashfree, then
 // upload the matching document.
+// A document an admin sent back (REJECTED) must be uploaded again; says why.
+const sentBack = (doc) => doc?.status === "REJECTED";
+function SentBackNote({ doc }) {
+  return sentBack(doc) ? <p className="mt-1 text-[11px] font-medium text-rose-700">Please upload again{doc.rejection_reason ? `: ${doc.rejection_reason}` : "."}</p> : null;
+}
+
 function IdentityStep({ step, title, docType, placeholder, pattern, savedNumber, verified, verifiedName, verifying, busy, onVerify, uploadedDoc, onUpload }) {
   const [value, setValue] = useState(savedNumber || "");
   const number = value.trim().toUpperCase();
@@ -1333,11 +1450,11 @@ function IdentityStep({ step, title, docType, placeholder, pattern, savedNumber,
       {isVerified && verifiedName && <p className="mt-1 text-[11px] text-emerald-800">Registered to {verifiedName}</p>}
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-stone-200 pt-3">
         <span className="text-[11px] text-stone-600">
-          {uploadedDoc
+          {uploadedDoc && !sentBack(uploadedDoc)
             ? `${title} document uploaded (${uploadedDoc.status || "PENDING"})`
             : isVerified ? `Now upload a copy of your ${title} document.` : `Verify your ${title} first, then upload its document.`}
         </span>
-        {!uploadedDoc && (
+        {(!uploadedDoc || sentBack(uploadedDoc)) && (
           <button
             type="button"
             disabled={!isVerified}
@@ -1349,6 +1466,131 @@ function IdentityStep({ step, title, docType, placeholder, pattern, savedNumber,
           </button>
         )}
       </div>
+      <SentBackNote doc={uploadedDoc} />
+    </article>
+  );
+}
+
+// The owner's live selfie, taken after the PAN is verified.
+function SelfieStep({ step, panVerified, uploadedDoc, onStart }) {
+  return (
+    <article className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-bold text-stone-900">Step {step}: Take a live selfie</h3>
+        <span className="text-[10px] font-bold uppercase text-rose-700">Required</span>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className="text-[11px] text-stone-600">
+          {uploadedDoc && !sentBack(uploadedDoc)
+            ? `Selfie uploaded (${uploadedDoc.status || "PENDING"})`
+            : panVerified ? "Use your phone's front camera. We check that your face is clearly visible." : "Verify your PAN first."}
+        </span>
+        {(!uploadedDoc || sentBack(uploadedDoc)) && (
+          <button
+            type="button"
+            disabled={!panVerified}
+            onClick={onStart}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>Open camera</span>
+          </button>
+        )}
+      </div>
+      <SentBackNote doc={uploadedDoc} />
+    </article>
+  );
+}
+
+// An owner document: enter its number, optionally verify it with Cashfree,
+// then upload the document.
+function NumberStep({ step, title, docType, hint, placeholder, pattern, maxLength, askDob = false, verifiedNumber, verifying, busy, onVerify, uploadedDoc, uploadLabel = title, backDocType, backUploadedDoc, onUpload }) {
+  const [value, setValue] = useState(uploadedDoc?.doc_number || verifiedNumber || "");
+  const [dob, setDob] = useState("");
+  const number = value.trim().toUpperCase().replace(/\s+/g, "");
+  const valid = pattern.test(number);
+  const isVerified = Boolean(verifiedNumber) && number === verifiedNumber;
+
+  return (
+    <article className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-bold text-stone-900">Step {step}: Enter your {title} number, then upload it</h3>
+        <span className="text-[10px] font-bold uppercase text-rose-700">Required</span>
+      </div>
+      {hint && <p className="mt-1 text-[11px] text-stone-500">{hint}</p>}
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value.toUpperCase())}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          inputMode={docType === "AADHAAR_MASKED" ? "numeric" : undefined}
+          aria-label={`${title} number`}
+          className="min-w-0 flex-1 rounded-xl border border-stone-300 bg-white px-3 py-2 font-mono text-sm uppercase focus:border-amber-500 focus:outline-none"
+        />
+        {askDob && !isVerified && onVerify && (
+          <input
+            type="date"
+            value={dob}
+            onChange={(e) => setDob(e.target.value)}
+            aria-label="Date of birth"
+            className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
+          />
+        )}
+        {onVerify && (isVerified ? (
+          <span className="inline-flex items-center justify-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Verified
+          </span>
+        ) : (
+          <button
+            type="button"
+            disabled={!valid || busy || (askDob && !dob)}
+            onClick={() => onVerify(number, dob)}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+          >
+            {verifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            <span>Verify</span>
+          </button>
+        ))}
+      </div>
+      {number && !valid && <p className="mt-1 text-[11px] text-rose-600">Enter a valid {title} number ({placeholder}).</p>}
+      {onVerify && !isVerified && <p className="mt-1 text-[11px] text-stone-500">Verifying is optional.</p>}
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-stone-200 pt-3">
+        <span className="text-[11px] text-stone-600">
+          {uploadedDoc && !sentBack(uploadedDoc) ? `${uploadLabel} uploaded (${uploadedDoc.status || "PENDING"})` : valid ? `Now upload your ${uploadLabel}.` : `Enter your ${title} number first.`}
+        </span>
+        {(!uploadedDoc || sentBack(uploadedDoc)) && (
+          <button
+            type="button"
+            disabled={!valid}
+            onClick={() => onUpload(docType, number)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>Upload {uploadLabel}</span>
+          </button>
+        )}
+      </div>
+      <SentBackNote doc={uploadedDoc} />
+      {backDocType && (
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-stone-600">
+            {backUploadedDoc && !sentBack(backUploadedDoc) ? `${title} back uploaded (${backUploadedDoc.status || "PENDING"})` : `Now upload the back of your ${title}.`}
+          </span>
+          {(!backUploadedDoc || sentBack(backUploadedDoc)) && (
+            <button
+              type="button"
+              onClick={() => onUpload(backDocType)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              <span>Upload {title} back</span>
+            </button>
+          )}
+        </div>
+      )}
+      {backDocType && <SentBackNote doc={backUploadedDoc} />}
     </article>
   );
 }

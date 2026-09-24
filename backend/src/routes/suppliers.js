@@ -353,10 +353,20 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
     // so an admin never reviews a placeholder link or someone else's file.
     const filename = docUrl.startsWith(KYB_FILE_SCHEME) ? kybFileName(docUrl) : null;
     const upload = filename
-      ? db.prepare("SELECT id FROM uploads WHERE filename = ? AND UPPER(COALESCE(entity_type, '')) = 'KYB' AND entity_id = ?").get(filename, id)
+      ? db.prepare("SELECT id, mime_type FROM uploads WHERE filename = ? AND UPPER(COALESCE(entity_type, '')) = 'KYB' AND entity_id = ?").get(filename, id)
       : null;
     if (!upload) {
       return res.status(400).json({ error: "Upload the document file (PDF or image) before submitting it." });
+    }
+    if (docType === "SELFIE" && !String(upload.mime_type || "").startsWith("image/")) {
+      return res.status(400).json({ error: "Take your selfie with the camera; a PDF is not accepted." });
+    }
+    // An individual owner verifies their PAN with Cashfree before uploading the card (owner decision 2026-09-24).
+    if (docType === "PAN") {
+      const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+      if (isIndividualOwner(supplier) && Number(supplier.pan_verified) !== 1) {
+        return res.status(400).json({ error: "Verify your PAN number first, then upload the PAN card." });
+      }
     }
 
     // Check if a document of this type already exists for this supplier

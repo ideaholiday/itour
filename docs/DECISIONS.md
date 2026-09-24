@@ -321,5 +321,14 @@ This document records significant technical and product architectural decisions.
 
 ---
 
+## ADR 033: Individual Owners Verify PAN, Take a Live Selfie, Then Upload Aadhaar, DL and RC
+- **Date**: 2026-09-24
+- **Decision Made** (owner, 2026-09-24): Owners finish five steps: verified PAN then its card, a live selfie, masked Aadhaar (last 4 digits), driving licence number + upload, RC number + upload. Permit, insurance and cheque are optional. PAN verification is mandatory (card refused and admin approval blocked without it); DL/RC Cashfree checks stay optional. The selfie is not SecureID: camera only, and an on-device MediaPipe detector (served from our `/mediapipe/`) must see one close, centred face. An admin compares faces by eye.
+- **Auto-approval** (owner, 2026-09-24): verified PAN + PAN card, selfie, DL, RC, Aadhaar front and back (`AADHAAR_BACK`) uploaded → approved. DL/RC checks and name matching no longer block (replaces ADR 024 C4).
+- **Review after approval** (owner, 2026-09-24): staff compare Cashfree names and may send one document back (`REJECTED` + reason); the owner stays approved and re-uploads.
+- **Consequences**: `POST /api/uploads` may carry a base64 file up to its 10 MB cap (the 100k string cap refused every photo over ~73 KB). Owners approved earlier keep their status. Pending owners add the Aadhaar back, which approves them.
+
+---
+
 ## ADR 025 onward: SEO and content
 Moved to [`DECISIONS_SEO.md`](DECISIONS_SEO.md): city pages, the staff blog, link previews, Hindi pages, WhatsApp sharing. Add new SEO and content ADRs there.

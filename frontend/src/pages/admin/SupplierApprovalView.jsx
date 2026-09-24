@@ -124,6 +124,38 @@ export default function SupplierApprovalView() {
     }
   };
 
+  // Sends one document back to the supplier to upload again; their KYB status stays as it is.
+  const handleRequestReupload = async (doc) => {
+    if (!selectedSupplier) return;
+    const reason = window.prompt(`Why should ${kybDocLabel(doc.doc_type)} be uploaded again? The supplier sees this.`, "Name does not match your PAN");
+    if (reason === null) return;
+    if (reason.trim().length < 5) {
+      setMessage({ type: "error", text: "Write a reason of at least 5 characters." });
+      return;
+    }
+    setActionLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/admin/suppliers/${selectedSupplier.id}/kyb/${doc.id}/reupload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ reason: reason.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || "Could not ask for the document again");
+      setSelectedSupplier((prev) => prev && ({
+        ...prev,
+        kybDocs: (prev.kybDocs || []).map((item) => (item.id === doc.id ? { ...item, ...data.document } : item)),
+      }));
+      setMessage({ type: "success", text: data.message });
+      await fetchSuppliers();
+    } catch (err) {
+      setMessage({ type: "error", text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleRunAutoVerify = async () => {
     if (!selectedSupplier) return;
     setAutoVerifying(true);
@@ -602,6 +634,15 @@ export default function SupplierApprovalView() {
                   </ul>
                 )}
 
+                {selectedSupplier.kybReadiness?.ownerChecks && (
+                  <div className="mb-3 text-[11px] bg-white border border-stone-200 rounded-xl p-3 space-y-0.5">
+                    <div className="font-bold text-stone-900">Names from Cashfree: check they are the same person</div>
+                    <div>PAN: <strong>{selectedSupplier.kybReadiness.ownerChecks.pan?.name || "Not verified"}</strong></div>
+                    <div>Driving licence: <strong>{selectedSupplier.kybReadiness.ownerChecks.licence?.name || "Not checked"}</strong></div>
+                    <div>Vehicle RC owner: <strong>{selectedSupplier.kybReadiness.ownerChecks.vehicle?.name || "Not checked"}</strong></div>
+                  </div>
+                )}
+
                 {(selectedSupplier.kybDocs || []).length === 0 ? (
                   <p className="text-xs text-stone-500 bg-white border border-dashed border-stone-300 rounded-xl p-4 text-center">
                     This supplier has not uploaded any KYB documents.
@@ -621,6 +662,17 @@ export default function SupplierApprovalView() {
                           </div>
                           {doc.rejection_reason && <div className="text-[10px] text-rose-700">Note: {doc.rejection_reason}</div>}
                         </div>
+                        <div className="shrink-0 flex flex-wrap gap-2">
+                        {doc.has_file && doc.status !== "REJECTED" && (
+                          <button
+                            type="button"
+                            disabled={actionLoading}
+                            onClick={() => handleRequestReupload(doc)}
+                            className="bg-white hover:bg-rose-50 text-rose-800 border border-rose-300 px-3 py-1.5 rounded-xl font-bold text-xs disabled:opacity-50"
+                          >
+                            Ask to upload again
+                          </button>
+                        )}
                         {doc.has_file ? (
                           <button
                             type="button"
@@ -637,6 +689,7 @@ export default function SupplierApprovalView() {
                             No file uploaded
                           </span>
                         )}
+                        </div>
                       </li>
                     ))}
                   </ul>

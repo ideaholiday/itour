@@ -48,9 +48,10 @@ test("an individual owner checks PAN, licence and RC with Cashfree, and the flee
   assert.equal(refused.data.code, "CASHFREE_INDIA_ONLY");
 });
 
-// ADR 024 step C4: an owner is approved automatically once PAN, licence and RC are verified,
-// the names match and every document is uploaded; otherwise an admin approves by hand.
-test("an owner is approved automatically when every check passes and the names match", async t => {
+// ADR 033: an owner is approved automatically once their PAN is verified and the PAN card,
+// selfie, Aadhaar front and back, driving licence and RC are uploaded. Licence and RC
+// checks are optional and never hold them back; without a verified PAN an admin decides.
+test("an owner is approved automatically once PAN is verified and every document is uploaded", async t => {
   const fs = await import("node:fs"); const os = await import("node:os"); const path = await import("node:path");
   const kybFilesDir = fs.mkdtempSync(path.join(os.tmpdir(), "kyb-owner-auto-"));
   const api = await startTestServer({ CASHFREE_SECUREID_SIMULATE: "true", KYB_FILES_DIR: kybFilesDir });
@@ -63,26 +64,28 @@ test("an owner is approved automatically when every check passes and the names m
   };
   const status = id => db.prepare("SELECT kyb_status, kyb_approval_source FROM suppliers WHERE id = ?").get(id);
   const upload = async ({ token, id }, docType, docNumber) => {
-    const file = await requestJson(api.baseUrl, "/api/uploads", { token, body: { data: Buffer.from("%PDF-1.4\n%%EOF").toString("base64"), filename: `${docType}.pdf`, mimeType: "application/pdf", entityType: "KYB", entityId: id } });
+    const image = docType === "SELFIE";
+    const file = await requestJson(api.baseUrl, "/api/uploads", { token, body: { data: image ? Buffer.from("89504e470d0a1a0a", "hex").toString("base64") : Buffer.from("%PDF-1.4\n%%EOF").toString("base64"), filename: `${docType}.${image ? "png" : "pdf"}`, mimeType: image ? "image/png" : "application/pdf", entityType: "KYB", entityId: id } });
     return requestJson(api.baseUrl, `/api/suppliers/${id}/kyb`, { token, body: { docType, docUrl: file.data.upload.url, ...(docNumber ? { docNumber } : {}) } });
   };
   const check = ({ token, id }, path, body) => requestJson(api.baseUrl, `/api/suppliers/${id}/kyb/${path}`, { token, body });
 
   const owner = await signupOwner("auto.owner@example.test", "+919812300031");
-  for (const docType of ["PAN", "DRIVING_LICENSE", "VEHICLE_REGISTRATION", "COMMERCIAL_PERMIT", "VEHICLE_INSURANCE", "BANK_CANCELLED_CHEQUE"]) await upload(owner, docType);
+  for (const docType of ["SELFIE", "DRIVING_LICENSE", "VEHICLE_REGISTRATION"]) await upload(owner, docType);
   assert.equal((await check(owner, "verify-pan", { pan: "ABCPK1234F", name: "Ramesh K" })).data.kybAutoApproved, false);
-  assert.equal((await check(owner, "verify-dl", { licenseNumber: "GA0320180012345", dob: "1985-04-02" })).data.kybAutoApproved, false);
-  assert.equal((await check(owner, "verify-rc", { registrationNumber: "GA03AB1234" })).data.kybAutoApproved, false);
-  assert.equal(status(owner.id).kyb_status, "PENDING", "the masked Aadhaar is still missing");
-  const last = await upload(owner, "AADHAAR_MASKED", "0123");
-  assert.equal(last.data.kybAutoApproved, true);
+  await upload(owner, "PAN");
+  assert.equal((await upload(owner, "AADHAAR_MASKED", "0123")).data.kybAutoApproved, false);
+  assert.equal(status(owner.id).kyb_status, "PENDING", "the Aadhaar back is still missing");
+  // A document staff sent back doesn't count until it is uploaded again.
+  db.prepare("UPDATE kyb_documents SET status = 'REJECTED', rejection_reason = 'Blurred' WHERE supplier_id = ? AND doc_type = 'DRIVING_LICENSE'").run(owner.id);
+  assert.equal((await upload(owner, "AADHAAR_BACK")).data.kybAutoApproved, false);
+  const last = await upload(owner, "DRIVING_LICENSE");
+  assert.equal(last.data.kybAutoApproved, true, "no licence or RC check is needed");
   assert.deepEqual({ ...status(owner.id) }, { kyb_status: "APPROVED", kyb_approval_source: "CASHFREE_SECUREID" });
 
-  // A PAN in someone else's name leaves the owner for an admin.
-  const other = await signupOwner("mismatch.owner@example.test", "+919812300032");
-  for (const docType of ["PAN", "AADHAAR_MASKED", "DRIVING_LICENSE", "VEHICLE_REGISTRATION", "COMMERCIAL_PERMIT", "VEHICLE_INSURANCE", "BANK_CANCELLED_CHEQUE"]) await upload(other, docType);
-  await check(other, "verify-pan", { pan: "ABCPS9876F", name: "Sunita Sharma" });
-  await check(other, "verify-dl", { licenseNumber: "GA0320180054321", dob: "1985-04-02" });
+  // Every document without a verified PAN leaves the owner for an admin.
+  const other = await signupOwner("nopan.owner@example.test", "+919812300032");
+  for (const docType of ["SELFIE", "AADHAAR_MASKED", "AADHAAR_BACK", "DRIVING_LICENSE", "VEHICLE_REGISTRATION"]) await upload(other, docType);
   assert.equal((await check(other, "verify-rc", { registrationNumber: "GA03AB9876" })).data.kybAutoApproved, false);
   assert.equal(status(other.id).kyb_status, "PENDING");
 });
