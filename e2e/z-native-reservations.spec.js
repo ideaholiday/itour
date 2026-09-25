@@ -56,7 +56,9 @@ test("supplier sets seat inventory and traveler sees a live ten-minute checkout 
     // A newly published product has no location rules yet, so the scoped
     // suggestions are empty and the field falls back to global place search.
     // Take whatever it offers rather than a seeded product's zone name.
-    const suggestion = traveler.getByRole("option").first();
+    // Scoped to the suggestion list: the page's <select>s (country code, booking
+    // option) also expose role "option", and their hidden entries never show.
+    const suggestion = traveler.getByRole("listbox").getByRole("option").first();
     await suggestion.waitFor({ state: "visible" });
     await suggestion.click();
     await traveler.getByRole("button", { name: /Demo sandbox payment/i }).click();
