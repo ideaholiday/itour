@@ -40,5 +40,10 @@ for (const [id, name, email, role] of [
   insertUser.run(id, name, email, hashPassword(randomBytes(24).toString("hex")), role);
 }
 
+// The demo supplier stands in for one registered before subscriptions began
+// (ADR 017). On a database built today it would otherwise need a paid plan,
+// and every marketplace query (search, SEO, OCTo) would find nothing.
+db.prepare("UPDATE suppliers SET subscription_exempt = 1 WHERE id = 'sup_multisolution_goa'").run();
+
 const applied = migrations?.applied?.length ?? 0;
 console.log(`test database ready (${databaseInfo.path}; ${applied} migration(s) applied)`);
