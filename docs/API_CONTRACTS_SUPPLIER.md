@@ -202,6 +202,7 @@ The supplier, `ADMIN` or `STAFF`. Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPE
 
 
 ### 3.4 Direct bookings: walk-in, phone, manual (ADR 034)
+Front desk staff may call every endpoint in this section (ADR 036).
 The supplier's own customers. Seats come from the same native inventory as marketplace and OCTo bookings (`reserveNativeInventory`), the price from `calculateBookingQuote`; the browser never sends a total. Commission is 0, no `payouts` row is written, and `payment_status` is `OFFLINE` so no IdeaHoliday refund path touches it. Counter sales ignore the online `cutoff_minutes` and close when the departure starts. All routes need `requireSupplierAccess`; errors are `400 VALIDATION_ERROR`, `404 PRODUCT_NOT_FOUND`, `409 INVENTORY_UNAVAILABLE`.
 - **`GET /api/suppliers/:id/availability?date=YYYY-MM-DD`**: `{ products: [{ productId, optionId, title, optionName, departures: [slot] }] }` for every active seat-inventory option; `slot` is the native slot view (`localTime`, `capacity`, `vacancies`, `status`), computed as a counter sale.
 - **`POST /api/suppliers/:id/bookings/quote`**: body `{ product_id, product_option_id?, activity_date, pickup_time?, adults, children?, unit_items?, discount_inr? }` → `{ quote: { baseAmount, taxAmount, totalAmount, discountInr, amountDueInr, vacancies } }`. Takes no seats.
@@ -209,3 +210,11 @@ The supplier's own customers. Seats come from the same native inventory as marke
 - **`GET /api/suppliers/:id/bookings/:bookingId/payments`**: `{ amountInr, balanceDueInr, payments, documents }`.
 - **`POST /api/suppliers/:id/bookings/:bookingId/payments`**: body `{ mode, amount_inr, reference?, note? }` records money collected later; refused over the balance (`400 OVERPAYMENT`) or for a booking IdeaHoliday collected (`409 NOT_SUPPLIER_DIRECT`).
 - For an `OFFLINE` booking, `/api/bookings/:ref/documents/invoice` renders the operator's payment summary, not an IdeaHoliday invoice. Travelers cannot self-cancel, reschedule or amend it (`SUPPLIER_DIRECT_BOOKING`).
+
+### 3.5 Staff logins (ADR 036)
+A signed-in supplier user is the owner or a staff member. `GET /api/suppliers/:id` returns `access: { role: OWNER|MANAGER|FRONT_DESK|GUIDE }` (admins and operations count as `OWNER`), and `POST /api/auth/login` returns `user.supplier_role`. Staff are refused what their role doesn't allow with `403 SUPPLIER_ROLE_FORBIDDEN`. The staff endpoints below are owner only:
+- **`GET /api/suppliers/:id/staff`**: `{ members: [{ id, name, email, phone, role, createdAt }] }`.
+- **`POST /api/suppliers/:id/staff`**: body `{ name, email, phone?, role: MANAGER|FRONT_DESK|GUIDE }` → `201 { member, temporaryPassword, linkedExistingAccount }`. A new person gets a temporary password (returned once, `Cache-Control: no-store`); an existing traveler account is linked, keeps its password and `temporaryPassword` is `null`. An email that already has a supplier or IdeaHoliday team account is `409 ACCOUNT_IN_USE`.
+- **`PATCH /api/suppliers/:id/staff/:userId`**: body `{ name?, phone?, role? }` → `{ member }`. It applies to open sessions immediately.
+- **`POST /api/suppliers/:id/staff/:userId/reset-password`**: `{ member, temporaryPassword }`; the old password stops working.
+- **`DELETE /api/suppliers/:id/staff/:userId`**: `{ id, removed: true }`; the account becomes a `TRAVELER`.

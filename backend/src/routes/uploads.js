@@ -5,6 +5,7 @@ import { z } from "zod";
 import logger from "../config/logger.js";
 import { kybMimeType, saveKybFile } from "../services/kybFileService.js";
 import { createRateLimiter } from "../middleware/security.js";
+import { supplierMay } from "../services/supplierStaffService.js";
 
 const router = express.Router();
 const uploadLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 60, scope: "upload" });
@@ -50,7 +51,7 @@ router.post("/uploads", uploadLimiter, authenticateBearer, async (req, res) => {
       // Identity documents: only the supplier themselves (or an admin) may add
       // one, and the file is stored privately rather than in public /uploads.
       const role = String(req.user?.role || "").toUpperCase();
-      const ownsSupplier = role === "SUPPLIER" && req.user.supplier_id && req.user.supplier_id === entityId;
+      const ownsSupplier = role === "SUPPLIER" && req.user.supplier_id && req.user.supplier_id === entityId && supplierMay(req.user, "owner");
       if (!entityId || !(ownsSupplier || ["ADMIN", "STAFF"].includes(role))) {
         return res.status(403).json({ error: "KYB documents can only be uploaded for your own supplier account", code: "FORBIDDEN" });
       }
@@ -107,7 +108,7 @@ router.get("/uploads/:id", optionalBearer, (req, res) => {
   }
   if (String(upload.entity_type || "").toUpperCase() === "KYB") {
     const role = String(req.user?.role || "").toUpperCase();
-    const ownsSupplier = role === "SUPPLIER" && req.user?.supplier_id && req.user.supplier_id === upload.entity_id;
+    const ownsSupplier = role === "SUPPLIER" && req.user?.supplier_id && req.user.supplier_id === upload.entity_id && supplierMay(req.user, "owner");
     if (!(ownsSupplier || ["ADMIN", "STAFF"].includes(role))) {
       return res.status(404).json({ error: "UPLOAD_NOT_FOUND" });
     }

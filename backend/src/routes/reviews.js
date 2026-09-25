@@ -4,6 +4,7 @@ import db from "../db.js";
 import { authenticate, optionalAuthMiddleware, requireRoles } from "../middleware/auth.js";
 import { createShareLinkReview, createVerifiedReview, moderateReview, RATED_REVIEW_SOURCES, recalculateQualityScores, respondToReview, reviewDetails } from "../services/reviewService.js";
 import { validateBody } from "../middleware/validation.js";
+import { supplierMay } from "../services/supplierStaffService.js";
 import { reviewSchemas } from "../validators/apiSchemas.js";
 import { createRateLimiter } from "../middleware/security.js";
 import {
@@ -189,7 +190,7 @@ router.post("/share/:slug/review", openReviewLimiter, authenticate, validateBody
 
 function supplierActor(req, res) {
   const actor = requester(req);
-  if (String(actor?.role || "").toUpperCase() !== "SUPPLIER" || !actor.supplier_id) {
+  if (String(actor?.role || "").toUpperCase() !== "SUPPLIER" || !actor.supplier_id || !supplierMay(actor, "manage")) {
     res.status(403).json({ error: "Supplier access required" });
     return null;
   }
@@ -412,7 +413,7 @@ router.get("/supplier/:id", optionalAuthMiddleware, (req, res) => {
 router.post("/:id/response", authenticate, requireRoles("SUPPLIER"), validateBody(reviewSchemas.response), (req, res) => {
   try {
     const actor = requester(req);
-    if (String(actor?.role || "").toUpperCase() !== "SUPPLIER" || !actor.supplier_id) return res.status(403).json({ error: "Supplier access required" });
+    if (String(actor?.role || "").toUpperCase() !== "SUPPLIER" || !actor.supplier_id || !supplierMay(actor, "manage")) return res.status(403).json({ error: "Supplier access required" });
     return res.json({ success: true, review: respondToReview(db, req.params.id, { supplierId: actor.supplier_id, response: req.body.response }) });
   } catch (error) {
     return res.status(error.status || 500).json({ error: error.message || "Response could not be published" });

@@ -9,6 +9,7 @@ import {
   importRemoteProducts,
 } from "../services/channelManagerService.js";
 import logger from "../config/logger.js";
+import { supplierMay } from "../services/supplierStaffService.js";
 
 const router = Router();
 router.use(authenticate);
@@ -19,7 +20,8 @@ function getSupplierId(req) {
   if (user.role === "ADMIN" || user.role === "STAFF") {
     return req.query.supplierId || req.params.supplierId || user.supplier_id;
   }
-  return user.supplier_id;
+  // Channel connections are manager work (ADR 036).
+  return supplierMay(user, "manage") ? user.supplier_id : null;
 }
 
 // GET /api/supplier-channels or /api/suppliers/:id/channels

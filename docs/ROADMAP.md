@@ -56,7 +56,8 @@ Do not rebuild these. Extend them if asked.
 
 - **Phase 0 — done:** OCTo partner keys; shared-resource locks.
 - **Phase 1 — done:** walk-in / phone / manual bookings, `bookings.source`, supplier payment records and balance due.
-- **Next, in order:** 2 supplier staff logins and roles → 3 departures board, booking calendar, guides/vehicles/equipment, supplier reschedule → 4 real dashboard numbers → 5 supplier agents with net rates and credit → 6 package and quotation builder with hotel rate sheet and PDF email → 7 per-channel on/off and reseller API keys in the extranet.
+- **Phase 2 — done:** supplier staff logins with owner, manager, front desk and guide roles (ADR 036).
+- **Next, in order:** 3 departures board, booking calendar, guides/vehicles/equipment, supplier reschedule → 4 real dashboard numbers → 5 supplier agents with net rates and credit → 6 package and quotation builder with hotel rate sheet and PDF email → 7 per-channel on/off and reseller API keys in the extranet.
 
 Standing obligations that apply to every change:
 

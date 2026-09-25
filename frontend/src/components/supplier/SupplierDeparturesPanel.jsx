@@ -10,7 +10,8 @@ const canScan = typeof window !== "undefined" && "BarcodeDetector" in window && 
  * scanning the voucher QR or typing the reference, the guest list for one departure with
  * attendance, and cancelling a whole departure with a preview of the refunds.
  */
-export default function SupplierDeparturesPanel({ supplierId, products = [], onChanged }) {
+// canCancel is false for front desk and guides (ADR 036).
+export default function SupplierDeparturesPanel({ supplierId, products = [], onChanged, canCancel = true }) {
   // --- Check-in -------------------------------------------------------------
   const [code, setCode] = useState("");
   const [checkIn, setCheckIn] = useState(null);
@@ -264,7 +265,7 @@ export default function SupplierDeparturesPanel({ supplierId, products = [], onC
       )}
 
       {/* Cancel a departure */}
-      <div className="rounded-2xl border border-rose-200 p-4">
+      {canCancel && <div className="rounded-2xl border border-rose-200 p-4">
         {cancelMessage && <p role="status" className="mb-3 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">{cancelMessage}</p>}
         {!cancelOpen ? (
           <button type="button" onClick={() => setCancelOpen(true)} disabled={!productId || date < indiaToday()} className="flex items-center gap-1.5 text-sm font-bold text-rose-700 disabled:opacity-40"><CalendarX className="h-4 w-4" /> Cancel this departure (weather, too few travelers…)</button>
@@ -291,7 +292,7 @@ export default function SupplierDeparturesPanel({ supplierId, products = [], onC
             </div>
           </div>
         )}
-      </div>
+      </div>}
     </section>
   );
 }

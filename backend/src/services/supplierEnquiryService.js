@@ -1,5 +1,6 @@
 import { customAlphabet, nanoid } from "nanoid";
 import { containsContactDetails, isProfileVisible } from "./supplierProfileService.js";
+import { supplierMay } from "./supplierStaffService.js";
 
 /**
  * Traveler questions to a supplier, sent from the supplier's public profile.
@@ -118,7 +119,8 @@ function loadEnquiry(database, ref) {
 function accessRole(actor, enquiry) {
   const role = roleOf(actor);
   if (["ADMIN", "STAFF"].includes(role)) return "STAFF";
-  if (role === "SUPPLIER" && actor.supplier_id === enquiry.supplier_id) return "SUPPLIER";
+  // Enquiries are manager work; front desk and guides don't see them (ADR 036).
+  if (role === "SUPPLIER" && actor.supplier_id === enquiry.supplier_id && supplierMay(actor, "manage")) return "SUPPLIER";
   if (actor?.id && actor.id === enquiry.user_id) return "TRAVELER";
   return null;
 }
@@ -167,7 +169,7 @@ export function listEnquiries(database, actor, { status = null } = {}) {
   const where = [];
   const params = [];
   if (role === "SUPPLIER") {
-    if (!actor.supplier_id) throw enquiryError("Supplier access required", 403);
+    if (!actor.supplier_id || !supplierMay(actor, "manage")) throw enquiryError("Supplier access required", 403);
     where.push("e.supplier_id = ?");
     params.push(actor.supplier_id);
   } else if (["ADMIN", "STAFF"].includes(role)) {

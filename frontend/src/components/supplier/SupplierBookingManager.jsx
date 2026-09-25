@@ -86,7 +86,9 @@ function DriverLocationLine({ booking, onRefresh }) {
   );
 }
 
-export default function SupplierBookingManager({ supplierData, loading, onRefresh }) {
+// canManage is false for front-desk staff (ADR 036): they see bookings but don't
+// respond, cancel or dispatch.
+export default function SupplierBookingManager({ supplierData, loading, onRefresh, canManage = true }) {
   const [activeFilter, setActiveFilter] = useState("ALL"); // ALL, PENDING, IN_PROGRESS, COMPLETED, CANCELLED
   const [sourceFilter, setSourceFilter] = useState("ALL"); // ALL, DIRECT, IDEAHOLIDAY, API
   const [searchTerm, setSearchTerm] = useState("");
@@ -462,7 +464,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
 
   return (
     <div className="space-y-6">
-      <DispatchQueue supplierId={s.id} onSelect={id => setSelectedBooking(bookings.find(b => b.id === id))} />
+      {canManage && <DispatchQueue supplierId={s.id} onSelect={id => setSelectedBooking(bookings.find(b => b.id === id))} />}
       {/* Header and Filter Tabs */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -647,7 +649,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     {/* Actions */}
                     <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-2">
-                        {isPendingResp && (
+                        {canManage && isPendingResp && (
                           <button
                             onClick={() => setSelectedBooking(b)}
                             className="rounded-xl bg-amber-500 hover:bg-amber-400 px-3 py-1.5 text-xs font-bold text-stone-950 shadow-sm"
@@ -655,7 +657,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                             Respond
                           </button>
                         )}
-                        {!isCancelled && (
+                        {canManage && !isCancelled && (
                           <button
                             onClick={() => handleOpenCancelModal(b)}
                             className="rounded-xl border border-stone-200 bg-white hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700 px-2.5 py-1.5 text-xs font-bold text-stone-600 transition shadow-sm"
@@ -735,7 +737,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
             </div>
 
             {/* Pending Response Alert with Countdown */}
-            {(selectedBooking.supplier_response_status === "PENDING" || selectedBooking.status === "pending_confirmation") && (
+            {canManage && (selectedBooking.supplier_response_status === "PENDING" || selectedBooking.status === "pending_confirmation") && (
               <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5">
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-amber-900">
@@ -913,7 +915,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
             )}
 
             {/* Driver Assignment & Dispatch Controls */}
-            {selectedBooking.status !== "cancelled" && (
+            {canManage && selectedBooking.status !== "cancelled" && (
               <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-4">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-wider text-stone-700">Driver & Fleet Dispatch</span>
@@ -1063,7 +1065,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
 
             {/* Action Footer */}
             <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-stone-200 pt-4">
-              {selectedBooking.status !== "cancelled" ? (
+              {!canManage ? <span /> : selectedBooking.status !== "cancelled" ? (
                 <button
                   type="button"
                   onClick={() => handleOpenCancelModal(selectedBooking)}

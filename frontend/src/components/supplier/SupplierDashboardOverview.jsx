@@ -38,6 +38,7 @@ import SupplierPerformanceRing from "./SupplierPerformanceRing.jsx";
 import SupplierQuickActions from "./SupplierQuickActions.jsx";
 import SupplierAnalyticsDashboard from "./SupplierAnalyticsDashboard.jsx";
 import SupplierCompliancePanel from "./SupplierCompliancePanel.jsx";
+import SupplierStaffPanel from "./SupplierStaffPanel.jsx";
 import { authHeaders } from "../../lib/api.js";
 
 const money = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
@@ -209,6 +210,10 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
 
   if (initialPanel === "share") {
     return <SupplierShareKitPanel supplierId={supplier.id} />;
+  }
+
+  if (initialPanel === "staff") {
+    return <SupplierStaffPanel supplierId={supplier.id} />;
   }
 
   if (initialPanel === "subscription") {

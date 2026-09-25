@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { hashPassword, passwordMatches } from "../lib/passwords.js";
+import { supplierAccessForUser } from "../services/supplierStaffService.js";
 import { authenticate } from "../middleware/auth.js";
 import logger from "../config/logger.js";
 import { toE164 } from "../lib/phone.js";
@@ -189,7 +190,9 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
     return res.status(403).json({ error: "Access restricted to registered suppliers. Please sign in with your supplier credentials or register on supply.ideaholiday.in." });
   }
 
-  const supplier = user.role === "SUPPLIER" ? db.prepare("SELECT id, company_name, kyb_status, is_verified FROM suppliers WHERE LOWER(email) = ?").get(user.email.toLowerCase()) : null;
+  // The owner is linked by email; staff by supplier_members (ADR 036).
+  const supplierAccess = user.role === "SUPPLIER" ? supplierAccessForUser(db, user) : null;
+  const supplier = supplierAccess ? db.prepare("SELECT id, company_name, kyb_status, is_verified FROM suppliers WHERE id = ?").get(supplierAccess.supplierId) : null;
   const token = jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role, supplier_id: supplier?.id || null },
     SECRET,
@@ -214,7 +217,8 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      supplier_id: supplier?.id || null
+      supplier_id: supplier?.id || null,
+      supplier_role: supplier ? supplierAccess.role : null
     },
     supplier: supplier || null,
     portalRedirect

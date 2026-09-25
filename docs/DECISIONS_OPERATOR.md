@@ -1,7 +1,7 @@
 # Operator Platform Decisions (ADR 034 onward): Idea Holiday
 
 > **Summary:** Owner decisions for running an operator's whole business on supply.ideaholiday.in: direct bookings, B2B agents, packages and quotations, with their reasons.
-> **Read when:** changing walk-in/phone/manual bookings, supplier agents, quotations or PDFs, or recording a new decision in that area. Other ADRs: [`DECISIONS.md`](DECISIONS.md).
+> **Read when:** changing walk-in/phone/manual bookings, supplier staff roles, supplier agents, quotations or PDFs, or recording a new decision in that area. Other ADRs: [`DECISIONS.md`](DECISIONS.md).
 
 ## ADR 034: Supplier-Direct Bookings Share the Inventory and Pay No Commission
 - **Date**: 2026-09-25
@@ -18,3 +18,15 @@
   2. **B2B agents** are each supplier's own agents, hotels and resellers, with net rates and commission. The platform-wide B2B sub-agent portal stays LATER.
   3. **PDF**: add `pdfkit` (pure JavaScript) for quotation, voucher and invoice attachments.
 - **Consequences**: Agent bookings and quotations reuse the one inventory and quote. `pdfkit` is the only new dependency and must keep `npm audit --omit=dev` at 0.
+
+---
+
+## ADR 036: Supplier Staff Logins with Four Roles
+- **Date**: 2026-09-25
+- **Context**: Counter staff took walk-ins with the owner's password, which also opens bank details, KYB and plan payments.
+- **Decision Made** (owner, 2026-09-25): The supplier's own login is the **owner** and can do everything. Staff get their own email and password, linked to one supplier (`supplier_members`), with one role:
+  - **Manager**: all day-to-day work (listings, prices, rates, calendar, bookings, cancellations, dispatch, drivers, resources, reviews, enquiries, support, analytics, channel manager). No bank/payout details or payout ledger, KYB, plans and billing, business profile, or staff.
+  - **Front desk**: availability, quote and create walk-in/phone/manual bookings, record payments, see bookings, resend vouchers, manifest and check-in. No price, listing or cancellation changes.
+  - **Guide**: departure manifest, check-in and attendance. Sees traveler name, headcount, pickup and **phone**, never email or what a guest owes.
+  - Only the **owner** adds, changes, resets or removes staff. **No per-plan seat limit** for now.
+- **Consequences**: The role is read from the database on every request, so a change applies to open sessions. Front desk and guides are refused any supplier endpoint not on their allowlist (`supplierStaffService.js`). Managers are refused only the owner-only areas, so a new owner-only endpoint must go under an owner-only path or be added to that list. Removing a staff member sets the account back to `TRAVELER`.

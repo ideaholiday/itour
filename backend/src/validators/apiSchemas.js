@@ -200,7 +200,11 @@ const locationRuleSchema = object({
 // A fleet document expiry date (ADR 024); empty clears it.
 const fleetDate = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date"), z.literal(""), z.null()]).optional();
 
+const supplierStaffRole = z.enum(["MANAGER", "FRONT_DESK", "GUIDE"]);
+
 export const supplierSchemas = {
+  staffMember: object({ name: text(2, 100), email, phone: phone.optional(), role: supplierStaffRole }),
+  staffMemberUpdate: object({ name: text(2, 100).optional(), phone: phone.optional(), role: supplierStaffRole.optional() }),
   registration: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100) }),
   kyb: object({
     docType: optionalText(80),

@@ -18,6 +18,7 @@ function mutationClassification(req) {
   if (/\/api\/admin\//.test(path)) return ["ADMIN_ACTION", "ADMIN_RESOURCE"];
   if (/\/api\/ops\//.test(path)) return ["OPERATIONS_ACTION", "OPERATIONS_RESOURCE"];
   if (/\/suppliers\/.+\/kyb/.test(path)) return ["SUPPLIER_KYB_CHANGED", "SUPPLIER"];
+  if (/\/suppliers\/.+\/staff/.test(path)) return ["SUPPLIER_STAFF_CHANGED", "SUPPLIER"];
   if (/\/suppliers\/.+\/geofences/.test(path)) return ["SUPPLIER_COVERAGE_CHANGED", "SUPPLIER"];
   if (/\/suppliers\/.+\/products/.test(path)) return ["SUPPLIER_LISTING_CHANGED", "PRODUCT"];
   if (/\/suppliers\/.+\/(dispatch|assign-driver|drivers|bookings)/.test(path)) return ["SUPPLIER_FULFILLMENT_CHANGED", "BOOKING"];

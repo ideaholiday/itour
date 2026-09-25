@@ -72,6 +72,7 @@ import { PricingRuleService } from "../services/pricingRuleService.js";
 import { backfillProductOptions } from "../services/logisticsService.js";
 import { backfillProductLocationRules } from "../data/canonicalLocations.js";
 import { onReferralBookingCancelled, onReferralTripCompleted } from "../services/referralService.js";
+import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
 
 const router = express.Router();
 
@@ -152,12 +153,76 @@ router.get("/", requireRoles("ADMIN", "STAFF"), (req, res) => {
 
 router.use("/:id", requireSupplierSelf("id"));
 
+// Staff logins (ADR 036): a manager, front desk or guide reaches only what their
+// role allows. Admins, operations staff and the owner (no member role) pass.
+router.use("/:id", (req, res, next) => {
+  const supplierRole = String(req.user?.role || "").toUpperCase() === "SUPPLIER" ? req.user?.supplier_role : null;
+  if (!supplierRole || supplierRoleAllows(supplierRole, req.method, req.path)) return next();
+  logger.warn("Supplier staff action denied", { requestId: req.requestId, actorId: req.user.id, supplierRole, method: req.method, path: req.path });
+  return res.status(403).json({ error: "Your staff role does not allow this. Ask the account owner.", code: "SUPPLIER_ROLE_FORBIDDEN" });
+});
+
+/** The signed-in supplier user's role on this account; admins and ops count as the owner. */
+function supplierRoleOf(req) {
+  return String(req.user?.role || "").toUpperCase() === "SUPPLIER" ? req.user?.supplier_role || OWNER_ROLE : OWNER_ROLE;
+}
+
 // Supplier subscription (ADR 017): status, price, online payment and GST invoices.
 function subscriptionFailure(res, req, error, fallback) {
   if (error.status && error.status < 500 || error.status === 502) return res.status(error.status).json({ error: error.message, code: error.code });
   logger.error(fallback, { requestId: req.requestId, error });
   return res.status(500).json({ error: fallback });
 }
+
+// Staff logins (ADR 036). Owner only: the role gate above refuses /staff to members.
+function staffFailure(res, req, error, fallback) {
+  if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+router.get("/:id/staff", (req, res) => {
+  try {
+    res.json({ success: true, members: listStaff(db, req.params.id) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not load your staff");
+  }
+});
+
+// Temporary password returned once.
+router.post("/:id/staff", validateBody(supplierSchemas.staffMember), (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.status(201).json({ success: true, ...addStaffMember(db, req.params.id, req.body, req.user) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not add the staff member");
+  }
+});
+
+router.patch("/:id/staff/:userId", validateBody(supplierSchemas.staffMemberUpdate), (req, res) => {
+  try {
+    res.json({ success: true, member: updateStaffMember(db, req.params.id, req.params.userId, req.body) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not update the staff member");
+  }
+});
+
+router.delete("/:id/staff/:userId", (req, res) => {
+  try {
+    res.json({ success: true, ...removeStaffMember(db, req.params.id, req.params.userId) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not remove the staff member");
+  }
+});
+
+router.post("/:id/staff/:userId/reset-password", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...resetStaffPassword(db, req.params.id, req.params.userId) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not reset the password");
+  }
+});
 
 // Share kit (docs/SHARE_KIT.md): links, QR/print URLs, embed code and scan counts.
 router.get("/:id/share-kit", (req, res) => {
@@ -301,8 +366,9 @@ router.get("/:id", (req, res) => {
       WHERE p.supplier_id = ? ORDER BY COALESCE(p.processed_at, p.created_at) DESC
     `).all(id);
 
-    res.json({
+    const detail = {
       success: true,
+      access: { role: supplierRoleOf(req) },
       supplier: { ...supplier, commission_rate_effective: resolveCommissionRate(db, supplier.id) },
       subscription: getSubscriptionStatus(db, supplier.id),
       kybDocs,
@@ -313,12 +379,26 @@ router.get("/:id", (req, res) => {
       drivers,
       blockedDates,
       payouts
-    });
+    };
+    res.json(staffSupplierView(detail));
   } catch (err) {
     logger.error("Supplier lookup failed", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to fetch supplier details" });
   }
 });
+
+// Staff never see bank, PAN, KYB documents or payouts (ADR 036). A guide works
+// from the departure manifest, so gets no booking, driver or payment lists.
+const OWNER_ONLY_SUPPLIER_FIELDS = ["payout_bank_details", "pan_number", "pan_verified_name", "bank_verified_name", "bank_match_score"];
+function staffSupplierView(detail) {
+  const { role } = detail.access;
+  if (role === OWNER_ROLE) return detail;
+  const supplier = { ...detail.supplier };
+  for (const field of OWNER_ONLY_SUPPLIER_FIELDS) delete supplier[field];
+  const view = { ...detail, supplier, kybDocs: [], kybReadiness: null, payouts: [] };
+  if (role === "GUIDE") Object.assign(view, { bookings: [], drivers: [], blockedDates: [], geoFences: [] });
+  return view;
+}
 
 // POST /api/suppliers/register - Register a new fleet vendor / tour operator
 router.post("/register", validateBody(supplierSchemas.registration), (req, res) => {
@@ -1940,7 +2020,11 @@ router.patch("/:id/bookings/:bookingId/attendance", optionalAuthMiddleware, requ
 router.get("/:id/manifest", optionalAuthMiddleware, requireSupplierAccess, validateQuery(supplierSchemas.manifestQuery), (req, res) => {
   try {
     const { productId, date, time, format } = req.query;
-    const manifest = departureManifest(db, { supplierId: req.params.id, productId, date, time: time || null });
+    const full = departureManifest(db, { supplierId: req.params.id, productId, date, time: time || null });
+    // Guides see names, headcount, pickup and phone, not what a guest owes (ADR 036).
+    const manifest = supplierRoleOf(req) === "GUIDE"
+      ? { ...full, bookings: full.bookings.map((row) => ({ ...row, balanceDueInr: null })) }
+      : full;
     if (format === "csv") {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="manifest_${date}${time ? `_${time.replace(":", "")}` : ""}.csv"`);
