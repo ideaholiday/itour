@@ -27,6 +27,8 @@ export const hotelRateSchema = z.object({
   netPerNightInr: z.number().int().min(0).max(10_000_000),
   extraAdultInr: z.number().int().min(0).max(10_000_000).default(0),
   childInr: z.number().int().min(0).max(10_000_000).default(0),
+  // Guests one room sleeps, extra bed included; quotations warn when the rooms are too few (ADR 044).
+  maxGuests: z.number().int().min(1).max(20).optional().nullable(),
 }).strict().refine((rate) => rate.validFrom <= rate.validTo, { message: "The season must end on or after it starts", path: ["validTo"] });
 
 function addDays(date, days) {
@@ -45,6 +47,7 @@ function rateView(row) {
   return {
     id: row.id, roomType: row.room_type, mealPlan: row.meal_plan, validFrom: row.valid_from, validTo: row.valid_to,
     netPerNightInr: Number(row.net_per_night_inr), extraAdultInr: Number(row.extra_adult_inr), childInr: Number(row.child_inr),
+    maxGuests: row.max_guests ?? null,
   };
 }
 
@@ -79,8 +82,8 @@ export function addHotelRate(db, supplierId, hotelId, input) {
     WHERE hotel_id = ? AND LOWER(room_type) = LOWER(?) AND meal_plan = ? AND valid_from <= ? AND valid_to >= ?`)
     .get(hotelId, rate.roomType, rate.mealPlan, rate.validTo, rate.validFrom);
   if (overlap) throw hotelError(`This overlaps the ${overlap.valid_from} to ${overlap.valid_to} season for ${rate.roomType} ${rate.mealPlan}`, 409, "RATE_OVERLAP");
-  db.prepare(`INSERT INTO supplier_hotel_rates (id, hotel_id, room_type, meal_plan, valid_from, valid_to, net_per_night_inr, extra_adult_inr, child_inr)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(`hrt_${nanoid(12)}`, hotelId, rate.roomType, rate.mealPlan, rate.validFrom, rate.validTo, rate.netPerNightInr, rate.extraAdultInr, rate.childInr);
+  db.prepare(`INSERT INTO supplier_hotel_rates (id, hotel_id, room_type, meal_plan, valid_from, valid_to, net_per_night_inr, extra_adult_inr, child_inr, max_guests)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(`hrt_${nanoid(12)}`, hotelId, rate.roomType, rate.mealPlan, rate.validFrom, rate.validTo, rate.netPerNightInr, rate.extraAdultInr, rate.childInr, rate.maxGuests ?? null);
   return hotelView(db, findHotel(db, supplierId, hotelId));
 }
 

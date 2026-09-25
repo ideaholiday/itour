@@ -100,3 +100,57 @@ test("supplier offers 3 Star and 4 Star hotel options and records the customer's
   await expect(page.getByText("Customer chose 4 Star")).toBeVisible();
   await expect(page.getByText("₹5,775").first()).toBeVisible();
 });
+
+// ADR 044: a car priced per km (minimum km per day, driver allowance) and a hotel room that sleeps too few.
+test("supplier prices an outstation car per km and is warned when rooms sleep too few", async ({ page, request }) => {
+  const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
+  const account = await login.json();
+  const base = `/api/suppliers/${account.user.supplier_id}`;
+  const headers = { Authorization: `Bearer ${account.token}` };
+  const stamp = Date.now().toString(36);
+  const cab = (await (await request.post(`${base}/cab-types`, { headers, data: { name: `Innova km ${stamp}`, seats: 6 } })).json()).cabType;
+  const hotel = (await (await request.post(`${base}/hotels`, { headers, data: { name: `Tiny Inn ${stamp}`, city: "Jaipur" } })).json()).hotel;
+  const room = await request.post(`${base}/hotels/${hotel.id}/rates`, { headers, data: { roomType: "Single", mealPlan: "CP", validFrom: isoDate(-2), validTo: isoDate(400), netPerNightInr: 2000, maxGuests: 1 } });
+  expect(room.status()).toBe(201);
+
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.goto("/supplier/dashboard?panel=packages");
+  await page.getByRole("button", { name: "Cars & activities" }).click();
+  const name = `Delhi to Jaipur ${stamp}`;
+  await page.getByLabel("Kind").selectOption("TRANSFER");
+  await page.getByLabel("Service name").fill(name);
+  await page.getByLabel("Car pricing").selectOption("PER_KM");
+  await page.getByLabel("Usual distance in km").fill("280");
+  await page.getByRole("button", { name: "Add service" }).click();
+  const card = page.locator("div.rounded-2xl").filter({ hasText: name }).filter({ has: page.getByLabel("Price per km") });
+  await expect(card).toContainText("usually 280 km");
+  await card.getByLabel("Cab type").selectOption(cab.id);
+  await card.getByLabel("Season from").fill(isoDate(-2));
+  await card.getByLabel("Season to").fill(isoDate(400));
+  await card.getByLabel("Price per km").fill("14");
+  await card.getByLabel("Minimum km per day").fill("250");
+  await card.getByLabel("Driver allowance per day").fill("300");
+  await card.getByRole("button", { name: "Add season" }).click();
+  await expect(card).toContainText("₹14/km · 250 km · ₹300");
+
+  await page.getByRole("button", { name: "Quotations" }).click();
+  await page.getByRole("button", { name: "New quotation" }).click();
+  await page.getByLabel("Title").fill(`Rajasthan drive ${stamp}`);
+  await page.getByLabel("Customer name").fill("Arjun Mehta");
+  await page.getByLabel("Markup on your costs (%)").fill("0");
+  await page.getByRole("button", { name: "Transfer / sightseeing" }).click();
+  await page.getByLabel("Car service").selectOption({ label: name });
+  await page.getByRole("combobox", { name: /^Cab/ }).selectOption(cab.id);
+  await page.getByLabel("Km", { exact: true }).fill("600");
+  await page.getByLabel("Car days").fill("3");
+  await page.getByRole("button", { name: "Hotel nights" }).click();
+  await page.getByRole("combobox", { name: /^Hotel/ }).selectOption(hotel.id);
+  await page.getByRole("combobox", { name: /^Room/ }).selectOption("Single");
+
+  await page.getByRole("button", { name: "Save and price" }).click();
+  await expect(page.getByText("Saved and priced.")).toBeVisible();
+  // Car: max(600, 3 × 250) × ₹14 + 3 × ₹300 = ₹11,400. Hotel ₹2,000. +5% GST = ₹14,070.
+  await expect(page.getByText("₹11,400")).toBeVisible();
+  await expect(page.getByText("₹14,070")).toBeVisible();
+  await expect(page.getByText(`Tiny Inn ${stamp}: 1 Single room sleeps 1, but 2 are travelling.`)).toBeVisible();
+});

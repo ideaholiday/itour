@@ -49,6 +49,7 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
       await request(`${base}/${hotelId}/rates`, { method: "POST", body: JSON.stringify({
         roomType: draft.roomType, mealPlan: draft.mealPlan || "CP", validFrom: draft.validFrom, validTo: draft.validTo,
         netPerNightInr: Number(draft.netPerNightInr), extraAdultInr: Number(draft.extraAdultInr || 0), childInr: Number(draft.childInr || 0),
+        maxGuests: draft.maxGuests ? Number(draft.maxGuests) : null,
       }) });
       setRateDrafts({ ...rateDrafts, [hotelId]: { roomType: draft.roomType, mealPlan: draft.mealPlan } });
     });
@@ -72,16 +73,16 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
           <div key={hotel.id} className="rounded-2xl border border-stone-200 p-4">
             <p className="font-bold text-stone-900">{hotel.name}<span className="font-normal text-stone-500">{hotel.city ? ` · ${hotel.city}` : ""}{hotel.starRating ? ` · ${hotel.starRating}★` : ""}</span></p>
             <table className="mt-2 w-full text-left text-xs">
-              <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1">Room</th><th>Meals</th><th>Season</th><th className="text-right">Net / night</th><th className="text-right">Extra adult</th><th className="text-right">Child</th><th /></tr></thead>
+              <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1">Room</th><th>Meals</th><th>Season</th><th className="text-right">Net / night</th><th className="text-right">Extra adult</th><th className="text-right">Child</th><th className="text-right">Sleeps</th><th /></tr></thead>
               <tbody className="divide-y divide-stone-100">
                 {hotel.rates.map((rate) => (
                   <tr key={rate.id}>
                     <td className="py-1.5">{rate.roomType}</td><td>{rate.mealPlan}</td><td>{rate.validFrom} → {rate.validTo}</td>
-                    <td className="text-right font-mono">{inr(rate.netPerNightInr)}</td><td className="text-right font-mono">{inr(rate.extraAdultInr)}</td><td className="text-right font-mono">{inr(rate.childInr)}</td>
+                    <td className="text-right font-mono">{inr(rate.netPerNightInr)}</td><td className="text-right font-mono">{inr(rate.extraAdultInr)}</td><td className="text-right font-mono">{inr(rate.childInr)}</td><td className="text-right">{rate.maxGuests ?? "–"}</td>
                     <td className="text-right"><button onClick={() => run(() => request(`${base}/${hotel.id}/rates/${rate.id}`, { method: "DELETE" }))} aria-label={`Remove ${rate.roomType} ${rate.mealPlan} ${rate.validFrom} rate`} className="rounded p-1 text-stone-400 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button></td>
                   </tr>
                 ))}
-                {!hotel.rates.length && <tr><td colSpan={7} className="py-2 text-stone-500">No rates yet.</td></tr>}
+                {!hotel.rates.length && <tr><td colSpan={8} className="py-2 text-stone-500">No rates yet.</td></tr>}
               </tbody>
             </table>
             <form onSubmit={addRate(hotel.id)} className="mt-3 flex flex-wrap items-end gap-2 text-xs">
@@ -92,6 +93,7 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
               <input required type="number" min={0} placeholder="Net / night ₹" value={draft.netPerNightInr || ""} onChange={(event) => setRate(hotel.id, "netPerNightInr", event.target.value)} className={`${input} w-32`} aria-label="Net per night" />
               <input type="number" min={0} placeholder="Extra adult ₹" value={draft.extraAdultInr || ""} onChange={(event) => setRate(hotel.id, "extraAdultInr", event.target.value)} className={`${input} w-28`} aria-label="Extra adult per night" />
               <input type="number" min={0} placeholder="Child ₹" value={draft.childInr || ""} onChange={(event) => setRate(hotel.id, "childInr", event.target.value)} className={`${input} w-24`} aria-label="Child per night" />
+              <input type="number" min={1} max={20} placeholder="Sleeps" title="Guests one room sleeps, extra bed included" value={draft.maxGuests || ""} onChange={(event) => setRate(hotel.id, "maxGuests", event.target.value)} className={`${input} w-24`} aria-label="Max guests per room" />
               <button type="submit" className="rounded-xl border border-stone-300 px-3 py-2 font-bold">Add season</button>
             </form>
           </div>

@@ -27,7 +27,7 @@ function linePayload(line) {
   if (line.kind === "HOTEL") return { ...base, option: Number(line.option) || 1, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: line.checkIn || line.date, nights: Number(line.nights) || 1, rooms: Number(line.rooms) || 1, extraAdults: Number(line.extraAdults) || 0, children: Number(line.children) || 0 };
   if (line.kind === "LISTING") return { ...base, productId: line.productId, productOptionId: line.productOptionId || null, date: line.date, pickupTime: line.pickupTime || null, adults: Number(line.adults) || 1, children: Number(line.children) || 0 };
   // Rate-sheet lines: an empty count follows the quotation's travelers, and an empty cab count means enough cabs for everyone.
-  if (line.kind === "TRANSPORT") return { ...base, title: line.title || null, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: line.date, vehicles: count(line.vehicles), adults: count(line.adults), children: count(line.children) };
+  if (line.kind === "TRANSPORT") return { ...base, title: line.title || null, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: line.date, vehicles: count(line.vehicles), km: count(line.km), carDays: count(line.carDays), adults: count(line.adults), children: count(line.children) };
   if (line.kind === "ACTIVITY") return { ...base, title: line.title || null, serviceId: line.serviceId, date: line.date, adults: count(line.adults), children: count(line.children) };
   return { ...base, date: line.date || null, amountInr: Number(line.amountInr) || 0 };
 }
@@ -307,6 +307,10 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                         <label>Car service<select value={line.serviceId || ""} onChange={(event) => pickService(index, event.target.value)} className={`mt-1 block max-w-56 ${input}`}><option value="">Choose…</option>{serviceOptions(["TRANSFER", "SIGHTSEEING"])}</select></label>
                         <label>Cab<select value={line.cabTypeId || ""} onChange={(event) => setLine(index, { cabTypeId: event.target.value })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{cabsFor(services.find((item) => item.id === line.serviceId)).map((cab) => <option key={cab.id} value={cab.id}>{cab.name} ({cab.seats} seats)</option>)}</select></label>
                         <label>Cabs<input type="number" min={1} placeholder="Auto" value={line.vehicles ?? ""} onChange={(event) => setLine(index, { vehicles: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        {services.find((item) => item.id === line.serviceId)?.pricing === "PER_KM" && <>
+                          <label>Km<input type="number" min={1} placeholder={String(services.find((item) => item.id === line.serviceId)?.distanceKm || "")} value={line.km ?? ""} onChange={(event) => setLine(index, { km: event.target.value })} className={`mt-1 block w-20 ${input}`} /></label>
+                          <label>Car days<input type="number" min={1} placeholder="1" value={line.carDays ?? ""} onChange={(event) => setLine(index, { carDays: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        </>}
                         <label>Date<input type="date" value={line.date || ""} onChange={(event) => setLine(index, { date: event.target.value })} className={`mt-1 block ${input}`} /></label>
                       </>}
                       {line.kind === "ACTIVITY" && <>

@@ -259,3 +259,53 @@ test("hotel options share the itinerary, are priced one by one, and the customer
   assert.equal(copy.response.status, 201, JSON.stringify(copy.data));
   assert.deepEqual([copy.data.quotation.options.length, copy.data.quotation.selectedOption, copy.data.quotation.totals.totalInr], [2, null, 10395]);
 });
+
+test("per-km cars charge the greater of km driven and the daily minimum plus driver allowance, and short rooms are warned", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+  const ctx = setup(db);
+  const start = day(40);
+
+  const innova = (await call(api, ctx, "/cab-types", { body: { name: "Innova", seats: 6 } })).data.cabType;
+  const outstation = (await call(api, ctx, "/services", { body: { kind: "TRANSFER", name: "Delhi to Jaipur by car", pricing: "PER_KM", distanceKm: 280 } })).data.service;
+  assert.deepEqual([outstation.pricing, outstation.distanceKm], ["PER_KM", 280]);
+  const season = (body) => call(api, ctx, `/services/${outstation.id}/rates`, { body: { cabTypeId: innova.id, validFrom: day(30), validTo: day(60), ...body } });
+  assert.equal((await season({ vehicleInr: 5000 })).data.code, "PRICE_REQUIRED", "a per-km service needs a price per km");
+  assert.equal((await season({ perKmInr: 14, minKmPerDay: 250, driverAllowanceInr: 300 })).response.status, 201);
+  // Switching to fixed prices would leave the season without a price.
+  assert.equal((await call(api, ctx, `/services/${outstation.id}`, { method: "PUT", body: { kind: "TRANSFER", name: "Delhi to Jaipur by car", pricing: "FIXED" } })).data.code, "PRICING_CHANGE");
+
+  const hotel = (await call(api, ctx, "/hotels", { body: { name: "Jaipur Haveli", city: "Jaipur" } })).data.hotel;
+  const room = await call(api, ctx, `/hotels/${hotel.id}/rates`, { body: { roomType: "Deluxe", mealPlan: "CP", validFrom: day(30), validTo: day(60), netPerNightInr: 3000, maxGuests: 3 } });
+  assert.equal(room.data.hotel.rates[0].maxGuests, 3);
+
+  const car = { kind: "TRANSPORT", dayNumber: 1, serviceId: outstation.id, cabTypeId: innova.id, date: start };
+  const draft = {
+    title: "Rajasthan drive", customerName: "Arjun Mehta", startDate: start, adults: 7, children: 0, markupPct: 0,
+    lines: [
+      car, // usual 280 km, 1 day: max(280, 250) × 14 + 300 = 4220 per car, 2 cars for 7
+      { ...car, dayNumber: 2, date: day(41), km: 600, carDays: 3, vehicles: 2 }, // max(600, 750) × 14 + 900 = 11400 per car
+      { ...car, dayNumber: 3, date: day(42), km: 900, carDays: 3, vehicles: 2 }, // 900 × 14 + 900 = 13500 per car
+      { kind: "HOTEL", dayNumber: 1, title: "Stay", hotelId: hotel.id, roomType: "Deluxe", mealPlan: "CP", checkIn: start, nights: 2, rooms: 2 },
+    ],
+  };
+  const created = await call(api, ctx, "/quotations", { body: draft });
+  assert.equal(created.response.status, 201, JSON.stringify(created.data));
+  const [first, second, third] = created.data.quotation.lines.filter((line) => line.kind === "TRANSPORT");
+  assert.deepEqual([first.km, first.carDays, first.vehicles, first.priceInr], [280, 1, 2, 8440]);
+  assert.deepEqual([second.km, second.carDays, second.priceInr], [600, 3, 22800]);
+  assert.equal(third.priceInr, 27000);
+  // 2 rooms × 3 guests = 6 beds for 7 travellers.
+  assert.deepEqual(created.data.quotation.warnings, ["Jaipur Haveli: 2 Deluxe rooms sleep 6, but 7 are travelling."]);
+
+  const three = await call(api, ctx, `/quotations/${created.data.quotation.id}`, { method: "PUT", body: { ...draft, lines: [...draft.lines.slice(0, 3), { ...draft.lines[3], rooms: 3 }] } });
+  assert.deepEqual(three.data.quotation.warnings, []);
+
+  // No usual distance and no km on the line: refused.
+  const noDistance = (await call(api, ctx, "/services", { body: { kind: "SIGHTSEEING", name: "Car at disposal", pricing: "PER_KM" } })).data.service;
+  await call(api, ctx, `/services/${noDistance.id}/rates`, { body: { cabTypeId: innova.id, validFrom: day(30), validTo: day(60), perKmInr: 14 } });
+  assert.equal((await call(api, ctx, "/quotations", { body: { ...draft, lines: [{ ...car, serviceId: noDistance.id }] } })).data.code, "KM_REQUIRED");
+
+  const pdf = await fetch(`${api.baseUrl}/api/suppliers/${ctx.supplier.id}/quotations/${created.data.quotation.id}/pdf`, { headers: { authorization: `Bearer ${ctx.ownerToken}` } });
+  assert.equal(pdf.status, 200);
+});

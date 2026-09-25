@@ -55,6 +55,8 @@ const lineSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("TRANSPORT"), ...serviceLineBase,
     cabTypeId: z.string().trim().min(1).max(120), vehicles: z.number().int().min(1).max(50).optional().nullable(),
+    // Per-km cars (ADR 044): the km driven and the days the car is used.
+    km: z.number().int().min(1).max(20_000).optional().nullable(), carDays: z.number().int().min(1).max(60).optional().nullable(),
   }).strict(),
   z.object({ kind: z.literal("ACTIVITY"), ...serviceLineBase }).strict(),
 ]);
@@ -117,8 +119,8 @@ function priceLine(db, supplierId, line, travelers) {
     const children = line.children ?? travelers.children;
     const row = { line_date: line.date, service_id: line.serviceId, adults, children };
     if (line.kind === "TRANSPORT") {
-      const cost = transportCost(db, supplierId, { serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: line.date, vehicles: line.vehicles, adults, children });
-      return { price: cost.costInr, title: line.title || cost.service.name, service: cost.service, row: { ...row, cab_type_id: cost.cab.id, vehicles: cost.vehicles } };
+      const cost = transportCost(db, supplierId, { serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: line.date, vehicles: line.vehicles, adults, children, km: line.km, carDays: line.carDays });
+      return { price: cost.costInr, title: line.title || cost.service.name, service: cost.service, row: { ...row, cab_type_id: cost.cab.id, vehicles: cost.vehicles, km: cost.km ?? null, car_days: cost.carDays ?? null } };
     }
     const cost = activityCost(db, supplierId, { serviceId: line.serviceId, date: line.date, adults, children });
     return { price: cost.costInr, title: line.title || cost.service.name, service: cost.service, row };
@@ -163,7 +165,7 @@ function lineView(row) {
     hotelId: row.hotel_id || null, roomType: row.room_type || null, mealPlan: row.meal_plan || null, nights: row.nights ?? null, rooms: row.rooms ?? null,
     extraAdults: Number(row.extra_adults || 0), productId: row.product_id || null, productOptionId: row.product_option_id || null,
     pickupTime: row.pickup_time || null, adults: row.adults ?? null, children: Number(row.children || 0), amountInr: row.amount_inr ?? null,
-    serviceId: row.service_id || null, cabTypeId: row.cab_type_id || null, vehicles: row.vehicles ?? null,
+    serviceId: row.service_id || null, cabTypeId: row.cab_type_id || null, vehicles: row.vehicles ?? null, km: row.km ?? null, carDays: row.car_days ?? null,
     option: row.kind === "HOTEL" ? row.option_number || 1 : null,
     priceInr: Number(row.price_inr), bookingId: row.booking_id || null,
   };
@@ -171,8 +173,9 @@ function lineView(row) {
 
 /**
  * Checks that catch a wrong quotation before the customer sees it (ADR 042):
- * a line dated off its day, too few seats in the cabs, and a night of the trip
- * with no hotel when the package includes hotels.
+ * a line dated off its day, too few seats in the cabs, too few hotel rooms for
+ * the group (ADR 044), and a night of the trip with no hotel when the package
+ * includes hotels.
  */
 function quotationWarnings(db, row, lines, options = []) {
   const warnings = [];
@@ -184,6 +187,15 @@ function quotationWarnings(db, row, lines, options = []) {
       const cab = db.prepare("SELECT name, seats FROM supplier_cab_types WHERE id = ?").get(line.cabTypeId);
       const people = Number(line.adults || 0) + Number(line.children || 0);
       if (cab && line.vehicles * cab.seats < people) warnings.push(`${line.title}: ${line.vehicles} × ${cab.name} seat ${line.vehicles * cab.seats}, but ${people} are travelling.`);
+    }
+    if (line.kind === "HOTEL" && line.date) {
+      const rate = db.prepare(`SELECT r.max_guests, h.name FROM supplier_hotel_rates r JOIN supplier_hotels h ON h.id = r.hotel_id
+        WHERE r.hotel_id = ? AND LOWER(r.room_type) = LOWER(?) AND r.meal_plan = ? AND r.valid_from <= ? AND r.valid_to >= ? LIMIT 1`)
+        .get(line.hotelId, line.roomType, line.mealPlan, line.date, line.date);
+      const people = Number(row.adults) + Number(row.children);
+      if (rate?.max_guests && line.rooms * rate.max_guests < people) {
+        warnings.push(`${rate.name}: ${line.rooms} ${line.roomType} ${line.rooms === 1 ? "room sleeps" : "rooms sleep"} ${line.rooms * rate.max_guests}, but ${people} are travelling.`);
+      }
     }
   }
   const lastDay = Math.max(0, ...lines.map((line) => line.dayNumber));
@@ -289,14 +301,14 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, supplierId, `Q-${quoteRef()}`, ...header, actor?.id || null);
     }
     const insert = db.prepare(`INSERT INTO quotation_lines (id, quotation_id, day_number, sort_order, kind, title, description, line_date, hotel_id, room_type, meal_plan,
-        nights, rooms, extra_adults, product_id, product_option_id, pickup_time, adults, children, amount_inr, service_id, cab_type_id, vehicles, option_number, price_inr)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        nights, rooms, extra_adults, product_id, product_option_id, pickup_time, adults, children, amount_inr, service_id, cab_type_id, vehicles, option_number, km, car_days, price_inr)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     priced.forEach((line, index) => {
       const row = line.row;
       insert.run(`qln_${nanoid(12)}`, id, line.dayNumber, index, line.kind, line.title, line.description || null, row.line_date ?? null,
         row.hotel_id ?? null, row.room_type ?? null, row.meal_plan ?? null, row.nights ?? null, row.rooms ?? null, row.extra_adults ?? 0,
         row.product_id ?? null, row.product_option_id ?? null, row.pickup_time ?? null, row.adults ?? null, row.children ?? 0, row.amount_inr ?? null,
-        row.service_id ?? null, row.cab_type_id ?? null, row.vehicles ?? null, row.option_number ?? null, line.price);
+        row.service_id ?? null, row.cab_type_id ?? null, row.vehicles ?? null, row.option_number ?? null, row.km ?? null, row.car_days ?? null, line.price);
     });
     if (optionCount > 1) {
       const insertOption = db.prepare("INSERT INTO quotation_options (quotation_id, option_number, name) VALUES (?, ?, ?)");
@@ -320,7 +332,7 @@ function lineInput(line, shift) {
   const base = { kind: line.kind, dayNumber: line.dayNumber, title: line.title, description: line.description };
   if (line.kind === "HOTEL") return { ...base, option: line.option || 1, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: move(line.date), nights: line.nights, rooms: line.rooms, extraAdults: line.extraAdults, children: line.children };
   if (line.kind === "LISTING") return { ...base, productId: line.productId, productOptionId: line.productOptionId, date: move(line.date), pickupTime: line.pickupTime, adults: line.adults, children: line.children };
-  if (line.kind === "TRANSPORT") return { ...base, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: move(line.date), vehicles: line.vehicles, adults: line.adults, children: line.children };
+  if (line.kind === "TRANSPORT") return { ...base, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: move(line.date), vehicles: line.vehicles, km: line.km, carDays: line.carDays, adults: line.adults, children: line.children };
   if (line.kind === "ACTIVITY") return { ...base, serviceId: line.serviceId, date: move(line.date), adults: line.adults, children: line.children };
   return { ...base, date: move(line.date), amountInr: line.amountInr };
 }

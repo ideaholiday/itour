@@ -32,7 +32,8 @@ function lineSummary(line, hotels, cabs) {
   if (line.kind === "LISTING") return [line.title, line.pickupTime ? `at ${line.pickupTime}` : null].filter(Boolean).join(" ");
   if (line.kind === "TRANSPORT") {
     const cab = cabs.get(line.cabTypeId);
-    return cab ? `${line.title} · ${line.vehicles > 1 ? `${line.vehicles} × ` : ""}${cab.name}` : line.title;
+    const usage = [line.carDays > 1 ? `${line.carDays} days` : null, line.km ? `about ${line.km} km` : null].filter(Boolean);
+    return [line.title, cab ? `${line.vehicles > 1 ? `${line.vehicles} × ` : ""}${cab.name}` : null, ...usage].filter(Boolean).join(" · ");
   }
   return line.title;
 }

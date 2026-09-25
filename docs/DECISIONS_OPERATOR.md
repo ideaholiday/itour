@@ -110,3 +110,14 @@
   3. **Accepting records the customer's option.** Its price becomes the quotation's total; payments and what is due count against it. Until then the quotation's total is option 1's.
   4. A new option starts as a **copy of option 1's hotels**, changed hotel by hotel.
 - **Consequences**: Warnings check the hotel nights of every option. A copied quotation keeps its options, open again.
+
+---
+
+## ADR 044: Per-Kilometre Cars and a Room-Occupancy Warning
+- **Date**: 2026-09-25
+- **Context**: Outstation and multi-day cars in India are priced per km with a minimum km per day and a driver allowance, not per route. Quotations could not tell when the hotel rooms were too few for the group.
+- **Decision Made** (owner, 2026-09-25), for operator-platform Phase 10:
+  1. **A car service is priced fixed per vehicle or per km.** Per km, each cab type has a rate per km, a minimum km per day and a driver allowance per day; the service may have a usual distance.
+  2. **One car costs** max(km, minimum km per day × days) × rate per km + driver allowance × days, rounded to the rupee, times the number of cars. Tolls, parking and permits stay custom lines.
+  3. **A hotel rate may say how many guests a room sleeps**, extra bed included. A hotel line warns, without blocking, when rooms × that number is below the travelers. No number, no warning.
+- **Consequences**: A service with seasons can't switch between fixed and per km (`PRICING_CHANGE`). The customer's PDF shows the car days and about how many km.
