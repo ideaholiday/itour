@@ -62,3 +62,14 @@
   3. **Credit limit, refused over it.** A booking adds its unpaid net amount to what the agent owes; one that would take them over their limit is refused unless enough is paid now. The supplier records the agent's payments.
   4. **Agent bookings are the supplier's own sales**, like walk-ins (ADR 034): source `AGENT`, `payment_status = OFFLINE`, no IdeaHoliday commission or payout, the same shared inventory.
 - **Consequences**: What an agent owes is the `balance_due_inr` of their live bookings, so there is one ledger. A payment on the agent's account is applied to their oldest open bookings first and cannot exceed what they owe. The guest of an agent booking is never asked to pay at the meeting point.
+
+---
+
+## ADR 040: Package Quotations: One Markup, 5% Package GST, Book Listings in One Click
+- **Date**: 2026-09-25
+- **Decision Made** (owner, 2026-09-25), for operator-platform Phase 6:
+  1. **Lines**: hotel nights from the supplier's own rate sheet (hotel, room type, meal plan, net rate per night by season), the supplier's own listings (priced by the server quote, before tax), and custom lines (flights, permits, guide fees). Hotel and custom lines are the supplier's costs and carry one **markup %** per quotation; listings enter at their own price. The customer sees one package price, not the breakdown.
+  2. **GST**: 5% on the whole package price for an Indian supplier (tour-operator rate, no input tax credit), shown once. Suppliers outside India quote tax-inclusive with no GST line. The owner will confirm the rate with their CA.
+  3. **Accepting**: staff mark the quotation accepted; each listing line then gets "Book now", which makes a booking on the shared inventory and checks seats at that moment. Hotels stay as lines; the supplier books them with the hotel.
+  4. **Delivery**: email with the PDF attached where the provider allows (Brevo) and a signed link in the body, which can also be sent on WhatsApp.
+- **Consequences**: A booking made from a quotation holds the seats and records the listing's share of the package (`quotation_id`); the customer's money is tracked on the quotation, so the booking carries no balance of its own. The PDF uses "INR" because the PDF's built-in fonts have no rupee sign.

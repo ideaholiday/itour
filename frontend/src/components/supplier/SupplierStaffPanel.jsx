@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle2, Copy, KeyRound, RefreshCw, Trash2, UserPlus,
 import { authHeaders } from "../../lib/api.js";
 import PhoneInput from "../PhoneInput.jsx";
 
-export const STAFF_ROLE_LABELS = { MANAGER: "Manager", FRONT_DESK: "Front desk", GUIDE: "Guide" };
+import { STAFF_ROLE_LABELS } from "./staffRoles.js";
 const ROLE_HELP = {
   MANAGER: "Listings, prices, calendar, bookings, cancellations, dispatch and reviews. No bank details, KYB, plans or staff.",
   FRONT_DESK: "Walk-in and phone bookings, payments, vouchers, guest list and check-in.",

@@ -123,6 +123,7 @@ import publicSuppliersRouter from "./routes/publicSuppliers.js";
 import blogRouter from "./routes/blog.js";
 import { goRouter, shareRouter } from "./routes/shareKit.js";
 import enquiriesRouter from "./routes/enquiries.js";
+import quotationsRouter from "./routes/quotations.js";
 import securityTxtRouter from "./routes/securityTxt.js";
 import metricsRouter from "./routes/metrics.js";
 import travelerRouter from "./routes/traveler.js";
@@ -210,6 +211,7 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/blog`, blogRouter);
   app.use(`${prefix}/share`, shareRouter);
   app.use(`${prefix}/enquiries`, enquiriesRouter);
+  app.use(`${prefix}/quotations`, quotationsRouter);
   app.use(`${prefix}/suppliers`, suppliersRouter);
   app.use(`${prefix}/supplier-channels`, supplierChannelsRouter);
   app.use(`${prefix}/octo`, octoRouter);

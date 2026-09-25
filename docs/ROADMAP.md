@@ -61,7 +61,8 @@ Do not rebuild these. Extend them if asked.
 - **Phase 3b — done:** booking calendar; supplier reschedule at the same price, with the traveler able to decline for a full wallet refund (ADR 037).
 - **Phase 4 — done:** real supplier dashboard numbers: earnings by trip date split marketplace/direct, growth against the same days last month, and service metrics that say "Not enough data" instead of inventing (ADR 038).
 - **Phase 5 — done:** the supplier's own agents booked by staff at a commission-based net rate, on credit up to a limit, with payments on account and statements (ADR 039).
-- **Next, in order:** 6 package and quotation builder with hotel rate sheet and PDF email → 7 per-channel on/off and reseller API keys in the extranet.
+- **Phase 6 — done:** package quotations with a hotel rate sheet, one markup, 5% package GST for Indian suppliers, PDF by email and share link, listing lines booked in one click once accepted (ADR 040).
+- **Next, in order:** 7 per-channel on/off and reseller API keys in the extranet.
 
 Standing obligations that apply to every change:
 

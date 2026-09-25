@@ -54,6 +54,7 @@ To protect against driver impersonation and unauthorized passenger pickups:
 3. **File Uploads** (`POST /api/uploads`, `backend/src/routes/uploads.js`):
    - Sign-in is required, and uploads are limited to 60 an hour per client (`scope: "upload"`).
    - Public uploads (photos) must be a real PNG, JPG or WEBP image, checked from the file's first bytes (`detectImageType`). The stored extension comes from those bytes, never from the uploaded file name, so a page can't be served from our domain as a "photo".
+   - Quotation PDFs (ADR 040) are never stored: they are rendered on request, for the supplier's owner or manager, or for a signed 60-day share token (`quotationService.createQuotationToken`, the voucher-link HMAC). The customer's PDF shows no costs, markup or line prices.
    - KYB documents are stored privately and only accepted for the supplier's own account or by staff (`kybFileService.js`).
    - In production (`MEDIA_STORAGE=supabase`) photos go to the public Supabase Storage bucket `supplier-media` and KYB documents to the private bucket `kyb-documents`. The buckets have no storage policies, so only the backend's service-role key can write to them; KYB files are read back only through the backend's owner/admin routes.
 

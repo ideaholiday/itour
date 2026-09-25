@@ -108,8 +108,11 @@ Dispatches HTML-rendered booking vouchers, PDF e-tickets, payment receipts, and 
 - **For SES**: `SES_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SES_FROM_EMAIL`.
 - **For Brevo**: `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`.
 
+### Attachments
+`sendEmail({ attachments: [{ name, contentBase64 }] })` attaches files through **Brevo** only (package quotation PDFs, ADR 040). The SES path sends the body alone, so every email that carries an attachment also carries a signed link to the same file.
+
 ### Delivery Security
-Voucher links in emails are cryptographically signed using `DOCUMENT_LINK_SECRET` with time-based HMAC expirations, preventing URL tampering.
+Voucher and quotation links in emails are cryptographically signed using `DOCUMENT_LINK_SECRET` with time-based HMAC expirations, preventing URL tampering.
 
 ---
 

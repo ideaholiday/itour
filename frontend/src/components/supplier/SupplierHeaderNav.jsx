@@ -1,10 +1,10 @@
 import React, { Suspense, lazy, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart3, Bell, Briefcase, CalendarCheck, ChevronDown, CreditCard, QrCode, ExternalLink, FileCheck, Globe, LayoutDashboard, LogOut, Map, MessageSquare, PlusCircle, RefreshCw, Store, UserCog, UserPlus, Users } from "lucide-react";
+import { BarChart3, Bell, Briefcase, FileSpreadsheet, CalendarCheck, ChevronDown, CreditCard, QrCode, ExternalLink, FileCheck, Globe, LayoutDashboard, LogOut, Map, MessageSquare, PlusCircle, RefreshCw, Store, UserCog, UserPlus, Users } from "lucide-react";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { useAuth } from "../../lib/auth.jsx";
 import SupplierNotificationBell from "./SupplierNotificationBell.jsx";
-import { STAFF_ROLE_LABELS } from "./SupplierStaffPanel.jsx";
+import { STAFF_ROLE_LABELS } from "./staffRoles.js";
 
 const WalkInBookingDrawer = lazy(() => import("./WalkInBookingDrawer.jsx"));
 
@@ -29,6 +29,7 @@ export default function SupplierHeaderNav({ supplierData, activeTab, onBookingCr
     ["CHANNELS", "Channel Manager", "/supplier/channels", RefreshCw],
     ["FLEET", "Fleet", "/supplier/dashboard?panel=fleet", Users, supplierData?.drivers?.length || null],
     ["AGENTS", "Agents", "/supplier/dashboard?panel=agents", Briefcase],
+    ["PACKAGES", "Packages", "/supplier/dashboard?panel=packages", FileSpreadsheet],
     ["ANALYTICS", "Analytics", "/supplier/dashboard?panel=analytics", BarChart3],
     ["PROFILE", "Public profile", "/supplier/dashboard?panel=profile", Globe],
     ["SHARE", "Share kit", "/supplier/dashboard?panel=share", QrCode],
@@ -40,7 +41,7 @@ export default function SupplierHeaderNav({ supplierData, activeTab, onBookingCr
   ].filter(([id]) => (role === "OWNER" ? true : role === "MANAGER" ? !["KYB", "SUBSCRIPTION", "STAFF"].includes(id) : id === "BOOKINGS"));
 
   const isCurrent = (id, path) => {
-    if (["FLEET", "KYB", "BUILDER", "ANALYTICS", "PROFILE", "SHARE", "ENQUIRIES", "SUBSCRIPTION", "STAFF", "AGENTS"].includes(id)) return requestedPanel === (id === "BUILDER" ? "listings" : id === "KYB" ? "compliance" : id.toLowerCase());
+    if (["FLEET", "KYB", "BUILDER", "ANALYTICS", "PROFILE", "SHARE", "ENQUIRIES", "SUBSCRIPTION", "STAFF", "AGENTS", "PACKAGES"].includes(id)) return requestedPanel === (id === "BUILDER" ? "listings" : id === "KYB" ? "compliance" : id.toLowerCase());
     if (id === "DASHBOARD") return location.pathname === "/supplier" || (location.pathname === "/supplier/dashboard" && !requestedPanel);
     return location.pathname === path;
   };

@@ -24,6 +24,13 @@
 4. **Payments on account** are applied to the agent's open bookings, oldest trip first, and can't exceed what they owe. Cancelling an agent booking removes what was owed on it; any money already paid is settled between supplier and agent.
 5. **The guest is never asked to pay**: the guest list and board show no balance for agent bookings.
 
+## Package quotations (ADR 040)
+1. **Hotel rate sheet.** Contracted net rates per hotel, room type and meal plan by season. Hotels are never live inventory; the rate sheet only prices quotations. A stay is priced night by night, so a stay across two seasons uses each night's rate; a night without a rate is refused (`RATE_MISSING`).
+2. **Lines, priced by the server**: hotel nights (cost), the supplier's own listings (pre-tax quote price) and custom items (cost). Markup % applies to the cost lines only. An Indian supplier adds 5% GST on the package; a supplier abroad quotes tax-inclusive.
+3. **The customer sees one price.** The PDF lists the itinerary day by day without line prices, then package price, GST and total, in "INR" (the PDF fonts have no rupee sign).
+4. **Sending** emails the PDF (attached through Brevo) with a signed link valid 60 days, and returns the same link and a WhatsApp message. A draft becomes `SENT`. A draft or sent quotation can be edited and re-priced; accepted and declined ones are final.
+5. **Accepted**: each listing line is booked with one click, checking seats then. The booking holds the seats and records the line's share of the package; the customer's payments are recorded on the quotation, never more than it's due. Hotels are booked with the hotel directly.
+
 ## Supplier reschedule (ADR 037)
 1. **Same option, same price.** An owner or manager moves a booking to another date or time; the seats move in one transaction (`moveNativeReservation`) and `amount_inr` never changes. Like a counter sale, the new departure may be past the online cut-off until it starts.
 2. **Refused** when the booking is cancelled, completed, in progress or unpaid; the traveler was already checked in or marked a no-show; a driver is assigned (unassign first); it is a leg of a multi-stop circuit (operations reschedule those); the new departure has started or lacks seats; or nothing changes.

@@ -76,6 +76,10 @@ import { assignResource, bookingCalendar, departureBoard, guideDepartureScope, u
 import { rescheduleBySupplier } from "../services/supplierRescheduleService.js";
 import { supplierAnalytics, supplierDashboardStats } from "../services/supplierDashboardService.js";
 import { agentStatement, listAgents, recordAgentPayment, saveAgent, setAgentRates } from "../services/supplierAgentService.js";
+import { addHotelRate, deleteHotelRate, listHotels, saveHotel } from "../services/supplierHotelService.js";
+import { bookQuotationLine, findQuotation, listQuotations, quotationShareUrl, quotationView, recordQuotationPayment, saveQuotation, setQuotationStatus } from "../services/quotationService.js";
+import { quotationPdf } from "../services/quotationPdfService.js";
+import { sendEmail } from "../services/emailService.js";
 import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
 
 const router = express.Router();
@@ -2351,6 +2355,77 @@ router.post("/:id/agents/:agentId/payments", (req, res) => {
   } catch (error) {
     directBookingFailure(res, req, error, "Could not record the payment");
   }
+});
+
+// Hotel rate sheet (ADR 040): contracted net rates, used only to price quotations.
+router.get("/:id/hotels", (req, res) => {
+  try { res.json({ success: true, hotels: listHotels(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load hotels"); }
+});
+router.post("/:id/hotels", (req, res) => {
+  try { res.status(201).json({ success: true, hotel: saveHotel(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add the hotel"); }
+});
+router.put("/:id/hotels/:hotelId", (req, res) => {
+  try { res.json({ success: true, hotel: saveHotel(db, req.params.id, req.body, req.params.hotelId) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the hotel"); }
+});
+router.post("/:id/hotels/:hotelId/rates", (req, res) => {
+  try { res.status(201).json({ success: true, hotel: addHotelRate(db, req.params.id, req.params.hotelId, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add the rate"); }
+});
+router.delete("/:id/hotels/:hotelId/rates/:rateId", (req, res) => {
+  try { res.json({ success: true, hotel: deleteHotelRate(db, req.params.id, req.params.hotelId, req.params.rateId) }); } catch (error) { directBookingFailure(res, req, error, "Could not remove the rate"); }
+});
+
+// Package quotations (ADR 040): priced on the server, sent as a PDF, booked line by line once accepted.
+router.get("/:id/quotations", (req, res) => {
+  try { res.json({ success: true, quotations: listQuotations(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load quotations"); }
+});
+router.post("/:id/quotations", (req, res) => {
+  try { res.status(201).json({ success: true, quotation: saveQuotation(db, req.params.id, req.body, { actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the quotation"); }
+});
+router.get("/:id/quotations/:quotationId", (req, res) => {
+  try { res.json({ success: true, quotation: quotationView(db, findQuotation(db, req.params.id, req.params.quotationId)) }); } catch (error) { directBookingFailure(res, req, error, "Could not load the quotation"); }
+});
+router.put("/:id/quotations/:quotationId", (req, res) => {
+  try { res.json({ success: true, quotation: saveQuotation(db, req.params.id, req.body, { actor: req.user, quotationId: req.params.quotationId }) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the quotation"); }
+});
+router.post("/:id/quotations/:quotationId/status", (req, res) => {
+  try { res.json({ success: true, quotation: setQuotationStatus(db, req.params.id, req.params.quotationId, String(req.body?.status || "").toUpperCase()) }); } catch (error) { directBookingFailure(res, req, error, "Could not change the status"); }
+});
+router.post("/:id/quotations/:quotationId/payments", (req, res) => {
+  try { res.status(201).json({ success: true, quotation: recordQuotationPayment(db, { supplierId: req.params.id, quotationId: req.params.quotationId, actor: req.user, input: req.body }) }); } catch (error) { directBookingFailure(res, req, error, "Could not record the payment"); }
+});
+router.post("/:id/quotations/:quotationId/lines/:lineId/book", (req, res) => {
+  try { res.status(201).json({ success: true, ...bookQuotationLine(db, { supplierId: req.params.id, quotationId: req.params.quotationId, lineId: req.params.lineId, actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not book this line"); }
+});
+router.get("/:id/quotations/:quotationId/pdf", async (req, res) => {
+  try {
+    const { buffer, filename } = await quotationPdf(db, req.params.id, req.params.quotationId);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store" });
+    res.send(buffer);
+  } catch (error) { directBookingFailure(res, req, error, "Could not make the PDF"); }
+});
+
+// Sends the PDF by email (attached where the provider allows, with the link in the body)
+// and returns the link and a WhatsApp message for the same quotation. A draft becomes sent.
+router.post("/:id/quotations/:quotationId/send", async (req, res) => {
+  try {
+    let row = findQuotation(db, req.params.id, req.params.quotationId);
+    if (row.status === "DECLINED") return res.status(409).json({ error: "This quotation was declined", code: "QUOTATION_FINAL" });
+    const supplier = db.prepare("SELECT company_name FROM suppliers WHERE id = ?").get(req.params.id);
+    const shareUrl = quotationShareUrl(row);
+    const view = quotationView(db, row);
+    const message = `Hello ${row.customer_name},\n\nHere is your quotation ${row.ref} for ${row.title}: INR ${view.totals.totalInr.toLocaleString("en-IN")} for the whole group.\n\nView or download it: ${shareUrl}\n\n${supplier?.company_name || ""}`.trim();
+    let email = { status: "SKIPPED", error: "No customer email on the quotation" };
+    if (req.body?.email !== false && row.customer_email) {
+      const { buffer, filename } = await quotationPdf(db, req.params.id, row.id);
+      email = await sendEmail({
+        to: row.customer_email, recipientName: row.customer_name, recipientRole: "TRAVELER", eventType: "QUOTATION_SENT",
+        eventKey: `quotation:${row.id}:${Date.now()}`, subject: `Your quotation ${row.ref}: ${row.title}`, text: message,
+        metadata: { quotationId: row.id, ref: row.ref }, attachments: [{ name: filename, contentBase64: buffer.toString("base64") }],
+      });
+    }
+    if (row.status === "DRAFT") row = findQuotation(db, req.params.id, setQuotationStatus(db, req.params.id, row.id, "SENT").id);
+    res.json({ success: true, shareUrl, whatsappText: message, email: { status: email.status, error: email.error || null }, quotation: quotationView(db, row) });
+  } catch (error) { directBookingFailure(res, req, error, "Could not send the quotation"); }
 });
 
 // Booking calendar (ADR 037): bookings and guests per day for one month.

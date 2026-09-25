@@ -80,7 +80,9 @@ function insertPayments(db, { bookingId, supplierId, actorId, payments }) {
  * Creates a confirmed supplier-direct booking against the shared inventory.
  * Returns { booking, idempotent }.
  */
-export function createSupplierBooking(db, { supplierId, actor, input }) {
+// packageLine (ADR 040): a listing line of an accepted quotation. The booking
+// records the line's share of the package and owes nothing of its own.
+export function createSupplierBooking(db, { supplierId, actor, input, packageLine = null }) {
   const data = directBookingSchema.parse(input);
   const product = db.prepare("SELECT id, supplier_id, city FROM products WHERE id = ?").get(data.product_id);
   if (!product || product.supplier_id !== supplierId) throw directError("Product not found for this supplier", 404, "PRODUCT_NOT_FOUND");
@@ -126,9 +128,9 @@ export function createSupplierBooking(db, { supplierId, actor, input }) {
     if (data.discount_inr > quote.totalAmount) throw directError("The discount is larger than the booking total", 400, "DISCOUNT_TOO_LARGE");
     // An agent pays the quote minus their commission, within their credit limit (ADR 039).
     const agent = forAgent ? agentPricing(db, { supplierId, agentId: data.agent_id, productId: product.id, totalAmount: quote.totalAmount, paidNowInr: paidInr }) : null;
-    const amountInr = agent ? agent.netInr : quote.totalAmount - data.discount_inr;
+    const amountInr = packageLine ? Number(packageLine.priceInr) : agent ? agent.netInr : quote.totalAmount - data.discount_inr;
     if (paidInr > amountInr) throw directError(`Payments of ₹${paidInr} are more than the ₹${amountInr} due`, 400, "OVERPAYMENT");
-    const { balance, paymentMethod } = derivePaymentState(amountInr, paidInr);
+    const { balance, paymentMethod } = packageLine ? { balance: 0, paymentMethod: "PACKAGE" } : derivePaymentState(amountInr, paidInr);
 
     let userId = null;
     if (email) {
@@ -146,9 +148,9 @@ export function createSupplierBooking(db, { supplierId, actor, input }) {
         traveler_name, traveler_phone, traveler_email, amount_inr, tolls_and_tax_amount,
         commission_amount, commission_rate_snapshot, supplier_payout_amount, payment_method, payment_status, status,
         confirmation_type, confirmation_status, supplier_assignment_status, supplier_assignment_method, supplier_response_status, supplier_assigned_at, supplier_responded_at,
-        source, created_by_user_id, direct_discount_inr, balance_due_inr, agent_id, agent_commission_inr
+        source, created_by_user_id, direct_discount_inr, balance_due_inr, agent_id, agent_commission_inr, quotation_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'confirmed',
-        'INSTANT', 'CONFIRMED', 'SUPPLIER_ACCEPTED', 'SUPPLIER_DIRECT', 'ACCEPTED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`)
+        'INSTANT', 'CONFIRMED', 'SUPPLIER_ACCEPTED', 'SUPPLIER_DIRECT', 'ACCEPTED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         bookingId, ref, clientRequestId, userId, product.id, optionId, supplierId,
         quote.product.product_code || product.id, quote.product.supplier_code || supplierId, quote.product.product_type, quote.variantName,
@@ -156,7 +158,7 @@ export function createSupplierBooking(db, { supplierId, actor, input }) {
         quote.adults, quote.children, quote.vehicleCategory,
         data.traveler_name, phone, email, amountInr, quote.tolls + quote.stateTax + quote.gstAmount,
         amountInr, paymentMethod, OFFLINE_PAYMENT_STATUS,
-        data.source, actor?.id || null, data.discount_inr, balance, agent ? data.agent_id : null, agent ? agent.commissionInr : 0,
+        data.source, actor?.id || null, data.discount_inr, balance, agent ? data.agent_id : null, agent ? agent.commissionInr : 0, packageLine?.quotationId || null,
       );
     saveBookingUnitItems(db, bookingId, quote.unitItems, quote.nativeSlot?.unitPrices || {});
 

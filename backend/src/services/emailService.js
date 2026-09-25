@@ -108,6 +108,9 @@ export async function sendEmail({
   text,
   html,
   metadata,
+  // [{ name, contentBase64 }]: sent by Brevo; the SES path sends the body only,
+  // so an attachment must never be the only way to reach its content.
+  attachments = [],
 }, { client, database = db, fetchImpl = globalThis.fetch } = {}) {
   const address = String(to || "").trim().toLowerCase();
   if (!validEmail(address)) return { success: false, status: "FAILED", error: "A valid recipient email is required" };
@@ -164,6 +167,7 @@ export async function sendEmail({
             String(eventType).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 50),
             String(recipientRole).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 50),
           ],
+          ...(attachments.length ? { attachment: attachments.map((file) => ({ name: file.name, content: file.contentBase64 })) } : {}),
         }),
       });
 

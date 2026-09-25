@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import SupplierPublicProfileEditor from "./SupplierPublicProfileEditor.jsx";
 import EnquiryInbox from "../EnquiryInbox.jsx";
 import { Link } from "react-router-dom";
@@ -38,8 +38,6 @@ import SupplierPerformanceRing from "./SupplierPerformanceRing.jsx";
 import SupplierQuickActions from "./SupplierQuickActions.jsx";
 import SupplierAnalyticsDashboard from "./SupplierAnalyticsDashboard.jsx";
 import SupplierCompliancePanel from "./SupplierCompliancePanel.jsx";
-import SupplierStaffPanel from "./SupplierStaffPanel.jsx";
-import SupplierAgentsPanel from "./SupplierAgentsPanel.jsx";
 import { authHeaders } from "../../lib/api.js";
 
 const money = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
@@ -47,6 +45,11 @@ const productScore = (product) => {
   const checks = [product.title, product.short_desc, product.hero_image, Number(product.price_inr) > 0, product.inclusions, product.itinerary];
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 };
+
+const SupplierStaffPanel = lazy(() => import("./SupplierStaffPanel.jsx"));
+const SupplierAgentsPanel = lazy(() => import("./SupplierAgentsPanel.jsx"));
+const SupplierQuotationsPanel = lazy(() => import("./SupplierQuotationsPanel.jsx"));
+const PanelLoading = () => <p className="p-8 text-center text-xs text-stone-500">Loading…</p>;
 
 export default function SupplierDashboardOverview({ supplierData, loading, onRefresh, initialPanel }) {
   const [blockOpen, setBlockOpen] = useState(false);
@@ -219,12 +222,17 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
     return <SupplierShareKitPanel supplierId={supplier.id} />;
   }
 
+  // Operator tools load only when opened, to keep the dashboard bundle small.
+  if (initialPanel === "packages") {
+    return <Suspense fallback={<PanelLoading />}><SupplierQuotationsPanel supplierId={supplier.id} products={products} /></Suspense>;
+  }
+
   if (initialPanel === "agents") {
-    return <SupplierAgentsPanel supplierId={supplier.id} products={products} />;
+    return <Suspense fallback={<PanelLoading />}><SupplierAgentsPanel supplierId={supplier.id} products={products} /></Suspense>;
   }
 
   if (initialPanel === "staff") {
-    return <SupplierStaffPanel supplierId={supplier.id} />;
+    return <Suspense fallback={<PanelLoading />}><SupplierStaffPanel supplierId={supplier.id} /></Suspense>;
   }
 
   if (initialPanel === "subscription") {

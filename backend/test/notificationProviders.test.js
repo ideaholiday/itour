@@ -177,6 +177,25 @@ test("Brevo (Sendinblue) email provider dispatches through API and logs messageI
 });
 
 
+test("Brevo sends attachments (a quotation PDF, ADR 040); without any, the payload has none", async t => {
+  const keys = ["EMAIL_NOTIFICATIONS_ENABLED", "EMAIL_PROVIDER", "BREVO_API_KEY"];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  t.after(() => { for (const key of keys) restoreEnv(key, previous[key]); });
+  Object.assign(process.env, { EMAIL_NOTIFICATIONS_ENABLED: "true", EMAIL_PROVIDER: "BREVO", BREVO_API_KEY: "xkeysib-mock-test-key" });
+  const database = notificationDatabase();
+  t.after(() => database.close());
+  const bodies = [];
+  const fetchImpl = async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, status: 201, json: async () => ({ messageId: `msg-${bodies.length}` }) };
+  };
+  const base = { to: "meera@example.com", subject: "Your quotation Q-ABC123", text: "Here is your quotation." };
+  await sendEmail({ ...base, eventKey: "quotation:1", attachments: [{ name: "Q-ABC123.pdf", contentBase64: "JVBERi0=" }] }, { database, fetchImpl });
+  await sendEmail({ ...base, eventKey: "quotation:2" }, { database, fetchImpl });
+  assert.deepEqual(bodies[0].attachment, [{ name: "Q-ABC123.pdf", content: "JVBERi0=" }]);
+  assert.equal("attachment" in bodies[1], false);
+});
+
 test("supplier SMS records provider acceptance and suppresses successful retries", async t => {
   const { sendSupplierSms } = await import("../src/services/smsService.js");
   const keys = ["SMS_NOTIFICATIONS_ENABLED", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_MESSAGING_SERVICE_SID"];
