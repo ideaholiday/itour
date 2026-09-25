@@ -17,6 +17,13 @@
 3. **A guide linked to a login** sees, lists and checks in only the departures they are assigned to (`403 NOT_YOUR_DEPARTURE`). An unlinked guide login keeps the guide role's normal access (ADR 036).
 4. **The booking calendar** shows bookings, guests and departures per day for a month; picking a day opens it on the board.
 
+## Agents (ADR 039)
+1. **Staff book for an agent** from the walk-in drawer: source `AGENT`, the same inventory and quote, commission-free for IdeaHoliday (`payment_status = OFFLINE`, no payout).
+2. **Net rate.** The agent pays the quote minus their commission (`commission_pct`, or a per-listing `supplier_agent_rates` %). No discount on top.
+3. **Credit.** What the agent owes is the unpaid net of their live bookings. A booking whose unpaid part would take them over `credit_limit_inr` is refused (`409 AGENT_CREDIT_LIMIT`, saying how much to take now). An inactive agent can't book.
+4. **Payments on account** are applied to the agent's open bookings, oldest trip first, and can't exceed what they owe. Cancelling an agent booking removes what was owed on it; any money already paid is settled between supplier and agent.
+5. **The guest is never asked to pay**: the guest list and board show no balance for agent bookings.
+
 ## Supplier reschedule (ADR 037)
 1. **Same option, same price.** An owner or manager moves a booking to another date or time; the seats move in one transaction (`moveNativeReservation`) and `amount_inr` never changes. Like a counter sale, the new departure may be past the online cut-off until it starts.
 2. **Refused** when the booking is cancelled, completed, in progress or unpaid; the traveler was already checked in or marked a no-show; a driver is assigned (unassign first); it is a leg of a multi-stop circuit (operations reschedule those); the new departure has started or lacks seats; or nothing changes.

@@ -11,6 +11,7 @@ import {
 } from "./nativeInventoryService.js";
 import { toE164 } from "../lib/phone.js";
 import { DIRECT_SOURCES, DIRECT_PAYMENT_MODES, OFFLINE_PAYMENT_STATUS } from "../lib/bookingSources.js";
+import { agentPricing } from "./supplierAgentService.js";
 
 // Supplier-direct bookings (ADR 034): a walk-in at the counter, a phone call or
 // a manual entry. They take seats from the same native inventory as every
@@ -44,6 +45,8 @@ export const directBookingSchema = z.object({
   discount_inr: z.number().int().min(0).max(10_000_000).default(0),
   payments: z.array(paymentSchema).max(5).default([]),
   client_request_id: z.string().trim().min(8).max(120).optional().nullable(),
+  // ADR 039: an AGENT booking names the agent and takes their net rate, not a discount.
+  agent_id: z.string().trim().min(1).max(120).optional().nullable(),
 }).strict();
 
 export const directPaymentSchema = paymentSchema.strict();
@@ -100,6 +103,10 @@ export function createSupplierBooking(db, { supplierId, actor, input }) {
   const bookingId = `bk_${nanoid(12)}`;
   const ref = `IH-${nanoid(7).toUpperCase()}`;
   const paidInr = data.payments.reduce((sum, payment) => sum + payment.amount_inr, 0);
+  const forAgent = data.source === "AGENT";
+  if (forAgent && !data.agent_id) throw directError("Choose the agent", 400, "AGENT_REQUIRED");
+  if (!forAgent && data.agent_id) throw directError("Only an agent booking names an agent", 400, "AGENT_NOT_EXPECTED");
+  if (forAgent && data.discount_inr > 0) throw directError("An agent's price is set by their commission; it can't also be discounted", 400, "AGENT_DISCOUNT");
 
   db.transaction(() => {
     // Seats first, from the one shared pool, under the same locks as a
@@ -117,7 +124,9 @@ export function createSupplierBooking(db, { supplierId, actor, input }) {
 
     // The supplier may give its own customer a discount, never a price below zero.
     if (data.discount_inr > quote.totalAmount) throw directError("The discount is larger than the booking total", 400, "DISCOUNT_TOO_LARGE");
-    const amountInr = quote.totalAmount - data.discount_inr;
+    // An agent pays the quote minus their commission, within their credit limit (ADR 039).
+    const agent = forAgent ? agentPricing(db, { supplierId, agentId: data.agent_id, productId: product.id, totalAmount: quote.totalAmount, paidNowInr: paidInr }) : null;
+    const amountInr = agent ? agent.netInr : quote.totalAmount - data.discount_inr;
     if (paidInr > amountInr) throw directError(`Payments of ₹${paidInr} are more than the ₹${amountInr} due`, 400, "OVERPAYMENT");
     const { balance, paymentMethod } = derivePaymentState(amountInr, paidInr);
 
@@ -137,9 +146,9 @@ export function createSupplierBooking(db, { supplierId, actor, input }) {
         traveler_name, traveler_phone, traveler_email, amount_inr, tolls_and_tax_amount,
         commission_amount, commission_rate_snapshot, supplier_payout_amount, payment_method, payment_status, status,
         confirmation_type, confirmation_status, supplier_assignment_status, supplier_assignment_method, supplier_response_status, supplier_assigned_at, supplier_responded_at,
-        source, created_by_user_id, direct_discount_inr, balance_due_inr
+        source, created_by_user_id, direct_discount_inr, balance_due_inr, agent_id, agent_commission_inr
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'confirmed',
-        'INSTANT', 'CONFIRMED', 'SUPPLIER_ACCEPTED', 'SUPPLIER_DIRECT', 'ACCEPTED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?)`)
+        'INSTANT', 'CONFIRMED', 'SUPPLIER_ACCEPTED', 'SUPPLIER_DIRECT', 'ACCEPTED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)`)
       .run(
         bookingId, ref, clientRequestId, userId, product.id, optionId, supplierId,
         quote.product.product_code || product.id, quote.product.supplier_code || supplierId, quote.product.product_type, quote.variantName,
@@ -147,7 +156,7 @@ export function createSupplierBooking(db, { supplierId, actor, input }) {
         quote.adults, quote.children, quote.vehicleCategory,
         data.traveler_name, phone, email, amountInr, quote.tolls + quote.stateTax + quote.gstAmount,
         amountInr, paymentMethod, OFFLINE_PAYMENT_STATUS,
-        data.source, actor?.id || null, data.discount_inr, balance,
+        data.source, actor?.id || null, data.discount_inr, balance, agent ? data.agent_id : null, agent ? agent.commissionInr : 0,
       );
     saveBookingUnitItems(db, bookingId, quote.unitItems, quote.nativeSlot?.unitPrices || {});
 
@@ -172,7 +181,7 @@ export function createSupplierBooking(db, { supplierId, actor, input }) {
 
 /** Prices a counter sale without taking seats, so staff can quote the guest. */
 export function quoteSupplierBooking(db, { supplierId, input }) {
-  const data = directBookingSchema.pick({ product_id: true, product_option_id: true, activity_date: true, pickup_time: true, adults: true, children: true, unit_items: true, discount_inr: true }).parse(input);
+  const data = directBookingSchema.pick({ product_id: true, product_option_id: true, activity_date: true, pickup_time: true, adults: true, children: true, unit_items: true, discount_inr: true, agent_id: true }).parse(input);
   const product = db.prepare("SELECT id, supplier_id FROM products WHERE id = ?").get(data.product_id);
   if (!product || product.supplier_id !== supplierId) throw directError("Product not found for this supplier", 404, "PRODUCT_NOT_FOUND");
   const optionId = bookingOption(db, product.id, data.product_option_id);
@@ -181,8 +190,15 @@ export function quoteSupplierBooking(db, { supplierId, input }) {
     product_id: product.id, product_option_id: optionId, activity_date: data.activity_date, pickup_time: data.pickup_time || "09:00",
     adults: data.adults, children: data.children, unit_items: data.unit_items,
   }, { enforceListingSupplierAvailability: !native, counterSale: true });
+  const taxAmount = quote.tolls + quote.stateTax + quote.gstAmount;
+  const vacancies = quote.nativeSlot?.vacancies ?? null;
+  if (data.agent_id) {
+    // The agent's net and remaining credit; nothing is held or charged.
+    const agent = agentPricing(db, { supplierId, agentId: data.agent_id, productId: product.id, totalAmount: quote.totalAmount, enforceCredit: false });
+    return { baseAmount: quote.baseAmount, taxAmount, totalAmount: quote.totalAmount, discountInr: 0, agentCommissionPct: agent.commissionPct, agentCommissionInr: agent.commissionInr, amountDueInr: agent.netInr, agentOwedInr: agent.owedInr, agentAvailableCreditInr: agent.availableCreditInr, vacancies };
+  }
   const discount = Math.min(data.discount_inr, quote.totalAmount);
-  return { baseAmount: quote.baseAmount, taxAmount: quote.tolls + quote.stateTax + quote.gstAmount, totalAmount: quote.totalAmount, discountInr: discount, amountDueInr: quote.totalAmount - discount, vacancies: quote.nativeSlot?.vacancies ?? null };
+  return { baseAmount: quote.baseAmount, taxAmount, totalAmount: quote.totalAmount, discountInr: discount, amountDueInr: quote.totalAmount - discount, vacancies };
 }
 
 /** Records money the supplier collected later (the balance at the counter, a UPI transfer). */

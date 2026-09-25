@@ -30,6 +30,8 @@ const FRONT_DESK = [
   ...OPERATIONS,
   ["GET", /^\/availability(\/check)?$/],
   ["GET", /^\/booking-calendar$/],
+  // The agent picker in the booking drawer (ADR 039); managing agents is manager work.
+  ["GET", /^\/agents$/],
   ["POST", /^\/bookings\/quote$/],
   ["POST", /^\/bookings$/],
   ["GET", /^\/bookings\/[^/]+\/payments$/],

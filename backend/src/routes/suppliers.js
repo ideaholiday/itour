@@ -75,6 +75,7 @@ import { onReferralBookingCancelled, onReferralTripCompleted } from "../services
 import { assignResource, bookingCalendar, departureBoard, guideDepartureScope, unassignResource } from "../services/departureBoardService.js";
 import { rescheduleBySupplier } from "../services/supplierRescheduleService.js";
 import { supplierAnalytics, supplierDashboardStats } from "../services/supplierDashboardService.js";
+import { agentStatement, listAgents, recordAgentPayment, saveAgent, setAgentRates } from "../services/supplierAgentService.js";
 import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
 
 const router = express.Router();
@@ -351,7 +352,7 @@ router.get("/:id", (req, res) => {
       ORDER BY COALESCE(p.created_at, '') DESC, p.rowid DESC
     `).all(id);
     const bookings = db.prepare(`
-      SELECT b.*, p.title as product_title, p.hero_image, p.city, p.is_instant_booking, p.cancellation_policy,
+      SELECT b.*, p.title as product_title, p.hero_image, p.city, p.is_instant_booking, p.cancellation_policy, ag.name AS agent_name,
              da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number, da.assignment_status,
              da.supplier_driver_id, da.acknowledgement, da.response_deadline, da.driver_email, da.assignment_source, da.assigned_at, da.last_status_at,
              da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at,
@@ -359,6 +360,7 @@ router.get("/:id", (req, res) => {
       FROM bookings b
       LEFT JOIN products p ON b.product_id = p.id
       LEFT JOIN driver_assignments da ON b.id = da.booking_id
+      LEFT JOIN supplier_agents ag ON ag.id = b.agent_id
       WHERE b.supplier_id = ?
       ORDER BY b.created_at DESC
     `).all(id).map((booking) => {
@@ -2297,6 +2299,57 @@ router.get("/:id/departures", (req, res) => {
     res.json({ success: true, ...departureBoard(db, req.params.id, { from: req.query.from, days: req.query.days, listAvailability: listNativeAvailability, scope: departureScopeOf(req) }) });
   } catch (error) {
     staffFailure(res, req, error, "Could not load departures");
+  }
+});
+
+// Supplier agents (ADR 039): the supplier's own agents, hotels and resellers, at a net rate on credit.
+router.get("/:id/agents", (req, res) => {
+  try {
+    res.json({ success: true, agents: listAgents(db, req.params.id) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not load agents");
+  }
+});
+
+router.post("/:id/agents", (req, res) => {
+  try {
+    res.status(201).json({ success: true, agent: saveAgent(db, req.params.id, req.body) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not add the agent");
+  }
+});
+
+router.put("/:id/agents/:agentId", (req, res) => {
+  try {
+    res.json({ success: true, agent: saveAgent(db, req.params.id, req.body, req.params.agentId) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not save the agent");
+  }
+});
+
+router.put("/:id/agents/:agentId/rates", (req, res) => {
+  try {
+    res.json({ success: true, agent: setAgentRates(db, req.params.id, req.params.agentId, req.body) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not save the agent's rates");
+  }
+});
+
+router.get("/:id/agents/:agentId/statement", (req, res) => {
+  try {
+    const dateOrNull = (value) => (/^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : null);
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...agentStatement(db, req.params.id, req.params.agentId, { from: dateOrNull(req.query.from), to: dateOrNull(req.query.to) }) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not load the statement");
+  }
+});
+
+router.post("/:id/agents/:agentId/payments", (req, res) => {
+  try {
+    res.status(201).json({ success: true, ...recordAgentPayment(db, { supplierId: req.params.id, agentId: req.params.agentId, actor: req.user, input: req.body }) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not record the payment");
   }
 });
 

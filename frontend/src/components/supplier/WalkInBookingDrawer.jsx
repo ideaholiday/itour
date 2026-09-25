@@ -7,7 +7,7 @@ import { authHeaders } from "../../lib/api.js";
 // manual entry. Seats come from the same inventory the marketplace sells; the
 // server prices the booking and the supplier records what it collected.
 
-const SOURCES = [["WALK_IN", "Walk-in"], ["PHONE", "Phone"], ["MANUAL", "Manual"]];
+const SOURCES = [["WALK_IN", "Walk-in"], ["PHONE", "Phone"], ["MANUAL", "Manual"], ["AGENT", "Agent"]];
 const MODES = [["CASH", "Cash"], ["UPI", "UPI"], ["CARD", "Card"], ["BANK", "Bank transfer"], ["LATER", "Pay later"]];
 const inr = (value) => `₹${Number(value || 0).toLocaleString("en-IN")}`;
 const today = () => {
@@ -59,6 +59,17 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
   const [result, setResult] = useState(null);
   const [clientRequestId, setClientRequestId] = useState(requestId);
   const [sendStatus, setSendStatus] = useState("");
+  // Agent bookings (ADR 039): the agent's net rate and credit replace the discount.
+  const [agents, setAgents] = useState(null);
+  const [agentId, setAgentId] = useState("");
+  const forAgent = source === "AGENT";
+
+  useEffect(() => {
+    if (!forAgent || agents) return;
+    call(`/api/suppliers/${supplierId}/agents`)
+      .then((data) => setAgents((data.agents || []).filter((agent) => agent.status === "ACTIVE")))
+      .catch((err) => { setAgents([]); setError(err.message); });
+  }, [forAgent, agents, supplierId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,12 +93,13 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
     const timer = setTimeout(() => {
       call(`/api/suppliers/${supplierId}/bookings/quote`, {
         product_id: slot.productId, product_option_id: slot.optionId, activity_date: date, pickup_time: slot.localTime,
-        adults, children, discount_inr: Number(discount) || 0,
+        adults, children, ...(forAgent ? { agent_id: agentId } : { discount_inr: Number(discount) || 0 }),
       }).then((data) => { if (!cancelled) { setQuote(data.quote); setError(""); } })
         .catch((err) => { if (!cancelled) { setQuote(null); setError(err.message); } });
     }, 250);
+    if (forAgent && !agentId) { clearTimeout(timer); setQuote(null); }
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [supplierId, slot, date, adults, children, discount]);
+  }, [supplierId, slot, date, adults, children, discount, forAgent, agentId]);
 
   const amountDue = quote?.amountDueInr ?? 0;
   const paidNow = mode === "LATER" ? 0 : Math.min(amountDue, paid ?? amountDue);
@@ -110,7 +122,7 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
       const data = await call(`/api/suppliers/${supplierId}/bookings`, {
         source, product_id: slot.productId, product_option_id: slot.optionId, activity_date: date, pickup_time: slot.localTime,
         adults, children, traveler_name: guest.name, traveler_phone: guest.phone, traveler_email: guest.email || null,
-        discount_inr: Number(discount) || 0,
+        ...(forAgent ? { agent_id: agentId } : { discount_inr: Number(discount) || 0 }),
         payments: paidNow > 0 ? [{ mode, amount_inr: paidNow, reference: reference || null }] : [],
         client_request_id: clientRequestId,
       });
@@ -194,6 +206,16 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
                 ))}
               </div>
 
+              {forAgent && (
+                <label className="block">
+                  <span className="text-xs font-bold uppercase tracking-wide text-stone-500">Agent</span>
+                  <select required value={agentId} onChange={(event) => { setAgentId(event.target.value); setPaid(null); }} className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5">
+                    <option value="">{agents === null ? "Loading agents…" : agents.length ? "Choose the agent" : "No agents yet: add them under Agents"}</option>
+                    {(agents || []).map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.commissionPct}% · {inr(agent.availableCreditInr)} credit left</option>)}
+                  </select>
+                </label>
+              )}
+
               <label className="block">
                 <span className="text-xs font-bold uppercase tracking-wide text-stone-500">Date</span>
                 <input type="date" value={date} min={today()} onChange={(event) => setDate(event.target.value)} className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5" required />
@@ -235,11 +257,16 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
 
                 <div className="rounded-2xl border border-stone-200 p-4">
                   <div className="flex items-center justify-between text-sm"><span className="text-stone-600">Price incl. taxes</span><span className="font-bold tabular-nums">{quote ? inr(quote.totalAmount) : "…"}</span></div>
-                  <label className="mt-2 flex items-center justify-between gap-3 text-sm">
-                    <span className="text-stone-600">Your discount (₹)</span>
-                    <input type="number" min={0} max={quote?.totalAmount || 0} value={discount} onChange={(event) => setDiscount(Math.max(0, Number(event.target.value) || 0))} className="w-28 rounded-lg border border-stone-200 px-2 py-1 text-right" />
-                  </label>
-                  <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2"><span className="font-bold">Guest pays</span><span className="text-xl font-black tabular-nums">{quote ? inr(amountDue) : "…"}</span></div>
+                  {forAgent ? (
+                    <div className="mt-2 flex items-center justify-between text-sm"><span className="text-stone-600">Agent commission{quote ? ` (${quote.agentCommissionPct}%)` : ""}</span><span className="tabular-nums">{quote ? `− ${inr(quote.agentCommissionInr)}` : "…"}</span></div>
+                  ) : (
+                    <label className="mt-2 flex items-center justify-between gap-3 text-sm">
+                      <span className="text-stone-600">Your discount (₹)</span>
+                      <input type="number" min={0} max={quote?.totalAmount || 0} value={discount} onChange={(event) => setDiscount(Math.max(0, Number(event.target.value) || 0))} className="w-28 rounded-lg border border-stone-200 px-2 py-1 text-right" />
+                    </label>
+                  )}
+                  <div className="mt-2 flex items-center justify-between border-t border-stone-100 pt-2"><span className="font-bold">{forAgent ? "Agent pays (net)" : "Guest pays"}</span><span className="text-xl font-black tabular-nums">{quote ? inr(amountDue) : "…"}</span></div>
+                  {forAgent && quote && <p className="mt-1 text-xs text-stone-500">Owes {inr(quote.agentOwedInr)} now · {inr(quote.agentAvailableCreditInr)} credit left</p>}
                 </div>
 
                 <fieldset>
@@ -251,7 +278,11 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
                     <label className="text-sm"><span className="text-stone-600">Amount (₹)</span><input type="number" min={1} max={amountDue} value={paid ?? amountDue} onChange={(event) => setPaid(Math.max(0, Number(event.target.value) || 0))} className="mt-1 w-full rounded-lg border border-stone-200 px-2 py-2" /></label>
                     {mode !== "CASH" && <label className="text-sm"><span className="text-stone-600">Reference</span><input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="UTR / last 4 digits" className="mt-1 w-full rounded-lg border border-stone-200 px-2 py-2" /></label>}
                   </div>}
-                  {quote && amountDue - paidNow > 0 && <p className="mt-2 text-sm font-semibold text-amber-700">Balance due at the trip: {inr(amountDue - paidNow)}</p>}
+                  {quote && amountDue - paidNow > 0 && <p className={`mt-2 text-sm font-semibold ${forAgent && amountDue - paidNow > quote.agentAvailableCreditInr ? "text-rose-700" : "text-amber-700"}`}>
+                    {forAgent
+                      ? `${inr(amountDue - paidNow)} goes on the agent's account${amountDue - paidNow > quote.agentAvailableCreditInr ? ": over their credit limit, take more now" : ""}`
+                      : `Balance due at the trip: ${inr(amountDue - paidNow)}`}
+                  </p>}
                 </fieldset>
               </>}
 

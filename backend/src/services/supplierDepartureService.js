@@ -157,9 +157,10 @@ export function departureManifest(db, { supplierId, productId, date, time = null
       status: row.status,
       attendanceStatus: row.attendance_status || null,
       checkedInAt: row.checked_in_at || null,
-      // A direct booking's guest may still owe the operator at the meeting point.
+      // A direct booking's guest may still owe the operator at the meeting point;
+      // an agent booking's balance is the agent's to pay, not the guest's (ADR 039).
       source: row.source || "B2C",
-      balanceDueInr: Number(row.balance_due_inr || 0),
+      balanceDueInr: row.source === "AGENT" ? 0 : Number(row.balance_due_inr || 0),
     })),
   };
 }

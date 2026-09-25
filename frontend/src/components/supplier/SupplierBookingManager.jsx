@@ -42,15 +42,15 @@ import { api, authHeaders } from "../../lib/api.js";
 
 // Where a booking came from (ADR 034). Supplier-direct bookings are the
 // operator's own customers: paid to the operator, commission-free.
-const SOURCE_LABELS = { B2C: "IdeaHoliday", IH_B2B: "IdeaHoliday B2B", API: "Partner API", WALK_IN: "Walk-in", PHONE: "Phone", MANUAL: "Manual" };
-const DIRECT_SOURCES = ["WALK_IN", "PHONE", "MANUAL"];
+const SOURCE_LABELS = { B2C: "IdeaHoliday", IH_B2B: "IdeaHoliday B2B", API: "Partner API", WALK_IN: "Walk-in", PHONE: "Phone", MANUAL: "Manual", AGENT: "Agent" };
+const DIRECT_SOURCES = ["WALK_IN", "PHONE", "MANUAL", "AGENT"];
 const sourceGroup = (source) => DIRECT_SOURCES.includes(source) ? "DIRECT" : source === "API" ? "API" : "IDEAHOLIDAY";
 function SourceBadge({ booking }) {
   const source = booking.source || "B2C";
   const direct = sourceGroup(source) === "DIRECT";
   return (
     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${direct ? "border-sky-200 bg-sky-50 text-sky-800" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
-      {SOURCE_LABELS[source] || source}
+      {SOURCE_LABELS[source] || source}{source === "AGENT" && booking.agent_name ? ` · ${booking.agent_name}` : ""}
       {direct && Number(booking.balance_due_inr) > 0 && booking.status !== "cancelled" ? <span className="ml-1 text-amber-700">· ₹{Number(booking.balance_due_inr).toLocaleString("en-IN")} due</span> : null}
     </span>
   );

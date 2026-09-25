@@ -51,3 +51,14 @@
   2. **Growth** compares earnings from the 1st of this month to today with the same days last month, and is hidden when last month had nothing.
   3. **Service metrics** over the last 90 days: median response time to marketplace booking requests, % answered before the deadline, no-show rate from check-in, and pickup OTP verified % on completed trips that had one. Each shows "Not enough data" below 5 bookings, never a made-up value.
 - **Consequences**: No dashboard number has a hardcoded fallback. "Today" is the supplier's own country date.
+
+---
+
+## ADR 039: Supplier Agents Book Through Staff at a Net Rate, on Credit
+- **Date**: 2026-09-25
+- **Decision Made** (owner, 2026-09-25), for operator-platform Phase 5:
+  1. **Staff book for the agent** in the walk-in/phone drawer by choosing the agent. An agent login portal and agent API keys come later (Phase 7).
+  2. **Net rate is a commission % per agent**, with an optional % per listing for special deals. The agent pays the server quote minus that commission; staff cannot also discount it.
+  3. **Credit limit, refused over it.** A booking adds its unpaid net amount to what the agent owes; one that would take them over their limit is refused unless enough is paid now. The supplier records the agent's payments.
+  4. **Agent bookings are the supplier's own sales**, like walk-ins (ADR 034): source `AGENT`, `payment_status = OFFLINE`, no IdeaHoliday commission or payout, the same shared inventory.
+- **Consequences**: What an agent owes is the `balance_due_inr` of their live bookings, so there is one ledger. A payment on the agent's account is applied to their oldest open bookings first and cannot exceed what they owe. The guest of an agent booking is never asked to pay at the meeting point.

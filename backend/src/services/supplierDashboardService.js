@@ -161,7 +161,7 @@ export function supplierAnalytics(db, supplierId, { now = new Date() } = {}) {
 
   // Marketplace requests that needed an answer: they carry a response deadline.
   const requests = db.prepare(`SELECT supplier_assigned_at, created_at, supplier_responded_at, supplier_response_deadline FROM bookings
-    WHERE supplier_id = ? AND supplier_response_deadline IS NOT NULL AND COALESCE(source, 'B2C') NOT IN ('WALK_IN', 'PHONE', 'MANUAL')
+    WHERE supplier_id = ? AND supplier_response_deadline IS NOT NULL AND COALESCE(source, 'B2C') NOT IN ('WALK_IN', 'PHONE', 'MANUAL', 'AGENT')
       AND activity_date >= ?`).all(supplierId, since);
   const answered = requests.filter((row) => row.supplier_responded_at);
   const responseMinutes = answered

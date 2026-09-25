@@ -4,7 +4,8 @@
 
 // The supplier's own customers, booked in the supplier extranet. The supplier
 // collects the money; IdeaHoliday takes no commission and never refunds them.
-export const DIRECT_SOURCES = Object.freeze(["WALK_IN", "PHONE", "MANUAL"]);
+// AGENT is one of the supplier's own agents, booked by staff at a net rate (ADR 039).
+export const DIRECT_SOURCES = Object.freeze(["WALK_IN", "PHONE", "MANUAL", "AGENT"]);
 export const BOOKING_SOURCES = Object.freeze(["B2C", "IH_B2B", "API", ...DIRECT_SOURCES]);
 
 export function sourceGroup(source) {
