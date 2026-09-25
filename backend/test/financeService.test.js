@@ -78,32 +78,32 @@ test("uses the product cancellation policy instead of a global refund rule", () 
   const booking = db.prepare("SELECT b.*, p.cancellation_policy FROM bookings b JOIN products p ON p.id = b.product_id").get();
   
   // Set created_at to 3 days ago so grace period does not trigger
-  booking.created_at = "2026-09-01T10:00:00";
+  booking.created_at = "2026-09-01T10:00:00+05:30";
 
   // MODERATE_48H test
-  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-08T08:00:00") }).refundPercentage, 100);
-  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-09T04:00:00") }).refundPercentage, 50);
-  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-09T12:00:00") }).refundPercentage, 0);
+  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-08T08:00:00+05:30") }).refundPercentage, 100);
+  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-09T04:00:00+05:30") }).refundPercentage, 50);
+  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-09T12:00:00+05:30") }).refundPercentage, 0);
 
   // FLEXIBLE_24H test
   const flexBooking = { ...booking, cancellation_policy: "FLEXIBLE_24H" };
-  assert.equal(calculateRefundQuote(db, flexBooking, { now: new Date("2026-09-09T08:00:00") }).refundPercentage, 100);
-  assert.equal(calculateRefundQuote(db, flexBooking, { now: new Date("2026-09-09T12:00:00") }).refundPercentage, 0);
+  assert.equal(calculateRefundQuote(db, flexBooking, { now: new Date("2026-09-09T08:00:00+05:30") }).refundPercentage, 100);
+  assert.equal(calculateRefundQuote(db, flexBooking, { now: new Date("2026-09-09T12:00:00+05:30") }).refundPercentage, 0);
 
   // STRICT_7D test
   const strictBooking = { ...booking, cancellation_policy: "STRICT_7D" };
-  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-02T10:00:00") }).refundPercentage, 100);
-  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-05T10:00:00") }).refundPercentage, 50);
-  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-09T10:00:00") }).refundPercentage, 0);
+  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-02T10:00:00+05:30") }).refundPercentage, 100);
+  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-05T10:00:00+05:30") }).refundPercentage, 50);
+  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-09T10:00:00+05:30") }).refundPercentage, 0);
 
   // Booking Grace Window test (booked 2 hours ago, trip in 20 hours)
   const recentBooking = {
     ...booking,
     cancellation_policy: "FLEXIBLE_24H",
-    created_at: "2026-09-09T12:00:00",
+    created_at: "2026-09-09T12:00:00+05:30",
   };
   assert.equal(
-    calculateRefundQuote(db, recentBooking, { now: new Date("2026-09-09T14:00:00") }).refundPercentage,
+    calculateRefundQuote(db, recentBooking, { now: new Date("2026-09-09T14:00:00+05:30") }).refundPercentage,
     100
   );
 
