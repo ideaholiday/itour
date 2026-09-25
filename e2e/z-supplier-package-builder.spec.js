@@ -154,3 +154,67 @@ test("supplier prices an outstation car per km and is warned when rooms sleep to
   await expect(page.getByText("₹14,070")).toBeVisible();
   await expect(page.getByText(`Tiny Inn ${stamp}: 1 Single room sleeps 1, but 2 are travelling.`)).toBeVisible();
 });
+
+// ADR 045: after acceptance the operator confirms each item, gives the car a driver,
+// pays the hotel and sends the final itinerary; the car shows on the bookings page.
+test("supplier runs an accepted trip: confirmations, a driver, a vendor payment and the final itinerary", async ({ page, request }) => {
+  const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
+  const account = await login.json();
+  const base = `/api/suppliers/${account.user.supplier_id}`;
+  const headers = { Authorization: `Bearer ${account.token}` };
+  const post = async (path, data) => {
+    const response = await request.post(`${base}${path}`, { headers, data });
+    const body = await response.json();
+    expect(response.ok(), JSON.stringify(body)).toBeTruthy();
+    return body;
+  };
+  const stamp = Date.now().toString(36);
+  const digits = String(Date.now()).slice(-8);
+  const start = isoDate(2);
+
+  const hotel = (await post("/hotels", { name: `Trip Inn ${stamp}`, city: "Jaipur", email: "reservations@trip-inn.example" })).hotel;
+  await post(`/hotels/${hotel.id}/rates`, { roomType: "Deluxe", mealPlan: "CP", validFrom: isoDate(-2), validTo: isoDate(60), netPerNightInr: 3000 });
+  const cab = (await post("/cab-types", { name: `Innova trip ${stamp}`, seats: 6 })).cabType;
+  const tour = (await post("/services", { kind: "SIGHTSEEING", name: `City tour ${stamp}`, startTime: "09:30" })).service;
+  await post(`/services/${tour.id}/rates`, { cabTypeId: cab.id, validFrom: isoDate(-2), validTo: isoDate(60), vehicleInr: 2500 });
+  const driverName = `Suresh ${stamp}`;
+  const { driverId } = await post("/drivers", { driverName, driverPhone: `+9198${digits}`, vehicleNumber: `RJ14TR${digits.slice(-4)}`, vehicleModel: "Toyota Innova", seatCapacity: 6 });
+  const quotation = (await post("/quotations", {
+    title: `Trip ${stamp}`, customerName: "Kavya Rao", customerPhone: "+919800000002", startDate: start, adults: 2, children: 0, markupPct: 10,
+    lines: [
+      { kind: "HOTEL", dayNumber: 1, title: "Stay", hotelId: hotel.id, roomType: "Deluxe", mealPlan: "CP", checkIn: start, nights: 1, rooms: 1 },
+      { kind: "TRANSPORT", dayNumber: 1, serviceId: tour.id, cabTypeId: cab.id, date: start },
+    ],
+  })).quotation;
+  await post(`/quotations/${quotation.id}/send`, { email: false });
+  await post(`/quotations/${quotation.id}/status`, { status: "ACCEPTED" });
+
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.goto("/supplier/dashboard?panel=packages");
+  await page.getByRole("button", { name: new RegExp(`Trip ${stamp}`) }).click();
+  const tripFile = page.getByRole("region", { name: "Trip file" });
+  await expect(tripFile).toContainText("0 of 2 confirmed");
+
+  const stay = tripFile.getByRole("listitem", { name: `Trip item Trip Inn ${stamp}` });
+  await stay.getByLabel("Status").selectOption("CONFIRMED");
+  await stay.getByLabel("Confirmation no.").fill("TI-4410");
+  await stay.getByRole("button", { name: "Save" }).click();
+  await expect(tripFile).toContainText("1 of 2 confirmed");
+  await stay.getByLabel(`Pay vendor for Trip Inn ${stamp}`).fill("1000");
+  await stay.getByRole("button", { name: "Record payment" }).click();
+  await expect(stay).toContainText("Paid ₹1,000 of ₹3,000");
+
+  const car = tripFile.getByRole("listitem", { name: `Trip item City tour ${stamp}` });
+  await car.getByRole("combobox", { name: /^Driver/ }).selectOption(driverId);
+  await car.getByLabel("Status").selectOption("CONFIRMED");
+  await car.getByRole("button", { name: "Save" }).click();
+  await expect(tripFile).toContainText("2 of 2 confirmed");
+
+  await tripFile.getByRole("button", { name: "Send final itinerary" }).click();
+  await expect(tripFile).toContainText("/api/quotations/itinerary/");
+
+  await page.goto("/supplier/bookings");
+  const scheduled = page.getByRole("listitem", { name: `Car City tour ${stamp} ${quotation.ref}` });
+  await expect(scheduled).toBeVisible();
+  await expect(scheduled.getByRole("combobox").first()).toHaveValue(driverId);
+});

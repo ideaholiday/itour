@@ -78,6 +78,8 @@ import { supplierAnalytics, supplierDashboardStats } from "../services/supplierD
 import { agentStatement, listAgents, recordAgentPayment, saveAgent, setAgentRates } from "../services/supplierAgentService.js";
 import { addHotelRate, deleteHotelRate, listHotels, saveHotel } from "../services/supplierHotelService.js";
 import { bookQuotationLine, copyQuotation, findQuotation, listQuotations, quotationShareUrl, quotationView, recordQuotationPayment, saveQuotation, setQuotationStatus, suggestQuotations } from "../services/quotationService.js";
+import { carSchedule, recordVendorPayment, requestHotelBooking, sendItinerary, updateArrangement } from "../services/tripService.js";
+import { itineraryPdf } from "../services/tripItineraryPdfService.js";
 import { addServiceRate, deleteServiceRate, listCabTypes, listServices, saveCabType, saveService } from "../services/supplierRateSheetService.js";
 import { quotationPdf } from "../services/quotationPdfService.js";
 import { createResellerKey, listResellerKeys, revokeResellerKey, setProductChannels } from "../services/supplierChannelSettingsService.js";
@@ -2454,6 +2456,36 @@ router.get("/:id/quotations/:quotationId/pdf", async (req, res) => {
     res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store" });
     res.send(buffer);
   } catch (error) { directBookingFailure(res, req, error, "Could not make the PDF"); }
+});
+
+// Running an accepted trip (ADR 045): each hotel, car, activity and custom line's status,
+// hotel booking requests by email, drivers, vendor payments and the final itinerary.
+router.patch("/:id/quotations/:quotationId/lines/:lineId/arrangement", (req, res) => {
+  try { res.json({ success: true, quotation: updateArrangement(db, { supplierId: req.params.id, quotationId: req.params.quotationId, lineId: req.params.lineId, input: req.body }) }); } catch (error) { directBookingFailure(res, req, error, "Could not update the line"); }
+});
+router.post("/:id/quotations/:quotationId/lines/:lineId/request", async (req, res) => {
+  try { res.json({ success: true, ...(await requestHotelBooking(db, { supplierId: req.params.id, quotationId: req.params.quotationId, lineId: req.params.lineId })) }); } catch (error) { directBookingFailure(res, req, error, "Could not send the booking request"); }
+});
+router.post("/:id/quotations/:quotationId/lines/:lineId/vendor-payments", (req, res) => {
+  try { res.status(201).json({ success: true, quotation: recordVendorPayment(db, { supplierId: req.params.id, quotationId: req.params.quotationId, lineId: req.params.lineId, actor: req.user, input: req.body }) }); } catch (error) { directBookingFailure(res, req, error, "Could not record the payment"); }
+});
+router.get("/:id/quotations/:quotationId/itinerary", async (req, res) => {
+  try {
+    const row = findQuotation(db, req.params.id, req.params.quotationId);
+    if (row.status !== "ACCEPTED") return res.status(409).json({ error: "The itinerary is ready once the quotation is accepted", code: "NOT_ACCEPTED" });
+    const { buffer, filename } = await itineraryPdf(db, req.params.id, row.id);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store" });
+    res.send(buffer);
+  } catch (error) { directBookingFailure(res, req, error, "Could not make the itinerary"); }
+});
+router.post("/:id/quotations/:quotationId/itinerary/send", async (req, res) => {
+  try { res.json({ success: true, ...(await sendItinerary(db, { supplierId: req.params.id, quotationId: req.params.quotationId, email: req.body?.email !== false })) }); } catch (error) { directBookingFailure(res, req, error, "Could not send the itinerary"); }
+});
+router.get("/:id/car-schedule", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...carSchedule(db, req.params.id, { from: req.query.from, days: req.query.days }) });
+  } catch (error) { directBookingFailure(res, req, error, "Could not load the car schedule"); }
 });
 
 // Sends the PDF by email (attached where the provider allows, with the link in the body)

@@ -262,6 +262,15 @@ Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md). Owner or manager.
 - **`POST .../quotations/:quotationId/payments`** `{ mode, amount_inr, reference? }` → `201 { quotation }`; `409 NOT_ACCEPTED`, `400 OVERPAYMENT`.
 - **Public**: **`GET /api/quotations/share/:token`** returns the PDF for a signed, 60-day token, no sign-in; `404` when forged or expired. Rate-limited per client (`scope: "quotation-share"`).
 
+### 3.10b Running an accepted trip (ADR 045)
+Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md). Owner or manager. The quotation view gains `trip` once accepted: `{ items, toBook, requested, confirmed, cancelled, unbookedListings, alerts: [string], money: { customerTotalInr, customerPaidInr, gstInr, vendorPayableInr, vendorPaidInr, vendorDueInr, marginInr } }`, and each line `arranged`, `arrangementStatus`, `vendorName`, `confirmationRef`, `payableInr`, `vendorPaidInr`, `driverIds`, `requestedAt`, `confirmedAt`. Hotels take `email?`, `phone?`.
+- **`PATCH .../quotations/:quotationId/lines/:lineId/arrangement`** `{ status?: TO_BOOK|REQUESTED|CONFIRMED|CANCELLED, vendorName?, confirmationRef?, payableInr?, driverIds? }` → `{ quotation }`. Errors: `409 NOT_ACCEPTED`, `404 LINE_NOT_FOUND`, `409 NOT_ARRANGED` (a listing, or a hotel of an option not chosen), `400 NOT_A_CAR`, `400 TOO_MANY_DRIVERS`, `404 DRIVER_NOT_FOUND`, `409 DRIVER_UNAVAILABLE`, `409 FLEET_DOCUMENT_EXPIRED`, `409 DRIVER_BUSY`.
+- **`POST .../lines/:lineId/request`** → `{ email: { status, error }, quotation }`: emails a hotel line's booking request; `REQUESTED` only when sent. `400 NOT_A_HOTEL`, `409 ALREADY_ARRANGED`, `409 HOTEL_EMAIL_MISSING`.
+- **`POST .../lines/:lineId/vendor-payments`** `{ mode, amount_inr, reference? }` → `201 { quotation }`; `400 OVERPAYMENT`.
+- **`GET .../quotations/:quotationId/itinerary`** → the final itinerary PDF (`409 NOT_ACCEPTED`). **`POST .../itinerary/send`** `{ email?: false }` → `{ shareUrl, whatsappText, email, quotation }`; `409 NOT_ALL_CONFIRMED`.
+- **`GET /api/suppliers/:id/car-schedule?from=YYYY-MM-DD&days=1–14`** (default 7) → `{ from, to, days, cars: [{ quotationId, ref, customerName, customerPhone, lineId, title, date, endDate, carDays, km, startTime, fromPlace, toPlace, cabType, seats, vehicles, travelers, status, confirmationRef, drivers: [{ id, name, phone, vehicleModel, vehicleNumber, seats, status }] }], fleet: [driver] }`.
+- **Public**: **`GET /api/quotations/itinerary/:token`** returns the itinerary PDF of an accepted quotation; `404` when forged, expired, a quotation token, or not accepted.
+
 ### 3.11 Sales channels and reseller keys (ADR 041)
 Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md).
 - **`PATCH /api/suppliers/:id/products/:productId/channels`** `{ marketplace?, ideaholidayApi?, ownResellers? }` (booleans; omitted ones stay) → `{ productId, channels: { marketplace, ideaholidayApi, ownResellers } }`. Owner or manager. The listing's `sell_*` columns come back on `GET /api/suppliers/:id` products.

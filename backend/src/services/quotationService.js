@@ -167,7 +167,49 @@ function lineView(row) {
     pickupTime: row.pickup_time || null, adults: row.adults ?? null, children: Number(row.children || 0), amountInr: row.amount_inr ?? null,
     serviceId: row.service_id || null, cabTypeId: row.cab_type_id || null, vehicles: row.vehicles ?? null, km: row.km ?? null, carDays: row.car_days ?? null,
     option: row.kind === "HOTEL" ? row.option_number || 1 : null,
+    // Arranging an accepted trip (ADR 045); arrangementStatus is filled in by the trip summary.
+    arrangementStatus: row.arrangement_status || null, vendorName: row.vendor_name || null, confirmationRef: row.confirmation_ref || null,
+    payableInr: row.payable_inr ?? Number(row.price_inr), driverIds: row.driver_ids ? row.driver_ids.split(",") : [],
+    requestedAt: row.requested_at || null, confirmedAt: row.confirmed_at || null,
     priceInr: Number(row.price_inr), bookingId: row.booking_id || null,
+  };
+}
+
+const ARRANGED_KINDS = new Set(["HOTEL", "TRANSPORT", "ACTIVITY", "CUSTOM"]);
+const TRIP_ALERT_DAYS = 7;
+const indiaToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+
+/** The lines the operator arranges once accepted: the chosen option's hotels, cars, activities and custom lines. */
+export function arrangedLines(lines, selectedOption) {
+  return lines.filter((line) => ARRANGED_KINDS.has(line.kind) && (line.kind !== "HOTEL" || line.option === (selectedOption || 1)));
+}
+
+/**
+ * The trip file of an accepted quotation (ADR 045): each arranged line's
+ * status, alerts for lines not confirmed within a week of their date, and the
+ * money: what the customer paid, what the operator owes vendors, the margin.
+ */
+function tripSummary(db, row, lines, customerPaid) {
+  const paidByLine = new Map(db.prepare("SELECT line_id, SUM(amount_inr) AS paid FROM quotation_vendor_payments WHERE quotation_id = ? GROUP BY line_id").all(row.id)
+    .map((payment) => [payment.line_id, Number(payment.paid)]));
+  const arranged = arrangedLines(lines, row.selected_option);
+  for (const line of arranged) Object.assign(line, { arranged: true, arrangementStatus: line.arrangementStatus || "TO_BOOK", vendorPaidInr: paidByLine.get(line.id) || 0 });
+  const live = arranged.filter((line) => line.arrangementStatus !== "CANCELLED");
+  const count = (status) => arranged.filter((line) => line.arrangementStatus === status).length;
+  const soon = addDays(indiaToday(), TRIP_ALERT_DAYS);
+  const payable = live.reduce((sum, line) => sum + line.payableInr, 0);
+  const vendorPaid = arranged.reduce((sum, line) => sum + line.vendorPaidInr, 0);
+  return {
+    items: arranged.length, toBook: count("TO_BOOK"), requested: count("REQUESTED"), confirmed: count("CONFIRMED"), cancelled: count("CANCELLED"),
+    unbookedListings: lines.filter((line) => line.kind === "LISTING" && !line.bookingId).length,
+    alerts: live.filter((line) => line.arrangementStatus !== "CONFIRMED" && line.date && line.date <= soon)
+      .map((line) => `${line.title} on ${line.date} isn't confirmed yet.`),
+    money: {
+      customerTotalInr: row.total_inr, customerPaidInr: customerPaid, gstInr: row.gst_inr,
+      vendorPayableInr: payable, vendorPaidInr: vendorPaid,
+      vendorDueInr: live.reduce((sum, line) => sum + Math.max(0, line.payableInr - line.vendorPaidInr), 0),
+      marginInr: row.subtotal_inr - payable,
+    },
   };
 }
 
@@ -239,6 +281,7 @@ export function quotationView(db, row) {
       perPersonInr: perPerson(row.total_inr),
     },
     options, selectedOption: row.selected_option ?? null,
+    trip: row.status === "ACCEPTED" ? tripSummary(db, row, lines, paid) : null,
     lines, days, payments, warnings: quotationWarnings(db, row, lines, options),
     sentAt: row.sent_at || null, acceptedAt: row.accepted_at || null, createdAt: row.created_at, updatedAt: row.updated_at,
   };
@@ -434,13 +477,15 @@ export function bookQuotationLine(db, { supplierId, quotationId, lineId, actor }
 const secret = () => process.env.DOCUMENT_LINK_SECRET || process.env.OTP_SECRET || process.env.JWT_SECRET || "idea-holiday-local-document-secret-change-me";
 const sign = (payload) => crypto.createHmac("sha256", secret()).update(`quotation:${payload}`).digest("base64url");
 
-export function createQuotationToken(quotation, { expiresInSeconds = 60 * 24 * 60 * 60 } = {}, now = Date.now()) {
-  const payload = Buffer.from(JSON.stringify({ q: quotation.id, exp: Math.floor(now / 1000) + expiresInSeconds })).toString("base64url");
+// kind "itinerary" signs the final itinerary's link (ADR 045); a quotation token carries no kind.
+export function createQuotationToken(quotation, { expiresInSeconds = 60 * 24 * 60 * 60, kind = "quotation" } = {}, now = Date.now()) {
+  const body = { q: quotation.id, exp: Math.floor(now / 1000) + expiresInSeconds, ...(kind === "quotation" ? {} : { k: kind }) };
+  const payload = Buffer.from(JSON.stringify(body)).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }
 
-/** The quotation id a share token names, or null when it is forged or expired. */
-export function verifyQuotationToken(token, now = Date.now()) {
+/** The quotation id a share token of this kind names, or null when it is forged, expired or of another kind. */
+export function verifyQuotationToken(token, now = Date.now(), kind = "quotation") {
   try {
     const [payload, signature] = String(token || "").split(".");
     if (!payload || !signature) return null;
@@ -448,15 +493,25 @@ export function verifyQuotationToken(token, now = Date.now()) {
     const received = Buffer.from(signature);
     if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return null;
     const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    return Number(data.exp) >= Math.floor(now / 1000) ? data.q : null;
+    return Number(data.exp) >= Math.floor(now / 1000) && (data.k || "quotation") === kind ? data.q : null;
   } catch {
     return null;
   }
 }
 
+function publicBase(baseUrl) {
+  const configured = String(baseUrl || process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || "").trim().replace(/\/$/, "");
+  return configured || (process.env.NODE_ENV === "production" ? "https://ideaholiday.in" : "http://localhost:8080");
+}
+
 /** A link anyone can open to download the PDF, like a voucher link. */
 export function quotationShareUrl(quotation, baseUrl = null) {
-  const configured = String(baseUrl || process.env.PUBLIC_APP_URL || process.env.APP_BASE_URL || "").trim().replace(/\/$/, "");
-  const base = configured || (process.env.NODE_ENV === "production" ? "https://ideaholiday.in" : "http://localhost:8080");
-  return `${base}/api/quotations/share/${encodeURIComponent(createQuotationToken(quotation))}`;
+  return `${publicBase(baseUrl)}/api/quotations/share/${encodeURIComponent(createQuotationToken(quotation))}`;
+}
+
+/** The final itinerary's link (ADR 045), valid until 30 days after the trip starts. */
+export function itineraryShareUrl(quotation, baseUrl = null, now = Date.now()) {
+  const untilTrip = Math.floor((Date.parse(`${quotation.start_date || quotation.startDate}T00:00:00Z`) - now) / 1000);
+  const expiresInSeconds = Math.max(0, untilTrip) + 30 * 24 * 60 * 60;
+  return `${publicBase(baseUrl)}/api/quotations/itinerary/${encodeURIComponent(createQuotationToken(quotation, { expiresInSeconds, kind: "itinerary" }, now))}`;
 }

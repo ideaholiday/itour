@@ -121,3 +121,16 @@
   2. **One car costs** max(km, minimum km per day × days) × rate per km + driver allowance × days, rounded to the rupee, times the number of cars. Tolls, parking and permits stay custom lines.
   3. **A hotel rate may say how many guests a room sleeps**, extra bed included. A hotel line warns, without blocking, when rooms × that number is below the travelers. No number, no warning.
 - **Consequences**: A service with seasons can't switch between fixed and per km (`PRICING_CHANGE`). The customer's PDF shows the car days and about how many km.
+
+---
+
+## ADR 045: Running an Accepted Trip
+- **Date**: 2026-09-25
+- **Context**: After a package was accepted, only listing lines became bookings. Hotels, cars and activities were "arranged by you" with nothing to track whether they were booked, confirmed or paid, and the customer had no final itinerary.
+- **Decision Made** (owner, 2026-09-25), for operator-platform Phase 11:
+  1. **A trip file per accepted quotation.** Each arranged line (the chosen option's hotels, cars, activities, custom lines) goes To book → Requested → Confirmed, or Cancelled, with the vendor, the confirmation number and what the operator owes. Unconfirmed lines within 7 days are flagged.
+  2. **Hotel booking requests go by email only**, to the hotel's reservations address on the rate sheet. A line becomes Requested only when the email is sent; staff may also set it by hand.
+  3. **Cars get drivers from the supplier's fleet**, one per car, shown by week under the departures board. A driver can't be on two trips' cars, or a car and a marketplace booking, on the same day, nor be unavailable or hold papers expiring before the car's last day (ADR 024).
+  4. **Vendor payments per line**, never more than owed; the trip shows customer paid, vendors owed and the margin before GST.
+  5. **The final itinerary** (days, hotel confirmations, cars with pickup and drivers, booking references, money, operator contact) is sent by email with a signed link and WhatsApp text, only once every line is confirmed or cancelled and every listing booked.
+- **Consequences**: The itinerary link is its own token kind, separate from the quotation link. Nothing here touches IdeaHoliday commission, payouts or the shared inventory.

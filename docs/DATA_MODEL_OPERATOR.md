@@ -1,0 +1,20 @@
+# Data Model, Operator Platform: Idea Holiday
+
+> **Summary:** Tables for running an operator's own business: direct-booking payments, staff, agents, the private hotel, car and activity rate sheets, and package quotations.
+> **Read when:** changing those tables or their queries. Everything else, including `bookings`: [`DATA_MODEL.md`](DATA_MODEL.md). Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md).
+
+## Rate sheets, quotations and trips (ADR 040, ADR 042–045)
+- **`supplier_hotels`** / **`supplier_hotel_rates`** (067, ADR 040): hotel rates. Rate: `room_type`, `meal_plan`, season `valid_from`–`valid_to`, `net_per_night_inr`, `extra_adult_inr`, `child_inr`, `max_guests` per room (071).
+- **`supplier_cab_types`** (`name`, `seats`), **`supplier_services`**, **`supplier_service_rates`** (069, ADR 042): car and activity prices. Service `kind` `TRANSFER`/`SIGHTSEEING`/`ACTIVITY`, `closed_weekdays`, day text, `pricing` `FIXED`/`PER_KM` + `distance_km` (071). Rate: season + `cab_type_id` + `vehicle_inr` or (071) `per_km_inr`, `min_km_per_day`, `driver_allowance_inr`; or `adult_inr`, `child_inr`.
+- **`quotations`** (067; `destination` 069; `selected_option` 070): `ref` (`Q-XXXXXX`), `title`, customer contact, `agent_id`, `start_date`, `adults`, `children`, `markup_pct`, `notes`, `valid_until`, `status` (`DRAFT`, `SENT`, `ACCEPTED`, `DECLINED`) and server totals `cost_inr` (all non-listing lines), `listings_inr`, `markup_inr`, `subtotal_inr`, `gst_pct`, `gst_inr`, `total_inr` (option 1's; once accepted, the chosen one's).
+- **`quotation_lines`** (067): `kind` `HOTEL` (hotel, room, meal plan, check-in `line_date`, `nights`, `rooms`, `extra_adults`, `children`, `option_number` 070, NULL = 1), `LISTING` (`product_id`, option, `line_date`, `pickup_time`, `adults`, `children`, and `booking_id` once booked) `CUSTOM` (`amount_inr`), `TRANSPORT` (`service_id`, `cab_type_id`, `vehicles`, 071 `km`, `car_days`) or `ACTIVITY` (`service_id`) (069); `day_number`, `title`, `description` and `price_inr`, the server-worked cost or pre-tax price. `kind` is checked in code (069).
+- **`quotation_days`** (069): `day_number`, `title`, `description`. **`quotation_options`** (070, ADR 043): `option_number`, `name` (2+ = hotel options).
+- **`quotation_payments`** (067): paid for an accepted package: `amount_inr`, `mode`, `reference`, `received_by`.
+- **Trip arrangements** (072, ADR 045): `quotation_lines.arrangement_status` (`NULL` = to book, `REQUESTED`, `CONFIRMED`, `CANCELLED`), `vendor_name`, `confirmation_ref`, `payable_inr` (`NULL` = the line's `price_inr`), `driver_ids` (comma list of `supplier_drivers.id`, one per vehicle), `requested_at`, `confirmed_at`. `supplier_hotels.email` and `phone` for booking requests.
+- **`quotation_vendor_payments`** (072): what the operator paid a vendor for one line: `quotation_id`, `line_id`, `amount_inr`, `mode`, `reference`, `paid_by`, `paid_at`.
+
+## Direct sales, staff and agents (ADR 034, ADR 036, ADR 039)
+- **`supplier_agents`** (migration 066, ADR 039): a supplier's own travel agents, hotels and resellers. `supplier_id`, `name`, `contact_name`, `phone`, `email`, `commission_pct` (0–90), `credit_limit_inr` (0 = pay at booking), `status` (`ACTIVE`, `INACTIVE`). What an agent owes is not stored: it is the sum of `balance_due_inr` over their live bookings.
+- **`supplier_agent_rates`** (migration 066): a per-listing commission for one agent. `agent_id`, `product_id`, `commission_pct`.
+- **`supplier_members`** (migration 063, ADR 036): supplier staff logins. `supplier_id`, `user_id` (unique: a user works for one supplier; the user's `role` is `SUPPLIER`), `role` (`MANAGER`, `FRONT_DESK`, `GUIDE`), `created_by_user_id`. The owner is not listed here; they are the user whose email matches `suppliers.email`.
+- **`booking_payments`** (migration 062): money a supplier collected for a direct booking. `booking_id`, `supplier_id`, `amount_inr` (> 0), `mode` (`CASH`, `UPI`, `CARD`, `BANK`), `reference`, `note`, `received_by`, `received_at`.

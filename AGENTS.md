@@ -53,7 +53,7 @@ Legacy and noise files are hidden from search by `.ignore` / `.geminiignore`.
 | Decide what to work on next | [`ROADMAP.md`](docs/ROADMAP.md) |
 | Seats, holds, rates, calendar, capacity | [`RESERVATION_ENGINE.md`](docs/RESERVATION_ENGINE.md) |
 | Pricing, commission, refunds, booking state, coupons, supplier subscriptions, check-in and departure cancellation | [`BUSINESS_RULES.md`](docs/BUSINESS_RULES.md), [`COUPONS.md`](docs/COUPONS.md), [`SUPPLIER_PLANS.md`](docs/SUPPLIER_PLANS.md), [`REFUND_CREDIT.md`](docs/REFUND_CREDIT.md), [`SUPPLIER_OPERATIONS.md`](docs/SUPPLIER_OPERATIONS.md) |
-| Schema, tables, fields | [`DATA_MODEL.md`](docs/DATA_MODEL.md) |
+| Schema, tables, fields | [`DATA_MODEL.md`](docs/DATA_MODEL.md) (operator platform: [`DATA_MODEL_OPERATOR.md`](docs/DATA_MODEL_OPERATOR.md)) |
 | Add or change an endpoint | [`API_CONTRACTS.md`](docs/API_CONTRACTS.md) (supplier extranet: [`API_CONTRACTS_SUPPLIER.md`](docs/API_CONTRACTS_SUPPLIER.md)) + [`SECURITY.md`](docs/SECURITY.md) |
 | Auth, RBAC, PII, dependency CVEs | [`SECURITY.md`](docs/SECURITY.md) |
 | How the system fits together, request flows | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) |

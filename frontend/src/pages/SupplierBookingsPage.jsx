@@ -5,6 +5,7 @@ import ReviewShareLinks from "../components/supplier/ReviewShareLinks.jsx";
 import SupplierDeparturesPanel from "../components/supplier/SupplierDeparturesPanel.jsx";
 import SupplierDeparturesBoard from "../components/supplier/SupplierDeparturesBoard.jsx";
 import SupplierBookingCalendar from "../components/supplier/SupplierBookingCalendar.jsx";
+import SupplierCarSchedule from "../components/supplier/SupplierCarSchedule.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import { api, authHeaders } from "../lib/api.js";
 import { AlertTriangle, Headphones, Star } from "lucide-react";
@@ -74,6 +75,8 @@ export default function SupplierBookingsPage() {
         )}
         {supplierId && role !== "GUIDE" && <SupplierBookingCalendar supplierId={supplierId} selected={boardDate} onSelect={setBoardDate} />}
         {supplierId && <SupplierDeparturesBoard supplierId={supplierId} canAssign={!counterRole} from={boardDate} onFromChange={setBoardDate} />}
+        {/* Package trip cars and their drivers are manager work (ADR 045). */}
+        {supplierId && !counterRole && <SupplierCarSchedule supplierId={supplierId} from={boardDate} />}
         <SupplierDeparturesPanel supplierId={supplierId} products={supplierData?.products || []} onChanged={fetchSupplierData} canCancel={!counterRole} />
         {counterRole ? null : <>
         <ReviewShareLinks products={supplierData?.products || []} />

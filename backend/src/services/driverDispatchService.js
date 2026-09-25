@@ -19,7 +19,7 @@ export const DISPATCH_STATUS_TRANSITIONS = Object.freeze({
   CANCELLED: [],
 });
 
-const unavailableFleetStatuses = new Set(["INACTIVE", "SUSPENDED", "UNAVAILABLE", "MAINTENANCE"]);
+export const unavailableFleetStatuses = new Set(["INACTIVE", "SUSPENDED", "UNAVAILABLE", "MAINTENANCE"]);
 const activeAssignmentStatuses = new Set(["ASSIGNED", "EN_ROUTE", "ARRIVED", "TRIP_STARTED"]);
 
 function dispatchError(message, status = 400) {

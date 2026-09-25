@@ -16,6 +16,9 @@ export const hotelSchema = z.object({
   city: z.string().trim().max(100).optional().nullable(),
   starRating: z.number().int().min(1).max(7).optional().nullable(),
   notes: z.string().trim().max(1000).optional().nullable(),
+  // Where booking requests go (ADR 045).
+  email: z.string().trim().email().max(200).optional().nullable().or(z.literal("")),
+  phone: z.string().trim().max(24).optional().nullable(),
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
 }).strict();
 
@@ -53,7 +56,7 @@ function rateView(row) {
 
 function hotelView(db, row) {
   const rates = db.prepare("SELECT * FROM supplier_hotel_rates WHERE hotel_id = ? ORDER BY room_type, meal_plan, valid_from").all(row.id).map(rateView);
-  return { id: row.id, name: row.name, city: row.city || null, starRating: row.star_rating ?? null, notes: row.notes || null, status: row.status, rates };
+  return { id: row.id, name: row.name, city: row.city || null, starRating: row.star_rating ?? null, notes: row.notes || null, email: row.email || null, phone: row.phone || null, status: row.status, rates };
 }
 
 export function listHotels(db, supplierId) {
@@ -63,13 +66,13 @@ export function listHotels(db, supplierId) {
 
 export function saveHotel(db, supplierId, input, hotelId = null) {
   const hotel = hotelSchema.parse(input);
-  const values = [hotel.name, hotel.city || null, hotel.starRating ?? null, hotel.notes || null, hotel.status];
+  const values = [hotel.name, hotel.city || null, hotel.starRating ?? null, hotel.notes || null, hotel.status, hotel.email ? hotel.email.toLowerCase() : null, hotel.phone || null];
   if (hotelId) {
     findHotel(db, supplierId, hotelId);
-    db.prepare("UPDATE supplier_hotels SET name = ?, city = ?, star_rating = ?, notes = ?, status = ? WHERE id = ? AND supplier_id = ?").run(...values, hotelId, supplierId);
+    db.prepare("UPDATE supplier_hotels SET name = ?, city = ?, star_rating = ?, notes = ?, status = ?, email = ?, phone = ? WHERE id = ? AND supplier_id = ?").run(...values, hotelId, supplierId);
   } else {
     hotelId = `htl_${nanoid(12)}`;
-    db.prepare("INSERT INTO supplier_hotels (id, supplier_id, name, city, star_rating, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?)").run(hotelId, supplierId, ...values);
+    db.prepare("INSERT INTO supplier_hotels (id, supplier_id, name, city, star_rating, notes, status, email, phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(hotelId, supplierId, ...values);
   }
   return hotelView(db, findHotel(db, supplierId, hotelId));
 }

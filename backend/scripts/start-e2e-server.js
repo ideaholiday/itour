@@ -36,6 +36,9 @@ Object.assign(process.env, {
   // Browser journeys intentionally create several isolated users in one run.
   // Keep production's default intact while preventing cross-test rate-limit state.
   AUTH_RATE_LIMIT: "100",
+  // The whole suite runs from one client address against one server; the
+  // supplier dashboards alone pass production's 1,000 requests per 15 minutes.
+  GLOBAL_RATE_LIMIT: "10000",
 });
 
 const [{ default: db }, { hashPassword }] = await Promise.all([

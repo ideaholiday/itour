@@ -21,7 +21,8 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
   const base = `/api/suppliers/${supplierId}/hotels`;
   const [hotels, setHotels] = useState([]);
   const [error, setError] = useState("");
-  const [hotelDraft, setHotelDraft] = useState({ name: "", city: "", starRating: "" });
+  const [hotelDraft, setHotelDraft] = useState({ name: "", city: "", starRating: "", email: "", phone: "" });
+  const [contacts, setContacts] = useState({});
   const [rateDrafts, setRateDrafts] = useState({});
 
   const load = useCallback(() => {
@@ -37,8 +38,8 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
   const addHotel = (event) => {
     event.preventDefault();
     run(async () => {
-      await request(base, { method: "POST", body: JSON.stringify({ name: hotelDraft.name, city: hotelDraft.city || null, starRating: hotelDraft.starRating ? Number(hotelDraft.starRating) : null }) });
-      setHotelDraft({ name: "", city: "", starRating: "" });
+      await request(base, { method: "POST", body: JSON.stringify({ name: hotelDraft.name, city: hotelDraft.city || null, starRating: hotelDraft.starRating ? Number(hotelDraft.starRating) : null, email: hotelDraft.email || null, phone: hotelDraft.phone || null }) });
+      setHotelDraft({ name: "", city: "", starRating: "", email: "", phone: "" });
     });
   };
 
@@ -54,6 +55,13 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
       setRateDrafts({ ...rateDrafts, [hotelId]: { roomType: draft.roomType, mealPlan: draft.mealPlan } });
     });
   };
+  // Where booking requests go (ADR 045).
+  const contactOf = (hotel) => contacts[hotel.id] || { email: hotel.email || "", phone: hotel.phone || "" };
+  const saveContact = (hotel) => run(async () => {
+    const contact = contactOf(hotel);
+    await request(`${base}/${hotel.id}`, { method: "PUT", body: JSON.stringify({ name: hotel.name, city: hotel.city, starRating: hotel.starRating, notes: hotel.notes, status: hotel.status, email: contact.email || null, phone: contact.phone || null }) });
+    setContacts({ ...contacts, [hotel.id]: undefined });
+  });
   const setRate = (hotelId, field, value) => setRateDrafts({ ...rateDrafts, [hotelId]: { ...(rateDrafts[hotelId] || {}), [field]: value } });
 
   return (
@@ -64,6 +72,8 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
         <input required minLength={2} placeholder="Hotel name" value={hotelDraft.name} onChange={(event) => setHotelDraft({ ...hotelDraft, name: event.target.value })} className={`${input} min-w-48 flex-1`} aria-label="Hotel name" />
         <input placeholder="City" value={hotelDraft.city} onChange={(event) => setHotelDraft({ ...hotelDraft, city: event.target.value })} className={`${input} w-36`} aria-label="City" />
         <select value={hotelDraft.starRating} onChange={(event) => setHotelDraft({ ...hotelDraft, starRating: event.target.value })} className={input} aria-label="Stars"><option value="">Stars</option>{[1, 2, 3, 4, 5].map((stars) => <option key={stars} value={stars}>{stars}★</option>)}</select>
+        <input type="email" placeholder="Reservations email" value={hotelDraft.email} onChange={(event) => setHotelDraft({ ...hotelDraft, email: event.target.value })} className={`${input} w-52`} aria-label="Hotel email" />
+        <input placeholder="Phone" value={hotelDraft.phone} onChange={(event) => setHotelDraft({ ...hotelDraft, phone: event.target.value })} className={`${input} w-36`} aria-label="Hotel phone" />
         <button type="submit" className="flex items-center gap-1 rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-stone-950"><Plus className="h-4 w-4" /> Add hotel</button>
       </form>
 
@@ -72,6 +82,11 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
         return (
           <div key={hotel.id} className="rounded-2xl border border-stone-200 p-4">
             <p className="font-bold text-stone-900">{hotel.name}<span className="font-normal text-stone-500">{hotel.city ? ` · ${hotel.city}` : ""}{hotel.starRating ? ` · ${hotel.starRating}★` : ""}</span></p>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+              <input type="email" placeholder="Reservations email (for booking requests)" value={contactOf(hotel).email} onChange={(event) => setContacts({ ...contacts, [hotel.id]: { ...contactOf(hotel), email: event.target.value } })} className={`${input} w-64 py-1.5`} aria-label={`${hotel.name} email`} />
+              <input placeholder="Phone" value={contactOf(hotel).phone} onChange={(event) => setContacts({ ...contacts, [hotel.id]: { ...contactOf(hotel), phone: event.target.value } })} className={`${input} w-36 py-1.5`} aria-label={`${hotel.name} phone`} />
+              {contacts[hotel.id] && <button type="button" onClick={() => saveContact(hotel)} className="rounded-lg border border-stone-300 px-2 py-1.5 font-bold">Save contact</button>}
+            </div>
             <table className="mt-2 w-full text-left text-xs">
               <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1">Room</th><th>Meals</th><th>Season</th><th className="text-right">Net / night</th><th className="text-right">Extra adult</th><th className="text-right">Child</th><th className="text-right">Sleeps</th><th /></tr></thead>
               <tbody className="divide-y divide-stone-100">

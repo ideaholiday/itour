@@ -3,6 +3,7 @@ import { AlertCircle, CalendarPlus, Car, CheckCircle2, Copy, Download, FileText,
 import { authHeaders } from "../../lib/api.js";
 import SupplierHotelRatesPanel, { MEAL_PLAN_LABELS } from "./SupplierHotelRatesPanel.jsx";
 import SupplierRateSheetPanel, { isTransport } from "./SupplierRateSheetPanel.jsx";
+import SupplierTripPanel from "./SupplierTripPanel.jsx";
 
 const inr = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const input = "rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm";
@@ -420,6 +421,8 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
               <button type="submit" className="rounded-xl bg-stone-900 px-4 py-2 font-bold text-white">Record payment</button>
             </form>
           )}
+
+          {saved?.status === "ACCEPTED" && saved.trip && <SupplierTripPanel supplierId={supplierId} quotation={saved} hotels={hotels} onChange={open} />}
         </div>
       )}
     </section>

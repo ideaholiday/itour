@@ -66,7 +66,8 @@ Do not rebuild these. Extend them if asked.
 - Phases 0–7 are deployed to production (owner, 2026-09-25).
 - **Phase 8 — done:** private rate sheet for cab types, transfers, sightseeing and activities; quotations built day by day from it with day text, seat/date/hotel-night warnings, a per-person price, copy to a new date and past-quotation suggestions (ADR 042). Deployed 2026-09-25 (owner).
 - **Phase 9 — done:** hotel options in one quotation (3 Star, 4 Star…), each priced on its own; the customer's choice sets the price (ADR 043). Deployed 2026-09-25 (owner).
-- **Phase 10 — done:** per-km car pricing (rate per km, minimum km per day, driver allowance per day) and a warning when hotel rooms sleep too few (ADR 044). Needs migration 071 (applied automatically on the next deploy).
+- **Phase 10 — done:** per-km car pricing (rate per km, minimum km per day, driver allowance per day) and a warning when hotel rooms sleep too few (ADR 044). Deployed 2026-09-25 (owner).
+- **Phase 11 — done:** running an accepted trip: a trip file with each line's status, confirmation and vendor cost; hotel booking requests by email; drivers for cars with clash checks and a weekly car schedule; vendor payments and margin; the final itinerary by email and WhatsApp (ADR 045). `DATA_MODEL.md` split: operator tables in `DATA_MODEL_OPERATOR.md`. Needs migration 072 (applied automatically on the next deploy).
 
 Standing obligations that apply to every change:
 
