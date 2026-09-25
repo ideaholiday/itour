@@ -72,7 +72,8 @@ import { PricingRuleService } from "../services/pricingRuleService.js";
 import { backfillProductOptions } from "../services/logisticsService.js";
 import { backfillProductLocationRules } from "../data/canonicalLocations.js";
 import { onReferralBookingCancelled, onReferralTripCompleted } from "../services/referralService.js";
-import { assignResource, departureBoard, guideDepartureScope, unassignResource } from "../services/departureBoardService.js";
+import { assignResource, bookingCalendar, departureBoard, guideDepartureScope, unassignResource } from "../services/departureBoardService.js";
+import { rescheduleBySupplier } from "../services/supplierRescheduleService.js";
 import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
 
 const router = express.Router();
@@ -1999,6 +2000,20 @@ router.post("/:id/bookings/:bookingId/cancel", optionalAuthMiddleware, requireSu
   }
 });
 
+// POST /api/suppliers/:id/bookings/:bookingId/reschedule - Move a booking to another departure (ADR 037).
+// Price unchanged; a traveler who paid IdeaHoliday is told and may decline for a full wallet refund.
+router.post("/:id/bookings/:bookingId/reschedule", validateBody(supplierSchemas.reschedule), (req, res) => {
+  try {
+    const result = rescheduleBySupplier(db, { supplierId: req.params.id, bookingId: req.params.bookingId, date: req.body.date, time: req.body.time || null, reason: req.body.reason, actor: req.user });
+    if (result.travelerMayDecline) {
+      queueNotification(sendGuestBookingNotification(db, result.bookingId, "SUPPLIER_RESCHEDULED", { eventKeySuffix: `${result.to.date}_${result.to.time || ""}` }), "Supplier reschedule traveler notification");
+    }
+    res.json({ success: true, ...result });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not move the booking");
+  }
+});
+
 // Day-of-operations (docs/SUPPLIER_OPERATIONS.md): voucher check-in, no-shows,
 // the guest list for a departure, and cancelling a whole departure.
 
@@ -2369,6 +2384,16 @@ router.get("/:id/departures", (req, res) => {
     res.json({ success: true, ...departureBoard(db, req.params.id, { from: req.query.from, days: req.query.days, listAvailability: listNativeAvailability, scope: departureScopeOf(req) }) });
   } catch (error) {
     staffFailure(res, req, error, "Could not load departures");
+  }
+});
+
+// Booking calendar (ADR 037): bookings and guests per day for one month.
+router.get("/:id/booking-calendar", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...bookingCalendar(db, req.params.id, { month: req.query.month }) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not load the calendar");
   }
 });
 

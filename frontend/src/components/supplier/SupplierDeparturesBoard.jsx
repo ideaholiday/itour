@@ -22,9 +22,12 @@ const dayLabel = (date) => new Date(`${date}T00:00:00`).toLocaleDateString("en-I
  * guides, vehicles and equipment on a departure; a guide linked to a login
  * sees only their own departures.
  */
-export default function SupplierDeparturesBoard({ supplierId, canAssign = false }) {
+// `from` and `onFromChange` let the booking calendar pick the day; without them the board keeps its own.
+export default function SupplierDeparturesBoard({ supplierId, canAssign = false, from: controlledFrom, onFromChange }) {
   const base = `/api/suppliers/${supplierId}`;
-  const [from, setFrom] = useState(indiaToday());
+  const [ownFrom, setOwnFrom] = useState(indiaToday());
+  const from = controlledFrom || ownFrom;
+  const setFrom = onFromChange || setOwnFrom;
   const [days, setDays] = useState(1);
   const [board, setBoard] = useState(null);
   const [crew, setCrew] = useState([]);

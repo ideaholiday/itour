@@ -37,6 +37,7 @@ import {
   redeemWalletCredit,
 } from "../services/referralService.js";
 import { localDateTimeMs, productTime } from "../lib/localTime.js";
+import { acceptSupplierReschedule, declineSupplierReschedule } from "../services/supplierRescheduleService.js";
 import { isGstFreeProduct, productCountry } from "../lib/productTax.js";
 
 const router = Router();
@@ -697,6 +698,29 @@ router.post("/:ref/amendment/apply", authenticate, validateBody(bookingSchemas.a
     queueNotification(notifyBookingLogisticsEvent(db, booking.id, "PICKUP_DETAILS_UPDATED"), "Booking logistics amendment notification");
     res.json({ success: true, amendmentId, status: "APPLIED", cutoffAt, quote: publicQuote(quote), logistics: snapshot });
   } catch (error) { res.status(error.status || 500).json({ error: error.message || "Could not apply amendment", code: error.code }); }
+});
+
+// The operator moved this booking (ADR 037): keep the new departure, or decline it for a full wallet refund.
+router.post("/:ref/supplier-reschedule/accept", authenticate, (req, res) => {
+  try {
+    return res.json({ success: true, ...acceptSupplierReschedule(db, { ref: req.params.ref, actor: req.user }) });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+    logger.error("Keeping the operator's new date failed", { requestId: req.requestId, error });
+    return res.status(500).json({ error: "Your answer couldn't be saved" });
+  }
+});
+
+router.post("/:ref/supplier-reschedule/decline", authenticate, (req, res) => {
+  try {
+    const result = declineSupplierReschedule(db, { ref: req.params.ref, actor: req.user });
+    queueNotification(sendGuestBookingNotification(db, result.bookingId, "BOOKING_CANCELLED", { eventKeySuffix: "RESCHEDULE_DECLINED" }), "Declined reschedule traveler notification");
+    return res.json({ success: true, ...result });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+    logger.error("Declining the operator's new date failed", { requestId: req.requestId, error });
+    return res.status(500).json({ error: "The booking couldn't be cancelled" });
+  }
 });
 
 router.post("/:ref/pickup-otp/reset", authenticate, requireRoles("ADMIN", "STAFF"), (req, res) => {

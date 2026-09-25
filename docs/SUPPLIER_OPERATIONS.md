@@ -15,6 +15,13 @@
 1. **A departure is a product on a date at a time**, the guest-list key. The board merges the seat inventory's slots with live bookings, so a departure with bookings but no seat inventory still shows. Free seats are summed across the product's options.
 2. **Crew** are shared resources with a kind: guide, vehicle, equipment. Owners and managers put them on departures; a resource works one departure per date and time (`409 RESOURCE_BUSY`), but is free again at another time.
 3. **A guide linked to a login** sees, lists and checks in only the departures they are assigned to (`403 NOT_YOUR_DEPARTURE`). An unlinked guide login keeps the guide role's normal access (ADR 036).
+4. **The booking calendar** shows bookings, guests and departures per day for a month; picking a day opens it on the board.
+
+## Supplier reschedule (ADR 037)
+1. **Same option, same price.** An owner or manager moves a booking to another date or time; the seats move in one transaction (`moveNativeReservation`) and `amount_inr` never changes. Like a counter sale, the new departure may be past the online cut-off until it starts.
+2. **Refused** when the booking is cancelled, completed, in progress or unpaid; the traveler was already checked in or marked a no-show; a driver is assigned (unassign first); it is a leg of a multi-stop circuit (operations reschedule those); the new departure has started or lacks seats; or nothing changes.
+3. **A paid marketplace booking** becomes `MOVED`: the traveler gets an email and WhatsApp and a notice in My Bookings, and can keep it or decline it until the new departure starts. Declining cancels it with a full wallet refund, like a supplier cancellation ([`REFUND_CREDIT.md`](REFUND_CREDIT.md)), and the supplier gets a notification.
+4. **A direct booking** (walk-in, phone, manual) just moves; the supplier tells the guest.
 
 ## Rules
 1. **Check-in is a record, not a state change.** Scanning the voucher QR (or typing the reference) sets `attendance_status = CHECKED_IN` with the time and the user. It does not move the booking status, the payout or any refund. Trips with a driver still start with the pickup OTP ([`BUSINESS_RULES.md`](BUSINESS_RULES.md) §6).

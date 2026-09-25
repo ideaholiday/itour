@@ -225,3 +225,8 @@ Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md). Every staff role may 
 - **`POST /api/suppliers/:id/departures/assignments`** `{ productId, date, time?, resourceId }` → `201 { assignment }`. Errors: `404 PRODUCT_NOT_FOUND`, `404 RESOURCE_NOT_FOUND`, `409 ALREADY_ASSIGNED`, `409 RESOURCE_BUSY` (on another departure at that date and time).
 - **`DELETE /api/suppliers/:id/departures/assignments/:assignmentId`** → `{ id, removed: true }`; `404 ASSIGNMENT_NOT_FOUND`.
 - Check-in, attendance and the manifest (§3.1.5) refuse or leave out bookings on departures a linked guide isn't assigned to (`403 NOT_YOUR_DEPARTURE`).
+- **`GET /api/suppliers/:id/booking-calendar?month=YYYY-MM`**: `{ month, days: [{ date, bookings, guests, departures }] }`, days with live bookings only. Owner, manager and front desk.
+
+### 3.7 Supplier reschedule (ADR 037)
+Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md). Owner or manager.
+- **`POST /api/suppliers/:id/bookings/:bookingId/reschedule`** `{ date, time?, reason }` → `{ bookingId, ref, from: { date, time }, to: { date, time }, travelerMayDecline }`. The price is unchanged. When `travelerMayDecline` the traveler is sent `SUPPLIER_RESCHEDULED`. Errors: `404 BOOKING_NOT_FOUND`, `409 INVALID_STATUS`, `409 ALREADY_ATTENDED`, `409 CIRCUIT_BOOKING`, `409 DRIVER_ASSIGNED`, `409 DEPARTURE_STARTED`, `409 SAME_DEPARTURE`, `409 DEPARTURE_IN_PAST`, `409 INVENTORY_UNAVAILABLE`.

@@ -309,6 +309,9 @@ export const api = {
     fetch(`/api/bookings/${encodeURIComponent(bookingId)}/cancellation-preview`, { headers: authHeaders() }).then(handle),
   selfCancelBooking: (bookingId, payload) =>
     fetch(`/api/bookings/${encodeURIComponent(bookingId)}/self-cancel`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  // The operator moved the booking (ADR 037): keep the new departure or decline it for a full wallet refund.
+  answerSupplierReschedule: (bookingRef, answer) =>
+    fetch(`/api/bookings/${encodeURIComponent(bookingRef)}/supplier-reschedule/${answer === "decline" ? "decline" : "accept"}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: "{}" }).then(handle),
   refundCreditToSource: (bookingId) =>
     fetch(`/api/bookings/${encodeURIComponent(bookingId)}/refund-to-source`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: "{}" }).then(handle),
   getSupplierPricingRules: (supplierId) =>

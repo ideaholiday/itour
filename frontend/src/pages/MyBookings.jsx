@@ -639,6 +639,21 @@ export default function MyBookings() {
                         </div>
                       </div>
 
+                      {booking.supplier_reschedule_status === "MOVED" && !["cancelled", "completed", "in_progress"].includes(status) && (
+                        <div role="status" className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+                          <strong className="block">{booking.supplier_name || "The operator"} moved this trip</strong>
+                          <p className="mt-1 text-xs leading-relaxed">
+                            From {formatDate(booking.supplier_reschedule_from_date)}{booking.supplier_reschedule_from_time ? ` ${booking.supplier_reschedule_from_time}` : ""} to{" "}
+                            <strong>{formatDate(booking.activity_date)}{booking.pickup_time ? ` ${booking.pickup_time}` : ""}</strong>, same price.
+                            {booking.supplier_reschedule_reason ? ` Reason: ${booking.supplier_reschedule_reason}.` : ""} If it doesn't work for you, decline and we'll refund you in full to your wallet.
+                          </p>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button type="button" onClick={async () => { try { await api.answerSupplierReschedule(booking.ref, "accept"); fetchBookings(); } catch (err) { window.alert(err.message); } }} className="rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-stone-950 hover:bg-amber-400">Keep the new date</button>
+                            <button type="button" onClick={async () => { if (!window.confirm("Decline the new date? The booking is cancelled and the full amount goes to your Idea Holiday wallet.")) return; try { await api.answerSupplierReschedule(booking.ref, "decline"); fetchBookings(); } catch (err) { window.alert(err.message); } }} className="rounded-xl border border-rose-300 bg-white px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50">Decline and refund</button>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Travel Spec Badges */}
                       <div className="mt-5 grid gap-3 sm:grid-cols-3">
                         <div className="rounded-2xl bg-[#FAF9F6] p-3.5 border border-stone-200">

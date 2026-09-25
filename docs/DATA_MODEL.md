@@ -296,6 +296,7 @@ erDiagram
   - `checked_in_at`, `checked_in_by`: when attendance was recorded (ISO timestamp) and the user who recorded it.
   - `source` (migration 062): `B2C` (default), `IH_B2B`, `API` (OCTo partner), or supplier-direct `WALK_IN`, `PHONE`, `MANUAL`. A direct booking has `payment_status = OFFLINE`, commission 0 and no `payouts` row (ADR 034).
   - `created_by_user_id`, `direct_discount_inr`, `balance_due_inr` (migration 062): who entered a direct booking, the operator's discount, and what the guest still owes the operator.
+  - `supplier_reschedule_status` (migration 065, ADR 037): `NULL` (never moved by the supplier), `MOVED` (a paid booking the traveler hasn't answered), `ACCEPTED` or `DECLINED`. `supplier_reschedule_from_date`, `supplier_reschedule_from_time`, `supplier_reschedule_reason`, `supplier_rescheduled_at` record the move. Each move is also a `booking_modifications` row of type `SUPPLIER_RESCHEDULE`.
 - **`supplier_members`** (migration 063, ADR 036): supplier staff logins. `supplier_id`, `user_id` (unique: a user works for one supplier; the user's `role` is `SUPPLIER`), `role` (`MANAGER`, `FRONT_DESK`, `GUIDE`), `created_by_user_id`. The owner is not listed here; they are the user whose email matches `suppliers.email`.
 - **`booking_payments`** (migration 062): money a supplier collected for a direct booking. `booking_id`, `supplier_id`, `amount_inr` (> 0), `mode` (`CASH`, `UPI`, `CARD`, `BANK`), `reference`, `note`, `received_by`, `received_at`.
 - **`driver_assignments`**:

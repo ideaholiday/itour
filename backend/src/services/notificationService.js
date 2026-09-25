@@ -144,7 +144,7 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
   if (!booking) throw Object.assign(new Error("Booking not found"), { status: 404 });
 
   const eventType = String(requestedEventType || "DOCUMENTS").toUpperCase();
-  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE", "SUPPLIER_CONFIRMATION_PENDING", "PICKUP_DETAILS_UPDATED", "DRIVER_ARRIVING", "AMENDMENT_RESULT", "BOOKING_CANCELLED"].includes(eventType)) {
+  if (!["BOOKING_CONFIRMED", "DRIVER_ASSIGNED", "DOCUMENTS", "PRE_TRIP_REMINDER", "POST_TRIP_REVIEW_INVITE", "SUPPLIER_CONFIRMATION_PENDING", "PICKUP_DETAILS_UPDATED", "DRIVER_ARRIVING", "AMENDMENT_RESULT", "BOOKING_CANCELLED", "SUPPLIER_RESCHEDULED"].includes(eventType)) {
     throw Object.assign(new Error("Choose a supported booking logistics notification"), { status: 400 });
   }
   if (eventType === "DRIVER_ASSIGNED" && !booking.driver_name) {
@@ -230,6 +230,12 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
       subject: `Booking logistics amendment ${booking.ref}`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour requested pickup/drop amendment has been recorded. Check My Trips for the latest voucher and logistics status.`,
       template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "Amendment recorded", "Check My Trips for the latest voucher and logistics status."]),
+    },
+    // The operator moved the booking (ADR 037): same price, and the traveler may decline for a full wallet refund.
+    SUPPLIER_RESCHEDULED: {
+      subject: `New date for booking ${booking.ref}`,
+      message: `Hello ${booking.traveler_name || "Traveler"},\n\n${booking.supplier_name || "The operator"} has moved your ${experienceName} from ${booking.supplier_reschedule_from_date || "the original date"}${booking.supplier_reschedule_from_time ? ` ${booking.supplier_reschedule_from_time}` : ""} to ${booking.activity_date}${booking.pickup_time ? ` ${booking.pickup_time}` : ""}.${booking.supplier_reschedule_reason ? `\nReason: ${booking.supplier_reschedule_reason}` : ""}\nThe price is unchanged.\n\nIf the new date doesn't work for you, decline it in My Bookings and we'll refund you in full to your Idea Holiday wallet: https://ideaholiday.in/my-bookings`,
+      template: whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, "New date from the operator", `Moved to ${booking.activity_date}${booking.pickup_time ? ` ${booking.pickup_time}` : ""}, same price. If it doesn't work, decline in My Bookings for a full wallet refund.`]),
     },
     // A getter, so the wallet lookup only runs for this event.
     get BOOKING_CANCELLED() { return cancelledContent(); },

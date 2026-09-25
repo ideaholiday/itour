@@ -552,13 +552,14 @@ export function releaseNativeReservation(db, bookingId) {
 }
 
 // Called inside the booking mutation transaction so either both inventories move or neither does.
-export function moveNativeReservation(db, booking, localDate, localTime = booking.pickup_time) {
+// counterSale: a supplier's move ignores the online cut-off until the departure starts (ADR 034, 037).
+export function moveNativeReservation(db, booking, localDate, localTime = booking.pickup_time, { counterSale = false } = {}) {
   if (!getInventoryRules(db, booking.product_id, booking.product_option_id)) return;
   lockInventory(db, booking.product_id, booking.product_option_id);
   const existing = db.prepare("SELECT * FROM native_reservations WHERE booking_id = ? AND status = 'CONFIRMED'").get(booking.id);
   if (!existing) throw inventoryError("Confirmed seat reservation missing", "RESERVATION_MISSING");
   if (existing.availability_slot === `${booking.product_option_id}:${localDate}:${localTime}`) return;
-  const slot = checkNativeInventory(db, { product_id: booking.product_id, product_option_id: booking.product_option_id, activity_date: localDate, pickup_time: localTime, adults: booking.adults, children: booking.children });
+  const slot = checkNativeInventory(db, { product_id: booking.product_id, product_option_id: booking.product_option_id, activity_date: localDate, pickup_time: localTime, adults: booking.adults, children: booking.children }, { counterSale });
   db.prepare("INSERT INTO native_availability_slots (id, product_id, option_id, local_date, local_time, capacity) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING").run(slot.id, booking.product_id, booking.product_option_id, localDate, localTime, slot.capacity);
   db.prepare("UPDATE native_reservations SET availability_slot = ? WHERE id = ? AND status = 'CONFIRMED'").run(slot.id, existing.id);
 }

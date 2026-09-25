@@ -4,6 +4,7 @@ import SupplierBookingManager from "../components/supplier/SupplierBookingManage
 import ReviewShareLinks from "../components/supplier/ReviewShareLinks.jsx";
 import SupplierDeparturesPanel from "../components/supplier/SupplierDeparturesPanel.jsx";
 import SupplierDeparturesBoard from "../components/supplier/SupplierDeparturesBoard.jsx";
+import SupplierBookingCalendar from "../components/supplier/SupplierBookingCalendar.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import { api, authHeaders } from "../lib/api.js";
 import { AlertTriangle, Headphones, Star } from "lucide-react";
@@ -19,6 +20,7 @@ export default function SupplierBookingsPage() {
   const [reviewData, setReviewData] = useState({ reviews: [], quality: null });
   const [reviewReply, setReviewReply] = useState("");
   const [replyingReview, setReplyingReview] = useState(null);
+  const [boardDate, setBoardDate] = useState(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()));
 
   const sendSupportReply = async () => {
     if (!replyingCase || !supportReply.trim()) return;
@@ -70,7 +72,8 @@ export default function SupplierBookingsPage() {
             canManage={role !== "FRONT_DESK"}
           />
         )}
-        {supplierId && <SupplierDeparturesBoard supplierId={supplierId} canAssign={!counterRole} />}
+        {supplierId && role !== "GUIDE" && <SupplierBookingCalendar supplierId={supplierId} selected={boardDate} onSelect={setBoardDate} />}
+        {supplierId && <SupplierDeparturesBoard supplierId={supplierId} canAssign={!counterRole} from={boardDate} onFromChange={setBoardDate} />}
         <SupplierDeparturesPanel supplierId={supplierId} products={supplierData?.products || []} onChanged={fetchSupplierData} canCancel={!counterRole} />
         {counterRole ? null : <>
         <ReviewShareLinks products={supplierData?.products || []} />

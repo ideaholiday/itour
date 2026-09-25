@@ -1,5 +1,6 @@
 import DispatchQueue, { ConfirmByPhone } from "./DispatchQueue.jsx";
 import DispatchTimeline from "./DispatchTimeline.jsx";
+import RescheduleBookingPanel from "./RescheduleBookingPanel.jsx";
 import React, { useEffect, useState, useMemo } from "react";
 import {
   Search,
@@ -1061,6 +1062,10 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                   </div>
                 </details>
               </div>
+            )}
+
+            {canManage && !["cancelled", "completed", "in_progress", "pending_payment"].includes(String(selectedBooking.status || "").toLowerCase()) && (
+              <RescheduleBookingPanel key={selectedBooking.id} supplierId={s.id} booking={selectedBooking} onMoved={() => onRefresh?.()} />
             )}
 
             {/* Action Footer */}

@@ -149,3 +149,16 @@ export function unassignResource(db, supplierId, assignmentId) {
   if (!removed.changes) throw boardError("Assignment not found", 404, "ASSIGNMENT_NOT_FOUND");
   return { id: assignmentId, removed: true };
 }
+
+/** Bookings and guests per day for one month (`YYYY-MM`), for the booking calendar. */
+export function bookingCalendar(db, supplierId, { month }) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month || ""))) throw boardError("Choose a month as YYYY-MM", 400, "VALIDATION_ERROR");
+  const rows = db.prepare(`SELECT activity_date, COUNT(*) AS bookings, SUM(COALESCE(adults, 0) + COALESCE(children, 0)) AS guests,
+      COUNT(DISTINCT product_id || '|' || COALESCE(pickup_time, '')) AS departures
+    FROM bookings WHERE supplier_id = ? AND activity_date BETWEEN ? AND ? AND LOWER(status) NOT IN ('cancelled', 'pending_payment')
+    GROUP BY activity_date ORDER BY activity_date`).all(supplierId, `${month}-01`, `${month}-31`);
+  return {
+    month,
+    days: rows.map((row) => ({ date: row.activity_date, bookings: Number(row.bookings || 0), guests: Number(row.guests || 0), departures: Number(row.departures || 0) })),
+  };
+}

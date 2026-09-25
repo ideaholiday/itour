@@ -29,6 +29,7 @@ const OPERATIONS = [
 const FRONT_DESK = [
   ...OPERATIONS,
   ["GET", /^\/availability(\/check)?$/],
+  ["GET", /^\/booking-calendar$/],
   ["POST", /^\/bookings\/quote$/],
   ["POST", /^\/bookings$/],
   ["GET", /^\/bookings\/[^/]+\/payments$/],

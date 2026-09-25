@@ -20,6 +20,9 @@
    that part comes back as refund credit (`REFUND_CREDIT_RESTORED`), but it cannot be sent back as cash.
 6. **Self-cancelling a booking credit paid for** gives credit back at the policy's refund share,
    even when nothing was paid by card.
+7. **Declining a supplier's new date is a supplier cancellation** (ADR 037). When a supplier moves a
+   paid booking, the traveler may decline it until the new departure starts; it is refunded in full to
+   the wallet exactly as in rule 1, whatever the product's cancellation policy.
 
 ## How it is recorded
 - `bookings.payment_status = 'REFUNDED_TO_WALLET'`, `refunded_to_wallet_inr`, `refund_amount_inr`; the payout is zeroed and `CANCELLED`.

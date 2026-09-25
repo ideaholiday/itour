@@ -253,6 +253,7 @@ export const supplierSchemas = {
   blockDates: object({ dates: z.array(date).min(1).max(366).optional(), startDate: date.optional(), endDate: date.optional(), reason: optionalText(500), capacity: count.optional() }),
   price: object({ priceInr: amount.optional(), price_inr: amount.optional(), variantName: optionalText(160) }),
   cancellation: object({ reason: text(3, 1_000) }),
+  reschedule: object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date"), time: z.string().regex(/^\d{2}:\d{2}$/, "Use HH:MM").nullable().optional(), reason: text(3, 500) }),
   checkIn: object({ code: text(3, 2_000), allowOtherDate: booleanValue.optional() }),
   attendance: object({ status: z.enum(["CHECKED_IN", "NO_SHOW", "NONE"]) }),
   manifestQuery: object({ productId: text(1, 120), date, time: z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(), format: z.enum(["json", "csv"]).optional() }),

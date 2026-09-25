@@ -58,7 +58,8 @@ Do not rebuild these. Extend them if asked.
 - **Phase 1 — done:** walk-in / phone / manual bookings, `bookings.source`, supplier payment records and balance due.
 - **Phase 2 — done:** supplier staff logins with owner, manager, front desk and guide roles (ADR 036).
 - **Phase 3a — done:** departures board; guides, vehicles and equipment assigned to departures; linked guides see only their own (ADR 037).
-- **Next, in order:** 3b booking calendar and supplier reschedule (price frozen, traveler may decline for a full wallet refund) → 4 real dashboard numbers → 5 supplier agents with net rates and credit → 6 package and quotation builder with hotel rate sheet and PDF email → 7 per-channel on/off and reseller API keys in the extranet.
+- **Phase 3b — done:** booking calendar; supplier reschedule at the same price, with the traveler able to decline for a full wallet refund (ADR 037).
+- **Next, in order:** 4 real dashboard numbers → 5 supplier agents with net rates and credit → 6 package and quotation builder with hotel rate sheet and PDF email → 7 per-channel on/off and reseller API keys in the extranet.
 
 Standing obligations that apply to every change:
 
