@@ -69,7 +69,7 @@
 - **Date**: 2026-09-25
 - **Decision Made** (owner, 2026-09-25), for operator-platform Phase 6:
   1. **Lines**: hotel nights from the supplier's own rate sheet (hotel, room type, meal plan, net rate per night by season), the supplier's own listings (priced by the server quote, before tax), and custom lines (flights, permits, guide fees). Hotel and custom lines are the supplier's costs and carry one **markup %** per quotation; listings enter at their own price. The customer sees one package price, not the breakdown.
-  2. **GST**: 5% on the whole package price for an Indian supplier (tour-operator rate, no input tax credit), shown once. Suppliers outside India quote tax-inclusive with no GST line. The owner will confirm the rate with their CA.
+  2. **GST**: 5% on the whole package price for an Indian supplier (tour-operator rate, no input tax credit), shown once. Suppliers outside India quote tax-inclusive with no GST line. The owner confirmed 5% on 2026-09-25.
   3. **Accepting**: staff mark the quotation accepted; each listing line then gets "Book now", which makes a booking on the shared inventory and checks seats at that moment. Hotels stay as lines; the supplier books them with the hotel.
   4. **Delivery**: email with the PDF attached where the provider allows (Brevo) and a signed link in the body, which can also be sent on WhatsApp.
 - **Consequences**: A booking made from a quotation holds the seats and records the listing's share of the package (`quotation_id`); the customer's money is tracked on the quotation, so the booking carries no balance of its own. The PDF uses "INR" because the PDF's built-in fonts have no rupee sign.
@@ -84,3 +84,17 @@
   3. **Only the owner** issues and revokes keys; a key is shown once and only its SHA-256 is stored.
   4. **A key may be linked to one of the supplier's agents**: its bookings then take that agent's commission and credit limit and appear on the agent's statement. An unlinked key books at the normal price, owed to the supplier.
 - **Consequences**: Keys issued by IdeaHoliday (`scripts/create-api-partner.js`) keep today's behaviour. The guest is asked to pay at the meeting point only for walk-in, phone and manual bookings.
+
+---
+
+## ADR 042: Private Rate Sheet for Cars and Activities; Packages Built from Menus
+- **Date**: 2026-09-25
+- **Context**: Operators quoted their own transfers and sightseeing as custom lines, typing a price each time, or had to publish them as listings. DMC software (Sembark, TravelTree, Tourwriter) builds a package in minutes from price lists set up once: the quote is picked from menus and costed by the system.
+- **Decision Made** (owner, 2026-09-25), for operator-platform Phase 8:
+  1. **Private rate sheet** beside the hotel one: the supplier's **cab types** (name, seats); **transfers and sightseeing**, which are a car on a route priced **per vehicle for each cab type**, by season; and **activities and tickets**, priced **per adult and child**, by season. Services may be closed on weekdays. Nothing is listed, sold online or holds seats (ADR 035 kept).
+  2. **Quotation lines** `TRANSPORT` and `ACTIVITY` name a service; the server prices them. With no cab count, enough cabs for everyone (children take a seat). They are the supplier's cost and carry the one markup; listings stay at their own price; 5% package GST (ADR 040).
+  3. **Day text**: each day has a title and description; a service's day text fills an empty day.
+  4. **Checks before sending**, shown as warnings, never blocking: too few cab seats, a line dated off its day, a night of the trip with no hotel when the package has hotels. A date with no price or on a closed day is refused.
+  5. **Reuse**: any quotation can be copied to a new start date, every date moved and priced again; typing a destination offers past quotations for it.
+  6. **Not now**: per-kilometre pricing, several hotel options in one quotation (3★/4★), importing price lists, other currencies.
+- **Consequences**: The customer sees an approximate per-person price (total ÷ travelers, rounded up) besides the total. Quotation line kinds are checked by the service, not a column CHECK (migration 069).

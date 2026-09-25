@@ -147,7 +147,48 @@ function sqliteDropNotNull(db, tableName, columnName) {
   const definition = new RegExp(`([(,]\\s*["\`]?${column.name}["\`]?\\s[^,]*?)\\s+NOT\\s+NULL`, "i");
   const rewritten = sql.replace(definition, "$1");
   if (rewritten === sql) throw new Error(`Cannot drop NOT NULL: ${tableName}.${columnName} definition not recognised`);
+  rewriteSqliteTableSql(db, tableName, rewritten);
+}
 
+/**
+ * SQLite has no `ALTER TABLE ... DROP CONSTRAINT`. A column CHECK written inline
+ * gets PostgreSQL's default name `<table>_<column>_check`, so that name is
+ * mapped back to the column and its CHECK (...) is cut from the stored CREATE
+ * TABLE text. Like dropping NOT NULL, removing a CHECK does not change the
+ * on-disk format. A column without a CHECK is a no-op, as `IF EXISTS` implies.
+ */
+function sqliteDropColumnCheck(db, tableName, constraintName) {
+  const prefix = `${tableName}_`.toLowerCase();
+  const name = constraintName.toLowerCase();
+  if (!name.startsWith(prefix) || !name.endsWith("_check")) throw new Error(`Cannot drop constraint ${constraintName}: only <table>_<column>_check is supported on SQLite`);
+  const columnName = name.slice(prefix.length, -"_check".length);
+  const column = db.prepare(`PRAGMA table_info("${tableName}")`).all().find((item) => item.name.toLowerCase() === columnName);
+  if (!column) throw new Error(`Cannot drop constraint ${constraintName}: ${tableName}.${columnName} does not exist`);
+
+  const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName);
+  const start = sql.search(new RegExp(`[(,]\\s*["\`]?${column.name}["\`]?\\s`, "i"));
+  if (start < 0) throw new Error(`Cannot drop constraint ${constraintName}: column definition not recognised`);
+
+  // Walk the column definition to its closing comma or parenthesis, noting a top-level CHECK.
+  let depth = 0;
+  let checkAt = -1;
+  for (let index = start + 1; index < sql.length; index += 1) {
+    const char = sql[index];
+    if (depth === 0 && (char === "," || char === ")")) break;
+    if (depth === 0 && checkAt < 0 && /\s/.test(sql[index - 1]) && /^CHECK\s*\(/i.test(sql.slice(index))) checkAt = index;
+    if (char === "(") depth += 1;
+    if (char === ")") depth -= 1;
+  }
+  if (checkAt < 0) return;
+  let end = sql.indexOf("(", checkAt);
+  for (depth = 0; end < sql.length; end += 1) {
+    if (sql[end] === "(") depth += 1;
+    if (sql[end] === ")" && --depth === 0) break;
+  }
+  rewriteSqliteTableSql(db, tableName, sql.slice(0, checkAt).replace(/\s+$/, "") + sql.slice(end + 1));
+}
+
+function rewriteSqliteTableSql(db, tableName, rewritten) {
   const schemaVersion = db.pragma("schema_version", { simple: true });
   db.unsafeMode(true);
   try {
@@ -177,6 +218,13 @@ export function executeMigrationSql(db, sql) {
     );
     if (dropNotNull) {
       sqliteDropNotNull(db, dropNotNull[1], dropNotNull[2]);
+      continue;
+    }
+    const dropCheck = withoutLeadingComments(statement).match(
+      /^ALTER\s+TABLE\s+["`]?([a-zA-Z_][\w]*)["`]?\s+DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?["`]?([a-zA-Z_][\w]*)["`]?\s*;?\s*$/i,
+    );
+    if (dropCheck) {
+      sqliteDropColumnCheck(db, dropCheck[1], dropCheck[2]);
       continue;
     }
 

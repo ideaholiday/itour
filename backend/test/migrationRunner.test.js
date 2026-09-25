@@ -94,6 +94,21 @@ ALTER TABLE travelers ADD COLUMN IF NOT EXISTS adults INTEGER DEFAULT 2;`,
   }
 });
 
+test("migration runner drops a column CHECK by its PostgreSQL name on SQLite", () => {
+  const db = new Database(":memory:");
+  db.exec(`CREATE TABLE lines (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('A', 'B')), qty INTEGER CHECK (qty > 0))`);
+  assert.throws(() => db.prepare("INSERT INTO lines VALUES ('1', 'C', 1)").run(), /CHECK/);
+
+  executeMigrationSql(db, "-- widen the kinds\nALTER TABLE lines DROP CONSTRAINT IF EXISTS lines_kind_check;");
+  db.prepare("INSERT INTO lines VALUES ('1', 'C', 1)").run();
+  assert.throws(() => db.prepare("INSERT INTO lines VALUES ('2', 'A', 0)").run(), /CHECK/, "the other column's CHECK stays");
+  assert.equal(db.prepare("SELECT kind FROM lines").get().kind, "C");
+
+  // Already dropped: a no-op, as IF EXISTS implies.
+  executeMigrationSql(db, "ALTER TABLE lines DROP CONSTRAINT IF EXISTS lines_kind_check;");
+  assert.throws(() => executeMigrationSql(db, "ALTER TABLE lines DROP CONSTRAINT lines_pkey;"), /only <table>_<column>_check/);
+});
+
 test("migration runner rolls back the complete pending batch after a failure", () => {
   const db = new Database(":memory:");
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "idea-holiday-migrations-"));

@@ -77,7 +77,8 @@ import { rescheduleBySupplier } from "../services/supplierRescheduleService.js";
 import { supplierAnalytics, supplierDashboardStats } from "../services/supplierDashboardService.js";
 import { agentStatement, listAgents, recordAgentPayment, saveAgent, setAgentRates } from "../services/supplierAgentService.js";
 import { addHotelRate, deleteHotelRate, listHotels, saveHotel } from "../services/supplierHotelService.js";
-import { bookQuotationLine, findQuotation, listQuotations, quotationShareUrl, quotationView, recordQuotationPayment, saveQuotation, setQuotationStatus } from "../services/quotationService.js";
+import { bookQuotationLine, copyQuotation, findQuotation, listQuotations, quotationShareUrl, quotationView, recordQuotationPayment, saveQuotation, setQuotationStatus, suggestQuotations } from "../services/quotationService.js";
+import { addServiceRate, deleteServiceRate, listCabTypes, listServices, saveCabType, saveService } from "../services/supplierRateSheetService.js";
 import { quotationPdf } from "../services/quotationPdfService.js";
 import { createResellerKey, listResellerKeys, revokeResellerKey, setProductChannels } from "../services/supplierChannelSettingsService.js";
 import { sendEmail } from "../services/emailService.js";
@@ -2392,6 +2393,32 @@ router.delete("/:id/hotels/:hotelId/rates/:rateId", (req, res) => {
   try { res.json({ success: true, hotel: deleteHotelRate(db, req.params.id, req.params.hotelId, req.params.rateId) }); } catch (error) { directBookingFailure(res, req, error, "Could not remove the rate"); }
 });
 
+// Transfer, sightseeing and activity rate sheet (ADR 042): private prices, used only to price quotations.
+router.get("/:id/cab-types", (req, res) => {
+  try { res.json({ success: true, cabTypes: listCabTypes(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load cab types"); }
+});
+router.post("/:id/cab-types", (req, res) => {
+  try { res.status(201).json({ success: true, cabType: saveCabType(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add the cab type"); }
+});
+router.put("/:id/cab-types/:cabTypeId", (req, res) => {
+  try { res.json({ success: true, cabType: saveCabType(db, req.params.id, req.body, req.params.cabTypeId) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the cab type"); }
+});
+router.get("/:id/services", (req, res) => {
+  try { res.json({ success: true, services: listServices(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load services"); }
+});
+router.post("/:id/services", (req, res) => {
+  try { res.status(201).json({ success: true, service: saveService(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add the service"); }
+});
+router.put("/:id/services/:serviceId", (req, res) => {
+  try { res.json({ success: true, service: saveService(db, req.params.id, req.body, req.params.serviceId) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the service"); }
+});
+router.post("/:id/services/:serviceId/rates", (req, res) => {
+  try { res.status(201).json({ success: true, service: addServiceRate(db, req.params.id, req.params.serviceId, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add the rate"); }
+});
+router.delete("/:id/services/:serviceId/rates/:rateId", (req, res) => {
+  try { res.json({ success: true, service: deleteServiceRate(db, req.params.id, req.params.serviceId, req.params.rateId) }); } catch (error) { directBookingFailure(res, req, error, "Could not remove the rate"); }
+});
+
 // Package quotations (ADR 040): priced on the server, sent as a PDF, booked line by line once accepted.
 router.get("/:id/quotations", (req, res) => {
   try { res.json({ success: true, quotations: listQuotations(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load quotations"); }
@@ -2399,11 +2426,18 @@ router.get("/:id/quotations", (req, res) => {
 router.post("/:id/quotations", (req, res) => {
   try { res.status(201).json({ success: true, quotation: saveQuotation(db, req.params.id, req.body, { actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the quotation"); }
 });
+// Past quotations for the same destination and length, to start a new one from (ADR 042).
+router.get("/:id/quotations/suggestions", (req, res) => {
+  try { res.json({ success: true, quotations: suggestQuotations(db, req.params.id, { destination: req.query.destination, days: req.query.days }) }); } catch (error) { directBookingFailure(res, req, error, "Could not load past quotations"); }
+});
 router.get("/:id/quotations/:quotationId", (req, res) => {
   try { res.json({ success: true, quotation: quotationView(db, findQuotation(db, req.params.id, req.params.quotationId)) }); } catch (error) { directBookingFailure(res, req, error, "Could not load the quotation"); }
 });
 router.put("/:id/quotations/:quotationId", (req, res) => {
   try { res.json({ success: true, quotation: saveQuotation(db, req.params.id, req.body, { actor: req.user, quotationId: req.params.quotationId }) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the quotation"); }
+});
+router.post("/:id/quotations/:quotationId/copy", (req, res) => {
+  try { res.status(201).json({ success: true, quotation: copyQuotation(db, req.params.id, req.params.quotationId, req.body, { actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not copy the quotation"); }
 });
 router.post("/:id/quotations/:quotationId/status", (req, res) => {
   try { res.json({ success: true, quotation: setQuotationStatus(db, req.params.id, req.params.quotationId, String(req.body?.status || "").toUpperCase()) }); } catch (error) { directBookingFailure(res, req, error, "Could not change the status"); }

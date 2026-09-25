@@ -1,13 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Download, FileText, Hotel, MessageCircle, Package, Plus, Send, Trash2 } from "lucide-react";
+import { AlertCircle, CalendarPlus, Car, CheckCircle2, Copy, Download, FileText, Hotel, MessageCircle, Package, Plus, Send, Ticket, Trash2, TriangleAlert } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
 import SupplierHotelRatesPanel, { MEAL_PLAN_LABELS } from "./SupplierHotelRatesPanel.jsx";
+import SupplierRateSheetPanel, { isTransport } from "./SupplierRateSheetPanel.jsx";
 
 const inr = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const input = "rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm";
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const STATUS_STYLES = { DRAFT: "bg-stone-100 text-stone-700", SENT: "bg-sky-100 text-sky-800", ACCEPTED: "bg-emerald-100 text-emerald-800", DECLINED: "bg-rose-100 text-rose-800" };
-const NEW = () => ({ title: "", customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
+const addDays = (date, days) => { const next = new Date(`${date}T00:00:00Z`); next.setUTCDate(next.getUTCDate() + days); return next.toISOString().slice(0, 10); };
+const dayDate = (startDate, dayNumber) => addDays(startDate, (Number(dayNumber) || 1) - 1);
+const daysBetween = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+const count = (value) => (value === "" || value == null ? null : Number(value));
+const NEW = () => ({ title: "", destination: "", days: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
 
 async function request(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...authHeaders() } });
@@ -21,12 +26,16 @@ function linePayload(line) {
   const base = { kind: line.kind, dayNumber: Number(line.dayNumber) || 1, title: line.title || (line.kind === "HOTEL" ? "Stay" : "Item"), description: line.description || null };
   if (line.kind === "HOTEL") return { ...base, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: line.checkIn || line.date, nights: Number(line.nights) || 1, rooms: Number(line.rooms) || 1, extraAdults: Number(line.extraAdults) || 0, children: Number(line.children) || 0 };
   if (line.kind === "LISTING") return { ...base, productId: line.productId, productOptionId: line.productOptionId || null, date: line.date, pickupTime: line.pickupTime || null, adults: Number(line.adults) || 1, children: Number(line.children) || 0 };
+  // Rate-sheet lines: an empty count follows the quotation's travelers, and an empty cab count means enough cabs for everyone.
+  if (line.kind === "TRANSPORT") return { ...base, title: line.title || null, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: line.date, vehicles: count(line.vehicles), adults: count(line.adults), children: count(line.children) };
+  if (line.kind === "ACTIVITY") return { ...base, title: line.title || null, serviceId: line.serviceId, date: line.date, adults: count(line.adults), children: count(line.children) };
   return { ...base, date: line.date || null, amountInr: Number(line.amountInr) || 0 };
 }
 
 /**
- * Package quotations (ADR 040): hotels from the rate sheet, the supplier's own
- * listings and custom lines, day by day. The server prices every line; the
+ * Package quotations (ADR 040, ADR 042): hotels, cars and activities from the
+ * supplier's private rate sheets, its own listings and custom lines, day by
+ * day with a title and text per day. The server prices every line; the
  * customer's PDF shows one package price. Once accepted, listing lines are
  * booked one click each and payments are recorded against the package.
  */
@@ -35,6 +44,10 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const [tab, setTab] = useState("quotations");
   const [list, setList] = useState([]);
   const [hotels, setHotels] = useState([]);
+  const [cabTypes, setCabTypes] = useState([]);
+  const [services, setServices] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+  const [copyDate, setCopyDate] = useState(today);
   const [agents, setAgents] = useState([]);
   const [draft, setDraft] = useState(null);
   const [saved, setSaved] = useState(null);
@@ -47,13 +60,35 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   useEffect(() => {
     loadList();
     request(`${base}/hotels`).then((data) => setHotels(data.hotels || [])).catch(() => {});
+    request(`${base}/cab-types`).then((data) => setCabTypes(data.cabTypes || [])).catch(() => {});
+    request(`${base}/services`).then((data) => setServices(data.services || [])).catch(() => {});
     request(`${base}/agents`).then((data) => setAgents((data.agents || []).filter((agent) => agent.status === "ACTIVE"))).catch(() => {});
   }, [base, loadList]);
 
+  const onRateSheet = useCallback(({ cabTypes: cabs, services: list }) => { setCabTypes(cabs); setServices(list); }, []);
+
+  // Past quotations for the destination being typed, to start from one (ADR 042).
+  const destination = draft && !saved ? String(draft.destination || "").trim() : "";
+  useEffect(() => {
+    if (destination.length < 2) { setSuggestions([]); return undefined; }
+    const timer = setTimeout(() => request(`${base}/quotations/suggestions?destination=${encodeURIComponent(destination)}`).then((data) => setSuggestions(data.quotations || [])).catch(() => {}), 300);
+    return () => clearTimeout(timer);
+  }, [base, destination]);
+
   const open = (quotation) => {
     setSaved(quotation); setShared(null); setNotice(""); setError("");
-    setDraft({ ...quotation, customerEmail: quotation.customerEmail || "", customerPhone: quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
-      lines: quotation.lines.map((line) => ({ ...line, checkIn: line.kind === "HOTEL" ? line.date : undefined })) });
+    const group = quotation.adults + quotation.children;
+    setDraft({ ...quotation, destination: quotation.destination || "", days: quotation.days || [], customerEmail: quotation.customerEmail || "", customerPhone: quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
+      lines: quotation.lines.map((line) => {
+        const next = { ...line, checkIn: line.kind === "HOTEL" ? line.date : undefined };
+        if (line.kind !== "TRANSPORT" && line.kind !== "ACTIVITY") return next;
+        // Counts that match the group were left to follow it; keep them following.
+        const followsGroup = line.adults === quotation.adults && line.children === quotation.children;
+        if (followsGroup) Object.assign(next, { adults: "", children: "" });
+        const cab = cabTypes.find((item) => item.id === line.cabTypeId);
+        if (followsGroup && cab && line.vehicles === Math.max(1, Math.ceil(group / cab.seats))) next.vehicles = "";
+        return next;
+      }) });
   };
   const run = async (action, message) => {
     setError(""); setNotice("");
@@ -62,8 +97,9 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
 
   const save = () => run(async () => {
     const body = { ...draft, customerEmail: draft.customerEmail || null, customerPhone: draft.customerPhone || null, agentId: draft.agentId || null, notes: draft.notes || null, validUntil: draft.validUntil || null,
-      adults: Number(draft.adults), children: Number(draft.children), markupPct: Number(draft.markupPct), lines: draft.lines.map(linePayload) };
-    for (const key of ["id", "ref", "status", "totals", "payments", "sentAt", "acceptedAt", "createdAt", "updatedAt"]) delete body[key];
+      adults: Number(draft.adults), children: Number(draft.children), markupPct: Number(draft.markupPct), lines: draft.lines.map(linePayload), destination: draft.destination || null,
+      days: (draft.days || []).filter((day) => day.title || day.description).map((day) => ({ dayNumber: Number(day.dayNumber), title: day.title || null, description: day.description || null })) };
+    for (const key of ["id", "ref", "status", "totals", "payments", "warnings", "sentAt", "acceptedAt", "createdAt", "updatedAt"]) delete body[key];
     const data = await request(saved ? `${base}/quotations/${saved.id}` : `${base}/quotations`, { method: saved ? "PUT" : "POST", body: JSON.stringify(body) });
     open(data.quotation);
     return data;
@@ -93,15 +129,59 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     } catch (err) { setError(err.message); }
   };
 
-  const setLine = (index, patch) => setDraft({ ...draft, lines: draft.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)) });
-  const addLine = (kind) => setDraft({ ...draft, lines: [...draft.lines, { kind, dayNumber: 1, title: kind === "CUSTOM" ? "" : kind === "HOTEL" ? "Stay" : "", mealPlan: "CP", nights: 1, rooms: 1, adults: draft.adults, children: draft.children, date: draft.startDate, checkIn: draft.startDate }] });
+  // Copies any quotation to a new start date as a new draft, priced again (ADR 042).
+  const copyFrom = (quotationId, body, message) => run(async () => {
+    const data = await request(`${base}/quotations/${quotationId}/copy`, { method: "POST", body: JSON.stringify(body) });
+    open(data.quotation);
+    return data;
+  }, message);
+  const startFrom = (quotationId) => copyFrom(quotationId, {
+    startDate: draft.startDate, ...(draft.customerName.trim().length >= 2 ? { customerName: draft.customerName, customerEmail: draft.customerEmail || null, customerPhone: draft.customerPhone || null } : {}),
+  }, "Started from a past quotation and priced for your dates. Check it and save.");
+
+  // A line's date follows its day, so moving a day or the start date moves the dates with it.
+  const setLine = (index, patch) => setDraft({ ...draft, lines: draft.lines.map((line, i) => {
+    if (i !== index) return line;
+    const next = { ...line, ...patch };
+    if (patch.dayNumber !== undefined && Number(patch.dayNumber) >= 1) Object.assign(next, { date: dayDate(draft.startDate, patch.dayNumber), checkIn: dayDate(draft.startDate, patch.dayNumber) });
+    return next;
+  }) });
+  const setStart = (startDate) => {
+    const shift = /^\d{4}-\d{2}-\d{2}$/.test(startDate) && draft.startDate ? daysBetween(draft.startDate, startDate) : 0;
+    const move = (date) => (date && shift ? addDays(date, shift) : date);
+    setDraft({ ...draft, startDate, lines: draft.lines.map((line) => ({ ...line, date: move(line.date), checkIn: move(line.checkIn) })) });
+  };
+  const dayNumbers = draft ? [...new Set([...draft.lines.map((line) => Number(line.dayNumber) || 1), ...(draft.days || []).map((day) => Number(day.dayNumber))])].sort((a, b) => a - b) : [];
+  const lastDay = dayNumbers.length ? dayNumbers[dayNumbers.length - 1] : 1;
+  const dayOf = (dayNumber) => (draft.days || []).find((day) => Number(day.dayNumber) === dayNumber) || { dayNumber, title: "", description: "" };
+  const setDay = (dayNumber, patch) => setDraft({ ...draft, days: [...(draft.days || []).filter((day) => Number(day.dayNumber) !== dayNumber), { ...dayOf(dayNumber), ...patch }] });
+  const addLine = (kind) => {
+    const date = dayDate(draft.startDate, lastDay);
+    const followsGroup = kind === "TRANSPORT" || kind === "ACTIVITY";
+    setDraft({ ...draft, lines: [...draft.lines, { kind, dayNumber: lastDay, title: kind === "HOTEL" ? "Stay" : "", mealPlan: "CP", nights: 1, rooms: 1, adults: followsGroup ? "" : draft.adults, children: followsGroup ? "" : draft.children, vehicles: "", date, checkIn: date }] });
+  };
+  const cabsFor = (service) => cabTypes.filter((cab) => service?.rates.some((rate) => rate.cabTypeId === cab.id));
+  // Choosing a service names the line, picks a cab that has a price, and fills an empty day's title and text.
+  const pickService = (index, serviceId) => {
+    const service = services.find((item) => item.id === serviceId);
+    const line = draft.lines[index];
+    const dayNumber = Number(line.dayNumber) || 1;
+    const lines = draft.lines.map((item, i) => (i === index ? { ...item, serviceId, title: service?.name || "", cabTypeId: line.kind === "TRANSPORT" ? cabsFor(service)[0]?.id || "" : undefined } : item));
+    const day = dayOf(dayNumber);
+    const days = service && (service.dayTitle || service.dayDescription) && !day.title && !day.description
+      ? [...(draft.days || []).filter((item) => Number(item.dayNumber) !== dayNumber), { dayNumber, title: service.dayTitle || "", description: service.dayDescription || "" }]
+      : draft.days;
+    setDraft({ ...draft, lines, days });
+  };
+  const serviceOptions = (kinds) => services.filter((service) => kinds.includes(service.kind) && service.status === "ACTIVE")
+    .map((service) => <option key={service.id} value={service.id}>{service.city ? `${service.city}: ` : ""}{service.name}</option>);
   const editable = !saved || ["DRAFT", "SENT"].includes(saved.status);
 
-  if (tab === "hotels") {
+  if (tab !== "quotations") {
     return (
       <section className="space-y-4 rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
         <Tabs tab={tab} setTab={setTab} />
-        <SupplierHotelRatesPanel supplierId={supplierId} onChange={setHotels} />
+        {tab === "hotels" ? <SupplierHotelRatesPanel supplierId={supplierId} onChange={setHotels} /> : <SupplierRateSheetPanel supplierId={supplierId} onChange={onRateSheet} />}
       </section>
     );
   }
@@ -119,7 +199,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             {list.map((row) => (
               <li key={row.id}>
                 <button onClick={() => request(`${base}/quotations/${row.id}`).then((data) => open(data.quotation)).catch((err) => setError(err.message))} className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-stone-50">
-                  <span className="min-w-0"><strong className="block truncate text-sm text-stone-900">{row.title}</strong><span className="text-xs text-stone-500">{row.ref} · {row.customerName} · from {row.startDate}</span></span>
+                  <span className="min-w-0"><strong className="block truncate text-sm text-stone-900">{row.title}</strong><span className="text-xs text-stone-500">{row.ref} · {row.customerName}{row.destination ? ` · ${row.destination}` : ""} · from {row.startDate}</span></span>
                   <span className="text-right"><span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${STATUS_STYLES[row.status]}`}>{row.status}</span><span className="mt-1 block font-mono text-sm font-bold">{inr(row.totalInr)}</span></span>
                 </button>
               </li>
@@ -135,58 +215,98 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
           </div>
 
           <fieldset disabled={!editable} className="grid gap-3 sm:grid-cols-3">
-            <input required placeholder="Trip title, e.g. Goa Beach Escape" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={`${input} sm:col-span-3`} aria-label="Title" />
+            <input required placeholder="Trip title, e.g. Golden Triangle 4N/5D" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} className={`${input} sm:col-span-2`} aria-label="Title" />
+            <input placeholder="Destination, e.g. Delhi Agra Jaipur" value={draft.destination} onChange={(event) => setDraft({ ...draft, destination: event.target.value })} className={input} aria-label="Destination" />
             <input placeholder="Customer name" value={draft.customerName} onChange={(event) => setDraft({ ...draft, customerName: event.target.value })} className={input} aria-label="Customer name" />
             <input placeholder="Customer email" type="email" value={draft.customerEmail} onChange={(event) => setDraft({ ...draft, customerEmail: event.target.value })} className={input} aria-label="Customer email" />
             <input placeholder="Customer phone" value={draft.customerPhone} onChange={(event) => setDraft({ ...draft, customerPhone: event.target.value })} className={input} aria-label="Customer phone" />
-            <label className="text-xs text-stone-500">Starts<input type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} className={`mt-1 w-full ${input}`} /></label>
+            <label className="text-xs text-stone-500">Starts<input type="date" value={draft.startDate} onChange={(event) => setStart(event.target.value)} className={`mt-1 w-full ${input}`} /></label>
             <label className="text-xs text-stone-500">Adults / children<span className="mt-1 flex gap-2"><input type="number" min={1} value={draft.adults} onChange={(event) => setDraft({ ...draft, adults: event.target.value })} className={`w-full ${input}`} aria-label="Adults" /><input type="number" min={0} value={draft.children} onChange={(event) => setDraft({ ...draft, children: event.target.value })} className={`w-full ${input}`} aria-label="Children" /></span></label>
-            <label className="text-xs text-stone-500">Markup on hotels and extras (%)<input type="number" min={0} max={200} step="0.5" value={draft.markupPct} onChange={(event) => setDraft({ ...draft, markupPct: event.target.value })} className={`mt-1 w-full ${input}`} /></label>
+            <label className="text-xs text-stone-500">Markup on your costs (%)<input type="number" min={0} max={200} step="0.5" value={draft.markupPct} onChange={(event) => setDraft({ ...draft, markupPct: event.target.value })} className={`mt-1 w-full ${input}`} /></label>
             <label className="text-xs text-stone-500">For agent (optional)<select value={draft.agentId} onChange={(event) => setDraft({ ...draft, agentId: event.target.value })} className={`mt-1 w-full ${input}`}><option value="">Direct customer</option>{agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
             <label className="text-xs text-stone-500">Valid until<input type="date" value={draft.validUntil} onChange={(event) => setDraft({ ...draft, validUntil: event.target.value })} className={`mt-1 w-full ${input}`} /></label>
             <textarea placeholder="Notes for the customer (inclusions, exclusions, terms)" value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} rows={2} className={`${input} sm:col-span-3`} aria-label="Notes" />
           </fieldset>
 
+          {!saved && suggestions.length > 0 && (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs">
+              <p className="font-bold text-sky-900">Start from a past quotation for {destination}</p>
+              <ul className="mt-2 space-y-1">
+                {suggestions.map((row) => (
+                  <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white p-2">
+                    <span><strong>{row.title}</strong> <span className="text-stone-500">· {row.ref} · {row.days} day{row.days === 1 ? "" : "s"} · {row.adults + row.children} travelers · {inr(row.totalInr)}</span></span>
+                    <button type="button" onClick={() => startFrom(row.id)} className="rounded-lg bg-sky-700 px-3 py-1.5 font-bold text-white">Use for {draft.startDate}</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="space-y-2">
-            {draft.lines.map((line, index) => {
-              const hotel = hotels.find((item) => item.id === line.hotelId);
-              const rooms = hotel ? [...new Set(hotel.rates.map((rate) => rate.roomType))] : [];
-              return (
-                <fieldset key={index} disabled={!editable} className="flex flex-wrap items-end gap-2 rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3 text-xs">
-                  <label>Day<input type="number" min={1} value={line.dayNumber} onChange={(event) => setLine(index, { dayNumber: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
-                  {line.kind === "HOTEL" && <>
-                    <label>Hotel<select value={line.hotelId || ""} onChange={(event) => setLine(index, { hotelId: event.target.value, roomType: "" })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{hotels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                    <label>Room<select value={line.roomType || ""} onChange={(event) => setLine(index, { roomType: event.target.value })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{rooms.map((room) => <option key={room}>{room}</option>)}</select></label>
-                    <label>Meals<select value={line.mealPlan} onChange={(event) => setLine(index, { mealPlan: event.target.value })} className={`mt-1 block ${input}`}>{Object.entries(MEAL_PLAN_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-                    <label>Check-in<input type="date" value={line.checkIn || ""} onChange={(event) => setLine(index, { checkIn: event.target.value })} className={`mt-1 block ${input}`} /></label>
-                    <label>Nights<input type="number" min={1} value={line.nights} onChange={(event) => setLine(index, { nights: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
-                    <label>Rooms<input type="number" min={1} value={line.rooms} onChange={(event) => setLine(index, { rooms: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
-                    <label>Extra adults<input type="number" min={0} value={line.extraAdults || 0} onChange={(event) => setLine(index, { extraAdults: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
-                  </>}
-                  {line.kind === "LISTING" && <>
-                    <label>Listing<select value={line.productId || ""} onChange={(event) => setLine(index, { productId: event.target.value, title: products.find((item) => item.id === event.target.value)?.title || "" })} className={`mt-1 block max-w-56 ${input}`}><option value="">Choose…</option>{products.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
-                    <label>Date<input type="date" value={line.date || ""} onChange={(event) => setLine(index, { date: event.target.value })} className={`mt-1 block ${input}`} /></label>
-                    <label>Time<input type="time" value={line.pickupTime || ""} onChange={(event) => setLine(index, { pickupTime: event.target.value })} className={`mt-1 block ${input}`} /></label>
-                    <label>Adults<input type="number" min={1} value={line.adults} onChange={(event) => setLine(index, { adults: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
-                    <label>Children<input type="number" min={0} value={line.children} onChange={(event) => setLine(index, { children: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
-                  </>}
-                  {line.kind === "CUSTOM" && <>
-                    <label>Item<input placeholder="Airport cab, permits…" value={line.title} onChange={(event) => setLine(index, { title: event.target.value })} className={`mt-1 block w-48 ${input}`} /></label>
-                    <label>Your cost (₹)<input type="number" min={0} value={line.amountInr ?? ""} onChange={(event) => setLine(index, { amountInr: event.target.value })} className={`mt-1 block w-28 ${input}`} /></label>
-                  </>}
-                  <label className="min-w-40 flex-1">Description on the PDF<input value={line.description || ""} onChange={(event) => setLine(index, { description: event.target.value })} className={`mt-1 block w-full ${input}`} /></label>
-                  <span className="ml-auto text-right"><span className="block text-[10px] uppercase text-stone-400">{line.kind === "LISTING" ? "Price, pre-tax" : "Your cost"}</span><strong className="font-mono">{line.priceInr != null ? inr(line.priceInr) : "Save to price"}</strong></span>
-                  {saved?.status === "ACCEPTED" && line.kind === "LISTING" && (line.bookingId
-                    ? <span className="rounded-lg bg-emerald-100 px-2 py-1 font-bold text-emerald-800">Booked</span>
-                    : <button type="button" onClick={() => act(`/lines/${line.id}/book`, {}, `${line.title} booked; seats are held.`)} className="rounded-lg bg-stone-900 px-3 py-2 font-bold text-white disabled:opacity-50" disabled={false}>Book now</button>)}
-                  {editable && <button type="button" onClick={() => setDraft({ ...draft, lines: draft.lines.filter((_, i) => i !== index) })} aria-label="Remove line" className="rounded-lg p-2 text-stone-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>}
+            {dayNumbers.map((dayNumber) => (
+              <div key={dayNumber} className="space-y-2 rounded-2xl border border-stone-200 p-3">
+                <fieldset disabled={!editable} className="grid gap-2 text-xs sm:grid-cols-[10rem_1fr]">
+                  <span className="self-center font-black text-amber-700">Day {dayNumber} · {dayDate(draft.startDate, dayNumber)}</span>
+                  <input placeholder="Day title, e.g. Agra: Taj Mahal and Agra Fort" value={dayOf(dayNumber).title || ""} onChange={(event) => setDay(dayNumber, { title: event.target.value })} className={input} aria-label={`Day ${dayNumber} title`} />
+                  <textarea rows={2} placeholder="What happens this day (on the PDF)" value={dayOf(dayNumber).description || ""} onChange={(event) => setDay(dayNumber, { description: event.target.value })} className={`${input} sm:col-span-2`} aria-label={`Day ${dayNumber} description`} />
                 </fieldset>
-              );
-            })}
+                {draft.lines.map((line, index) => {
+                  if ((Number(line.dayNumber) || 1) !== dayNumber) return null;
+                  const hotel = hotels.find((item) => item.id === line.hotelId);
+                  const rooms = hotel ? [...new Set(hotel.rates.map((rate) => rate.roomType))] : [];
+                  return (
+                    <fieldset key={index} disabled={!editable} className="flex flex-wrap items-end gap-2 rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3 text-xs">
+                      <label>Day<input type="number" min={1} value={line.dayNumber} onChange={(event) => setLine(index, { dayNumber: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                      {line.kind === "HOTEL" && <>
+                        <label>Hotel<select value={line.hotelId || ""} onChange={(event) => setLine(index, { hotelId: event.target.value, roomType: "" })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{hotels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                        <label>Room<select value={line.roomType || ""} onChange={(event) => setLine(index, { roomType: event.target.value })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{rooms.map((room) => <option key={room}>{room}</option>)}</select></label>
+                        <label>Meals<select value={line.mealPlan} onChange={(event) => setLine(index, { mealPlan: event.target.value })} className={`mt-1 block ${input}`}>{Object.entries(MEAL_PLAN_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                        <label>Check-in<input type="date" value={line.checkIn || ""} onChange={(event) => setLine(index, { checkIn: event.target.value })} className={`mt-1 block ${input}`} /></label>
+                        <label>Nights<input type="number" min={1} value={line.nights} onChange={(event) => setLine(index, { nights: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        <label>Rooms<input type="number" min={1} value={line.rooms} onChange={(event) => setLine(index, { rooms: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        <label>Extra adults<input type="number" min={0} value={line.extraAdults || 0} onChange={(event) => setLine(index, { extraAdults: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                      </>}
+                      {line.kind === "LISTING" && <>
+                        <label>Listing<select value={line.productId || ""} onChange={(event) => setLine(index, { productId: event.target.value, title: products.find((item) => item.id === event.target.value)?.title || "" })} className={`mt-1 block max-w-56 ${input}`}><option value="">Choose…</option>{products.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+                        <label>Date<input type="date" value={line.date || ""} onChange={(event) => setLine(index, { date: event.target.value })} className={`mt-1 block ${input}`} /></label>
+                        <label>Time<input type="time" value={line.pickupTime || ""} onChange={(event) => setLine(index, { pickupTime: event.target.value })} className={`mt-1 block ${input}`} /></label>
+                        <label>Adults<input type="number" min={1} value={line.adults} onChange={(event) => setLine(index, { adults: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        <label>Children<input type="number" min={0} value={line.children} onChange={(event) => setLine(index, { children: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                      </>}
+                      {line.kind === "TRANSPORT" && <>
+                        <label>Car service<select value={line.serviceId || ""} onChange={(event) => pickService(index, event.target.value)} className={`mt-1 block max-w-56 ${input}`}><option value="">Choose…</option>{serviceOptions(["TRANSFER", "SIGHTSEEING"])}</select></label>
+                        <label>Cab<select value={line.cabTypeId || ""} onChange={(event) => setLine(index, { cabTypeId: event.target.value })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{cabsFor(services.find((item) => item.id === line.serviceId)).map((cab) => <option key={cab.id} value={cab.id}>{cab.name} ({cab.seats} seats)</option>)}</select></label>
+                        <label>Cabs<input type="number" min={1} placeholder="Auto" value={line.vehicles ?? ""} onChange={(event) => setLine(index, { vehicles: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        <label>Date<input type="date" value={line.date || ""} onChange={(event) => setLine(index, { date: event.target.value })} className={`mt-1 block ${input}`} /></label>
+                      </>}
+                      {line.kind === "ACTIVITY" && <>
+                        <label>Activity<select value={line.serviceId || ""} onChange={(event) => pickService(index, event.target.value)} className={`mt-1 block max-w-56 ${input}`}><option value="">Choose…</option>{serviceOptions(["ACTIVITY"])}</select></label>
+                        <label>Date<input type="date" value={line.date || ""} onChange={(event) => setLine(index, { date: event.target.value })} className={`mt-1 block ${input}`} /></label>
+                        <label>Adults<input type="number" min={0} placeholder={String(draft.adults)} value={line.adults ?? ""} onChange={(event) => setLine(index, { adults: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        <label>Children<input type="number" min={0} placeholder={String(draft.children)} value={line.children ?? ""} onChange={(event) => setLine(index, { children: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                      </>}
+                      {line.kind === "CUSTOM" && <>
+                        <label>Item<input placeholder="Airport cab, permits…" value={line.title} onChange={(event) => setLine(index, { title: event.target.value })} className={`mt-1 block w-48 ${input}`} /></label>
+                        <label>Your cost (₹)<input type="number" min={0} value={line.amountInr ?? ""} onChange={(event) => setLine(index, { amountInr: event.target.value })} className={`mt-1 block w-28 ${input}`} /></label>
+                      </>}
+                      <label className="min-w-40 flex-1">Description on the PDF<input value={line.description || ""} onChange={(event) => setLine(index, { description: event.target.value })} className={`mt-1 block w-full ${input}`} /></label>
+                      <span className="ml-auto text-right"><span className="block text-[10px] uppercase text-stone-400">{line.kind === "LISTING" ? "Price, pre-tax" : "Your cost"}</span><strong className="font-mono">{line.priceInr != null ? inr(line.priceInr) : "Save to price"}</strong></span>
+                      {saved?.status === "ACCEPTED" && line.kind === "LISTING" && (line.bookingId
+                        ? <span className="rounded-lg bg-emerald-100 px-2 py-1 font-bold text-emerald-800">Booked</span>
+                        : <button type="button" onClick={() => act(`/lines/${line.id}/book`, {}, `${line.title} booked; seats are held.`)} className="rounded-lg bg-stone-900 px-3 py-2 font-bold text-white disabled:opacity-50" disabled={false}>Book now</button>)}
+                      {editable && <button type="button" onClick={() => setDraft({ ...draft, lines: draft.lines.filter((_, i) => i !== index) })} aria-label="Remove line" className="rounded-lg p-2 text-stone-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>}
+                    </fieldset>
+                  );
+                })}
+              </div>
+            ))}
             {editable && <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => addLine("HOTEL")} disabled={!hotels.length} title={hotels.length ? "" : "Add hotels under Hotel rate sheet first"} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold disabled:opacity-40"><Hotel className="h-4 w-4" /> Hotel nights</button>
               <button type="button" onClick={() => addLine("LISTING")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold"><Package className="h-4 w-4" /> Your listing</button>
+              <button type="button" onClick={() => addLine("TRANSPORT")} disabled={!services.some((service) => isTransport(service.kind))} title={services.some((service) => isTransport(service.kind)) ? "" : "Add transfers or sightseeing under Cars & activities first"} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold disabled:opacity-40"><Car className="h-4 w-4" /> Transfer / sightseeing</button>
+              <button type="button" onClick={() => addLine("ACTIVITY")} disabled={!services.some((service) => service.kind === "ACTIVITY")} title={services.some((service) => service.kind === "ACTIVITY") ? "" : "Add activities under Cars & activities first"} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold disabled:opacity-40"><Ticket className="h-4 w-4" /> Activity / ticket</button>
               <button type="button" onClick={() => addLine("CUSTOM")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold"><Plus className="h-4 w-4" /> Custom item</button>
+              <button type="button" onClick={() => setDay(lastDay + (draft.lines.length || (draft.days || []).length ? 1 : 0), {})} className="flex items-center gap-1 rounded-xl border border-dashed border-stone-300 px-3 py-2 text-xs font-bold"><CalendarPlus className="h-4 w-4" /> Next day</button>
             </div>}
           </div>
 
@@ -194,7 +314,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             <div className="grid gap-2 rounded-2xl border border-stone-200 p-4 text-sm sm:grid-cols-2">
               <div className="space-y-1 text-xs text-stone-600">
                 <p className="text-[10px] font-black uppercase text-stone-400">Only you see this</p>
-                <p>Hotels and extras (cost) <span className="float-right font-mono">{inr(saved.totals.costInr)}</span></p>
+                <p>Your costs: hotels, cars, activities, extras <span className="float-right font-mono">{inr(saved.totals.costInr)}</span></p>
                 <p>Markup {saved.markupPct}% <span className="float-right font-mono">{inr(saved.totals.markupInr)}</span></p>
                 <p>Your listings <span className="float-right font-mono">{inr(saved.totals.listingsInr)}</span></p>
               </div>
@@ -203,8 +323,16 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                 <p>Package price <span className="float-right font-mono">{inr(saved.totals.subtotalInr)}</span></p>
                 {saved.totals.gstInr > 0 && <p>GST {saved.totals.gstPct}% <span className="float-right font-mono">{inr(saved.totals.gstInr)}</span></p>}
                 <p className="text-lg font-black">Total <span className="float-right font-mono">{inr(saved.totals.totalInr)}</span></p>
+                {saved.adults + saved.children > 1 && <p className="text-xs text-stone-500">About {inr(saved.totals.perPersonInr)} per person</p>}
                 {saved.status === "ACCEPTED" && <p className="text-xs text-stone-600">Paid {inr(saved.totals.paidInr)} · due <strong>{inr(saved.totals.dueInr)}</strong></p>}
               </div>
+            </div>
+          )}
+
+          {saved?.warnings?.length > 0 && (
+            <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <p className="flex items-center gap-1 font-bold"><TriangleAlert className="h-4 w-4" /> Check before sending</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5">{saved.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
             </div>
           )}
 
@@ -212,6 +340,10 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             {editable && <button onClick={save} className="rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-bold text-stone-950">Save and price</button>}
             {saved && <button onClick={downloadPdf} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Download className="h-4 w-4" /> PDF</button>}
             {saved && saved.status !== "DECLINED" && <button onClick={send} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Send className="h-4 w-4" /> Send to customer</button>}
+            {saved && <span className="flex items-center gap-1">
+              <input type="date" value={copyDate} onChange={(event) => setCopyDate(event.target.value)} className={`${input} py-2 text-xs`} aria-label="Start date for the copy" />
+              <button onClick={() => copyFrom(saved.id, { startDate: copyDate }, "Copied as a new draft for the new dates. Change the customer and save.")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Copy className="h-4 w-4" /> Copy to this date</button>
+            </span>}
             {saved?.status === "SENT" && <>
               <button onClick={() => act("/status", { status: "ACCEPTED" }, "Accepted. Book the listings below and record payments.")} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white">Customer accepted</button>
               <button onClick={() => act("/status", { status: "DECLINED" }, "Marked declined.")} className="rounded-xl border border-rose-300 px-4 py-2.5 text-xs font-bold text-rose-700">Declined</button>
@@ -248,7 +380,7 @@ function Tabs({ tab, setTab }) {
     <div className="flex items-center justify-between gap-3">
       <h2 className="font-display text-xl font-bold text-stone-900">Packages</h2>
       <div className="flex gap-1 rounded-xl bg-stone-100 p-1 text-xs font-bold">
-        {[["quotations", "Quotations"], ["hotels", "Hotel rate sheet"]].map(([value, label]) => (
+        {[["quotations", "Quotations"], ["hotels", "Hotel rate sheet"], ["services", "Cars & activities"]].map(([value, label]) => (
           <button key={value} onClick={() => setTab(value)} aria-pressed={tab === value} className={`rounded-lg px-3 py-1.5 ${tab === value ? "bg-white shadow-sm" : "text-stone-500"}`}>{label}</button>
         ))}
       </div>

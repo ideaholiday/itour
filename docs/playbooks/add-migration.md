@@ -9,6 +9,7 @@
 3. **Write SQL that runs on both engines:**
    - Tables: `CREATE TABLE IF NOT EXISTS`, `TEXT` ids, `created_at TEXT NOT NULL DEFAULT (datetime('now'))`.
    - Columns: `ALTER TABLE t ADD COLUMN IF NOT EXISTS c TYPE;` (the runner emulates this on SQLite).
+   - Dropping a column's inline CHECK: `ALTER TABLE t DROP CONSTRAINT IF EXISTS t_c_check;` (PostgreSQL's default name; the runner emulates it on SQLite, see `069_package_services.sql`).
    - The Postgres adapter rewrites `datetime('now')`, and rewrites `INSERT OR IGNORE` **only at the start of a statement**. End every statement with `;` (files are split per statement).
    - No PostgreSQL-only syntax (`JSONB` operators, `SERIAL`, `DO $$`) unless it's wrapped in an engine check in code.
 4. **Add a `-- @down` section** that reverses the change (`DROP ... IF EXISTS`). Rollback refuses files without one.

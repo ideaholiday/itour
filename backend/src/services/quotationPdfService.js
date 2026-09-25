@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import { findQuotation, quotationView } from "./quotationService.js";
 import { listHotels } from "./supplierHotelService.js";
+import { listCabTypes } from "./supplierRateSheetService.js";
 
 /**
  * The customer's copy of a package quotation (ADR 040): the itinerary day by
@@ -20,7 +21,7 @@ function dayDate(startDate, dayNumber) {
   return date.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-function lineSummary(line, hotels) {
+function lineSummary(line, hotels, cabs) {
   if (line.kind === "HOTEL") {
     const hotel = hotels.get(line.hotelId);
     const parts = [hotel?.name || line.title, line.roomType, MEAL_PLANS[line.mealPlan] || line.mealPlan, `${line.nights} night${line.nights === 1 ? "" : "s"}`];
@@ -28,12 +29,18 @@ function lineSummary(line, hotels) {
     return parts.filter(Boolean).join(" · ");
   }
   if (line.kind === "LISTING") return [line.title, line.pickupTime ? `at ${line.pickupTime}` : null].filter(Boolean).join(" ");
+  if (line.kind === "TRANSPORT") {
+    const cab = cabs.get(line.cabTypeId);
+    return cab ? `${line.title} · ${line.vehicles > 1 ? `${line.vehicles} × ` : ""}${cab.name}` : line.title;
+  }
   return line.title;
 }
 
 /** Renders the quotation to a PDF Buffer. */
-export function renderQuotationPdf({ quotation, supplier, hotels = [] }) {
+export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes = [] }) {
   const hotelsById = new Map(hotels.map((hotel) => [hotel.id, hotel]));
+  const cabsById = new Map(cabTypes.map((cab) => [cab.id, cab]));
+  const dayText = new Map((quotation.days || []).map((day) => [day.dayNumber, day]));
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: "A4", margin: 48, info: { Title: `${quotation.ref} ${quotation.title}`, Author: supplier.company_name || "IdeaHoliday partner" } });
     const chunks = [];
@@ -65,12 +72,14 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [] }) {
     // Itinerary, day by day, without prices.
     doc.font("Helvetica-Bold").fontSize(12).fillColor(INK).text("Itinerary", { width });
     doc.moveDown(0.4);
-    const days = [...new Set(quotation.lines.map((line) => line.dayNumber))].sort((a, b) => a - b);
+    const days = [...new Set([...quotation.lines.map((line) => line.dayNumber), ...dayText.keys()])].sort((a, b) => a - b);
     for (const day of days) {
       if (doc.y > doc.page.height - 140) doc.addPage();
-      doc.font("Helvetica-Bold").fontSize(10.5).fillColor(ACCENT).text(`Day ${day} · ${dayDate(quotation.startDate, day)}`, { width });
+      const text = dayText.get(day);
+      doc.font("Helvetica-Bold").fontSize(10.5).fillColor(ACCENT).text(`Day ${day} · ${dayDate(quotation.startDate, day)}${text?.title ? ` · ${text.title}` : ""}`, { width });
+      if (text?.description) doc.font("Helvetica").fontSize(9.5).fillColor(INK).text(text.description, { width, paragraphGap: 3 });
       for (const line of quotation.lines.filter((item) => item.dayNumber === day)) {
-        doc.font("Helvetica-Bold").fontSize(10).fillColor(INK).text(`• ${lineSummary(line, hotelsById)}`, { width, indent: 8 });
+        doc.font("Helvetica-Bold").fontSize(10).fillColor(INK).text(`• ${lineSummary(line, hotelsById, cabsById)}`, { width, indent: 8 });
         if (line.description) doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(line.description, { width: width - 18, indent: 18 });
       }
       doc.moveDown(0.6);
@@ -93,8 +102,10 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [] }) {
     }
     doc.font("Helvetica-Bold").fontSize(13).fillColor(INK).text("Total", 64, y + 6, { width: width / 2 });
     doc.font("Helvetica-Bold").fontSize(13).fillColor("#087f5b").text(inr(quotation.totals.totalInr), 48 + width / 2, y + 6, { width: width / 2 - 16, align: "right" });
+    const people = quotation.adults + quotation.children;
+    if (people > 1) doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(`About ${inr(quotation.totals.perPersonInr)} per person`, 48 + width / 2, y + 26, { width: width / 2 - 16, align: "right" });
     doc.x = 48;
-    doc.y = y + 40;
+    doc.y = y + 44;
 
     doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(`The price is for the whole group${quotation.totals.gstInr > 0 ? " and includes GST" : ""}. Hotels and departures are held only once the quotation is accepted and confirmed.`, 48, doc.y, { width });
     if (quotation.notes) {
@@ -110,6 +121,6 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [] }) {
 export async function quotationPdf(database, supplierId, quotationId) {
   const row = findQuotation(database, supplierId, quotationId);
   const supplier = database.prepare("SELECT company_name, contact_name, phone, email FROM suppliers WHERE id = ?").get(supplierId);
-  const buffer = await renderQuotationPdf({ quotation: quotationView(database, row), supplier: supplier || {}, hotels: listHotels(database, supplierId) });
+  const buffer = await renderQuotationPdf({ quotation: quotationView(database, row), supplier: supplier || {}, hotels: listHotels(database, supplierId), cabTypes: listCabTypes(database, supplierId) });
   return { buffer, filename: `${row.ref}.pdf` };
 }
