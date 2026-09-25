@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import logger from "../../config/logger.js";
 
 /**
@@ -176,60 +177,167 @@ export class GenericOctoAdapter extends ResTechAdapter {
 }
 
 /**
- * Bókun Adapter (Tripadvisor ResTech)
+ * Bókun Adapter (ADR 046): Bókun's OCTo API, the OCTo standard as published at
+ * docs.octo.travel, not the dialect our own /octo surface speaks.
+ *
+ * The operator creates an OCTo API key in Bókun (Settings → Connectivity → API
+ * keys, OCTo enabled); a vendor id, if given, is appended as `key/vendorId` to
+ * limit the key to one vendor. Live and test environments are Bókun's own.
+ * Nothing here invents a product, a price or a departure: what Bókun doesn't
+ * send stays empty. Verified against a mock OCTo server only until a Bókun test
+ * key is available (docs/INTEGRATIONS.md).
  */
+export const BOKUN_OCTO_ENDPOINTS = Object.freeze({
+  LIVE: "https://api.bokun.io/octo/v1",
+  TEST: "https://api.bokuntest.com/octo/v1",
+});
+
+/** A UUID derived from any idempotency key, so a retried reservation reaches Bókun as the same one. */
+function uuidFromKey(key) {
+  const text = String(key || "");
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)) return text.toLowerCase();
+  const hex = createHash("sha256").update(`bokun-reservation:${text}`).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${((parseInt(hex[16], 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** A price in rupees from an OCTo price object, only when it is in INR. */
+function inrPrice(price) {
+  if (!price || String(price.currency || "").toUpperCase() !== "INR" || price.retail == null) return null;
+  return Math.round(Number(price.retail) / 10 ** Number(price.currencyPrecision ?? 2));
+}
+
 export class BokunAdapter extends ResTechAdapter {
   constructor() {
     super("BOKUN");
   }
 
-  async testConnection(credentials) {
-    if (!credentials.accessKey && !credentials.apiKey) {
-      throw new Error("Bókun Access Key is required");
+  _config(credentials = {}) {
+    const key = String(credentials.apiKey || "").trim();
+    if (!key) throw Object.assign(new Error("Enter the OCTo API key from Bókun (Settings → Connectivity → API keys)"), { status: 400, code: "BOKUN_KEY_REQUIRED" });
+    const vendorId = String(credentials.vendorId || "").trim();
+    const endpoint = String(credentials.endpointUrl || BOKUN_OCTO_ENDPOINTS[String(credentials.environment || "LIVE").toUpperCase()] || BOKUN_OCTO_ENDPOINTS.LIVE).replace(/\/+$/, "");
+    const url = new URL(endpoint);
+    if (url.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(url.hostname)) {
+      throw Object.assign(new Error("The Bókun endpoint must use https"), { status: 400, code: "BOKUN_ENDPOINT_INVALID" });
     }
-    // Simulation / Direct verification
-    return { success: true, status: "CONNECTED", provider: "BOKUN" };
+    return { endpoint, token: vendorId ? `${key}/${vendorId}` : key };
+  }
+
+  async _call(credentials, path, { method = "GET", body, timeoutMs = 10000 } = {}) {
+    const { endpoint, token } = this._config(credentials);
+    const res = await fetch(`${endpoint}${path}`, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        // Bókun's docs name the header "Authentication"; the OCTo standard says Authorization. Send both.
+        Authentication: `Bearer ${token}`,
+        "Octo-Capabilities": "octo/pricing",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw Object.assign(new Error(`Bókun: ${data.errorMessage || data.error || `HTTP ${res.status}`}`), {
+        status: res.status >= 500 ? 502 : res.status === 401 || res.status === 403 ? 502 : 409,
+        code: res.status === 401 || res.status === 403 ? "PROVIDER_AUTH_FAILED" : data.error || "PROVIDER_ERROR",
+      });
+    }
+    return data;
+  }
+
+  async testConnection(credentials) {
+    const products = await this._call(credentials, "/products");
+    return { success: true, status: "CONNECTED", provider: "BOKUN", products: Array.isArray(products) ? products.length : 0 };
   }
 
   async fetchProducts(credentials) {
-    // If supplier provided an OCTo endpoint for their Bokun account, use generic OCTo engine
-    if (credentials.endpointUrl) {
-      return new GenericOctoAdapter().fetchProducts(credentials);
+    const products = await this._call(credentials, "/products");
+    return (Array.isArray(products) ? products : []).map((product) => {
+      const options = (product.options || []).map((option) => {
+        const unit = (type) => (option.units || []).find((item) => item.type === type);
+        return {
+          externalId: String(option.id),
+          name: option.title || option.internalName || null,
+          departureTimes: option.availabilityLocalStartTimes || [],
+          capacity: option.restrictions?.maxUnits ?? null,
+          adultPrice: inrPrice(unit("ADULT")?.pricingFrom?.[0]),
+          childPrice: inrPrice(unit("CHILD")?.pricingFrom?.[0]),
+        };
+      });
+      return {
+        externalId: String(product.id),
+        title: product.title || product.internalName || String(product.id),
+        shortDesc: product.shortDescription || null,
+        fullDesc: product.description || null,
+        heroImage: product.coverImageUrl || null,
+        currency: product.defaultCurrency || null,
+        priceInr: options.find((option) => option.adultPrice != null)?.adultPrice ?? null,
+        options,
+      };
+    });
+  }
+
+  async fetchAvailability(credentials, externalProductId, { optionId, localDateStart, localDateEnd } = {}) {
+    const slots = await this._call(credentials, "/availability", {
+      method: "POST",
+      body: { productId: externalProductId, optionId, localDateStart, localDateEnd: localDateEnd || localDateStart },
+    });
+    return (Array.isArray(slots) ? slots : []).map((slot) => ({
+      id: slot.id,
+      productId: externalProductId,
+      optionId: optionId || null,
+      localDate: String(slot.localDateTimeStart || "").slice(0, 10),
+      localTime: String(slot.localDateTimeStart || "").slice(11, 16),
+      localDateTimeStart: slot.localDateTimeStart,
+      utcCutoffAt: slot.utcCutoffAt || null,
+      capacity: slot.capacity ?? null,
+      vacancies: slot.vacancies ?? null,
+      available: Boolean(slot.available),
+      status: slot.status || null,
+      external: true,
+    }));
+  }
+
+  /**
+   * Reserves per the OCTo standard: the availability id comes from Bókun's own
+   * availability for that date and time, and each traveller is a unit id from
+   * the option's units.
+   */
+  async createReservation(credentials, { externalProductId, externalOptionId, unitItems, idempotencyKey, localDate, localTime }) {
+    const slots = await this.fetchAvailability(credentials, externalProductId, { optionId: externalOptionId, localDateStart: localDate });
+    const slot = slots.find((item) => item.localTime === localTime) || (slots.length === 1 && !localTime ? slots[0] : null);
+    if (!slot || !slot.available) {
+      throw Object.assign(new Error(`Bókun has no availability on ${localDate}${localTime ? ` at ${localTime}` : ""}`), { status: 409, code: "SLOT_UNAVAILABLE" });
     }
-    // Return standard catalog structure mapped for Bokun
-    return [
-      {
-        externalId: `bokun_${credentials.accessKey?.slice(0, 6) || "pkg"}_001`,
-        title: "Bókun Curated Island Tour & Water Sports",
-        shortDesc: "Experience authentic coastal adventures synchronized live with Bókun.",
-        fullDesc: "Complete guided tour with hotel transfers, speed boat rides, and snorkeling. Real-time availability managed on Bókun.",
-        heroImage: "https://images.unsplash.com/photo-1544735716-392fe2489ffa?w=800&auto=format&fit=crop&q=80",
-        city: "Goa",
-        category: "Adventure",
-        productType: "EXPERIENCE",
-        durationHours: 6,
-        priceInr: 2800,
-        currency: "INR",
-        options: [
-          {
-            externalId: "bokun_opt_morning",
-            name: "Morning Departure",
-            departureTimes: ["08:30", "10:00"],
-            capacity: 20,
-            adultPrice: 2800,
-            childPrice: 2100,
-          },
-          {
-            externalId: "bokun_opt_sunset",
-            name: "Sunset Sailing & Cruise",
-            departureTimes: ["16:00"],
-            capacity: 15,
-            adultPrice: 3200,
-            childPrice: 2400,
-          },
-        ],
-      },
-    ];
+    const product = await this._call(credentials, `/products/${encodeURIComponent(externalProductId)}`);
+    const option = (product.options || []).find((item) => String(item.id) === String(externalOptionId)) || (product.options || []).find((item) => item.default);
+    const units = unitItems.map((item) => {
+      const unit = (option?.units || []).find((candidate) => candidate.type === item.unitType);
+      if (!unit) throw Object.assign(new Error(`Bókun doesn't offer a ${String(item.unitType).toLowerCase()} ticket on this option`), { status: 409, code: "UNIT_NOT_OFFERED" });
+      return { unitId: unit.id };
+    });
+    return this._call(credentials, "/bookings", {
+      method: "POST",
+      body: { uuid: uuidFromKey(idempotencyKey), productId: externalProductId, optionId: option?.id ?? externalOptionId, availabilityId: slot.id, unitItems: units },
+    });
+  }
+
+  async confirmReservation(credentials, { uuid, contact = {} }) {
+    return this._call(credentials, `/bookings/${encodeURIComponent(uuid)}/confirm`, {
+      method: "POST",
+      body: { contact: { fullName: contact.fullName || null, emailAddress: contact.emailAddress || null, phoneNumber: contact.phoneNumber || null } },
+    });
+  }
+
+  /** Bókun cancels only when the cancellation would be a 100% refund; otherwise its error reaches the caller. */
+  async cancelReservation(credentials, { uuid, reason }) {
+    return this._call(credentials, `/bookings/${encodeURIComponent(uuid)}/cancel`, {
+      method: "POST",
+      body: { reason: reason || "Cancelled by marketplace" },
+    });
   }
 }
 

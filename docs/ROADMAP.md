@@ -102,7 +102,14 @@ hand-rolled a `bookings` table not matching production, and the analytics bugs
 the same way. Prefer fixtures built from the real migrations
 (`backend/test/helpers/migratedDb.js`).
 
-**2. Provider-specific adapters**
+**2. Provider-specific adapters** *(Bókun done, not yet verified against real Bókun; ADR 046)*
+Bókun now books through its OCTo API, following the published standard; it needs a run against Bókun's test
+environment (`https://api.bokuntest.com/octo/v1`) with a real OCTo key. Found on the way, owner to decide:
+the other five adapters return built-in sample products and report "connected" without calling the provider;
+the importer invents missing values (Goa, ₹1,500, 09:00/14:00, 15 seats); and our own OCTo server and client
+use a dialect (`/bookings/reservation|confirmation|cancellation`, `unitType`) rather than the standard, which
+standard OCTo resellers can't call. Changing the server would affect partners already integrated.
+
 `OCTO_GENERIC` now does availability, reserve, confirm and cancel, and the
 provider boundary is real. The remaining six adapters (Bókun, FareHarbor,
 Bookingkit, TourCMS, Activitar, Anchor) still only import products and return

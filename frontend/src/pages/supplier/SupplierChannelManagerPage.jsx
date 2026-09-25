@@ -22,12 +22,13 @@ const CHANNEL_DEFS = [
     id: "BOKUN",
     name: "Bókun",
     company: "Tripadvisor Company",
-    desc: "Sync live availability and tour departures directly via Bókun OCTo API.",
+    desc: "Live availability and bookings through Bókun's OCTo API. Create the key in Bókun: Settings → Connectivity → API keys, with OCTo enabled.",
     logoBg: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+    // ADR 046: one OCTo API key (bearer token), optionally limited to one vendor.
     fields: [
-      { key: "accessKey", label: "Access Key", placeholder: "e.g. bkn_live_acc_...", required: true },
-      { key: "secretKey", label: "Secret Key", placeholder: "••••••••", type: "password", required: true },
-      { key: "endpointUrl", label: "Custom OCTo Endpoint (Optional)", placeholder: "https://...api.bokun.io/octo" },
+      { key: "apiKey", label: "OCTo API Key", placeholder: "From Bókun → Settings → Connectivity → API keys", type: "password", required: true },
+      { key: "vendorId", label: "Vendor ID (Optional)", placeholder: "Limits the key to one Bókun vendor" },
+      { key: "endpointUrl", label: "Endpoint (Optional)", placeholder: "Empty = live. Test: https://api.bokuntest.com/octo/v1" },
     ],
   },
   {

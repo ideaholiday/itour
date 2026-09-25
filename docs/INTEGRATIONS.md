@@ -181,13 +181,22 @@ Enables suppliers on `supply.ideaholiday.in` to link their existing booking engi
 ### Supported Channel Engines
 | Channel | Adapter Type | Auth Scheme | Sync Capabilities |
 | :--- | :--- | :--- | :--- |
-| **Bókun (Tripadvisor)** | `BOKUN` | Access Key + Secret | Activities, departure rates, external reference mapping |
+| **Bókun (Tripadvisor)** | `BOKUN` | OCTo API key (Bearer), optional vendor id | Bókun's OCTo API, the published standard (ADR 046): products, availability, reserve, confirm, cancel. Tested against a mock OCTo server only; not yet against real Bókun |
 | **FareHarbor** | `FAREHARBOR` | API App Key | Experience discovery, item options |
 | **Bookingkit** | `BOOKINGKIT` | Client ID + Client Secret | Experience listings, pricing tiers |
 | **Palisis Group / TourCMS** | `TOURCMS` | Marketplace ID + API Key | Tour catalog, options |
 | **Activitar** | `ACTIVITAR` | Supplier API Key | Live inventory, activities |
 | **Anchor Operating System**| `ANCHOR` | Bearer Token | Attraction & ferry booking inventory |
-| **Generic OCTo Endpoint** | `OCTO_GENERIC` | Bearer Token | Standard OCTo v1 capabilities, products, availability |
+| **Generic OCTo Endpoint** | `OCTO_GENERIC` | Bearer Token | Products, availability, reserve, confirm, cancel in **our own OCTo dialect** (§9: `/bookings/reservation`, `/confirmation`, `/cancellation`, `unitType`), not the published standard |
+
+**FareHarbor, Bookingkit, TourCMS, Activitar and Anchor are placeholders:** "test connection" does not contact the provider and "fetch products" returns built-in sample products. They have no live availability or bookings (`PROVIDER_CAPABILITY_MISSING`). The product importer also fills anything a provider leaves out (city "Goa", ₹1,500, 09:00 and 14:00, 15 seats); imports are drafts.
+
+### Bókun (ADR 046)
+- The operator creates an OCTo API key in Bókun (Settings → Connectivity → API keys, OCTo enabled) and pastes it into the connection, with a vendor id to limit it to one vendor (sent as `key/vendorId`).
+- Endpoint: empty means live `https://api.bokun.io/octo/v1`; Bókun's test environment is `https://api.bokuntest.com/octo/v1`. Only `https` (or localhost for tests).
+- Headers: `Authorization: Bearer …` (the standard) and `Authentication: Bearer …` (the name Bókun's docs use), `Octo-Capabilities: octo/pricing`.
+- Reserve looks up Bókun's own availability id for the date and time and the option's unit ids by type (ADULT, CHILD), and sends a UUID derived from our idempotency key. Confirm sends the traveller's full name, email and phone. Bókun cancels only when it would be a 100% refund; its refusal reaches the caller.
+- Import takes Bókun's values only: rupee prices only when Bókun prices in INR, no invented city, times or capacity.
 
 ### Database Persistence & Endpoints
 - Table: `supplier_channel_connections` (`backend/migrations/020_supplier_channel_connections.sql`).

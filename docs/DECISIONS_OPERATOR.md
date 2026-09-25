@@ -134,3 +134,11 @@
   4. **Vendor payments per line**, never more than owed; the trip shows customer paid, vendors owed and the margin before GST.
   5. **The final itinerary** (days, hotel confirmations, cars with pickup and drivers, booking references, money, operator contact) is sent by email with a signed link and WhatsApp text, only once every line is confirmed or cancelled and every listing booked.
 - **Consequences**: The itinerary link is its own token kind, separate from the quotation link. Nothing here touches IdeaHoliday commission, payouts or the shared inventory.
+
+---
+
+## ADR 046: Bókun Through Its OCTo API, the Published Standard
+- **Date**: 2026-09-25
+- **Context**: Roadmap NEXT 2 (provider adapters). The Bókun adapter reported "connected" without calling Bókun and imported built-in sample products. Bókun publishes an OCTo API with a test environment. Our own OCTo client and `/octo` server speak a dialect of OCTo (different booking paths, `unitType` instead of `unitId`), so the generic client can't talk to Bókun as is.
+- **Decision Made** (owner, 2026-09-25): Build Bókun on its OCTo API following the published standard (`POST /availability`, `POST /bookings` with unit ids and availability id, `POST /bookings/{uuid}/confirm`, `POST /bookings/{uuid}/cancel`), authenticated with the operator's OCTo API key. Import only what Bókun sends. Leave our OCTo dialect and the other five placeholder adapters as they are for now (the owner chose Bókun alone, not the clean-up of the placeholders).
+- **Consequences**: Verified against a mock OCTo server only; it must be run against Bókun's test environment with a real key before a supplier relies on it. Existing Bókun connections saved with an access key and secret no longer connect; the supplier reconnects with an OCTo key.

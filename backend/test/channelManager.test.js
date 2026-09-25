@@ -150,15 +150,23 @@ test("Channel Registry: retrieves all supported ResTech adapters", () => {
   }
 });
 
-test("Channel Manager: connects supplier to Bókun, fetches products, and imports catalog", async () => {
+test("Channel Manager: connects supplier to Bókun, fetches products, and imports catalog", async t => {
   const db = setupChannelTestDb();
+  // Bókun's OCTo API answers with one product (ADR 046).
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => [{
+    id: "bk_prod_1", title: "Old Goa heritage walk", shortDescription: "Churches and convents", defaultCurrency: "INR",
+    options: [{ id: "bk_opt_1", title: "Morning", availabilityLocalStartTimes: ["08:30"], restrictions: { maxUnits: 12 },
+      units: [{ id: "u_adult", type: "ADULT", pricingFrom: [{ retail: 180000, currency: "INR", currencyPrecision: 2 }] }] }],
+  }] });
+  t.after(() => { globalThis.fetch = original; });
 
   // 1. Connect Bókun channel
   const connection = await connectSupplierChannel(db, {
     supplierId: "sup_channel_01",
     channelName: "BOKUN",
     channelTitle: "Primary Bókun Account",
-    credentials: { accessKey: "bk_test_access_key_123", secretKey: "bk_secret_456" },
+    credentials: { apiKey: "bk_octo_test_key" },
   });
 
   assert.ok(connection.id);

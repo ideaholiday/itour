@@ -86,6 +86,9 @@ export function externalReservationProvider(providerName) {
         externalProductId: externalId(db, supplierId, "PRODUCT", productId),
         externalOptionId: externalId(db, supplierId, "OPTION", optionId),
         availabilityId: `${optionId}:${localDate}:${localTime}`,
+        // A standard OCTo provider (Bókun, ADR 046) looks its own availability id up from these.
+        localDate,
+        localTime,
         unitItems: items,
         idempotencyKey: requestKey,
       });
@@ -115,7 +118,8 @@ export function externalReservationProvider(providerName) {
       const adapter = getChannelAdapter(id);
       const confirmReservation = capability(adapter, "confirmReservation");
       const uuid = externalId(db, booking.supplier_id, "BOOKING", booking.provider_reservation_id || booking.id);
-      return confirmReservation(credentials, { uuid });
+      const contact = { fullName: booking.traveler_name || null, emailAddress: booking.traveler_email || null, phoneNumber: booking.traveler_phone || null };
+      return confirmReservation(credentials, { uuid, contact });
     },
 
     async release(db, bookingId, { supplierId } = {}) {

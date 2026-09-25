@@ -75,15 +75,15 @@ test("an external provider refuses to act without an active connection", async t
 test("a provider that cannot do an operation yet says so instead of failing obscurely", async t => {
   const db = providerDb();
   t.after(() => db.close());
-  connect(db, { channel: "BOKUN" });
+  connect(db, { channel: "FAREHARBOR" });
 
-  // Bókun implements testConnection and fetchProducts, but not availability.
-  const adapter = getChannelAdapter("BOKUN");
+  // FareHarbor only imports products; it has no live availability yet (Bókun does since ADR 046).
+  const adapter = getChannelAdapter("FAREHARBOR");
   assert.equal(adapter.fetchAvailability, ResTechAdapter.prototype.fetchAvailability,
-    "this test is meaningless if Bókun has since implemented availability");
+    "this test is meaningless if FareHarbor has since implemented availability");
 
   await assert.rejects(
-    () => getReservationProvider("BOKUN").availability(db, { productId: "p", localDate: "2099-05-12", supplierId: "sup_1" }),
+    () => getReservationProvider("FAREHARBOR").availability(db, { productId: "p", localDate: "2099-05-12", supplierId: "sup_1" }),
     (error) => error.code === "PROVIDER_CAPABILITY_MISSING" && error.status === 501 && /cannot fetchAvailability yet/.test(error.message)
   );
 });
