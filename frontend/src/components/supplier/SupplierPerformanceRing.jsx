@@ -6,13 +6,14 @@ export function SupplierPerformanceRing({ stats }) {
   // Null until travelers leave verified reviews — shown as such, not as a number.
   const rating = Number(stats?.ratings?.avg) || null;
   const reviewCount = Number(stats?.ratings?.total_reviews || 0);
-  const completionRate = stats?.ratings?.completion_rate || 98;
-  const cancellationRate = stats?.ratings?.cancellation_rate || 1.2;
+  // Null until there are enough past trips (ADR 038); never a flattering default.
+  const completionRate = stats?.ratings?.completion_rate ?? null;
+  const cancellationRate = stats?.ratings?.cancellation_rate ?? null;
 
   // SVG Circular Gauge
   const radius = 32;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (completionRate / 100) * circumference;
+  const strokeDashoffset = circumference - ((completionRate ?? 0) / 100) * circumference;
 
   return (
     <Card elevation="sm" className="border-stone-200 dark:border-stone-800">
@@ -57,7 +58,7 @@ export function SupplierPerformanceRing({ stats }) {
             </svg>
             <div className="absolute flex flex-col items-center">
               <span className="text-sm font-extrabold text-stone-900 dark:text-stone-100 font-mono">
-                {completionRate}%
+                {completionRate === null ? "—" : `${completionRate}%`}
               </span>
               <span className="text-[9px] text-stone-400 font-medium uppercase">Fulfillment</span>
             </div>
@@ -81,7 +82,7 @@ export function SupplierPerformanceRing({ stats }) {
 
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-stone-700 dark:text-stone-300 font-mono">
-                {cancellationRate}%
+                {cancellationRate === null ? "Not enough data" : `${cancellationRate}%`}
               </span>
               <span className="text-xs text-stone-500">Cancellation Rate</span>
             </div>

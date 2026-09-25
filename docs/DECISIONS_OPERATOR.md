@@ -40,3 +40,14 @@
   2. **Guides, vehicles and equipment** are the existing shared resources (`native_resources`) with a `kind`. A guide resource may be linked to a staff login; that guide then sees and checks in only the departures they are assigned to.
   3. **Supplier reschedule** (3b): the price never changes and seats move atomically. For a marketplace booking the traveler is notified and may decline, which cancels it with a full wallet refund exactly like a supplier cancellation (ADR 019). A direct (walk-in, phone, manual) booking simply moves.
 - **Consequences**: An assignment names a departure by product, date and time, the same key as the guest list. One guide or vehicle cannot be assigned to two departures at the same date and time.
+
+---
+
+## ADR 038: Supplier Dashboard Numbers Are Real, or Say "Not Enough Data"
+- **Date**: 2026-09-25
+- **Context**: The supplier dashboard showed invented numbers: a fixed 6-month revenue chart, +14.8% growth, a made-up weekly trend and four hardcoded service metrics.
+- **Decision Made** (owner, 2026-09-25):
+  1. **Earnings** are what the supplier earns, on the **trip date**: the net payout on marketplace and partner bookings (after commission) plus the full amount of their own walk-in, phone and manual bookings. Split into marketplace and direct; direct is split into collected and still due. Cancelled and unpaid bookings are left out.
+  2. **Growth** compares earnings from the 1st of this month to today with the same days last month, and is hidden when last month had nothing.
+  3. **Service metrics** over the last 90 days: median response time to marketplace booking requests, % answered before the deadline, no-show rate from check-in, and pickup OTP verified % on completed trips that had one. Each shows "Not enough data" below 5 bookings, never a made-up value.
+- **Consequences**: No dashboard number has a hardcoded fallback. "Today" is the supplier's own country date.

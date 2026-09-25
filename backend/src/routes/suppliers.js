@@ -74,6 +74,7 @@ import { backfillProductLocationRules } from "../data/canonicalLocations.js";
 import { onReferralBookingCancelled, onReferralTripCompleted } from "../services/referralService.js";
 import { assignResource, bookingCalendar, departureBoard, guideDepartureScope, unassignResource } from "../services/departureBoardService.js";
 import { rescheduleBySupplier } from "../services/supplierRescheduleService.js";
+import { supplierAnalytics, supplierDashboardStats } from "../services/supplierDashboardService.js";
 import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
 
 const router = express.Router();
@@ -2110,100 +2111,12 @@ router.patch("/:id/bookings/:bookingId/status", optionalAuthMiddleware, requireS
 });
 
 // --- PHASE 4: SUPPLIER DASHBOARD STATS & REVENUE CARDS ---
+// Real numbers or null, never placeholders (ADR 038).
 router.get("/:id/dashboard-stats", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
   try {
-    const { id } = req.params;
-    const today = new Date().toISOString().split("T")[0];
-
-    // Today's trips
-    const todayStats = db.prepare(`
-      SELECT 
-        COUNT(*) as total_today,
-        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as trips_in_progress,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as trips_completed,
-        SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as trips_upcoming,
-        COALESCE(SUM(supplier_payout_amount), 0) as revenue_inr
-      FROM bookings
-      WHERE supplier_id = ? AND activity_date = ?
-    `).get(id, today);
-
-    // Month stats
-    const monthStart = today.slice(0, 7) + "-01";
-    const monthStats = db.prepare(`
-      SELECT 
-        COUNT(*) as total_month,
-        COALESCE(SUM(supplier_payout_amount), 0) as revenue_inr
-      FROM bookings
-      WHERE supplier_id = ? AND activity_date >= ? AND status != 'cancelled'
-    `).get(id, monthStart);
-
-    // Supplier rating & completion. Both numbers come from verified reviews:
-    // a supplier with none sees no rating, not a flattering placeholder.
-    const supplier = db.prepare("SELECT rating FROM suppliers WHERE id = ?").get(id);
-    const supplierQuality = db.prepare("SELECT review_count, average_rating FROM quality_scores WHERE entity_type = 'SUPPLIER' AND entity_id = ?").get(id);
-    const bookingCounts = db.prepare(`
-      SELECT 
-        COUNT(*) as total_all,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_all,
-        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_all
-      FROM bookings
-      WHERE supplier_id = ?
-    `).get(id);
-
-    const completionRate = bookingCounts.total_all > 0
-      ? Number(((bookingCounts.completed_all / bookingCounts.total_all) * 100).toFixed(1))
-      : 100;
-
-    const cancellationRate = bookingCounts.total_all > 0
-      ? Number(((bookingCounts.cancelled_all / bookingCounts.total_all) * 100).toFixed(1))
-      : 0;
-
-    // Unread notifications count
-    const unreadNotifications = db.prepare(
-      "SELECT COUNT(*) as count FROM supplier_notifications WHERE supplier_id = ? AND is_read = 0"
-    ).get(id)?.count || 0;
-
-    // Pending SLA alerts
-    const slaAlerts = db.prepare(`
-      SELECT id, ref, supplier_response_deadline, activity_date
-      FROM bookings
-      WHERE supplier_id = ? AND supplier_assignment_status = 'PENDING'
-      LIMIT 5
-    `).all(id);
-
-    return res.json({
-      today: {
-        bookings: todayStats.total_today || 0,
-        trips_in_progress: todayStats.trips_in_progress || 0,
-        trips_completed: todayStats.trips_completed || 0,
-        trips_upcoming: todayStats.trips_upcoming || 0,
-        revenue_inr: Math.round(todayStats.revenue_inr || 0),
-      },
-      week: {
-        bookings: Math.max(todayStats.total_today * 5, 12),
-        revenue_inr: Math.round((monthStats.revenue_inr || 0) / 4),
-        trend: [4, 6, 8, 5, 9, 7, todayStats.total_today || 5],
-      },
-      month: {
-        bookings: monthStats.total_month || 0,
-        revenue_inr: Math.round(monthStats.revenue_inr || 0),
-        growth_pct: 14.8,
-      },
-      ratings: {
-        avg: supplierQuality?.review_count ? supplierQuality.average_rating : (supplier?.rating ?? null),
-        total_reviews: Number(supplierQuality?.review_count || 0),
-        completion_rate: completionRate,
-        cancellation_rate: cancellationRate,
-      },
-      unread_notifications_count: unreadNotifications,
-      alerts: slaAlerts.map(a => ({
-        type: "SLA_PENDING",
-        booking_id: a.id,
-        booking_ref: a.ref,
-        deadline: a.supplier_response_deadline || "Action required",
-      })),
-    });
+    return res.json(supplierDashboardStats(db, req.params.id));
   } catch (err) {
+    logger.error("Supplier dashboard stats failed", { requestId: req.requestId, error: err });
     return res.status(500).json({ error: "Failed to fetch supplier dashboard stats" });
   }
 });
@@ -2592,40 +2505,12 @@ router.post("/:id/pricing-rules", optionalAuthMiddleware, requireSupplierAccess,
 
 // --- SUPPLIER ANALYTICS OVERVIEW ---
 router.get("/:id/analytics/overview", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
-  const { id } = req.params;
-
-  // Monthly revenue trend (last 6 months)
-  const revenueTrend = [
-    { month: "Mar 2026", revenue_inr: 185000, bookings: 42 },
-    { month: "Apr 2026", revenue_inr: 220000, bookings: 53 },
-    { month: "May 2026", revenue_inr: 310000, bookings: 78 },
-    { month: "Jun 2026", revenue_inr: 280000, bookings: 69 },
-    { month: "Jul 2026", revenue_inr: 340000, bookings: 85 },
-    { month: "Aug 2026", revenue_inr: 410000, bookings: 104 },
-  ];
-
-  // Top products leaderboard
-  const topProducts = db.prepare(`
-    SELECT p.id, p.title, p.price_inr, p.rating, COUNT(b.id) as booking_count,
-           COALESCE(SUM(b.supplier_payout_amount), 0) as total_earnings
-    FROM products p
-    LEFT JOIN bookings b ON b.product_id = p.id AND b.status != 'cancelled'
-    WHERE p.supplier_id = ?
-    GROUP BY p.id
-    ORDER BY total_earnings DESC
-    LIMIT 5
-  `).all(id);
-
-  return res.json({
-    revenueTrend,
-    topProducts,
-    operationalMetrics: {
-      avgResponseTimeMins: 24,
-      slaComplianceRate: 98.2,
-      driverAssignmentEfficiency: 95.5,
-      otpSuccessRate: 99.1,
-    },
-  });
+  try {
+    return res.json(supplierAnalytics(db, req.params.id));
+  } catch (err) {
+    logger.error("Supplier analytics failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Failed to load analytics" });
+  }
 });
 
 // --- SUPPLIER DYNAMIC PRICING RULES ---
