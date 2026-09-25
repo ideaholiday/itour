@@ -292,6 +292,9 @@ erDiagram
   - `pickup_otp_attempts`: Failed verification count (locks at 5).
   - `attendance_status` (migration 047): `CHECKED_IN`, `NO_SHOW` or `NULL`. Recorded by the supplier; does not change `status` or money ([`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md)).
   - `checked_in_at`, `checked_in_by`: when attendance was recorded (ISO timestamp) and the user who recorded it.
+  - `source` (migration 062): `B2C` (default), `IH_B2B`, `API` (OCTo partner), or supplier-direct `WALK_IN`, `PHONE`, `MANUAL`. A direct booking has `payment_status = OFFLINE`, commission 0 and no `payouts` row (ADR 034).
+  - `created_by_user_id`, `direct_discount_inr`, `balance_due_inr` (migration 062): who entered a direct booking, the operator's discount, and what the guest still owes the operator.
+- **`booking_payments`** (migration 062): money a supplier collected for a direct booking. `booking_id`, `supplier_id`, `amount_inr` (> 0), `mode` (`CASH`, `UPI`, `CARD`, `BANK`), `reference`, `note`, `received_by`, `received_at`.
 - **`driver_assignments`**:
   - `id`: Primary key.
   - `booking_id`: Foreign key to `bookings(id)`.

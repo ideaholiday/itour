@@ -1,6 +1,7 @@
 import { sendSupplierSms, smsConfiguration } from "./smsService.js";
 import { sendEmail, sendSupplierNotification } from "./emailService.js";
 import { normalizeWhatsAppPhone, sendWhatsAppMessage, whatsAppTemplate } from "./whatsappService.js";
+import { isServiceablePayment } from "../lib/bookingSources.js";
 import { guestDocumentLinks } from "./guestDocumentService.js";
 import logger from "../config/logger.js";
 import { issueBookingInvite } from "./reviewInviteService.js";
@@ -586,7 +587,7 @@ export async function notifyUpcomingTripReminder(database, bookingId) {
   const { scheduleKey } = await import('./dispatchStateService.js');
   const { deliverDispatchNotification } = await import('./dispatchNotificationService.js');
   const booking = database.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
-  if (!booking || booking.payment_status !== 'PAID' || !['confirmed','driver_assigned'].includes(booking.status)) throw Object.assign(new Error('Booking is not available for a trip reminder'), { status: 409 });
+  if (!booking || !isServiceablePayment(booking) || !['confirmed','driver_assigned'].includes(booking.status)) throw Object.assign(new Error('Booking is not available for a trip reminder'), { status: 409 });
   const assignment = database.prepare("SELECT * FROM driver_assignments WHERE booking_id = ? AND acknowledgement = 'ACCEPTED' AND assignment_status <> 'CANCELLED'").get(booking.id);
   const revision = assignment?.revision || 'unassigned';
   const result = await deliverDispatchNotification(database, { id: `${booking.id}:${scheduleKey(booking)}:${revision}:PRE_TRIP_REMINDER`, booking_id: booking.id, revision, event_type: 'PRE_TRIP_REMINDER', payload: '{}' });

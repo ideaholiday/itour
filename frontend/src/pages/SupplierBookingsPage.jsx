@@ -55,7 +55,7 @@ export default function SupplierBookingsPage() {
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-stone-900 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto space-y-6">
-        <SupplierHeaderNav supplierData={supplierData} activeTab="BOOKINGS" />
+        <SupplierHeaderNav supplierData={supplierData} activeTab="BOOKINGS" onBookingCreated={fetchSupplierData} />
         <SupplierBookingManager
           supplierData={supplierData}
           loading={loading}

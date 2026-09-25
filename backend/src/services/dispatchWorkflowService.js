@@ -4,8 +4,9 @@ import { assignDriverToBooking, bookingWindow, bookingWithDuration, getFleetAvai
 import { assertDriverSharingLocation, assessDriverLocationRisk, LOCATION_RISK } from './driverLocationService.js';
 import { dispatchTransaction, scheduleKey, departureKey, enqueueDispatch, revokeAssignment, isCancelledBooking } from './dispatchStateService.js';
 import { productTime } from '../lib/localTime.js';
+import { isServiceablePayment } from '../lib/bookingSources.js';
 
-const active = b => b.payment_status === 'PAID' && ['confirmed', 'driver_assigned'].includes(String(b.status).toLowerCase()) && ['SUPPLIER_ACCEPTED','LEGACY_ASSIGNED','MANUAL_ASSIGNED','AUTO_REALLOCATED','RESCHEDULE_RECONFIRMED'].includes(b.supplier_assignment_status || 'LEGACY_ASSIGNED');
+const active = b => isServiceablePayment(b) && ['confirmed', 'driver_assigned'].includes(String(b.status).toLowerCase()) && ['SUPPLIER_ACCEPTED','LEGACY_ASSIGNED','MANUAL_ASSIGNED','AUTO_REALLOCATED','RESCHEDULE_RECONFIRMED'].includes(b.supplier_assignment_status || 'LEGACY_ASSIGNED');
 const error = (message, status = 409) => Object.assign(new Error(message), { status });
 
 export function driverAccessToken(assignment) {
@@ -19,7 +20,7 @@ export function currentDriverAssignment(db, assignmentId, revision, now = new Da
   const assignment = db.prepare('SELECT * FROM driver_assignments WHERE id = ?').get(assignmentId);
   if (!assignment || !assignment.revision || assignment.revision !== revision || assignment.assignment_status === 'CANCELLED') throw error('This driver assignment is no longer available', 401);
   const booking = bookingWithDuration(db, assignment.booking_id, assignment.supplier_id);
-  if (!booking || booking.payment_status !== 'PAID' || isCancelledBooking(booking) || scheduleKey(booking) !== assignment.schedule_key || now.getTime() > bookingWindow(booking, productTime(db, booking.product_id)).end + 24 * 3600000) throw error('This trip link has expired or the schedule changed', 401);
+  if (!booking || !isServiceablePayment(booking) || isCancelledBooking(booking) || scheduleKey(booking) !== assignment.schedule_key || now.getTime() > bookingWindow(booking, productTime(db, booking.product_id)).end + 24 * 3600000) throw error('This trip link has expired or the schedule changed', 401);
   return { assignment, booking };
 }
 export function exchangeDriverLink(db, token) {
@@ -137,7 +138,7 @@ export const TRIP_WATCH = Object.freeze({ notStartedMinutes: 60, overdueHours: 2
 // Without completion the payout is never scheduled, so these must not be left silent.
 export function processTripWatch(db, { now = new Date(), supplierId = null } = {}) {
   const rows = db.prepare(`SELECT b.id FROM bookings b JOIN driver_assignments da ON da.booking_id = b.id
-    WHERE b.payment_status = 'PAID' AND LOWER(b.status) IN ('driver_assigned', 'in_progress')
+    WHERE b.payment_status IN ('PAID', 'OFFLINE') AND LOWER(b.status) IN ('driver_assigned', 'in_progress')
       AND da.acknowledgement = 'ACCEPTED' AND da.assignment_status IN ('ASSIGNED', 'EN_ROUTE', 'ARRIVED', 'TRIP_STARTED')
       ${supplierId ? 'AND b.supplier_id = ?' : ''}`).all(...(supplierId ? [supplierId] : []));
   let alerts = 0;

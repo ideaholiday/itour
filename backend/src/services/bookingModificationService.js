@@ -1,4 +1,5 @@
 import { moveNativeReservation } from "./nativeInventoryService.js";
+import { isSupplierDirect } from "../lib/bookingSources.js";
 import { onBookingCancelled } from "./affiliateService.js";
 import { onReferralBookingCancelled } from "./referralService.js";
 import crypto from "crypto";
@@ -8,6 +9,12 @@ export class BookingModificationService {
   /**
    * Helper to verify if actor is authorized to modify the booking
    */
+  // A supplier-direct booking (ADR 034) is changed by the operator, never by the
+  // guest through IdeaHoliday: the guest paid the operator, not us.
+  static isTravelerLockedOut(actor, booking) {
+    return isSupplierDirect(booking) && !["ADMIN", "STAFF"].includes(String(actor?.role || "").toUpperCase());
+  }
+
   static verifyActorAuthorization(actor, booking) {
     if (!actor) return false;
     const role = String(actor.role || "").toUpperCase();
@@ -47,6 +54,9 @@ export class BookingModificationService {
 
     if (actor && !this.verifyActorAuthorization(actor, booking)) {
       return { eligible: false, error: "UNAUTHORIZED" };
+    }
+    if (this.isTravelerLockedOut(actor, booking)) {
+      return { eligible: false, error: "SUPPLIER_DIRECT_BOOKING", message: "This booking was made directly with the operator. Contact them to change it." };
     }
 
     const rawStatus = String(booking.status || "").toLowerCase();
@@ -156,6 +166,7 @@ export class BookingModificationService {
     const booking = database.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
     if (!booking) throw new Error("BOOKING_NOT_FOUND");
     if (actor && !this.verifyActorAuthorization(actor, booking)) throw new Error("UNAUTHORIZED");
+    if (this.isTravelerLockedOut(actor, booking)) throw new Error("SUPPLIER_DIRECT_BOOKING");
 
     let policy = "FLEXIBLE_24H";
     if (booking.product_id) {

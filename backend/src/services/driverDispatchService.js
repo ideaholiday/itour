@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { vehicleModelSupportsCategory } from "../lib/vehicleInventory.js";
 import { normalizeWhatsAppPhone } from "./whatsappService.js";
 import { hashPickupOtp } from "./bookingService.js";
+import { isServiceablePayment } from "../lib/bookingSources.js";
 import { markReferralTripCompleted } from "./referralService.js";
 import { onTripCompleted } from "./affiliateService.js";
 import { latestDriverLocation, recordDriverLocations, telemetryFromAssignment } from "./driverLocationService.js";
@@ -258,7 +259,7 @@ function updateDispatchStatusLocked(database, { supplierId, bookingId, nextStatu
   const assignment = database.prepare("SELECT * FROM driver_assignments WHERE booking_id = ? AND supplier_id = ?").get(bookingId, supplierId);
   if (!assignment) throw dispatchError("Assign a driver before updating dispatch", 409);
   const booking = database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
-  if (!booking || ['cancelled'].includes(String(booking.status).toLowerCase()) || booking.payment_status !== 'PAID') throw dispatchError("Booking is not available for service", 409);
+  if (!booking || ['cancelled'].includes(String(booking.status).toLowerCase()) || !isServiceablePayment(booking)) throw dispatchError("Booking is not available for service", 409);
   if (assignment.schedule_key && assignment.schedule_key !== scheduleKey(booking)) throw dispatchError("Trip schedule changed; reassign the driver", 409);
   if (assignment.acknowledgement !== 'ACCEPTED') throw dispatchError("Driver must accept this assignment first", 409);
   const current = String(assignment.assignment_status || "ASSIGNED").toUpperCase();
@@ -309,7 +310,7 @@ export function getDispatchTimeline(database, bookingId) {
 export function verifyPickupOtp(database, bookingId, enteredOtp) {
   const result = dispatchTransaction(database, () => {
     const booking = database.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId);
-    if (!booking || booking.payment_status !== 'PAID' || !['confirmed','driver_assigned','in_progress'].includes(booking.status)) return { error: "Booking is not available for pickup", status: 409 };
+    if (!booking || !isServiceablePayment(booking) || !['confirmed','driver_assigned','in_progress'].includes(booking.status)) return { error: "Booking is not available for pickup", status: 409 };
     if (booking.otp_verified_at) return { valid: true, bookingId };
     if (Number(booking.otp_attempts || 0) >= 5) return { error: "Pickup code locked. Contact operations", status: 429 };
     if (!booking.otp_hash || !booking.otp_expires_at || Date.parse(booking.otp_expires_at) < Date.now()) return { error: "Pickup code expired. Contact operations", status: 410 };

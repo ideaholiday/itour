@@ -25,6 +25,8 @@ function database() {
       ('bk_3', 'IH-CCC333', 'sup_2', 'prd_1', 'confirmed', 'PAID', '2026-09-16', '09:00', 'Jetty', 1, 0, 'Other', NULL, NULL, NULL);
   `);
   executeMigrationSql(db, upSql("047_booking_attendance.sql"));
+  // Migration 062: where the booking came from and what its guest still owes.
+  db.exec("ALTER TABLE bookings ADD COLUMN source TEXT NOT NULL DEFAULT 'B2C'; ALTER TABLE bookings ADD COLUMN balance_due_inr INTEGER NOT NULL DEFAULT 0;");
   return db;
 }
 
@@ -68,5 +70,13 @@ test("the guest list counts live guests and escapes spreadsheet formulas", () =>
   const csv = manifestCsv(manifest);
   assert.match(csv, /IH-AAA111,'@SUM\(A1\),\+91 90000 00001/);
   assert.match(csv, /"Veg, no onion"/);
+  assert.match(csv.split("\r\n")[0], /,Source,Balance due$/);
+
+  // A walk-in guest who still owes the operator shows the amount to collect.
+  db.prepare("UPDATE bookings SET source = 'WALK_IN', balance_due_inr = 500 WHERE id = 'bk_1'").run();
+  const counter = departureManifest(db, { supplierId: "sup_1", productId: "prd_1", date: "2026-09-16" });
+  assert.equal(counter.bookings[0].source, "WALK_IN");
+  assert.equal(counter.bookings[0].balanceDueInr, 500);
+  assert.match(manifestCsv(counter), /,WALK_IN,500\r\n/);
   assert.throws(() => departureManifest(db, { supplierId: "sup_2", productId: "prd_1", date: "2026-09-16" }), { code: "PRODUCT_NOT_FOUND" });
 });

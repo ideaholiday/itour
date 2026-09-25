@@ -38,6 +38,22 @@ import {
 } from "lucide-react";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { api, authHeaders } from "../../lib/api.js";
+
+// Where a booking came from (ADR 034). Supplier-direct bookings are the
+// operator's own customers: paid to the operator, commission-free.
+const SOURCE_LABELS = { B2C: "IdeaHoliday", IH_B2B: "IdeaHoliday B2B", API: "Partner API", WALK_IN: "Walk-in", PHONE: "Phone", MANUAL: "Manual" };
+const DIRECT_SOURCES = ["WALK_IN", "PHONE", "MANUAL"];
+const sourceGroup = (source) => DIRECT_SOURCES.includes(source) ? "DIRECT" : source === "API" ? "API" : "IDEAHOLIDAY";
+function SourceBadge({ booking }) {
+  const source = booking.source || "B2C";
+  const direct = sourceGroup(source) === "DIRECT";
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${direct ? "border-sky-200 bg-sky-50 text-sky-800" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
+      {SOURCE_LABELS[source] || source}
+      {direct && Number(booking.balance_due_inr) > 0 && booking.status !== "cancelled" ? <span className="ml-1 text-amber-700">· ₹{Number(booking.balance_due_inr).toLocaleString("en-IN")} due</span> : null}
+    </span>
+  );
+}
 import PhoneInput from "../PhoneInput.jsx";
 
 const money = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
@@ -72,6 +88,7 @@ function DriverLocationLine({ booking, onRefresh }) {
 
 export default function SupplierBookingManager({ supplierData, loading, onRefresh }) {
   const [activeFilter, setActiveFilter] = useState("ALL"); // ALL, PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+  const [sourceFilter, setSourceFilter] = useState("ALL"); // ALL, DIRECT, IDEAHOLIDAY, API
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("NEWEST");
   const [selectedBooking, setSelectedBooking] = useState(null);
@@ -167,6 +184,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
       if (activeFilter === "IN_PROGRESS" && (!["in_progress", "driver_assigned", "confirmed"].includes(b.status) || b.supplier_response_status === "PENDING")) return false;
       if (activeFilter === "COMPLETED" && b.status !== "completed") return false;
       if (activeFilter === "CANCELLED" && b.status !== "cancelled") return false;
+      if (sourceFilter !== "ALL" && sourceGroup(b.source || "B2C") !== sourceFilter) return false;
 
       // Search filter
       if (searchTerm.trim()) {
@@ -188,7 +206,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
       if (sortBy === "AMOUNT_HIGH") return (b.amount_inr || 0) - (a.amount_inr || 0);
       return 0;
     });
-  }, [bookings, activeFilter, searchTerm, sortBy]);
+  }, [bookings, activeFilter, sourceFilter, searchTerm, sortBy]);
 
   const getStatusBadge = (b) => {
     const st = (b.status || "confirmed").toLowerCase();
@@ -499,6 +517,20 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
           />
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[11px] font-bold text-stone-500">Source:</span>
+          <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            aria-label="Filter by booking source"
+            className="rounded-xl border border-stone-200 bg-[#FAF9F6] px-3 py-2 text-xs font-bold text-stone-700 focus:border-amber-500 focus:bg-white focus:outline-none"
+          >
+            <option value="ALL">All sources</option>
+            <option value="DIRECT">My direct bookings</option>
+            <option value="IDEAHOLIDAY">IdeaHoliday</option>
+            <option value="API">Partner API</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           <span className="text-[11px] font-bold text-stone-500">Sort:</span>
           <select
             value={sortBy}
@@ -583,7 +615,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
 
                     {/* Status & Driver */}
                     <td className="px-5 py-4">
-                      <div>{getStatusBadge(b)}</div>
+                      <div className="flex flex-wrap items-center gap-1">{getStatusBadge(b)}<SourceBadge booking={b} /></div>
                       <div className="mt-1 text-[11px]">
                         {isCancelled ? (
                           <span className="text-rose-700 text-[10px] font-bold">
@@ -785,7 +817,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     </>
                   )}
                 </div>
-                {selectedBooking.payment_status === "PAID" && selectedBooking.supplier_response_status === "ACCEPTED" && (
+                {["PAID", "OFFLINE"].includes(selectedBooking.payment_status) && selectedBooking.supplier_response_status === "ACCEPTED" && (
                   <div className="mt-3 border-t border-stone-200 pt-3">
                     <button
                       type="button"
@@ -1086,7 +1118,9 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                   <span className="font-bold">{cancelModalBooking.cancellation_policy || "FLEXIBLE_24H"}</span>
                 </div>
                 <p className="mt-2 text-[11px] leading-relaxed text-amber-900 border-t border-amber-200 pt-2">
-                  When cancelled by operator, a full refund of {money(cancelModalBooking.amount_inr)} will be credited back to the traveler's payment source.
+                  {cancelModalBooking.payment_status === "OFFLINE"
+                    ? "This is your own direct booking: the seats go back on sale, and any refund to the guest is yours to settle."
+                    : `When cancelled by operator, a full refund of ${money(cancelModalBooking.amount_inr)} will be credited back to the traveler's payment source.`}
                 </p>
               </div>
 

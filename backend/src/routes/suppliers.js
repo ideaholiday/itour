@@ -8,7 +8,11 @@ import {
   saveSlotOverrideRange, deleteSlotOverrideRange,
   listResources, saveResource, deleteResource,
   listPromotions, savePromotion, deletePromotion,
+  listNativeAvailability,
 } from "../services/nativeInventoryService.js";
+import { createSupplierBooking, listDirectPayments, quoteSupplierBooking, recordDirectPayment, supplierDayAvailability } from "../services/supplierBookingService.js";
+import { isServiceablePayment } from "../lib/bookingSources.js";
+import { guestDocumentLinks } from "../services/guestDocumentService.js";
 import { getProductOptions, ensureDefaultProductOption } from "../services/logisticsService.js";
 import { activityPath } from "../../../shared/activityUrl.js";
 import express from "express";
@@ -1531,12 +1535,69 @@ router.post("/:id/bookings/:bookingId/respond-assignment", optionalAuthMiddlewar
   }
 });
 
+// Supplier-direct bookings (ADR 034): walk-in, phone and manual bookings on the shared inventory.
+function directBookingFailure(res, req, error, fallback) {
+  if (error.name === "ZodError") {
+    const issue = error.issues?.[0];
+    return res.status(400).json({ error: issue ? `${issue.path.join(".") || "request"}: ${issue.message}` : "Check the booking details", code: "VALIDATION_ERROR" });
+  }
+  if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+// GET /api/suppliers/:id/availability?date=YYYY-MM-DD - Live seats on every departure that day, as sold at the counter
+router.get("/:id/availability", requireSupplierAccess, (req, res) => {
+  try {
+    const date = String(req.query.date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "Choose a date as YYYY-MM-DD", code: "VALIDATION_ERROR" });
+    return res.json({ success: true, date, products: supplierDayAvailability(db, req.params.id, date, listNativeAvailability) });
+  } catch (error) {
+    return directBookingFailure(res, req, error, "Availability could not be loaded");
+  }
+});
+
+// POST /api/suppliers/:id/bookings/quote - Price a counter sale before taking the guest's money
+router.post("/:id/bookings/quote", requireSupplierAccess, (req, res) => {
+  try {
+    return res.json({ success: true, quote: quoteSupplierBooking(db, { supplierId: req.params.id, input: req.body }) });
+  } catch (error) {
+    return directBookingFailure(res, req, error, "The booking could not be priced");
+  }
+});
+
+// POST /api/suppliers/:id/bookings - Walk-in, phone or manual booking, confirmed at once
+router.post("/:id/bookings", requireSupplierAccess, (req, res) => {
+  try {
+    const { booking, idempotent } = createSupplierBooking(db, { supplierId: req.params.id, actor: req.user, input: req.body });
+    return res.status(idempotent ? 200 : 201).json({ success: true, idempotent, booking, payments: listDirectPayments(db, booking.id), documents: guestDocumentLinks(booking) });
+  } catch (error) {
+    return directBookingFailure(res, req, error, "The booking could not be created");
+  }
+});
+
+// GET /api/suppliers/:id/bookings/:bookingId/payments - What the supplier has collected for a direct booking
+router.get("/:id/bookings/:bookingId/payments", requireSupplierAccess, (req, res) => {
+  const booking = db.prepare("SELECT id, ref, amount_inr, balance_due_inr, payment_status FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
+  if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
+  return res.json({ success: true, amountInr: booking.amount_inr, balanceDueInr: booking.balance_due_inr, payments: listDirectPayments(db, booking.id), documents: guestDocumentLinks(booking) });
+});
+
+// POST /api/suppliers/:id/bookings/:bookingId/payments - Record cash, UPI, card or bank money collected later
+router.post("/:id/bookings/:bookingId/payments", requireSupplierAccess, (req, res) => {
+  try {
+    return res.status(201).json({ success: true, ...recordDirectPayment(db, { supplierId: req.params.id, bookingId: req.params.bookingId, actor: req.user, input: req.body }) });
+  } catch (error) {
+    return directBookingFailure(res, req, error, "The payment could not be recorded");
+  }
+});
+
 // POST /api/suppliers/:id/bookings/:bookingId/notifications/resend - Supplier/admin resend of an approved guest update
 router.post("/:id/bookings/:bookingId/notifications/resend", optionalAuthMiddleware, requireSupplierAccess, validateBody(bookingSchemas.resend), async (req, res) => {
   try {
     const booking = db.prepare("SELECT id, ref, payment_status, supplier_response_status FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
     if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
-    if (booking.payment_status !== "PAID") return res.status(409).json({ error: "Guest notifications are available after payment is confirmed" });
+    if (!isServiceablePayment(booking)) return res.status(409).json({ error: "Guest notifications are available after payment is confirmed" });
     if (booking.supplier_response_status !== "ACCEPTED") return res.status(409).json({ error: "Accept the booking before sending the guest confirmation" });
 
     const eventType = String(req.body?.eventType || "BOOKING_CONFIRMED").toUpperCase();

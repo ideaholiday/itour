@@ -153,7 +153,7 @@ function validateCapacity(vehicleCategory, passengers, luggage) {
   }
 }
 
-export function calculateBookingQuote(db, input, { enforceListingSupplierAvailability = true, ownerId } = {}) {
+export function calculateBookingQuote(db, input, { enforceListingSupplierAvailability = true, ownerId, counterSale = false } = {}) {
   const productId = input.product_id || input.productId || input.activity_id || input.activityId;
   const product = db.prepare(
     `SELECT p.*, s.kyb_status, s.commission_rate, s.supplier_code, s.company_name AS supplier_name
@@ -191,7 +191,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
   }
 
   let unitBreakdown = normalizeUnitItems(input.unit_items || input.unitItems, { adults, children });
-  const nativeSlot = checkNativeInventory(db, input, { ownerId });
+  const nativeSlot = checkNativeInventory(db, input, { ownerId, counterSale });
   // A held reservation already froze its breakdown; keep the booking identical to it.
   if (nativeSlot?.unitItems?.length) unitBreakdown = normalizeUnitItems(nativeSlot.unitItems);
   const vehicleCategory = String(input.vehicle_category || input.selectedVehicle || (product.group_type === "SHARED" ? "SHARED_SEAT" : "SEDAN")).toUpperCase();

@@ -130,6 +130,7 @@ function setupOctoTestDb() {
       traveler_name TEXT,
       traveler_email TEXT,
       traveler_phone TEXT,
+      source TEXT NOT NULL DEFAULT 'B2C',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -366,6 +367,7 @@ test("OCTo Service: only a prepaid partner's confirmation is recorded as paid", 
 
   const statuses = db.prepare("SELECT payment_status FROM bookings ORDER BY payment_status").all().map((row) => row.payment_status);
   assert.deepEqual(statuses, ["PAID", "PENDING"]);
+  assert.deepEqual(db.prepare("SELECT DISTINCT source FROM bookings").all().map((row) => row.source), ["API"]);
 });
 
 test("OCTo Service: a supplier's own reseller key books only that supplier's products", () => {

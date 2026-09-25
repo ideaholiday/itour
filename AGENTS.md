@@ -54,13 +54,13 @@ Legacy and noise files are hidden from search by `.ignore` / `.geminiignore`.
 | Seats, holds, rates, calendar, capacity | [`RESERVATION_ENGINE.md`](docs/RESERVATION_ENGINE.md) |
 | Pricing, commission, refunds, booking state, coupons, supplier subscriptions, check-in and departure cancellation | [`BUSINESS_RULES.md`](docs/BUSINESS_RULES.md), [`COUPONS.md`](docs/COUPONS.md), [`SUPPLIER_PLANS.md`](docs/SUPPLIER_PLANS.md), [`REFUND_CREDIT.md`](docs/REFUND_CREDIT.md), [`SUPPLIER_OPERATIONS.md`](docs/SUPPLIER_OPERATIONS.md) |
 | Schema, tables, fields | [`DATA_MODEL.md`](docs/DATA_MODEL.md) |
-| Add or change an endpoint | [`API_CONTRACTS.md`](docs/API_CONTRACTS.md) + [`SECURITY.md`](docs/SECURITY.md) |
+| Add or change an endpoint | [`API_CONTRACTS.md`](docs/API_CONTRACTS.md) (supplier extranet: [`API_CONTRACTS_SUPPLIER.md`](docs/API_CONTRACTS_SUPPLIER.md)) + [`SECURITY.md`](docs/SECURITY.md) |
 | Auth, RBAC, PII, dependency CVEs | [`SECURITY.md`](docs/SECURITY.md) |
 | How the system fits together, request flows | [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | WhatsApp, payments, email, SMS, channel manager | [`INTEGRATIONS.md`](docs/INTEGRATIONS.md) + [`ENVIRONMENT.md`](docs/ENVIRONMENT.md) |
 | Run it locally, migrations, tooling | [`DEVELOPMENT.md`](docs/DEVELOPMENT.md) |
 | Write or fix tests | [`TESTING.md`](docs/TESTING.md) |
-| Why something was done this way | [`DECISIONS.md`](docs/DECISIONS.md) (SEO and content: [`DECISIONS_SEO.md`](docs/DECISIONS_SEO.md)) |
+| Why something was done this way | [`DECISIONS.md`](docs/DECISIONS.md) (SEO: [`DECISIONS_SEO.md`](docs/DECISIONS_SEO.md); operator platform: [`DECISIONS_OPERATOR.md`](docs/DECISIONS_OPERATOR.md)) |
 | A term you don't recognise | [`GLOSSARY.md`](docs/GLOSSARY.md) |
 | A library or framework API (Context7 IDs) | [`LIBRARIES.md`](docs/LIBRARIES.md) |
 

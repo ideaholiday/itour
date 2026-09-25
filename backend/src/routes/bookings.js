@@ -7,6 +7,7 @@ import { validateBody } from "../middleware/validation.js";
 import { bookingCreateSchema, bookingQuoteSchema, bookingSchemas } from "../validators/apiSchemas.js";
 import logger from "../config/logger.js";
 import { PHONE_FORMAT_HINT, toE164 } from "../lib/phone.js";
+import { isServiceablePayment, isSupplierDirect } from "../lib/bookingSources.js";
 import {
   MAX_OTP_ATTEMPTS,
   activatePickupOtp,
@@ -64,7 +65,7 @@ function canOperateBooking(actor, booking) {
 
 function travelerView(booking) {
   const { otp_hash, otp_encrypted, ...safeBooking } = booking;
-  const pickupOtp = booking.payment_status === "PAID" && !booking.otp_verified_at
+  const pickupOtp = isServiceablePayment(booking) && !booking.otp_verified_at
     ? decryptPickupOtp(booking.otp_encrypted) || booking.otp_code || null
     : null;
   delete safeBooking.otp_code;
@@ -611,6 +612,16 @@ router.get("/notifications", authenticate, (req, res) => {
   return res.json({ success: true, deliveries });
 });
 
+// A supplier-direct booking belongs to the operator's own records (ADR 034):
+// the guest changes it with the operator, not through IdeaHoliday.
+function loadAmendableBooking(req) {
+  const booking = loadOwnedBooking(req);
+  if (isSupplierDirect(booking)) {
+    throw Object.assign(new Error("This booking was made directly with the operator. Contact them to change it."), { status: 409, code: "SUPPLIER_DIRECT_BOOKING" });
+  }
+  return booking;
+}
+
 function loadOwnedBooking(req) {
   const actor = requester(req);
   const booking = db.prepare("SELECT b.*, p.title AS product_title FROM bookings b LEFT JOIN products p ON p.id = b.product_id WHERE b.ref = ? OR b.id = ?").get(req.params.ref, req.params.ref);
@@ -640,7 +651,7 @@ function amendmentCutoff(booking) {
 
 router.post("/:ref/amendment/check", authenticate, validateBody(bookingSchemas.amendment), (req, res) => {
   try {
-    const booking = loadOwnedBooking(req);
+    const booking = loadAmendableBooking(req);
     const cutoffAt = amendmentCutoff(booking);
     if (Date.now() >= new Date(cutoffAt).getTime()) return res.status(409).json({ error: "This booking is inside the logistics amendment cutoff", cutoffAt });
     const proposed = { ...booking, ...req.body.proposed, product_id: booking.product_id, activity_date: booking.activity_date };
@@ -654,7 +665,7 @@ router.post("/:ref/amendment/check", authenticate, validateBody(bookingSchemas.a
 
 router.post("/:ref/amendment/quote", authenticate, validateBody(bookingSchemas.amendment), (req, res) => {
   try {
-    const booking = loadOwnedBooking(req);
+    const booking = loadAmendableBooking(req);
     const proposed = { ...booking, ...req.body.proposed, product_id: booking.product_id, activity_date: booking.activity_date };
     const option = validateOptionLogistics(db, booking.product_id, proposed);
     const validation = assertBookingLocations(db, proposed, { requireOperationalDetails: false });
@@ -665,7 +676,7 @@ router.post("/:ref/amendment/quote", authenticate, validateBody(bookingSchemas.a
 
 router.post("/:ref/amendment/apply", authenticate, validateBody(bookingSchemas.amendment), (req, res) => {
   try {
-    const booking = loadOwnedBooking(req);
+    const booking = loadAmendableBooking(req);
     const cutoffAt = amendmentCutoff(booking);
     if (Date.now() >= new Date(cutoffAt).getTime()) return res.status(409).json({ error: "This booking is inside the logistics amendment cutoff", cutoffAt });
     const existing = db.prepare("SELECT * FROM booking_amendment_requests WHERE booking_id = ? AND idempotency_key = ?").get(booking.id, req.body.idempotencyKey);
@@ -694,7 +705,7 @@ router.post("/:ref/pickup-otp/reset", authenticate, requireRoles("ADMIN", "STAFF
     if (!actor || !["ADMIN", "STAFF"].includes(String(actor.role || "").toUpperCase())) return res.status(403).json({ error: "Operations access required" });
     const booking = db.prepare("SELECT * FROM bookings WHERE ref = ? OR id = ?").get(req.params.ref, req.params.ref);
     if (!booking) return res.status(404).json({ error: "Booking not found" });
-    if (booking.payment_status !== "PAID" || ["completed", "cancelled"].includes(String(booking.status).toLowerCase())) return res.status(409).json({ error: "A pickup code cannot be reset for this booking" });
+    if (!isServiceablePayment(booking) || ["completed", "cancelled"].includes(String(booking.status).toLowerCase())) return res.status(409).json({ error: "A pickup code cannot be reset for this booking" });
     const pickupOtp = activatePickupOtp(booking);
     db.prepare(
       `UPDATE bookings SET otp_code = NULL, otp_hash = ?, otp_encrypted = ?, otp_expires_at = ?,
@@ -713,7 +724,7 @@ router.post("/:ref/pickup-otp/verify", authenticate, requireRoles("ADMIN", "STAF
     const booking = db.prepare("SELECT * FROM bookings WHERE ref = ? OR id = ?").get(req.params.ref, req.params.ref);
     if (!booking) return res.status(404).json({ error: "Booking not found" });
     if (!canOperateBooking(actor, booking)) return res.status(403).json({ error: "This booking belongs to another operator" });
-    if (booking.payment_status !== "PAID") return res.status(409).json({ error: "Payment must be confirmed before pickup" });
+    if (!isServiceablePayment(booking)) return res.status(409).json({ error: "Payment must be confirmed before pickup" });
     if (booking.otp_verified_at) return res.json({ success: true, alreadyVerified: true, status: "in_progress" });
     if (!["confirmed", "driver_assigned"].includes(String(booking.status).toLowerCase())) return res.status(409).json({ error: "Pickup verification is not available for this booking status" });
     if (!db.prepare("SELECT id FROM driver_assignments WHERE booking_id = ?").get(booking.id)) return res.status(409).json({ error: "Assign a driver before verifying pickup" });

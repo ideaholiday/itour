@@ -392,8 +392,8 @@ export function confirmOctoReservation(db, input, partner = null) {
     }
 
     db.prepare(`
-      INSERT INTO bookings (id, ref, user_id, product_id, product_option_id, supplier_id, product_type, activity_date, pickup_time, pickup_location, adults, children, amount_inr, status, payment_status, traveler_name, traveler_email, traveler_phone)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?)
+      INSERT INTO bookings (id, ref, user_id, product_id, product_option_id, supplier_id, product_type, activity_date, pickup_time, pickup_location, adults, children, amount_inr, status, payment_status, traveler_name, traveler_email, traveler_phone, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, 'API')
       ON CONFLICT(id) DO NOTHING
     `).run(
       bookingId,

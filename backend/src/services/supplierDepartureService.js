@@ -120,7 +120,7 @@ const guests = (rows) => rows.reduce((sum, row) => sum + Number(row.adults || 0)
 export function departureManifest(db, { supplierId, productId, date, time = null }) {
   const product = requireSupplierProduct(db, supplierId, productId);
   const rows = db.prepare(`SELECT id, ref, traveler_name, traveler_phone, adults, children, pickup_time, pickup_location,
-      special_requests, variant_name, status, attendance_status, checked_in_at
+      special_requests, variant_name, status, attendance_status, checked_in_at, source, balance_due_inr
     FROM bookings WHERE supplier_id = ? AND product_id = ? AND activity_date = ?
     ORDER BY pickup_time, traveler_name, ref`).all(supplierId, productId, date);
   const live = rows.filter((row) => !["cancelled", "pending_payment"].includes(String(row.status || "").toLowerCase()));
@@ -153,6 +153,9 @@ export function departureManifest(db, { supplierId, productId, date, time = null
       status: row.status,
       attendanceStatus: row.attendance_status || null,
       checkedInAt: row.checked_in_at || null,
+      // A direct booking's guest may still owe the operator at the meeting point.
+      source: row.source || "B2C",
+      balanceDueInr: Number(row.balance_due_inr || 0),
     })),
   };
 }
@@ -165,10 +168,11 @@ function csvCell(value) {
 }
 
 export function manifestCsv(manifest) {
-  const header = ["Reference", "Traveler", "Phone", "Adults", "Children", "Time", "Pickup", "Option", "Special requests", "Attendance"];
+  const header = ["Reference", "Traveler", "Phone", "Adults", "Children", "Time", "Pickup", "Option", "Special requests", "Attendance", "Source", "Balance due"];
   const lines = manifest.bookings.map((row) => [
     row.ref, row.travelerName, row.travelerPhone, row.adults, row.children, row.pickupTime, row.pickupLocation,
     row.variantName, row.specialRequests, row.attendanceStatus === "CHECKED_IN" ? "Checked in" : row.attendanceStatus === "NO_SHOW" ? "No-show" : "",
+    row.source, row.balanceDueInr > 0 ? row.balanceDueInr : "",
   ]);
   return [header, ...lines].map((line) => line.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

@@ -1,0 +1,211 @@
+# API Contracts: Supplier Extranet
+
+> **Summary:** Endpoints the supplier workspace (`supply.ideaholiday.in`) calls under `/api/suppliers/:id`, including direct (walk-in, phone, manual) bookings.
+> **Read when:** adding or changing a supplier endpoint. Conventions (errors, auth, pagination) are in [`API_CONTRACTS.md`](API_CONTRACTS.md).
+
+## 3. Supplier Endpoints (Requires `SUPPLIER` linked to vendor ID)
+
+### 3.1 Supplier Extranet Inventory Management
+- **`GET /api/suppliers/:supplierId/products/:productId/inventory`**:
+  - Retrieves owned options, operating days, departure slots, seat quotas, and blackout dates.
+- **`PUT /api/suppliers/:supplierId/products/:productId/inventory/:optionId`**:
+  - Validates and saves inventory rules. Rejects capacity reductions below currently occupied seats.
+  - **Request Body**:
+    ```json
+    {
+      "operatingDays": [0, 1, 2, 3, 4, 5, 6],
+      "departureTimes": ["09:00", "14:00"],
+      "capacity": 20,
+      "adultPrice": 1200,
+      "childPrice": 600,
+      "cutoffMinutes": 120,
+      "cancellationHours": 24,
+      "blackoutDates": ["2026-12-25"],
+      "minPartySize": 1,
+      "maxPartySize": 0,
+      "unitPrices": { "SENIOR": 700, "INFANT": 0 },
+      "seatlessUnits": ["INFANT"]
+    }
+    ```
+  - `seatlessUnits` lists types that bill but consume no seat (an infant on a
+    lap). They are excluded from the `adults`/`children` seat counts but still
+    priced and still recorded in `booking_unit_items`. `ADULT` cannot be
+    seatless. Omit-to-keep like the fields below.
+  - `unitPrices` prices extended traveler types. `ADULT` and `CHILD` always come
+    from `adultPrice`/`childPrice`; a type left out is not sold, and reserving it
+    returns `UNIT_TYPE_NOT_SOLD`.
+  - `minPartySize`, `maxPartySize` and `unitPrices` are **omit-to-keep**: leaving a
+    field out preserves the stored value, so a client that predates these fields
+    cannot silently reset them. Send an explicit value (`{}` for `unitPrices`) to
+    clear one. A `maxPartySize` below `minPartySize` returns `INVALID_PARTY_SIZE`.
+  - `minPartySize` defaults to 1 and `maxPartySize` to `0` (no cap). A hold below
+    the minimum returns `BELOW_MIN_PARTY_SIZE`; above the maximum returns
+    `ABOVE_MAX_PARTY_SIZE`.
+
+### 3.1.1 Seasonal Rates
+- **`GET /api/suppliers/:supplierId/products/:productId/inventory/:optionId/rates`**:
+  - Lists date-ranged rate schedules, highest priority first.
+- **`POST .../inventory/:optionId/rates`**: Creates one schedule.
+  - **Request Body**:
+    ```json
+    {
+      "label": "Christmas week",
+      "startsOn": "2099-12-20",
+      "endsOn": "2099-12-26",
+      "weekdays": [5, 6],
+      "adultPrice": 4000,
+      "childPrice": 1800,
+      "priority": 10
+    }
+    ```
+  - The highest-`priority` schedule covering the travel date and its weekday
+    wins; otherwise the option's base price applies. A hold freezes the resolved
+    price, so repricing mid-checkout cannot change a traveler's total.
+- **`DELETE .../inventory/:optionId/rates/:rateId`**: Removes a schedule.
+
+### 3.1.2 Calendar Overrides
+- **`GET .../inventory/:optionId/calendar?from=&to=`**: Lists overrides in range.
+- **`PUT .../inventory/:optionId/calendar`**: Closes or resizes a date or a single departure.
+  - **Request Body**:
+    ```json
+    {
+      "localDate": "2099-12-25",
+      "localTime": "09:00",
+      "capacity": 4,
+      "closed": false,
+      "note": "Reduced boat capacity"
+    }
+    ```
+  - Omit `localTime` to apply to the whole day. `capacity: null` inherits the rule
+    capacity. Reducing capacity below seats already held or confirmed returns
+    `CAPACITY_BELOW_RESERVED`.
+- **`DELETE .../inventory/:optionId/calendar?localDate=&localTime=`**: Removes an
+  override, restoring the weekly rule.
+- **`PUT .../inventory/:optionId/calendar/range`**: Applies one override across a
+  date range in a **single transaction**.
+  - **Request Body**:
+    ```json
+    {
+      "from": "2099-07-01",
+      "to": "2099-07-31",
+      "weekdays": [1, 2],
+      "localTime": "09:00",
+      "capacity": null,
+      "closed": true,
+      "note": "Monsoon closure"
+    }
+    ```
+  - `weekdays` is optional and narrows the range ("every Monday in July");
+    omitted means every day. `localTime` omitted or `""` means the whole day.
+  - Dates the option does not operate on are **skipped**, and reported in
+    `skippedNonOperating`. The response returns `applied` and `appliedCount`.
+  - **All-or-nothing**: if any date in the range already has more seats reserved
+    than the new capacity, nothing is written and `CAPACITY_BELOW_RESERVED` is
+    returned. A range longer than 366 days returns `RANGE_TOO_LONG`.
+- **`DELETE .../inventory/:optionId/calendar/range?from=&to=&localTime=`**: Clears
+  every override in the range, reopening those dates onto the weekly rules.
+  Returns `removedCount`.
+
+### 3.1.2b Promotions
+- **`GET .../inventory/:optionId/promotions`**: Lists promotions with live `redeemed` counts.
+- **`POST .../inventory/:optionId/promotions`**: Creates one.
+  - **Request Body**:
+    ```json
+    {
+      "label": "Monsoon flash sale",
+      "code": "MONSOON20",
+      "discountType": "PERCENT",
+      "discountValue": 20,
+      "maxLeadHours": 48,
+      "minLeadHours": null,
+      "travelFrom": "2099-06-01",
+      "travelUntil": "2099-09-30",
+      "minPartySize": null,
+      "maxRedemptions": 100,
+      "priority": 10,
+      "active": true
+    }
+    ```
+  - `code` omitted or `null` makes the promotion **public** — shown to everyone in
+    availability and in the price calendar. With a code it applies only when the
+    traveler supplies one, and never leaks into public responses.
+  - `maxLeadHours` is last-minute ("within 48h of departure"); `minLeadHours` is
+    early-bird ("booked 30 days ahead"). Both are optional.
+  - `PERCENT` values above 100 return `VALIDATION_ERROR`. A duplicate code on the
+    same option returns `PROMO_CODE_EXISTS`. `maxRedemptions: 0` means unlimited;
+    redemptions are counted live from reservations, so the count cannot drift.
+  - **At most one promotion applies** — highest priority, then deepest discount.
+- **`DELETE .../inventory/:optionId/promotions/:promotionId`**: Removes it. Holds
+  already taken keep their frozen discounted price.
+
+### 3.1.3 Shared Resources
+- **`GET /api/suppliers/:supplierId/resources`**: Lists shared vehicles/guides and the options each constrains.
+- **`POST /api/suppliers/:supplierId/resources`**: Creates one.
+  - **Request Body**: `{ "name": "Tempo Traveller GA-07", "capacity": 6, "optionIds": ["opt_a", "opt_b"] }`
+- **`PUT .../resources/:resourceId`**: Replaces name, capacity and the linked options.
+- **`DELETE .../resources/:resourceId`**: Removes it, releasing the shared cap.
+- A departure's vacancies are the smallest of its own pool and every linked
+  resource, counted per departure time. Shrinking below seats already committed
+  returns `CAPACITY_BELOW_RESERVED`; linking an option owned by another supplier
+  returns `OPTION_NOT_FOUND`.
+
+### 3.1.4 Review Share Links
+
+- **`GET /api/reviews/share-links`**: The supplier's links, each with its funnel (`view_count`, `claim_count`, `invites_issued`, `reviews_submitted`), plus an aggregate `stats` block (`issued`, `opened`, `submitted`, `conversionPct`).
+- **`POST /api/reviews/share-links`**: `{ productId?, label? }` → a new link. Omitting `productId` accepts a booking for any of the supplier's listings; supplying one restricts claims to that listing. A listing belonging to another supplier is rejected with `403`.
+- **`PATCH /api/reviews/share-links/:id`**: `{ isActive }` deactivates or reactivates a link. A deactivated slug returns `410` to travelers. Another supplier's link is `403`.
+
+### 3.1.5 Check-in, guest lists and departure cancellation
+
+The supplier, `ADMIN` or `STAFF`. Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md). A departure is one product on one `date`, optionally at one `time` (`HH:MM`, matched against `bookings.pickup_time`).
+
+- **`POST /api/suppliers/:id/check-in`** `{ code, allowOtherDate? }`: `code` is the voucher QR link (`…/booking-confirmed/<ref>`) or the booking reference. Returns `{ alreadyCheckedIn, booking: { id, ref, travelerName, adults, children, productTitle, activityDate, pickupTime, attendanceStatus, checkedInAt } }`; a repeat scan returns `alreadyCheckedIn: true` with the first time. Errors: `400 INVALID_CODE`, `404 BOOKING_NOT_FOUND` (including another supplier's booking), `409 WRONG_DATE` (not today in India; retry with `allowOtherDate: true`), `409 BOOKING_CANCELLED`, `409 BOOKING_NOT_PAID`.
+- **`PATCH /api/suppliers/:id/bookings/:bookingId/attendance`** `{ status: "CHECKED_IN" | "NO_SHOW" | "NONE" }`: `NONE` clears a mistake. Returns `{ booking }`. `409 TOO_EARLY` for a no-show before the trip date.
+- **`GET /api/suppliers/:id/manifest?productId=&date=&time=&format=csv`**: the guest list. JSON `{ manifest: { product, date, time, departureTimes, totals: { bookings, guests, checkedIn, noShow, cancelledBookings }, bookings: [{ id, ref, travelerName, travelerPhone, adults, children, pickupTime, pickupLocation, specialRequests, variantName, status, attendanceStatus, checkedInAt }] } }`, or a CSV download with `format=csv`. Unpaid and cancelled bookings are left out. `404 PRODUCT_NOT_FOUND` for another supplier's product.
+- **`POST /api/suppliers/:id/products/:productId/departures/cancel`** `{ date, time?, reason, notes?, dryRun? }`: cancels every booking on the departure and closes it on the seat calendar, all or nothing. Returns `{ bookings, guests, paidBookings, walletRefundInr, closesOptions, dryRun, cancelled: [{ id, ref, walletCreditInr }] }`; with `dryRun: true` nothing changes and `cancelled` is empty. Each traveler is notified as for a single supplier cancellation. Errors: `409 DEPARTURE_IN_PAST`, `409 DEPARTURE_STARTED` (a booking is in progress or completed; the message lists the references), `409 NOTHING_TO_CANCEL`, `404 PRODUCT_NOT_FOUND`.
+
+### 3.2 Driver Assignment & Roster Dispatch
+- **`GET /api/suppliers/:id/drivers/availability?bookingId=`**: Every fleet driver with `available` and, when not available, a `reason` (status, vehicle category, seats, missing email, or a clashing booking ref).
+- **`POST /api/suppliers/:id/assign-driver`**: Assigns a fleet driver (`supplierDriverId`) or an outside driver. The driver receives a trip request and must accept from the private link, unless `confirmedByPhone` is set.
+  ```json
+  {
+    "bookingId": "bk_123",
+    "supplierDriverId": "drv_sup_1",
+    "confirmedByPhone": true,
+    "note": "Called Ravi at 18:05, he accepted"
+  }
+  ```
+  Outside driver instead of `supplierDriverId`: `driverName`, `driverPhone`, `driverEmail`, `seatCapacity`, `vehicleModel`, `vehicleNumber`. `note` (3+ characters) is required with `confirmedByPhone`.
+- **`GET /api/suppliers/:id/bookings/:bookingId/dispatch-timeline`**: The booking's driver and trip events (`event_type`, `new_status`, `actor_id`, `note`, `details`, `created_at`), plus the trip city's `timeZone` and `timeLabel` (`IST`, `ICT`). `404` for another supplier's booking.
+- **`POST /api/suppliers/:id/bookings/:bookingId/confirm-driver`** `{ "note": "Called Ravi at 18:05" }`: Records a pending driver's acceptance taken by phone. Allowed after the response deadline while the assignment is still pending; `409` once the driver was removed or the schedule changed. Idempotent for an already accepted driver. Queues the driver-confirmed notifications, closes the assignment task, and writes an `ACCEPT_BY_PHONE` audit event with the note.
+- **`GET /api/suppliers/:id/dispatch`**: Effective dispatch settings (`automatic_enabled`, `lead_hours`, `response_minutes`, `max_attempts`, `buffer_minutes`, and `source` of `DEFAULT` or `SUPPLIER`), fleet `readiness` (`total`, `ready`, and each driver's `missing` fields), open "assign manually" tasks (most urgent pickup first, with `pickup_at`, `minutes_to_pickup`, the trip city's `time_zone` and `time_label`, `priority`, `driver_state` of `NO_DRIVER` or `AWAITING_DRIVER`), and recent notification jobs.
+
+### 3.3 Verify Pickup OTP & Commence Journey
+- **Endpoint**: `POST /api/bookings/:id/verify-pickup-otp`
+- **Request Body**:
+  ```json
+  {
+    "otp": "849201"
+  }
+  ```
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "status": "in_progress",
+    "message": "Pickup verified successfully. Trip commenced."
+  }
+  ```
+- **Error (400 / 423)**: Returns remaining attempts or `OTP_LOCKED` error if failed 5 times.
+
+---
+
+
+### 3.4 Direct bookings: walk-in, phone, manual (ADR 034)
+The supplier's own customers. Seats come from the same native inventory as marketplace and OCTo bookings (`reserveNativeInventory`), the price from `calculateBookingQuote`; the browser never sends a total. Commission is 0, no `payouts` row is written, and `payment_status` is `OFFLINE` so no IdeaHoliday refund path touches it. Counter sales ignore the online `cutoff_minutes` and close when the departure starts. All routes need `requireSupplierAccess`; errors are `400 VALIDATION_ERROR`, `404 PRODUCT_NOT_FOUND`, `409 INVENTORY_UNAVAILABLE`.
+- **`GET /api/suppliers/:id/availability?date=YYYY-MM-DD`**: `{ products: [{ productId, optionId, title, optionName, departures: [slot] }] }` for every active seat-inventory option; `slot` is the native slot view (`localTime`, `capacity`, `vacancies`, `status`), computed as a counter sale.
+- **`POST /api/suppliers/:id/bookings/quote`**: body `{ product_id, product_option_id?, activity_date, pickup_time?, adults, children?, unit_items?, discount_inr? }` → `{ quote: { baseAmount, taxAmount, totalAmount, discountInr, amountDueInr, vacancies } }`. Takes no seats.
+- **`POST /api/suppliers/:id/bookings`**: body `{ source: WALK_IN|PHONE|MANUAL, product_id, product_option_id?, activity_date, pickup_time (required for seat inventory), adults, children?, unit_items?, traveler_name, traveler_phone, traveler_email?, pickup_location?, special_requests?, discount_inr?, payments?: [{ mode: CASH|UPI|CARD|BANK, amount_inr, reference?, note? }], client_request_id? }`. Unknown fields are refused. `discount_inr` cannot exceed the total; payments cannot exceed the amount due. Returns `201 { booking, payments, documents: { voucherUrl, invoiceUrl } }` with `status = confirmed`; a repeated `client_request_id` returns `200` and the same booking.
+- **`GET /api/suppliers/:id/bookings/:bookingId/payments`**: `{ amountInr, balanceDueInr, payments, documents }`.
+- **`POST /api/suppliers/:id/bookings/:bookingId/payments`**: body `{ mode, amount_inr, reference?, note? }` records money collected later; refused over the balance (`400 OVERPAYMENT`) or for a booking IdeaHoliday collected (`409 NOT_SUPPLIER_DIRECT`).
+- For an `OFFLINE` booking, `/api/bookings/:ref/documents/invoice` renders the operator's payment summary, not an IdeaHoliday invoice. Travelers cannot self-cancel, reschedule or amend it (`SUPPLIER_DIRECT_BOOKING`).

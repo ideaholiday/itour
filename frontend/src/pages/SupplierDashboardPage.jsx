@@ -73,6 +73,7 @@ export default function SupplierDashboardPage() {
         <SupplierHeaderNav
           supplierData={supplierData}
           activeTab={panel === "fleet" ? "FLEET" : panel === "compliance" ? "KYB" : panel === "listings" ? "BUILDER" : panel === "profile" ? "PROFILE" : panel === "enquiries" ? "ENQUIRIES" : "DASHBOARD"}
+          onBookingCreated={fetchSupplierData}
         />
 
         {/* KYB Status Banner — hidden on compliance tab (already shown there) */}

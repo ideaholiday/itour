@@ -400,12 +400,15 @@ function linkedResources(db, optionId, localDate, time, excludeId = "") {
   });
 }
 
-function slotView(db, rules, localDate, time, excludeId = "", promoContext = {}) {
+function slotView(db, rules, localDate, time, excludeId = "", promoContext = {}, { counterSale = false } = {}) {
   const id = `${rules.option_id}:${localDate}:${time}`;
   // The city's zone, not the rule's stored time_zone (which defaults to India).
   const zone = productTime(db, rules.product_id);
   const start = `${localDate}T${time}:00${offsetOn(zone, localDate, time)}`;
-  const cutoff = new Date(Date.parse(start) - Number(rules.cutoff_minutes) * 60000).toISOString();
+  // The cutoff protects online sales. A supplier selling to a guest at its own
+  // counter may sell until the departure leaves.
+  const cutoffMinutes = counterSale ? 0 : Number(rules.cutoff_minutes);
+  const cutoff = new Date(Date.parse(start) - cutoffMinutes * 60000).toISOString();
   const override = resolveOverride(db, rules.option_id, localDate, time);
   const pricing = resolvePricing(db, rules, localDate);
   // A promotion discounts the resolved seasonal or base rate; it never replaces it.
@@ -435,18 +438,18 @@ function slotView(db, rules, localDate, time, excludeId = "", promoContext = {})
     sharedResource: limitingResource ? { name: limitingResource.name, capacity: limitingResource.capacity } : null,
     cancellationHours: Number(rules.cancellation_hours) };
 }
-export function listNativeAvailability(db, productId, optionId, localDate, { promoCode = null } = {}) {
+export function listNativeAvailability(db, productId, optionId, localDate, { promoCode = null, counterSale = false } = {}) {
   date.parse(localDate);
   const rules = optionId
     ? [getInventoryRules(db, productId, optionId)].filter(Boolean)
     : db.prepare(`SELECT n.*, o.name AS option_name FROM native_inventory_rules n JOIN product_options o ON o.id = n.option_id
       WHERE n.product_id = ? AND (o.is_active IS NULL OR CAST(o.is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY o.name, o.id`).all(productId);
   return rules.flatMap(rule => parse(rule.departure_times).map(time => ({
-    ...slotView(db, rule, localDate, time, "", { code: promoCode }),
+    ...slotView(db, rule, localDate, time, "", { code: promoCode }, { counterSale }),
     optionName: rule.option_name || null,
   })));
 }
-export function checkNativeInventory(db, input, { ownerId } = {}) {
+export function checkNativeInventory(db, input, { ownerId, counterSale = false } = {}) {
   const productId = input.product_id || input.activity_id;
   const rules = getInventoryRules(db, productId, input.product_option_id);
   if (!rules) return null;
@@ -466,7 +469,7 @@ export function checkNativeInventory(db, input, { ownerId } = {}) {
   const slot = slotView(db, rules, localDate, time, excludeId, {
     code: input.promo_code || input.promoCode || null,
     partySize: party,
-  });
+  }, { counterSale });
   if (excludeId) return { ...slot, ...heldPricing, available: true, status: "AVAILABLE" };
   if (slot.minPartySize > 1 && party < slot.minPartySize) {
     throw inventoryError(`This departure needs at least ${slot.minPartySize} travelers to run.`, "BELOW_MIN_PARTY_SIZE");
@@ -477,7 +480,7 @@ export function checkNativeInventory(db, input, { ownerId } = {}) {
   if (!slot.available || slot.vacancies < party) throw inventoryError("This departure no longer has enough seats or has closed. Choose another departure.");
   return slot;
 }
-export function reserveNativeInventory(db, { productId, optionId, localDate, localTime, adults, children = 0, unitItems, promoCode = null, ownerId, requestKey }) {
+export function reserveNativeInventory(db, { productId, optionId, localDate, localTime, adults, children = 0, unitItems, promoCode = null, ownerId, requestKey, counterSale = false }) {
   // A unit breakdown, when supplied, is authoritative for the seat counts.
   const optionRules = getInventoryRules(db, productId, optionId);
   const breakdown = normalizeUnitItems(unitItems, {
@@ -497,7 +500,7 @@ export function reserveNativeInventory(db, { productId, optionId, localDate, loc
     }
     const activeOption = db.prepare("SELECT id FROM product_options WHERE id = ? AND product_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").get(optionId, productId);
     if (!activeOption) throw inventoryError("This option is no longer available", "OPTION_NOT_AVAILABLE");
-    const slot = checkNativeInventory(db, { product_id: productId, product_option_id: optionId, activity_date: localDate, pickup_time: localTime, adults, children, promo_code: promoCode });
+    const slot = checkNativeInventory(db, { product_id: productId, product_option_id: optionId, activity_date: localDate, pickup_time: localTime, adults, children, promo_code: promoCode }, { counterSale });
     if (!slot) throw inventoryError("Seat inventory is not enabled for this option", "INVENTORY_NOT_ENABLED");
     // Silently ignoring a bad code would charge the traveler full price after
     // they believed a discount applied.

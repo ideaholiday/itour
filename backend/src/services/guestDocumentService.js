@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { nanoid } from "nanoid";
 import { countryTime } from "../lib/localTime.js";
 import { GST_FREE_COUNTRIES } from "../lib/productTax.js";
+import { isServiceablePayment, isSupplierDirect } from "../lib/bookingSources.js";
 
 const documentTypes = new Set(["VOUCHER", "INVOICE"]);
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -58,7 +59,7 @@ function documentShell(title, booking, body) {
 }
 
 function voucherQr(booking) {
-  if (booking.payment_status !== "PAID" || booking.status === "cancelled") return "";
+  if (!isServiceablePayment(booking) || booking.status === "cancelled") return "";
   // The reference opens an authenticated trip page; the QR contains no guest PII or pickup secret.
   const qr = QRCode.create(`${resolveGuestDocumentBaseUrl()}/booking-confirmed/${encodeURIComponent(booking.ref)}`, { errorCorrectionLevel: "M" });
   const size = qr.modules.size;
@@ -99,6 +100,16 @@ export function renderGuestDocument(documentType, booking) {
     const pickupStatus = booking.confirmation_status === "PENDING_SUPPLIER" || logistics.pendingSupplier ? "Pickup details pending supplier confirmation" : `${pickupTime || "Time TBC"} · ${booking.pickup_location || "See meeting point"}`;
     const body = `<h1>Booking voucher</h1>${voucherQr(booking)}<p class="muted">Present this mobile voucher at pickup. Government-issued identification may be requested.</p><div class="grid"><div class="card"><span class="label">Experience / option</span><strong>${escapeHtml(booking.product_title || booking.product_type)}</strong><br><span class="muted">${escapeHtml(booking.confirmation_status || booking.status || "PENDING")}</span></div><div class="card"><span class="label">Traveler</span><strong>${escapeHtml(booking.traveler_name)}</strong><br>${escapeHtml(booking.traveler_phone)}</div><div class="card"><span class="label">Date and pickup window</span><strong>${escapeHtml(booking.activity_date)} · ${escapeHtml(pickupStatus)}</strong></div><div class="card"><span class="label">Operator</span><strong>${escapeHtml(booking.supplier_name || "Idea Holiday partner")}</strong><br>${escapeHtml(booking.supplier_phone || "")}</div></div><section class="section"><h2>Pickup / meeting point</h2><div class="card">${escapeHtml(booking.pickup_location || logistics.pickupLocation || "Pending confirmation")}${booking.pickup_instructions ? `<br><span class="muted">${escapeHtml(booking.pickup_instructions)}</span>` : ""}${logistics.meetingPointLabel ? `<br><span class="muted">Meeting point: ${escapeHtml(logistics.meetingPointLabel)}</span>` : ""}</div></section>${booking.drop_location ? `<section class="section"><h2>Drop-off</h2><div class="card">${escapeHtml(booking.drop_location)}</div></section>` : ""}<section class="section"><h2>Driver and vehicle</h2><div class="card">${driver}</div></section><div class="notice"><strong>Pickup security:</strong> Check the driver and vehicle plate before sharing the private pickup code shown only in My Trips. The code is intentionally excluded from this shareable voucher.</div>${booking.traveler_invite_link ? `<section class="section"><h2>Travelling with friends?</h2><div class="card">Anyone who signs up with this link gets a discount on their first Idea Holiday trip:<br><strong>${escapeHtml(booking.traveler_invite_link)}</strong></div></section>` : ""}${operatorReviewQr(booking)}`;
     return documentShell(`Voucher ${booking.ref}`, booking, body);
+  }
+
+  // A supplier-direct booking was paid to the operator, not to IdeaHoliday, so
+  // IdeaHoliday issues no invoice or receipt for it: only what is paid and owed.
+  if (isSupplierDirect(booking)) {
+    const amount = Number(booking.amount_inr || 0);
+    const balance = Number(booking.balance_due_inr || 0);
+    const discount = Number(booking.direct_discount_inr || 0);
+    const body = `<h1>Payment summary</h1><div class="grid"><div class="card"><span class="label">Booked with</span><strong>${escapeHtml(booking.supplier_name || "Your operator")}</strong></div><div class="card"><span class="label">Guest</span><strong>${escapeHtml(booking.traveler_name)}</strong><br>${escapeHtml(booking.traveler_phone || "")}</div></div><section class="section"><h2>${escapeHtml(booking.product_title || booking.product_type)} · ${escapeHtml(booking.activity_date)}</h2>${discount > 0 ? `<div class="row"><span>Discount from the operator</span><strong>− ${money(discount)}</strong></div>` : ""}<div class="row"><span>Booking total</span><strong>${money(amount)}</strong></div><div class="row"><span>Paid to the operator</span><strong>${money(amount - balance)}</strong></div><div class="row total"><span>${balance > 0 ? "Balance due" : "Fully paid"}</span><span>${money(balance)}</span></div></section><p class="muted">You paid ${escapeHtml(booking.supplier_name || "the operator")} directly. Tax invoices and refunds for this booking come from the operator.</p>`;
+    return documentShell(`Payment summary ${booking.ref}`, booking, body);
   }
 
   const total = Number(booking.amount_inr || 0);

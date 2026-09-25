@@ -246,7 +246,7 @@ export default function SupplierDeparturesPanel({ supplierId, products = [], onC
                     <td className="py-2 pr-3">{row.adults} adult{row.adults === 1 ? "" : "s"}{row.children ? `, ${row.children} child${row.children === 1 ? "" : "ren"}` : ""}</td>
                     <td className="py-2 pr-3">{row.pickupTime || "—"}</td>
                     <td className="py-2 pr-3 text-stone-600">{row.pickupLocation}{row.variantName ? <span className="block">{row.variantName}</span> : null}{row.specialRequests ? <span className="block italic">{row.specialRequests}</span> : null}</td>
-                    <td className="py-2 pr-3">{attendanceBadge(row.attendanceStatus)}</td>
+                    <td className="py-2 pr-3">{attendanceBadge(row.attendanceStatus)}{row.balanceDueInr > 0 ? <span className="mt-1 block text-[11px] font-bold text-amber-700">Collect ₹{row.balanceDueInr.toLocaleString("en-IN")}</span> : null}</td>
                     <td className="py-2">
                       <div className="flex justify-end gap-1">
                         {row.attendanceStatus !== "CHECKED_IN" && <button type="button" disabled={busyId === row.id} onClick={() => mark(row.id, "CHECKED_IN")} className="rounded-lg border border-emerald-300 p-1.5 text-emerald-700 hover:bg-emerald-50" aria-label={`Check in ${row.travelerName}`} title="Check in"><CircleCheck className="h-3.5 w-3.5" /></button>}

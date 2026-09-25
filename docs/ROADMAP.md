@@ -52,6 +52,12 @@ Do not rebuild these. Extend them if asked.
   - Then, in order: Play Console organisation account → privacy policy page covering driver location → upload key (kept outside the repo) → test on real Android phones (including Xiaomi/Oppo/Vivo battery savers) → Play listing, data-safety form and location foreground-service declaration → internal testing track → set `ANDROID_DRIVER_APP_SHA256` and `VITE_DRIVER_APP_URL` in production.
   - Until then, drivers share location from the browser trip page (Phase 1–2 work as is). The app already targets API 36, which Play requires for new apps from 2026-08-31.
 
+**Operator platform** (owner request 2026-09-25; ADR 034–035, [`DECISIONS_OPERATOR.md`](DECISIONS_OPERATOR.md)): run a tour operator's whole business on supply.ideaholiday.in, Bókun-style, with Sembark-style packages. Every channel books the one inventory.
+
+- **Phase 0 — done:** OCTo partner keys; shared-resource locks.
+- **Phase 1 — done:** walk-in / phone / manual bookings, `bookings.source`, supplier payment records and balance due.
+- **Next, in order:** 2 supplier staff logins and roles → 3 departures board, booking calendar, guides/vehicles/equipment, supplier reschedule → 4 real dashboard numbers → 5 supplier agents with net rates and credit → 6 package and quotation builder with hotel rate sheet and PDF email → 7 per-channel on/off and reseller API keys in the extranet.
+
 Standing obligations that apply to every change:
 
 - Keep `npm audit --omit=dev` at **0 vulnerabilities**.
