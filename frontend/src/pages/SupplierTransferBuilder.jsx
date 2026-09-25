@@ -90,7 +90,7 @@ function list(value) {
 export default function SupplierTransferBuilder() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const supplierId = user?.user_metadata?.supplier_id || user?.supplier_id || "sup_lucknow_cabs";
+  const supplierId = user?.user_metadata?.supplier_id || user?.supplier_id || null;
 
   const [routeType, setRouteType] = useState("AIRPORT_TRANSFER");
   const [serviceDirection, setServiceDirection] = useState("ARRIVAL");
@@ -287,6 +287,7 @@ export default function SupplierTransferBuilder() {
       const hubLabel = selectedHub?.name || origin.address;
       const zoneLabel = customZoneName || destination.address;
 
+      if (!supplierId) throw new Error("Your account is not linked to a supplier. Sign in again or contact support.");
       const response = await fetch(`/api/suppliers/${supplierId}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },

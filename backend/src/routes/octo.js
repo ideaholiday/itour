@@ -9,10 +9,14 @@ import {
   createOctoReservation,
   confirmOctoReservation,
   cancelOctoReservation,
+  getOctoBooking,
 } from "../services/octoService.js";
+import { requireApiPartner } from "../middleware/apiPartner.js";
 import logger from "../config/logger.js";
 
 const router = Router();
+// Browsing is public; anything that holds seats or reads a booking needs a key.
+const partnerOnly = requireApiPartner(db);
 
 // GET /octo/capabilities or /api/octo/capabilities
 router.get("/capabilities", (req, res) => {
@@ -72,9 +76,9 @@ router.post("/availability", (req, res) => {
 });
 
 // POST /octo/bookings/reservation or /api/octo/bookings/reservation
-router.post("/bookings/reservation", (req, res) => {
+router.post("/bookings/reservation", partnerOnly, (req, res) => {
   try {
-    const reservation = createOctoReservation(db, req.body);
+    const reservation = createOctoReservation(db, req.body, req.apiPartner);
     res.status(201).json(reservation);
   } catch (err) {
     logger.error("OCTo reservation error", { error: err.message });
@@ -83,9 +87,9 @@ router.post("/bookings/reservation", (req, res) => {
 });
 
 // POST /octo/bookings/confirmation or /api/octo/bookings/confirmation
-router.post("/bookings/confirmation", (req, res) => {
+router.post("/bookings/confirmation", partnerOnly, (req, res) => {
   try {
-    const confirmation = confirmOctoReservation(db, req.body);
+    const confirmation = confirmOctoReservation(db, req.body, req.apiPartner);
     res.json(confirmation);
   } catch (err) {
     logger.error("OCTo confirmation error", { error: err.message });
@@ -94,9 +98,9 @@ router.post("/bookings/confirmation", (req, res) => {
 });
 
 // POST /octo/bookings/cancellation or /api/octo/bookings/cancellation
-router.post("/bookings/cancellation", (req, res) => {
+router.post("/bookings/cancellation", partnerOnly, (req, res) => {
   try {
-    const cancellation = cancelOctoReservation(db, req.body);
+    const cancellation = cancelOctoReservation(db, req.body, req.apiPartner);
     res.json(cancellation);
   } catch (err) {
     logger.error("OCTo cancellation error", { error: err.message });
@@ -105,9 +109,9 @@ router.post("/bookings/cancellation", (req, res) => {
 });
 
 // GET /octo/bookings/:id or /api/octo/bookings/:id
-router.get("/bookings/:id", (req, res) => {
+router.get("/bookings/:id", partnerOnly, (req, res) => {
   try {
-    const reservation = db.prepare("SELECT * FROM native_reservations WHERE id = ? OR owner_id = ?").get(req.params.id, `octo_${req.params.id}`);
+    const reservation = getOctoBooking(db, req.params.id, req.apiPartner);
     if (!reservation) {
       return res.status(404).json({ error: "Booking not found", code: "BOOKING_NOT_FOUND" });
     }

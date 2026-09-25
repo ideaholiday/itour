@@ -12,7 +12,9 @@ import {
   createOctoReservation,
   confirmOctoReservation,
   cancelOctoReservation,
+  getOctoBooking,
 } from "../src/services/octoService.js";
+import { requireApiPartner, generateApiKey } from "../src/middleware/apiPartner.js";
 import { saveInventoryRules } from "../src/services/nativeInventoryService.js";
 
 function setupOctoTestDb() {
@@ -105,6 +107,7 @@ function setupOctoTestDb() {
       pricing_snapshot TEXT,
       unit_items TEXT NOT NULL DEFAULT '[]',
       promotion_id TEXT,
+      api_partner_id TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -317,4 +320,84 @@ test("OCTo Service: a hold cannot be confirmed once the supplier is suspended", 
     (error) => error.status === 409 && error.code === "PRODUCT_NOT_BOOKABLE"
   );
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM bookings").get().n, 0);
+});
+
+const partnerA = { id: "apip_a", supplier_id: null, prepaid: 0 };
+const partnerB = { id: "apip_b", supplier_id: null, prepaid: 0 };
+
+function holdFor(db, partner, extra = {}) {
+  const futureDate = new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 10);
+  return createOctoReservation(db, {
+    productId: "prod_test_01",
+    optionId: "opt_test_01",
+    availabilityId: `opt_test_01:${futureDate}:16:00`,
+    unitItems: [{ unitId: "opt_test_01:adult" }],
+    ...extra,
+  }, partner);
+}
+
+test("OCTo Service: a partner cannot read, confirm or cancel another partner's reservation", () => {
+  const db = setupOctoTestDb();
+  const reservation = holdFor(db, partnerA);
+
+  assert.equal(getOctoBooking(db, reservation.id, partnerB), null);
+  assert.throws(() => confirmOctoReservation(db, { uuid: reservation.id }, partnerB), (error) => error.status === 404);
+  assert.throws(() => cancelOctoReservation(db, { uuid: reservation.id }, partnerB), (error) => error.status === 404);
+  assert.equal(db.prepare("SELECT status FROM native_reservations WHERE id = ?").get(reservation.id).status, "ON_HOLD");
+
+  assert.equal(getOctoBooking(db, reservation.id, partnerA).id, reservation.id);
+});
+
+test("OCTo Service: a marketplace hold is out of reach of the OCTo API", () => {
+  const db = setupOctoTestDb();
+  db.prepare("INSERT INTO native_reservations (id, availability_slot, owner_id, request_key, adults, children, status, utc_expires_at) VALUES ('hold_web', 'x', 'user_traveler', 'k', 1, 0, 'CONFIRMED', '2099-01-01')").run();
+
+  assert.throws(() => cancelOctoReservation(db, { uuid: "hold_web" }), (error) => error.status === 404);
+  assert.equal(db.prepare("SELECT status FROM native_reservations WHERE id = 'hold_web'").get().status, "CONFIRMED");
+});
+
+test("OCTo Service: only a prepaid partner's confirmation is recorded as paid", () => {
+  const db = setupOctoTestDb();
+  const owed = holdFor(db, partnerA);
+  confirmOctoReservation(db, { uuid: owed.id, contact: { fullName: "Aarav Sharma", email: "aarav@example.com" } }, partnerA);
+  const prepaidPartner = { id: "apip_pre", supplier_id: null, prepaid: 1 };
+  const paid = holdFor(db, prepaidPartner, { uuid: "prepaid-uuid-0001" });
+  confirmOctoReservation(db, { uuid: paid.id, contact: { fullName: "Diya Rao", email: "diya@example.com" } }, prepaidPartner);
+
+  const statuses = db.prepare("SELECT payment_status FROM bookings ORDER BY payment_status").all().map((row) => row.payment_status);
+  assert.deepEqual(statuses, ["PAID", "PENDING"]);
+});
+
+test("OCTo Service: a supplier's own reseller key books only that supplier's products", () => {
+  const db = setupOctoTestDb();
+  const otherSupplierKey = { id: "apip_other", supplier_id: "sup_elsewhere", prepaid: 0 };
+  assert.throws(() => holdFor(db, otherSupplierKey), (error) => error.code === "PRODUCT_NOT_BOOKABLE");
+  const ownKey = { id: "apip_own", supplier_id: "sup_test_01", prepaid: 0 };
+  assert.equal(holdFor(db, ownKey).status, "ON_HOLD");
+});
+
+test("OCTo partner keys: missing, wrong and revoked keys are refused", () => {
+  const db = new Database(":memory:");
+  db.exec("CREATE TABLE api_partners (id TEXT PRIMARY KEY, name TEXT, supplier_id TEXT, key_hash TEXT UNIQUE, key_prefix TEXT, prepaid INTEGER DEFAULT 0, status TEXT DEFAULT 'ACTIVE', last_used_at TEXT)");
+  const active = generateApiKey();
+  const revoked = generateApiKey();
+  db.prepare("INSERT INTO api_partners (id, name, key_hash, key_prefix) VALUES ('apip_ok', 'Reseller', ?, ?)").run(active.keyHash, active.keyPrefix);
+  db.prepare("INSERT INTO api_partners (id, name, key_hash, key_prefix, status) VALUES ('apip_old', 'Old', ?, ?, 'REVOKED')").run(revoked.keyHash, revoked.keyPrefix);
+  const guard = requireApiPartner(db);
+
+  const run = (authorization) => {
+    const req = { headers: authorization ? { authorization } : {}, path: "/bookings/reservation" };
+    const outcome = { status: 200, next: false };
+    const res = { status(code) { outcome.status = code; return this; }, json() { return this; } };
+    guard(req, res, () => { outcome.next = true; });
+    return { ...outcome, partner: req.apiPartner };
+  };
+
+  assert.equal(run(null).status, 401);
+  assert.equal(run("Bearer ihp_not_a_key").status, 401);
+  assert.equal(run(`Bearer ${revoked.key}`).status, 401);
+  const ok = run(`Bearer ${active.key}`);
+  assert.equal(ok.next, true);
+  assert.equal(ok.partner.id, "apip_ok");
+  assert.ok(db.prepare("SELECT last_used_at FROM api_partners WHERE id = 'apip_ok'").get().last_used_at);
 });

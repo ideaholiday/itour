@@ -280,13 +280,37 @@ export function toNativeUnitItems(unitItems = []) {
   return [...counts.entries()].map(([unitType, quantity]) => ({ unitType, quantity }));
 }
 
-export function createOctoReservation(db, input) {
+// A partner reaches only reservations made over OCTo, and only its own. Without
+// the owner prefix check a caller could confirm or cancel a marketplace hold
+// by guessing its id.
+function findPartnerReservation(db, uuid, partner) {
+  const reservation = db.prepare("SELECT * FROM native_reservations WHERE (id = ? OR owner_id = ?) AND substr(owner_id, 1, 5) = 'octo_'")
+    .get(uuid, `octo_${uuid}`);
+  if (!reservation) return null;
+  if (partner && reservation.api_partner_id !== partner.id) return null;
+  return reservation;
+}
+
+export function getOctoBooking(db, uuid, partner = null) {
+  return findPartnerReservation(db, uuid, partner);
+}
+
+function assertPartnerMaySell(db, productId, partner) {
+  if (!partner?.supplier_id) return;
+  const product = db.prepare("SELECT supplier_id FROM products WHERE id = ?").get(productId);
+  if (product?.supplier_id !== partner.supplier_id) {
+    throw Object.assign(new Error("This product is not available for booking"), { status: 409, code: "PRODUCT_NOT_BOOKABLE" });
+  }
+}
+
+export function createOctoReservation(db, input, partner = null) {
   const { uuid = randomUUID(), productId, optionId, availabilityId, unitItems = [], contact } = input;
 
   if (!productId || !optionId || !availabilityId) {
     throw Object.assign(new Error("productId, optionId, and availabilityId are required"), { status: 400 });
   }
   assertSellableProduct(db, productId);
+  assertPartnerMaySell(db, productId, partner);
 
   const parts = availabilityId.split(":");
   const localDate = parts[1];
@@ -303,15 +327,18 @@ export function createOctoReservation(db, input) {
     ownerId: `octo_${uuid}`,
     requestKey: `octo_key_${uuid}`,
   });
+  if (partner) {
+    db.prepare("UPDATE native_reservations SET api_partner_id = ? WHERE id = ? AND api_partner_id IS NULL").run(partner.id, reservation.id);
+  }
 
   return octoReservationView(db, reservation.id, `octo_${uuid}`);
 }
 
-export function confirmOctoReservation(db, input) {
+export function confirmOctoReservation(db, input, partner = null) {
   const { uuid, contact = {} } = input;
   if (!uuid) throw Object.assign(new Error("uuid is required"), { status: 400 });
 
-  const reservation = db.prepare("SELECT * FROM native_reservations WHERE id = ? OR owner_id = ?").get(uuid, `octo_${uuid}`);
+  const reservation = findPartnerReservation(db, uuid, partner);
   if (!reservation) throw Object.assign(new Error("Reservation not found"), { status: 404 });
 
   if (reservation.status === "CONFIRMED") {
@@ -343,6 +370,10 @@ export function confirmOctoReservation(db, input) {
   // confirmation has to populate the same required shape as a native booking.
   const product = db.prepare("SELECT product_type, supplier_id, city FROM products WHERE id = ?").get(slot.product_id) || {};
   const bookingRef = `IH-${randomUUID().replace(/-/g, "").slice(0, 7).toUpperCase()}`;
+  // Nobody has paid us over OCTo. Only a prepaid partner, who collected the
+  // money and settles on account, gets a PAID booking; any other confirmation
+  // holds the seats with the payment still owed.
+  const paymentStatus = partner?.prepaid ? "PAID" : "PENDING";
 
   db.transaction(() => {
     // bookings.user_id is a real foreign key, but an OCTo reservation's owner is
@@ -362,7 +393,7 @@ export function confirmOctoReservation(db, input) {
 
     db.prepare(`
       INSERT INTO bookings (id, ref, user_id, product_id, product_option_id, supplier_id, product_type, activity_date, pickup_time, pickup_location, adults, children, amount_inr, status, payment_status, traveler_name, traveler_email, traveler_phone)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', 'PAID', ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
     `).run(
       bookingId,
@@ -378,6 +409,7 @@ export function confirmOctoReservation(db, input) {
       reservation.adults,
       reservation.children,
       amountInr,
+      paymentStatus,
       contact.fullName || "OCTo Guest",
       contact.email || "octo@ideaholiday.in",
       contact.phoneNumber || "+919999999999"
@@ -402,9 +434,9 @@ export function confirmOctoReservation(db, input) {
   };
 }
 
-export function cancelOctoReservation(db, input) {
+export function cancelOctoReservation(db, input, partner = null) {
   const { uuid, reason = "Customer request" } = input;
-  const reservation = db.prepare("SELECT * FROM native_reservations WHERE id = ? OR owner_id = ?").get(uuid, `octo_${uuid}`);
+  const reservation = findPartnerReservation(db, uuid, partner);
   if (!reservation) throw Object.assign(new Error("Reservation not found"), { status: 404 });
 
   db.transaction(() => {

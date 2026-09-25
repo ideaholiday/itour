@@ -9,7 +9,7 @@ import { AlertTriangle, Headphones, Star } from "lucide-react";
 
 export default function SupplierBookingsPage() {
   const { user } = useAuth();
-  const supplierId = user?.user_metadata?.supplier_id || user?.supplier_id || "sup_lucknow_cabs";
+  const supplierId = user?.user_metadata?.supplier_id || user?.supplier_id || null;
   const [supplierData, setSupplierData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [supportCases, setSupportCases] = useState([]);
@@ -30,6 +30,7 @@ export default function SupplierBookingsPage() {
   };
 
   const fetchSupplierData = async () => {
+    if (!supplierId) { setLoading(false); return; }
     try {
       const res = await fetch(`/api/suppliers/${supplierId}`, { headers: authHeaders() });
       const data = await res.json();

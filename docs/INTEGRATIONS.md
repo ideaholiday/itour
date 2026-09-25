@@ -208,7 +208,7 @@ Idea Holiday implements the Open Connectivity for Tours, Activities & Attraction
 - `GET /api/octo/v1/products`: Returns published catalog in OCTo format.
 - `GET /api/octo/v1/products/:id`: Returns individual product with options.
 - `POST /api/octo/v1/availability`: Real-time availability calculation for requested date/timeslot.
-- `POST /api/octo/v1/bookings/reservation`: 10-minute temporary seat hold (`native_reservations`).
+- `POST /api/octo/v1/bookings/reservation`: 10-minute temporary seat hold (`native_reservations`). This and the other `bookings` endpoints need a partner key (`Authorization: Bearer ihp_…`, issued by `scripts/create-api-partner.js`); see API_CONTRACTS §6.
 - `POST /api/octo/v1/bookings/confirmation`: Instant booking activation and voucher generation.
 - `POST /api/octo/v1/bookings/cancellation`: Policy-compliant booking cancellation and inventory release.
 

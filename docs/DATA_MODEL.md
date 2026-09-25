@@ -262,6 +262,11 @@ erDiagram
   - `internal_id`, `external_id`, `supplier_id`.
   - `PRIMARY KEY(provider, supplier_id, resource_type, internal_id)`.
 
+- **`api_partners`** (OCTo reseller keys, migration 061):
+  - `id` (`apip_...`), `name`, `supplier_id` (NULL = IdeaHoliday-wide; set = that supplier's products only).
+  - `key_hash` (SHA-256, UNIQUE), `key_prefix` (first 12 chars, for recognising a key), `prepaid` (1 = confirmations are PAID), `status` (`ACTIVE`, `REVOKED`), `last_used_at`.
+  - `native_reservations.api_partner_id` records which partner made an OCTo hold.
+
 - **`supplier_channel_connections`** (External ResTech & OCTo Ingestion):
   - `id`: Primary key (`ch_...`).
   - `supplier_id`: Foreign key referencing `suppliers(id)`.

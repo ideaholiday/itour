@@ -478,6 +478,8 @@ Backs `/admin/analytics`: **`GET /overview`**, **`/trends`**, **`/cohorts`**, **
 
 Compliant with OCTo specification v1. Used by external distributors, OTAs, and API partners to query Idea Holiday inventory and place instant bookings.
 
+**Auth:** the `bookings` endpoints need a partner key (SECURITY.md §1).
+
 - **`GET /api/octo/capabilities`**: Declares supported capabilities (`octo/core`, `octo/pricing`, `octo/content`).
 - **`GET /api/octo/suppliers`**: Lists verified suppliers with contact metadata.
 - **`GET /api/octo/products`**: Lists published products formatted into OCTo schemas with options, departure start times, and unit pricing (ADULT / CHILD in INR).
@@ -485,7 +487,6 @@ Compliant with OCTo specification v1. Used by external distributors, OTAs, and A
 - **`POST /api/octo/availability`**: Checks availability slots and vacancies for given `productId`, `optionId`, and date range.
 - **`POST /api/octo/bookings/reservation`**: Creates an owner-scoped 10-minute temporary seat reservation (`native_reservations`).
 - **`POST /api/octo/bookings/confirmation`**: Confirms a reservation into a booking. Populates the same required booking shape as a native checkout (`ref`, `product_type`, `pickup_location`, `amount_inr` from the hold's frozen price) and materialises a guest traveler for the synthetic OCTo owner.
-- **`POST /api/octo/bookings/confirmation`**: Commits reservation into confirmed booking with QR code voucher payload.
 - **`POST /api/octo/bookings/cancellation`**: Cancels reservation and releases seats back into availability.
 - **`GET /api/octo/bookings/:id`**: Fetches booking status and details.
 

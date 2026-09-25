@@ -359,6 +359,17 @@ export function resolveOverride(db, optionId, localDate, time) {
 }
 
 /** Resources constraining an option, with the seats each already has committed. */
+// Serialises every write that takes seats from a departure. The product row
+// covers this product's options; a shared resource can link options from
+// several products, so its rows are locked too, always in id order so two
+// writers cannot deadlock on them.
+function lockInventory(db, productId, optionId) {
+  db.prepare("UPDATE products SET id = id WHERE id = ?").run(productId);
+  const links = optionalQuery(db, () => db.prepare("SELECT resource_id FROM native_resource_options WHERE option_id = ? ORDER BY resource_id").all(optionId)) || [];
+  for (const { resource_id: resourceId } of links) {
+    db.prepare("UPDATE native_resources SET id = id WHERE id = ?").run(resourceId);
+  }
+}
 function linkedResources(db, optionId, localDate, time, excludeId = "") {
   const rows = optionalQuery(db, () => db.prepare(
     `SELECT r.id, r.name, r.capacity FROM native_resources r
@@ -477,7 +488,7 @@ export function reserveNativeInventory(db, { productId, optionId, localDate, loc
   children = breakdown.children;
   if (!ownerId || typeof requestKey !== "string" || !requestKey || requestKey.length > 200 || !Number.isInteger(adults) || adults < 1 || !Number.isInteger(children) || children < 0 || adults + children > 26) throw inventoryError("Invalid reservation request", "INVALID_RESERVATION", 400);
   return db.transaction(() => {
-    db.prepare("UPDATE products SET id = id WHERE id = ?").run(productId);
+    lockInventory(db, productId, optionId);
     const existing = db.prepare("SELECT r.*, s.product_id, s.option_id, s.local_date, s.local_time FROM native_reservations r JOIN native_availability_slots s ON s.id = r.availability_slot WHERE owner_id = ? AND request_key = ?").get(ownerId, requestKey);
     if (existing) {
       if (existing.product_id !== productId || existing.option_id !== optionId || existing.local_date !== localDate || existing.local_time !== localTime || Number(existing.adults) !== adults || Number(existing.children) !== children) throw inventoryError("Reservation key already used for different details", "IDEMPOTENCY_CONFLICT");
@@ -540,7 +551,7 @@ export function releaseNativeReservation(db, bookingId) {
 // Called inside the booking mutation transaction so either both inventories move or neither does.
 export function moveNativeReservation(db, booking, localDate, localTime = booking.pickup_time) {
   if (!getInventoryRules(db, booking.product_id, booking.product_option_id)) return;
-  db.prepare("UPDATE products SET id = id WHERE id = ?").run(booking.product_id);
+  lockInventory(db, booking.product_id, booking.product_option_id);
   const existing = db.prepare("SELECT * FROM native_reservations WHERE booking_id = ? AND status = 'CONFIRMED'").get(booking.id);
   if (!existing) throw inventoryError("Confirmed seat reservation missing", "RESERVATION_MISSING");
   if (existing.availability_slot === `${booking.product_option_id}:${localDate}:${localTime}`) return;

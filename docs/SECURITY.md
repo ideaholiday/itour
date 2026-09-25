@@ -19,6 +19,7 @@
 - **`SUPPLIER`**: Can only access listings, drivers, assignments, and payouts belonging to their verified `supplier_id`.
 - **`STAFF`**: Can access live trip telemetry, driver fallbacks, support queues, and staff tasks. Cannot access platform financial settlement configurations.
 - **`ADMIN`**: Full platform privileges, including KYB approvals, finance payouts, review moderation, and commission management.
+- **OCTo partners** (`api_partners`): machine callers, not users. Booking endpoints under `/octo` need `Authorization: Bearer ihp_…`; only the key's SHA-256 is stored, the key is printed once by `scripts/create-api-partner.js` and revoked with `--revoke`. A partner reaches only its own OCTo reservations, never marketplace holds, and only a `prepaid` partner's confirmation is recorded as paid.
 - **Team management**: only `ADMIN` grants, changes or revokes `STAFF`/`ADMIN` roles (Admin → Team). Roles are read from the database on every request, so a change applies to open sessions immediately. Nobody can remove or demote themselves, and the last `ADMIN` cannot be removed. Temporary passwords are returned once, stored as scrypt hashes, and never listed again. Every change is recorded in `audit_logs`.
 
 ---

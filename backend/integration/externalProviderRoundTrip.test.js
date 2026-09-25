@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import jwt from "jsonwebtoken";
 import { requestJson, startTestServer } from "./helpers/serverHarness.js";
 import { getReservationProvider } from "../src/services/reservationProviders.js";
+import { generateApiKey } from "../src/middleware/apiPartner.js";
 
 // The repo both serves OCTo (/octo) and now speaks it as a client. Pointing the
 // client at our own server round-trips the contract end to end: if the client
@@ -31,10 +32,14 @@ test("the OCTo provider round-trips availability and reservations against a live
   assert.equal(saved.response.status, 200, JSON.stringify(saved.data));
 
   // Treat our own /octo surface as the supplier's connected external channel.
+  // Booking over OCTo needs a partner key, sent the way any reseller sends it.
+  const partnerKey = generateApiKey();
+  db.prepare("INSERT INTO api_partners (id, name, key_hash, key_prefix) VALUES ('apip_roundtrip', 'Self OCTo', ?, ?)")
+    .run(partnerKey.keyHash, partnerKey.keyPrefix);
   db.prepare(`INSERT INTO supplier_channel_connections
     (id, supplier_id, channel_name, channel_title, endpoint_url, credentials_json, status, last_sync_status)
-    VALUES ('ch_roundtrip', ?, 'OCTO_GENERIC', 'Self OCTo', ?, '{}', 'ACTIVE', 'CONNECTED')`)
-    .run(supplier.id, `${api.baseUrl}/octo`);
+    VALUES ('ch_roundtrip', ?, 'OCTO_GENERIC', 'Self OCTo', ?, ?, 'ACTIVE', 'CONNECTED')`)
+    .run(supplier.id, `${api.baseUrl}/octo`, JSON.stringify({ apiKey: partnerKey.key }));
 
   const provider = getReservationProvider("OCTO_GENERIC");
   assert.equal(provider.isExternal, true);
@@ -92,4 +97,18 @@ test("an unconnected external provider fails loudly instead of serving native se
     (error) => error.code === "PROVIDER_NOT_CONNECTED" && error.status === 409,
     "without a connection the platform must not fall back to its own inventory"
   );
+});
+
+test("booking over OCTo without a partner key is refused, while browsing stays open", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+
+  const capabilities = await requestJson(api.baseUrl, "/octo/capabilities");
+  assert.equal(capabilities.response.status, 200);
+
+  for (const path of ["/octo/bookings/reservation", "/octo/bookings/confirmation", "/octo/bookings/cancellation"]) {
+    const refused = await requestJson(api.baseUrl, path, { body: { uuid: "anything" } });
+    assert.equal(refused.response.status, 401, path);
+  }
+  const lookup = await requestJson(api.baseUrl, "/octo/bookings/anything");
+  assert.equal(lookup.response.status, 401);
 });

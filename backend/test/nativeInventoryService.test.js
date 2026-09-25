@@ -728,3 +728,31 @@ test("a hold's frozen price adds 5% GST in India, 18% from an Indian supplier ab
   assert.throws(() => attachNativeReservation(db, thai.id, { ...tb, amount_inr: 1050 }, "v"), error => error.code === "PRICE_CHANGED");
   attachNativeReservation(db, thai.id, { ...tb, amount_inr: 1000 }, "v");
 });
+
+// The per-product row lock does not cover a resource shared with another
+// product's options; on Postgres two such products could both take the van's
+// last seat. Every seat-taking write must lock the linked resource rows too.
+function recordSql(db) {
+  const seen = [];
+  const prepare = db.prepare.bind(db);
+  db.prepare = (sql) => { seen.push(sql); return prepare(sql); };
+  return seen;
+}
+test("a hold locks the shared resources its option draws from", t => {
+  const db = fixture(t);
+  saveResource(db, "sup", { name: "Van", capacity: 6, optionIds: ["o"] });
+  const seen = recordSql(db);
+  reserve(db);
+  assert.ok(seen.some((sql) => /UPDATE native_resources SET id = id/.test(sql)), "the shared van row is locked");
+});
+test("a reschedule locks the shared resources of the new departure", t => {
+  const db = fixture(t);
+  saveResource(db, "sup", { name: "Van", capacity: 6, optionIds: ["o"] });
+  const hold = reserve(db);
+  const b = booking(db);
+  attachNativeReservation(db, hold.id, b, "u");
+  confirmNativeReservation(db, b);
+  const seen = recordSql(db);
+  moveNativeReservation(db, b, future, "14:00");
+  assert.ok(seen.some((sql) => /UPDATE native_resources SET id = id/.test(sql)));
+});
