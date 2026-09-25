@@ -1832,9 +1832,10 @@ router.post("/:id/drivers", optionalAuthMiddleware, requireSupplierAccess, valid
     if (duplicate) return res.status(409).json({ error: "This driver phone or vehicle is already in your fleet" });
 
     const driverId = `drv_sup_${Date.now()}`;
+    // No rating until a published review rates the driver (reviewService).
     db.prepare(
       `INSERT INTO supplier_drivers (id, supplier_id, driver_name, driver_phone, vehicle_model, vehicle_number, license_number, rating, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 4.9, 'AVAILABLE')`
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'AVAILABLE')`
     ).run(driverId, id, driverName.trim(), phone, vehicleModel || "Commercial Cab", plate, licenseNumber?.trim() || null);
 
     db.prepare("UPDATE supplier_drivers SET driver_email = ?, seat_capacity = ?, dispatch_priority = ? WHERE id = ?").run(driverEmail || null, seatCapacity || 0, dispatchPriority || 0, driverId);
