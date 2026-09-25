@@ -18,12 +18,15 @@ import { DIRECT_PAYMENT_MODES } from "../lib/bookingSources.js";
  *   hotel, transport, activity and custom lines are the supplier's cost and carry markup_pct;
  *   listings enter at their own pre-tax price;
  *   an Indian supplier adds 5% GST on the package (tour-operator rate).
- * The customer sees one package price. When the quotation is accepted, each
+ * The customer sees one package price, or one per hotel option (ADR 043): cars,
+ * activities, listings and custom lines are shared, each hotel line belongs to
+ * one option, and the customer picks an option on acceptance. When the quotation is accepted, each
  * listing line can be booked: the booking holds the seats and records the
  * line's share of the package, and the customer's money is tracked here.
  */
 
 export const PACKAGE_GST_PCT = 5;
+export const MAX_OPTIONS = 6;
 const STATUSES = ["DRAFT", "SENT", "ACCEPTED", "DECLINED"];
 const quoteRef = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date");
@@ -37,7 +40,7 @@ const serviceLineBase = {
 };
 const lineSchema = z.discriminatedUnion("kind", [
   z.object({
-    kind: z.literal("HOTEL"), ...lineBase,
+    kind: z.literal("HOTEL"), ...lineBase, option: z.number().int().min(1).max(MAX_OPTIONS).default(1),
     hotelId: z.string().trim().min(1).max(120), roomType: z.string().trim().min(1).max(80), mealPlan: z.enum(MEAL_PLANS),
     checkIn: isoDate, nights: z.number().int().min(1).max(60), rooms: z.number().int().min(1).max(50).default(1),
     extraAdults: z.number().int().min(0).max(50).default(0), children: z.number().int().min(0).max(50).default(0),
@@ -77,6 +80,8 @@ export const quotationSchema = z.object({
   validUntil: isoDate.optional().nullable(),
   lines: z.array(lineSchema).max(120).default([]),
   days: z.array(daySchema).max(60).default([]),
+  // Hotel options (ADR 043): none or one means a single package; 2–6 named options, hotels chosen per option.
+  options: z.array(z.object({ name: z.string().trim().min(1).max(60) }).strict()).max(MAX_OPTIONS).default([]),
 }).strict();
 
 export const quotationPaymentSchema = z.object({
@@ -91,7 +96,7 @@ const money = (value) => Math.round(Number(value || 0));
 function priceLine(db, supplierId, line, travelers) {
   if (line.kind === "HOTEL") {
     const stay = hotelStayCost(db, supplierId, line);
-    return { price: stay.costInr, row: { line_date: line.checkIn, hotel_id: line.hotelId, room_type: line.roomType, meal_plan: line.mealPlan, nights: line.nights, rooms: line.rooms, extra_adults: line.extraAdults, children: line.children } };
+    return { price: stay.costInr, row: { option_number: line.option, line_date: line.checkIn, hotel_id: line.hotelId, room_type: line.roomType, meal_plan: line.mealPlan, nights: line.nights, rooms: line.rooms, extra_adults: line.extraAdults, children: line.children } };
   }
   if (line.kind === "LISTING") {
     const product = db.prepare("SELECT id FROM products WHERE id = ? AND supplier_id = ?").get(line.productId, supplierId);
@@ -138,6 +143,9 @@ export function packageTotals(lines, { markupPct, gstPct }) {
   return { cost_inr: cost, listings_inr: listings, markup_inr: markup, subtotal_inr: subtotal, gst_pct: gstPct, gst_inr: gst, total_inr: subtotal + gst };
 }
 
+/** The lines one option is made of: the shared lines and that option's hotels. */
+const linesOfOption = (lines, option) => lines.filter((line) => line.kind !== "HOTEL" || (line.option || 1) === option);
+
 function supplierGstPct(db, supplierId) {
   const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
   return supplierCountry(db, supplier) === "India" ? PACKAGE_GST_PCT : 0;
@@ -156,6 +164,7 @@ function lineView(row) {
     extraAdults: Number(row.extra_adults || 0), productId: row.product_id || null, productOptionId: row.product_option_id || null,
     pickupTime: row.pickup_time || null, adults: row.adults ?? null, children: Number(row.children || 0), amountInr: row.amount_inr ?? null,
     serviceId: row.service_id || null, cabTypeId: row.cab_type_id || null, vehicles: row.vehicles ?? null,
+    option: row.kind === "HOTEL" ? row.option_number || 1 : null,
     priceInr: Number(row.price_inr), bookingId: row.booking_id || null,
   };
 }
@@ -165,7 +174,7 @@ function lineView(row) {
  * a line dated off its day, too few seats in the cabs, and a night of the trip
  * with no hotel when the package includes hotels.
  */
-function quotationWarnings(db, row, lines) {
+function quotationWarnings(db, row, lines, options = []) {
   const warnings = [];
   for (const line of lines) {
     if (line.date && line.kind !== "HOTEL" && line.date !== addDays(row.start_date, line.dayNumber - 1)) {
@@ -177,14 +186,16 @@ function quotationWarnings(db, row, lines) {
       if (cab && line.vehicles * cab.seats < people) warnings.push(`${line.title}: ${line.vehicles} × ${cab.name} seat ${line.vehicles * cab.seats}, but ${people} are travelling.`);
     }
   }
-  const stays = lines.filter((line) => line.kind === "HOTEL" && line.date);
   const lastDay = Math.max(0, ...lines.map((line) => line.dayNumber));
-  if (stays.length) {
+  const optionList = options.length ? options : [{ number: 1, name: null }];
+  for (const option of optionList) {
+    const stays = lines.filter((line) => line.kind === "HOTEL" && line.date && line.option === option.number);
+    if (!stays.length && !lines.some((line) => line.kind === "HOTEL")) continue;
     const covered = new Set();
     for (const stay of stays) for (let night = 0; night < stay.nights; night += 1) covered.add(daysBetween(row.start_date, stay.date) + night + 1);
     const missing = [];
     for (let day = 1; day < lastDay; day += 1) if (!covered.has(day)) missing.push(day);
-    if (missing.length) warnings.push(`No hotel for the night of day ${missing.join(", ")}.`);
+    if (missing.length) warnings.push(`${option.name ? `${option.name}: n` : "N"}o hotel for the night of day ${missing.join(", ")}.`);
   }
   return warnings;
 }
@@ -197,6 +208,15 @@ export function quotationView(db, row) {
   const days = db.prepare("SELECT day_number, title, description FROM quotation_days WHERE quotation_id = ? ORDER BY day_number").all(row.id)
     .map((day) => ({ dayNumber: day.day_number, title: day.title || null, description: day.description || null }));
   const travelers = Number(row.adults) + Number(row.children);
+  const perPerson = (total) => (travelers ? Math.ceil(total / travelers) : total);
+  const optionRows = db.prepare("SELECT option_number, name FROM quotation_options WHERE quotation_id = ? ORDER BY option_number").all(row.id);
+  const options = optionRows.length >= 2 ? optionRows.map((option) => {
+    const totals = packageTotals(linesOfOption(lines, option.option_number).map((line) => ({ kind: line.kind, price: line.priceInr })), { markupPct: Number(row.markup_pct), gstPct: Number(row.gst_pct) });
+    return {
+      number: option.option_number, name: option.name,
+      totals: { costInr: totals.cost_inr, listingsInr: totals.listings_inr, markupInr: totals.markup_inr, subtotalInr: totals.subtotal_inr, gstInr: totals.gst_inr, totalInr: totals.total_inr, perPersonInr: perPerson(totals.total_inr) },
+    };
+  }) : [];
   return {
     id: row.id, ref: row.ref, title: row.title, destination: row.destination || null, status: row.status,
     customerName: row.customer_name, customerEmail: row.customer_email || null, customerPhone: row.customer_phone || null, agentId: row.agent_id || null,
@@ -204,9 +224,10 @@ export function quotationView(db, row) {
     totals: {
       costInr: row.cost_inr, listingsInr: row.listings_inr, markupInr: row.markup_inr, subtotalInr: row.subtotal_inr,
       gstPct: Number(row.gst_pct), gstInr: row.gst_inr, totalInr: row.total_inr, paidInr: paid, dueInr: Math.max(0, row.total_inr - paid),
-      perPersonInr: travelers ? Math.ceil(row.total_inr / travelers) : row.total_inr,
+      perPersonInr: perPerson(row.total_inr),
     },
-    lines, days, payments, warnings: quotationWarnings(db, row, lines),
+    options, selectedOption: row.selected_option ?? null,
+    lines, days, payments, warnings: quotationWarnings(db, row, lines, options),
     sentAt: row.sent_at || null, acceptedAt: row.accepted_at || null, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
@@ -239,8 +260,12 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
   if (data.agentId && !db.prepare("SELECT id FROM supplier_agents WHERE id = ? AND supplier_id = ?").get(data.agentId, supplierId)) {
     throw quotationError("Agent not found", 404, "AGENT_NOT_FOUND");
   }
+  const optionCount = data.options.length >= 2 ? data.options.length : 1;
+  const stray = data.lines.find((line) => line.kind === "HOTEL" && line.option > optionCount);
+  if (stray) throw quotationError(`${stray.title} is in option ${stray.option}, but the quotation has ${optionCount === 1 ? "no options" : `${optionCount} options`}`, 400, "UNKNOWN_OPTION");
   const priced = data.lines.map((line) => ({ ...line, ...priceLine(db, supplierId, line, data) }));
-  const totals = packageTotals(priced, { markupPct: data.markupPct, gstPct: supplierGstPct(db, supplierId) });
+  // Until the customer picks, the quotation's own totals are option 1's.
+  const totals = packageTotals(linesOfOption(priced, 1), { markupPct: data.markupPct, gstPct: supplierGstPct(db, supplierId) });
 
   return db.transaction(() => {
     let id = quotationId;
@@ -256,6 +281,7 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
         WHERE id = ?`).run(...header, id);
       db.prepare("DELETE FROM quotation_lines WHERE quotation_id = ?").run(id);
       db.prepare("DELETE FROM quotation_days WHERE quotation_id = ?").run(id);
+      db.prepare("DELETE FROM quotation_options WHERE quotation_id = ?").run(id);
     } else {
       id = `qtn_${nanoid(12)}`;
       db.prepare(`INSERT INTO quotations (id, supplier_id, ref, title, destination, customer_name, customer_email, customer_phone, agent_id, start_date, adults, children,
@@ -263,15 +289,19 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, supplierId, `Q-${quoteRef()}`, ...header, actor?.id || null);
     }
     const insert = db.prepare(`INSERT INTO quotation_lines (id, quotation_id, day_number, sort_order, kind, title, description, line_date, hotel_id, room_type, meal_plan,
-        nights, rooms, extra_adults, product_id, product_option_id, pickup_time, adults, children, amount_inr, service_id, cab_type_id, vehicles, price_inr)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        nights, rooms, extra_adults, product_id, product_option_id, pickup_time, adults, children, amount_inr, service_id, cab_type_id, vehicles, option_number, price_inr)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     priced.forEach((line, index) => {
       const row = line.row;
       insert.run(`qln_${nanoid(12)}`, id, line.dayNumber, index, line.kind, line.title, line.description || null, row.line_date ?? null,
         row.hotel_id ?? null, row.room_type ?? null, row.meal_plan ?? null, row.nights ?? null, row.rooms ?? null, row.extra_adults ?? 0,
         row.product_id ?? null, row.product_option_id ?? null, row.pickup_time ?? null, row.adults ?? null, row.children ?? 0, row.amount_inr ?? null,
-        row.service_id ?? null, row.cab_type_id ?? null, row.vehicles ?? null, line.price);
+        row.service_id ?? null, row.cab_type_id ?? null, row.vehicles ?? null, row.option_number ?? null, line.price);
     });
+    if (optionCount > 1) {
+      const insertOption = db.prepare("INSERT INTO quotation_options (quotation_id, option_number, name) VALUES (?, ?, ?)");
+      data.options.forEach((option, index) => insertOption.run(id, index + 1, option.name));
+    }
     // Day text: what staff wrote, else the first rate-sheet service's day text for that day.
     const dayText = new Map(data.days.filter((day) => day.title || day.description).map((day) => [day.dayNumber, day]));
     for (const line of priced) {
@@ -288,7 +318,7 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
 function lineInput(line, shift) {
   const move = (date) => (date ? addDays(date, shift) : date);
   const base = { kind: line.kind, dayNumber: line.dayNumber, title: line.title, description: line.description };
-  if (line.kind === "HOTEL") return { ...base, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: move(line.date), nights: line.nights, rooms: line.rooms, extraAdults: line.extraAdults, children: line.children };
+  if (line.kind === "HOTEL") return { ...base, option: line.option || 1, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: move(line.date), nights: line.nights, rooms: line.rooms, extraAdults: line.extraAdults, children: line.children };
   if (line.kind === "LISTING") return { ...base, productId: line.productId, productOptionId: line.productOptionId, date: move(line.date), pickupTime: line.pickupTime, adults: line.adults, children: line.children };
   if (line.kind === "TRANSPORT") return { ...base, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: move(line.date), vehicles: line.vehicles, adults: line.adults, children: line.children };
   if (line.kind === "ACTIVITY") return { ...base, serviceId: line.serviceId, date: move(line.date), adults: line.adults, children: line.children };
@@ -317,18 +347,34 @@ export function copyQuotation(db, supplierId, quotationId, input, { actor = null
     customerPhone: options.customerName ? options.customerPhone || null : source.customerPhone,
     agentId: source.agentId, startDate: options.startDate, adults: source.adults, children: source.children, markupPct: source.markupPct,
     notes: source.notes, validUntil: null, lines: source.lines.map((line) => lineInput(line, shift)),
-    days: source.days,
+    days: source.days, options: source.options.map((option) => ({ name: option.name })),
   }, { actor });
 }
 
 /** DRAFT → SENT → ACCEPTED or DECLINED; a sent quotation may go back to draft for changes by saving it. */
-export function setQuotationStatus(db, supplierId, quotationId, status) {
+export function setQuotationStatus(db, supplierId, quotationId, status, { option = null } = {}) {
   if (!STATUSES.includes(status)) throw quotationError("Unknown status", 400, "INVALID_STATUS");
   const row = findQuotation(db, supplierId, quotationId);
   const allowed = { DRAFT: ["SENT"], SENT: ["ACCEPTED", "DECLINED", "SENT"], ACCEPTED: [], DECLINED: [] }[row.status];
   if (!allowed.includes(status)) throw quotationError(`A ${row.status.toLowerCase()} quotation can't become ${status.toLowerCase()}`, 409, "INVALID_TRANSITION");
+  // Accepting a quotation with hotel options records the customer's choice, whose totals become the quotation's (ADR 043).
+  let chosen = null;
+  if (status === "ACCEPTED") {
+    const { options } = quotationView(db, row);
+    if (options.length) {
+      chosen = options.find((item) => item.number === Number(option));
+      if (!chosen) throw quotationError(`Choose which option the customer accepted (1–${options.length})`, 400, "OPTION_REQUIRED");
+    }
+  }
   const stamp = status === "SENT" ? ", sent_at = CURRENT_TIMESTAMP" : status === "ACCEPTED" ? ", accepted_at = CURRENT_TIMESTAMP" : "";
-  db.prepare(`UPDATE quotations SET status = ?, updated_at = CURRENT_TIMESTAMP${stamp} WHERE id = ?`).run(status, row.id);
+  db.transaction(() => {
+    if (chosen) {
+      const totals = chosen.totals;
+      db.prepare(`UPDATE quotations SET selected_option = ?, cost_inr = ?, listings_inr = ?, markup_inr = ?, subtotal_inr = ?, gst_inr = ?, total_inr = ? WHERE id = ?`)
+        .run(chosen.number, totals.costInr, totals.listingsInr, totals.markupInr, totals.subtotalInr, totals.gstInr, totals.totalInr, row.id);
+    }
+    db.prepare(`UPDATE quotations SET status = ?, updated_at = CURRENT_TIMESTAMP${stamp} WHERE id = ?`).run(status, row.id);
+  })();
   return quotationView(db, findQuotation(db, supplierId, row.id));
 }
 

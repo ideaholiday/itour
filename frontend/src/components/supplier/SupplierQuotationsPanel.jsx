@@ -12,7 +12,7 @@ const addDays = (date, days) => { const next = new Date(`${date}T00:00:00Z`); ne
 const dayDate = (startDate, dayNumber) => addDays(startDate, (Number(dayNumber) || 1) - 1);
 const daysBetween = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 const count = (value) => (value === "" || value == null ? null : Number(value));
-const NEW = () => ({ title: "", destination: "", days: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
+const NEW = () => ({ title: "", destination: "", days: [], options: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
 
 async function request(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...authHeaders() } });
@@ -24,7 +24,7 @@ async function request(url, options = {}) {
 // What the server needs for each line; prices are always worked out on the server.
 function linePayload(line) {
   const base = { kind: line.kind, dayNumber: Number(line.dayNumber) || 1, title: line.title || (line.kind === "HOTEL" ? "Stay" : "Item"), description: line.description || null };
-  if (line.kind === "HOTEL") return { ...base, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: line.checkIn || line.date, nights: Number(line.nights) || 1, rooms: Number(line.rooms) || 1, extraAdults: Number(line.extraAdults) || 0, children: Number(line.children) || 0 };
+  if (line.kind === "HOTEL") return { ...base, option: Number(line.option) || 1, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: line.checkIn || line.date, nights: Number(line.nights) || 1, rooms: Number(line.rooms) || 1, extraAdults: Number(line.extraAdults) || 0, children: Number(line.children) || 0 };
   if (line.kind === "LISTING") return { ...base, productId: line.productId, productOptionId: line.productOptionId || null, date: line.date, pickupTime: line.pickupTime || null, adults: Number(line.adults) || 1, children: Number(line.children) || 0 };
   // Rate-sheet lines: an empty count follows the quotation's travelers, and an empty cab count means enough cabs for everyone.
   if (line.kind === "TRANSPORT") return { ...base, title: line.title || null, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: line.date, vehicles: count(line.vehicles), adults: count(line.adults), children: count(line.children) };
@@ -35,7 +35,8 @@ function linePayload(line) {
 /**
  * Package quotations (ADR 040, ADR 042): hotels, cars and activities from the
  * supplier's private rate sheets, its own listings and custom lines, day by
- * day with a title and text per day. The server prices every line; the
+ * day with a title and text per day, and optionally 2–6 hotel options sharing
+ * everything else (ADR 043). The server prices every line; the
  * customer's PDF shows one package price. Once accepted, listing lines are
  * booked one click each and payments are recorded against the package.
  */
@@ -48,6 +49,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const [services, setServices] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
   const [copyDate, setCopyDate] = useState(today);
+  const [acceptOption, setAcceptOption] = useState(1);
   const [agents, setAgents] = useState([]);
   const [draft, setDraft] = useState(null);
   const [saved, setSaved] = useState(null);
@@ -78,7 +80,8 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const open = (quotation) => {
     setSaved(quotation); setShared(null); setNotice(""); setError("");
     const group = quotation.adults + quotation.children;
-    setDraft({ ...quotation, destination: quotation.destination || "", days: quotation.days || [], customerEmail: quotation.customerEmail || "", customerPhone: quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
+    setAcceptOption(quotation.selectedOption || 1);
+    setDraft({ ...quotation, destination: quotation.destination || "", days: quotation.days || [], options: (quotation.options || []).map((option) => ({ name: option.name })), customerEmail: quotation.customerEmail || "", customerPhone: quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
       lines: quotation.lines.map((line) => {
         const next = { ...line, checkIn: line.kind === "HOTEL" ? line.date : undefined };
         if (line.kind !== "TRANSPORT" && line.kind !== "ACTIVITY") return next;
@@ -98,8 +101,9 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const save = () => run(async () => {
     const body = { ...draft, customerEmail: draft.customerEmail || null, customerPhone: draft.customerPhone || null, agentId: draft.agentId || null, notes: draft.notes || null, validUntil: draft.validUntil || null,
       adults: Number(draft.adults), children: Number(draft.children), markupPct: Number(draft.markupPct), lines: draft.lines.map(linePayload), destination: draft.destination || null,
-      days: (draft.days || []).filter((day) => day.title || day.description).map((day) => ({ dayNumber: Number(day.dayNumber), title: day.title || null, description: day.description || null })) };
-    for (const key of ["id", "ref", "status", "totals", "payments", "warnings", "sentAt", "acceptedAt", "createdAt", "updatedAt"]) delete body[key];
+      days: (draft.days || []).filter((day) => day.title || day.description).map((day) => ({ dayNumber: Number(day.dayNumber), title: day.title || null, description: day.description || null })),
+      options: draft.options.length >= 2 ? draft.options.map((option, index) => ({ name: option.name.trim() || `Option ${index + 1}` })) : [] };
+    for (const key of ["id", "ref", "status", "totals", "payments", "warnings", "selectedOption", "sentAt", "acceptedAt", "createdAt", "updatedAt"]) delete body[key];
     const data = await request(saved ? `${base}/quotations/${saved.id}` : `${base}/quotations`, { method: saved ? "PUT" : "POST", body: JSON.stringify(body) });
     open(data.quotation);
     return data;
@@ -173,6 +177,18 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
       : draft.days;
     setDraft({ ...draft, lines, days });
   };
+  // Hotel options (ADR 043): a new option starts as a copy of option 1's hotels, to change hotel by hotel.
+  const addOption = () => {
+    const options = draft.options.length >= 2 ? [...draft.options, { name: `Option ${draft.options.length + 1}` }] : [{ name: "Option 1" }, { name: "Option 2" }];
+    const firstHotels = draft.lines.filter((line) => line.kind === "HOTEL" && (Number(line.option) || 1) === 1);
+    setDraft({ ...draft, options, lines: [...draft.lines, ...firstHotels.map((line) => ({ ...line, option: options.length, id: undefined, priceInr: undefined }))] });
+  };
+  const removeOption = (number) => {
+    const options = draft.options.filter((_, index) => index + 1 !== number);
+    const lines = draft.lines.filter((line) => line.kind !== "HOTEL" || (Number(line.option) || 1) !== number)
+      .map((line) => (line.kind === "HOTEL" ? { ...line, option: options.length >= 2 && (Number(line.option) || 1) > number ? Number(line.option) - 1 : options.length >= 2 ? Number(line.option) || 1 : 1 } : line));
+    setDraft({ ...draft, options: options.length >= 2 ? options : [], lines });
+  };
   const serviceOptions = (kinds) => services.filter((service) => kinds.includes(service.kind) && service.status === "ACTIVE")
     .map((service) => <option key={service.id} value={service.id}>{service.city ? `${service.city}: ` : ""}{service.name}</option>);
   const editable = !saved || ["DRAFT", "SENT"].includes(saved.status);
@@ -242,6 +258,19 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             </div>
           )}
 
+          <fieldset disabled={!editable} className="flex flex-wrap items-center gap-2 rounded-2xl border border-stone-200 p-3 text-xs">
+            <span className="font-bold text-stone-700">Hotel options</span>
+            {draft.options.length < 2
+              ? <span className="text-stone-500">One set of hotels. Offer the customer a choice, e.g. 3 Star and 4 Star, with the rest of the trip the same.</span>
+              : draft.options.map((option, index) => (
+                <span key={index} className="flex items-center gap-1">
+                  <input value={option.name} onChange={(event) => setDraft({ ...draft, options: draft.options.map((item, i) => (i === index ? { name: event.target.value } : item)) })} className={`${input} w-28 py-1.5`} aria-label={`Option ${index + 1} name`} />
+                  <button type="button" onClick={() => removeOption(index + 1)} aria-label={`Remove option ${index + 1}`} className="rounded p-1 text-stone-400 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
+                </span>
+              ))}
+            {draft.options.length < 6 && <button type="button" onClick={addOption} disabled={!draft.lines.some((line) => line.kind === "HOTEL")} title={draft.lines.some((line) => line.kind === "HOTEL") ? "" : "Add hotel nights first"} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-1.5 font-bold disabled:opacity-40"><Plus className="h-3.5 w-3.5" /> {draft.options.length < 2 ? "Offer another hotel option" : "Add option"}</button>}
+          </fieldset>
+
           <div className="space-y-2">
             {dayNumbers.map((dayNumber) => (
               <div key={dayNumber} className="space-y-2 rounded-2xl border border-stone-200 p-3">
@@ -258,6 +287,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                     <fieldset key={index} disabled={!editable} className="flex flex-wrap items-end gap-2 rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3 text-xs">
                       <label>Day<input type="number" min={1} value={line.dayNumber} onChange={(event) => setLine(index, { dayNumber: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
                       {line.kind === "HOTEL" && <>
+                        {draft.options.length >= 2 && <label>Option<select value={Number(line.option) || 1} onChange={(event) => setLine(index, { option: Number(event.target.value) })} className={`mt-1 block ${input}`}>{draft.options.map((option, i) => <option key={i} value={i + 1}>{option.name || `Option ${i + 1}`}</option>)}</select></label>}
                         <label>Hotel<select value={line.hotelId || ""} onChange={(event) => setLine(index, { hotelId: event.target.value, roomType: "" })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{hotels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                         <label>Room<select value={line.roomType || ""} onChange={(event) => setLine(index, { roomType: event.target.value })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{rooms.map((room) => <option key={room}>{room}</option>)}</select></label>
                         <label>Meals<select value={line.mealPlan} onChange={(event) => setLine(index, { mealPlan: event.target.value })} className={`mt-1 block ${input}`}>{Object.entries(MEAL_PLAN_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -310,7 +340,22 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             </div>}
           </div>
 
-          {saved && (
+          {saved && saved.options.length > 0 && !saved.selectedOption && (
+            <div className="overflow-x-auto rounded-2xl border border-stone-200 p-3">
+              <table className="w-full text-right text-xs">
+                <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1 text-left">Option</th><th>Your costs</th><th>Markup</th><th>Your listings</th><th>GST</th><th className="text-stone-600">Customer pays</th><th>Per person</th></tr></thead>
+                <tbody className="divide-y divide-stone-100 font-mono">
+                  {saved.options.map((option) => (
+                    <tr key={option.number}>
+                      <td className="py-1.5 text-left font-sans font-bold">{option.name}</td><td>{inr(option.totals.costInr)}</td><td>{inr(option.totals.markupInr)}</td><td>{inr(option.totals.listingsInr)}</td><td>{inr(option.totals.gstInr)}</td>
+                      <td className="text-sm font-black">{inr(option.totals.totalInr)}</td><td>{inr(option.totals.perPersonInr)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {saved && !(saved.options.length > 0 && !saved.selectedOption) && (
             <div className="grid gap-2 rounded-2xl border border-stone-200 p-4 text-sm sm:grid-cols-2">
               <div className="space-y-1 text-xs text-stone-600">
                 <p className="text-[10px] font-black uppercase text-stone-400">Only you see this</p>
@@ -320,6 +365,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
               </div>
               <div className="space-y-1">
                 <p className="text-[10px] font-black uppercase text-stone-400">The customer sees</p>
+                {saved.selectedOption && <p className="text-xs font-bold text-emerald-700">Customer chose {saved.options.find((option) => option.number === saved.selectedOption)?.name}</p>}
                 <p>Package price <span className="float-right font-mono">{inr(saved.totals.subtotalInr)}</span></p>
                 {saved.totals.gstInr > 0 && <p>GST {saved.totals.gstPct}% <span className="float-right font-mono">{inr(saved.totals.gstInr)}</span></p>}
                 <p className="text-lg font-black">Total <span className="float-right font-mono">{inr(saved.totals.totalInr)}</span></p>
@@ -345,7 +391,8 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
               <button onClick={() => copyFrom(saved.id, { startDate: copyDate }, "Copied as a new draft for the new dates. Change the customer and save.")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Copy className="h-4 w-4" /> Copy to this date</button>
             </span>}
             {saved?.status === "SENT" && <>
-              <button onClick={() => act("/status", { status: "ACCEPTED" }, "Accepted. Book the listings below and record payments.")} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white">Customer accepted</button>
+              {saved.options.length > 0 && <select value={acceptOption} onChange={(event) => setAcceptOption(Number(event.target.value))} className={`${input} py-2 text-xs`} aria-label="Option the customer chose">{saved.options.map((option) => <option key={option.number} value={option.number}>{option.name}</option>)}</select>}
+              <button onClick={() => act("/status", saved.options.length ? { status: "ACCEPTED", option: acceptOption } : { status: "ACCEPTED" }, "Accepted. Book the listings below and record payments.")} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white">Customer accepted</button>
               <button onClick={() => act("/status", { status: "DECLINED" }, "Marked declined.")} className="rounded-xl border border-rose-300 px-4 py-2.5 text-xs font-bold text-rose-700">Declined</button>
             </>}
           </div>

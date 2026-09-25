@@ -64,8 +64,9 @@ Do not rebuild these. Extend them if asked.
 - **Phase 6 — done:** package quotations with a hotel rate sheet, one markup, 5% package GST for Indian suppliers, PDF by email and share link, listing lines booked in one click once accepted (ADR 040).
 - **Phase 7 — done:** three sales-channel switches per listing, and reseller API keys the owner issues, booked as the supplier's direct sales, optionally at an agent's net rate and credit (ADR 041).
 - Phases 0–7 are deployed to production (owner, 2026-09-25).
-- **Phase 8 — done:** private rate sheet for cab types, transfers, sightseeing and activities; quotations built day by day from it with day text, seat/date/hotel-night warnings, a per-person price, copy to a new date and past-quotation suggestions (ADR 042). Needs migration 069 (applied automatically on the next deploy).
-- **Later (ADR 042):** several hotel options in one quotation, per-kilometre car pricing.
+- **Phase 8 — done:** private rate sheet for cab types, transfers, sightseeing and activities; quotations built day by day from it with day text, seat/date/hotel-night warnings, a per-person price, copy to a new date and past-quotation suggestions (ADR 042). Deployed 2026-09-25 (owner).
+- **Phase 9 — done:** hotel options in one quotation (3 Star, 4 Star…), each priced on its own; the customer's choice sets the price (ADR 043). Needs migration 070 (applied automatically on the next deploy).
+- **Later (ADR 042):** per-kilometre car pricing; a room-occupancy warning needs a max-guests field on hotel rates.
 
 Standing obligations that apply to every change:
 

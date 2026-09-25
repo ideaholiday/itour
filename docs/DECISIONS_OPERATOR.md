@@ -96,5 +96,17 @@
   3. **Day text**: each day has a title and description; a service's day text fills an empty day.
   4. **Checks before sending**, shown as warnings, never blocking: too few cab seats, a line dated off its day, a night of the trip with no hotel when the package has hotels. A date with no price or on a closed day is refused.
   5. **Reuse**: any quotation can be copied to a new start date, every date moved and priced again; typing a destination offers past quotations for it.
-  6. **Not now**: per-kilometre pricing, several hotel options in one quotation (3★/4★), importing price lists, other currencies.
+  6. **Not now**: per-kilometre pricing, importing price lists, other currencies. (Hotel options came next, ADR 043.)
 - **Consequences**: The customer sees an approximate per-person price (total ÷ travelers, rounded up) besides the total. Quotation line kinds are checked by the service, not a column CHECK (migration 069).
+
+---
+
+## ADR 043: Hotel Options in One Quotation
+- **Date**: 2026-09-25
+- **Context**: Customers are usually offered the same trip at two or three hotel levels. Separate quotations for each duplicate the work and confuse the customer.
+- **Decision Made** (owner, 2026-09-25), for operator-platform Phase 9 (roadmap Step D):
+  1. A quotation may have **2 to 6 named options**. Only **hotel lines** belong to an option; cars, activities, listings and custom lines are shared by every option.
+  2. **Each option is priced on its own**: its hotels plus the shared lines, the one markup, 5% package GST. The PDF lists the shared itinerary once, then each option's hotels and price; the message lists each option's total.
+  3. **Accepting records the customer's option.** Its price becomes the quotation's total; payments and what is due count against it. Until then the quotation's total is option 1's.
+  4. A new option starts as a **copy of option 1's hotels**, changed hotel by hotel.
+- **Consequences**: Warnings check the hotel nights of every option. A copied quotation keeps its options, open again.

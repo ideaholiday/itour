@@ -201,3 +201,61 @@ test("transfers, sightseeing and activities price from the private rate sheet, f
   const publicProducts = await requestJson(api.baseUrl, "/api/products?search=Agra%20local");
   assert.ok(!JSON.stringify(publicProducts.data).includes(agra.id));
 });
+
+test("hotel options share the itinerary, are priced one by one, and the customer's choice sets the price", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+  const ctx = setup(db);
+  const start = day(40);
+  const hotelWithRate = async (name, stars, net) => {
+    const hotel = (await call(api, ctx, "/hotels", { body: { name, city: "Jaipur", starRating: stars } })).data.hotel;
+    await call(api, ctx, `/hotels/${hotel.id}/rates`, { body: { roomType: "Deluxe", mealPlan: "CP", validFrom: day(30), validTo: day(60), netPerNightInr: net } });
+    return hotel;
+  };
+  const three = await hotelWithRate("Pink City Inn", 3, 3000);
+  const four = await hotelWithRate("Amber Palace", 4, 5000);
+  const stay = (hotel, option) => ({ kind: "HOTEL", option, dayNumber: 1, title: "Stay", hotelId: hotel.id, roomType: "Deluxe", mealPlan: "CP", checkIn: start, nights: 2, rooms: 1 });
+  const draft = {
+    title: "Jaipur Weekend", destination: "Jaipur", customerName: "Kavya Rao", customerPhone: "+919800000002", customerEmail: "kavya@example.com",
+    startDate: start, adults: 2, children: 0, markupPct: 10,
+    options: [{ name: "3 Star" }, { name: "4 Star" }],
+    lines: [stay(three, 1), stay(four, 2), { kind: "CUSTOM", dayNumber: 2, title: "City tour", date: day(41), amountInr: 2000 }, { kind: "CUSTOM", dayNumber: 3, title: "Drop", date: day(42), amountInr: 1000 }],
+  };
+
+  // A hotel in an option that doesn't exist is refused.
+  assert.equal((await call(api, ctx, "/quotations", { body: { ...draft, options: [] } })).data.code, "UNKNOWN_OPTION");
+
+  const created = await call(api, ctx, "/quotations", { body: draft });
+  assert.equal(created.response.status, 201, JSON.stringify(created.data));
+  const quotation = created.data.quotation;
+  // 3 Star: 6000 + 3000 shared = 9000, +10% = 9900, +5% = 10395. 4 Star: 10000 + 3000 = 13000 → 14300 → 15015.
+  assert.deepEqual(quotation.options.map((option) => [option.number, option.name, option.totals.totalInr, option.totals.perPersonInr]), [[1, "3 Star", 10395, 5198], [2, "4 Star", 15015, 7508]]);
+  assert.equal(quotation.totals.totalInr, 10395, "until the customer picks, the quotation shows option 1");
+  assert.deepEqual(quotation.lines.map((line) => line.option), [1, 2, null, null]);
+  assert.deepEqual(quotation.warnings, []);
+
+  // An option missing a night is warned by name.
+  const short = await call(api, ctx, `/quotations/${quotation.id}`, { method: "PUT", body: { ...draft, lines: [stay(three, 1), { ...stay(four, 2), nights: 1 }, ...draft.lines.slice(2)] } });
+  assert.deepEqual(short.data.quotation.warnings, ["4 Star: no hotel for the night of day 2."]);
+  await call(api, ctx, `/quotations/${quotation.id}`, { method: "PUT", body: draft });
+
+  const sent = await call(api, ctx, `/quotations/${quotation.id}/send`, { body: {} });
+  assert.match(sent.data.whatsappText, /3 Star: INR 10,395\n- 4 Star: INR 15,015/);
+  const pdf = await fetch(`${api.baseUrl}/api/suppliers/${ctx.supplier.id}/quotations/${quotation.id}/pdf`, { headers: { authorization: `Bearer ${ctx.ownerToken}` } });
+  assert.equal(pdf.status, 200);
+
+  // Accepting needs the option; the chosen option's price becomes the quotation's and is what the customer owes.
+  assert.equal((await call(api, ctx, `/quotations/${quotation.id}/status`, { body: { status: "ACCEPTED" } })).data.code, "OPTION_REQUIRED");
+  assert.equal((await call(api, ctx, `/quotations/${quotation.id}/status`, { body: { status: "ACCEPTED", option: 3 } })).data.code, "OPTION_REQUIRED");
+  const accepted = await call(api, ctx, `/quotations/${quotation.id}/status`, { body: { status: "ACCEPTED", option: 2 } });
+  assert.equal(accepted.response.status, 200, JSON.stringify(accepted.data));
+  assert.deepEqual([accepted.data.quotation.status, accepted.data.quotation.selectedOption, accepted.data.quotation.totals.totalInr, accepted.data.quotation.totals.dueInr], ["ACCEPTED", 2, 15015, 15015]);
+  assert.equal((await call(api, ctx, `/quotations/${quotation.id}/payments`, { body: { mode: "UPI", amount_inr: 15016 } })).data.code, "OVERPAYMENT");
+  const acceptedPdf = await fetch(`${api.baseUrl}/api/suppliers/${ctx.supplier.id}/quotations/${quotation.id}/pdf`, { headers: { authorization: `Bearer ${ctx.ownerToken}` } });
+  assert.equal(acceptedPdf.status, 200);
+
+  // A copy keeps the options open again.
+  const copy = await call(api, ctx, `/quotations/${quotation.id}/copy`, { body: { startDate: day(45) } });
+  assert.equal(copy.response.status, 201, JSON.stringify(copy.data));
+  assert.deepEqual([copy.data.quotation.options.length, copy.data.quotation.selectedOption, copy.data.quotation.totals.totalInr], [2, null, 10395]);
+});

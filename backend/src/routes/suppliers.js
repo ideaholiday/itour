@@ -2440,7 +2440,7 @@ router.post("/:id/quotations/:quotationId/copy", (req, res) => {
   try { res.status(201).json({ success: true, quotation: copyQuotation(db, req.params.id, req.params.quotationId, req.body, { actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not copy the quotation"); }
 });
 router.post("/:id/quotations/:quotationId/status", (req, res) => {
-  try { res.json({ success: true, quotation: setQuotationStatus(db, req.params.id, req.params.quotationId, String(req.body?.status || "").toUpperCase()) }); } catch (error) { directBookingFailure(res, req, error, "Could not change the status"); }
+  try { res.json({ success: true, quotation: setQuotationStatus(db, req.params.id, req.params.quotationId, String(req.body?.status || "").toUpperCase(), { option: req.body?.option ?? null }) }); } catch (error) { directBookingFailure(res, req, error, "Could not change the status"); }
 });
 router.post("/:id/quotations/:quotationId/payments", (req, res) => {
   try { res.status(201).json({ success: true, quotation: recordQuotationPayment(db, { supplierId: req.params.id, quotationId: req.params.quotationId, actor: req.user, input: req.body }) }); } catch (error) { directBookingFailure(res, req, error, "Could not record the payment"); }
@@ -2465,7 +2465,11 @@ router.post("/:id/quotations/:quotationId/send", async (req, res) => {
     const supplier = db.prepare("SELECT company_name FROM suppliers WHERE id = ?").get(req.params.id);
     const shareUrl = quotationShareUrl(row);
     const view = quotationView(db, row);
-    const message = `Hello ${row.customer_name},\n\nHere is your quotation ${row.ref} for ${row.title}: INR ${view.totals.totalInr.toLocaleString("en-IN")} for the whole group.\n\nView or download it: ${shareUrl}\n\n${supplier?.company_name || ""}`.trim();
+    // With hotel options (ADR 043) the message lists each option's price.
+    const price = view.options.length && !view.selectedOption
+      ? `${view.options.length} hotel options:\n${view.options.map((option) => `- ${option.name}: INR ${option.totals.totalInr.toLocaleString("en-IN")}`).join("\n")}\nfor the whole group.`
+      : `INR ${view.totals.totalInr.toLocaleString("en-IN")} for the whole group.`;
+    const message = `Hello ${row.customer_name},\n\nHere is your quotation ${row.ref} for ${row.title}: ${price}\n\nView or download it: ${shareUrl}\n\n${supplier?.company_name || ""}`.trim();
     let email = { status: "SKIPPED", error: "No customer email on the quotation" };
     if (req.body?.email !== false && row.customer_email) {
       const { buffer, filename } = await quotationPdf(db, req.params.id, row.id);
