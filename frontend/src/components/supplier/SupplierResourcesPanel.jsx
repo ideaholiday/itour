@@ -22,7 +22,8 @@ export default function SupplierResourcesPanel({ supplierId, optionId, capacity 
       .then(async response => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error);
-        setResources(data.resources || []);
+        // Guides and equipment are crew for the departures board (ADR 037), not seat limits.
+        setResources((data.resources || []).filter(resource => !["GUIDE", "EQUIPMENT"].includes(resource.kind)));
       })
       .catch(error => setMessage(error.message))
       .finally(() => setLoading(false));
@@ -47,7 +48,7 @@ export default function SupplierResourcesPanel({ supplierId, optionId, capacity 
 
   async function createResource(event) {
     event.preventDefault();
-    const created = await send("POST", "", { name: draft.name, capacity: Number(draft.capacity), optionIds: [optionId] });
+    const created = await send("POST", "", { name: draft.name, capacity: Number(draft.capacity), optionIds: [optionId], kind: "VEHICLE" });
     if (created) { setDraft({ name: "", capacity: "" }); setMessage("Shared vehicle added and linked to this option."); }
   }
 

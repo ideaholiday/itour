@@ -30,3 +30,13 @@
   - **Guide**: departure manifest, check-in and attendance. Sees traveler name, headcount, pickup and **phone**, never email or what a guest owes.
   - Only the **owner** adds, changes, resets or removes staff. **No per-plan seat limit** for now.
 - **Consequences**: The role is read from the database on every request, so a change applies to open sessions. Front desk and guides are refused any supplier endpoint not on their allowlist (`supplierStaffService.js`). Managers are refused only the owner-only areas, so a new owner-only endpoint must go under an owner-only path or be added to that list. Removing a staff member sets the account back to `TRAVELER`.
+
+---
+
+## ADR 037: Departures Board, Crew Assignment and Supplier Reschedule
+- **Date**: 2026-09-25
+- **Decision Made** (owner, 2026-09-25), for operator-platform Phase 3:
+  1. **Order**: 3a is the departures board plus assigning guides, vehicles and equipment to departures; 3b is the booking calendar and supplier reschedule.
+  2. **Guides, vehicles and equipment** are the existing shared resources (`native_resources`) with a `kind`. A guide resource may be linked to a staff login; that guide then sees and checks in only the departures they are assigned to.
+  3. **Supplier reschedule** (3b): the price never changes and seats move atomically. For a marketplace booking the traveler is notified and may decline, which cancels it with a full wallet refund exactly like a supplier cancellation (ADR 019). A direct (walk-in, phone, manual) booking simply moves.
+- **Consequences**: An assignment names a departure by product, date and time, the same key as the guest list. One guide or vehicle cannot be assigned to two departures at the same date and time.

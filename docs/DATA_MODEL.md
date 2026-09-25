@@ -199,6 +199,8 @@ erDiagram
 
 - **`native_resources`** / **`native_resource_options`** (shared capacity, migration `023`):
   - A resource is one real vehicle, boat or guide with its own `capacity`.
+  - `kind` (migration 064): `GUIDE`, `VEHICLE`, `EQUIPMENT`, or `GENERAL` for older rows. `user_id` links a guide to a staff login (`supplier_members.user_id`), which then sees only its assigned departures (ADR 037). Crew added from the departures board has no option links, so it never limits seats.
+- **`departure_assignments`** (migration 064, ADR 037): a resource on a departure. `supplier_id`, `product_id`, `activity_date`, `departure_time` (`''` when the product has no fixed time), `resource_id`, `assigned_by_user_id`. Unique on (`resource_id`, `activity_date`, `departure_time`): a resource works one departure per date and time. Deleting a resource deletes its assignments.
   - `native_resource_options` links it many-to-many to the options drawing on it.
   - A departure's vacancies are the smallest of its own pool and every linked
     resource, counted per `(local_date, local_time)`, so the same van is free

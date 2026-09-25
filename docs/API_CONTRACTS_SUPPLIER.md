@@ -139,11 +139,11 @@
   already taken keep their frozen discounted price.
 
 ### 3.1.3 Shared Resources
-- **`GET /api/suppliers/:supplierId/resources`**: Lists shared vehicles/guides and the options each constrains.
+- **`GET /api/suppliers/:supplierId/resources`**: Lists shared vehicles/guides (`kind`, `user_id`) and the options each constrains, plus `staff: [{ id, name, role }]` for linking a guide to a login.
 - **`POST /api/suppliers/:supplierId/resources`**: Creates one.
-  - **Request Body**: `{ "name": "Tempo Traveller GA-07", "capacity": 6, "optionIds": ["opt_a", "opt_b"] }`
-- **`PUT .../resources/:resourceId`**: Replaces name, capacity and the linked options.
-- **`DELETE .../resources/:resourceId`**: Removes it, releasing the shared cap.
+  - **Request Body**: `{ "name": "Tempo Traveller GA-07", "capacity": 6, "optionIds": ["opt_a", "opt_b"], "kind"?: "GUIDE|VEHICLE|EQUIPMENT|GENERAL", "userId"?: "<staff user id>" }`. A `userId` that isn't this supplier's staff is `404 STAFF_MEMBER_NOT_FOUND`.
+- **`PUT .../resources/:resourceId`**: Replaces name, capacity and the linked options; `kind` and `userId` are kept when omitted (`userId: null` unlinks).
+- **`DELETE .../resources/:resourceId`**: Removes it and its departure assignments, releasing the shared cap.
 - A departure's vacancies are the smallest of its own pool and every linked
   resource, counted per departure time. Shrinking below seats already committed
   returns `CAPACITY_BELOW_RESERVED`; linking an option owned by another supplier
@@ -218,3 +218,10 @@ A signed-in supplier user is the owner or a staff member. `GET /api/suppliers/:i
 - **`PATCH /api/suppliers/:id/staff/:userId`**: body `{ name?, phone?, role? }` → `{ member }`. It applies to open sessions immediately.
 - **`POST /api/suppliers/:id/staff/:userId/reset-password`**: `{ member, temporaryPassword }`; the old password stops working.
 - **`DELETE /api/suppliers/:id/staff/:userId`**: `{ id, removed: true }`; the account becomes a `TRAVELER`.
+
+### 3.6 Departures board and crew (ADR 037)
+Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md). Every staff role may read the board; assigning is owner or manager.
+- **`GET /api/suppliers/:id/departures?from=YYYY-MM-DD&days=1..14`**: `{ from, to, days, departures: [{ key, productId, title, date, time, options: [{ optionId, optionName, capacity, vacancies, status }], capacity, freeSeats, bookings, guests, checkedIn, noShow, balanceDueInr, assignments: [{ id, resourceId, name, kind }] }] }`. Unpaid and cancelled bookings are left out. A guide linked to a guide resource gets only their assigned departures and `balanceDueInr: null`.
+- **`POST /api/suppliers/:id/departures/assignments`** `{ productId, date, time?, resourceId }` → `201 { assignment }`. Errors: `404 PRODUCT_NOT_FOUND`, `404 RESOURCE_NOT_FOUND`, `409 ALREADY_ASSIGNED`, `409 RESOURCE_BUSY` (on another departure at that date and time).
+- **`DELETE /api/suppliers/:id/departures/assignments/:assignmentId`** → `{ id, removed: true }`; `404 ASSIGNMENT_NOT_FOUND`.
+- Check-in, attendance and the manifest (§3.1.5) refuse or leave out bookings on departures a linked guide isn't assigned to (`403 NOT_YOUR_DEPARTURE`).

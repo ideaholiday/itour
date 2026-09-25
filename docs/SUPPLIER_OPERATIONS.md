@@ -11,6 +11,11 @@
 5. **Counter sales ignore the online cut-off** and close when the departure starts. Capacity, closures and party-size rules still apply.
 6. **No automatic message.** The marketplace confirmation is skipped; staff print the voucher or send it by WhatsApp or email from the confirmation screen.
 
+## Departures board and crew (ADR 037)
+1. **A departure is a product on a date at a time**, the guest-list key. The board merges the seat inventory's slots with live bookings, so a departure with bookings but no seat inventory still shows. Free seats are summed across the product's options.
+2. **Crew** are shared resources with a kind: guide, vehicle, equipment. Owners and managers put them on departures; a resource works one departure per date and time (`409 RESOURCE_BUSY`), but is free again at another time.
+3. **A guide linked to a login** sees, lists and checks in only the departures they are assigned to (`403 NOT_YOUR_DEPARTURE`). An unlinked guide login keeps the guide role's normal access (ADR 036).
+
 ## Rules
 1. **Check-in is a record, not a state change.** Scanning the voucher QR (or typing the reference) sets `attendance_status = CHECKED_IN` with the time and the user. It does not move the booking status, the payout or any refund. Trips with a driver still start with the pickup OTP ([`BUSINESS_RULES.md`](BUSINESS_RULES.md) §6).
 2. **Only the trip date, by default.** "Today" is the date in India. A voucher for another date is refused until the supplier confirms it. A second scan of the same voucher shows when it was first checked in and records nothing new. Cancelled and unpaid bookings cannot be checked in.

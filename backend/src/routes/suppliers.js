@@ -72,6 +72,7 @@ import { PricingRuleService } from "../services/pricingRuleService.js";
 import { backfillProductOptions } from "../services/logisticsService.js";
 import { backfillProductLocationRules } from "../data/canonicalLocations.js";
 import { onReferralBookingCancelled, onReferralTripCompleted } from "../services/referralService.js";
+import { assignResource, departureBoard, guideDepartureScope, unassignResource } from "../services/departureBoardService.js";
 import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
 
 const router = express.Router();
@@ -165,6 +166,11 @@ router.use("/:id", (req, res, next) => {
 /** The signed-in supplier user's role on this account; admins and ops count as the owner. */
 function supplierRoleOf(req) {
   return String(req.user?.role || "").toUpperCase() === "SUPPLIER" ? req.user?.supplier_role || OWNER_ROLE : OWNER_ROLE;
+}
+
+/** A guide linked to a guide resource works only their assigned departures (ADR 037); null is no limit. */
+function departureScopeOf(req) {
+  return supplierRoleOf(req) === "GUIDE" ? guideDepartureScope(db, req.params.id, req.user.id) : null;
 }
 
 // Supplier subscription (ADR 017): status, price, online payment and GST invoices.
@@ -1999,7 +2005,7 @@ router.post("/:id/bookings/:bookingId/cancel", optionalAuthMiddleware, requireSu
 // POST /api/suppliers/:id/check-in - Check a traveler in from a scanned voucher QR or typed reference
 router.post("/:id/check-in", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.checkIn), (req, res) => {
   try {
-    const result = checkInBooking(db, { supplierId: req.params.id, code: req.body.code, actorId: req.user?.id, allowOtherDate: req.body.allowOtherDate === true });
+    const result = checkInBooking(db, { supplierId: req.params.id, code: req.body.code, actorId: req.user?.id, allowOtherDate: req.body.allowOtherDate === true, scope: departureScopeOf(req) });
     res.json({ success: true, ...result });
   } catch (error) {
     subscriptionFailure(res, req, error, "Could not check this traveler in");
@@ -2009,7 +2015,7 @@ router.post("/:id/check-in", optionalAuthMiddleware, requireSupplierAccess, vali
 // PATCH /api/suppliers/:id/bookings/:bookingId/attendance - Mark checked in, no-show, or clear
 router.patch("/:id/bookings/:bookingId/attendance", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.attendance), (req, res) => {
   try {
-    const booking = setAttendance(db, { supplierId: req.params.id, bookingId: req.params.bookingId, status: req.body.status, actorId: req.user?.id });
+    const booking = setAttendance(db, { supplierId: req.params.id, bookingId: req.params.bookingId, status: req.body.status, actorId: req.user?.id, scope: departureScopeOf(req) });
     res.json({ success: true, booking });
   } catch (error) {
     subscriptionFailure(res, req, error, "Could not update attendance");
@@ -2021,9 +2027,12 @@ router.get("/:id/manifest", optionalAuthMiddleware, requireSupplierAccess, valid
   try {
     const { productId, date, time, format } = req.query;
     const full = departureManifest(db, { supplierId: req.params.id, productId, date, time: time || null });
-    // Guides see names, headcount, pickup and phone, not what a guest owes (ADR 036).
+    // Guides see names, headcount, pickup and phone, not what a guest owes (ADR 036),
+    // and a linked guide only their assigned departures (ADR 037).
+    const scope = departureScopeOf(req);
+    const assigned = (row) => !scope || scope.has(`${productId}|${date}|${row.pickupTime || ""}`);
     const manifest = supplierRoleOf(req) === "GUIDE"
-      ? { ...full, bookings: full.bookings.map((row) => ({ ...row, balanceDueInr: null })) }
+      ? { ...full, bookings: full.bookings.filter(assigned).map((row) => ({ ...row, balanceDueInr: null })) }
       : full;
     if (format === "csv") {
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
@@ -2349,7 +2358,34 @@ router.delete("/:id/products/:productId/inventory/:optionId/calendar", requireSu
 
 // --- SHARED RESOURCES (one vehicle or guide across several options) ---
 router.get("/:id/resources", requireSupplierAccess, (req, res) => {
-  res.json({ resources: listResources(db, req.params.id) });
+  // Staff names let a manager link a guide resource to a login (ADR 037).
+  res.json({ resources: listResources(db, req.params.id), staff: listStaff(db, req.params.id).map(({ id, name, role }) => ({ id, name, role })) });
+});
+
+// Departures board (ADR 037): every departure for 1 to 14 days with seats, head counts and crew.
+router.get("/:id/departures", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...departureBoard(db, req.params.id, { from: req.query.from, days: req.query.days, listAvailability: listNativeAvailability, scope: departureScopeOf(req) }) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not load departures");
+  }
+});
+
+router.post("/:id/departures/assignments", validateBody(supplierSchemas.departureAssignment), (req, res) => {
+  try {
+    res.status(201).json({ success: true, assignment: assignResource(db, req.params.id, req.body, req.user) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not assign to the departure");
+  }
+});
+
+router.delete("/:id/departures/assignments/:assignmentId", (req, res) => {
+  try {
+    res.json({ success: true, ...unassignResource(db, req.params.id, req.params.assignmentId) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not remove the assignment");
+  }
 });
 router.post("/:id/resources", requireSupplierAccess, (req, res) => {
   try { res.status(201).json({ success: true, resource: saveResource(db, req.params.id, req.body) }); }

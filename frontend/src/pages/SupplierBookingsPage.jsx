@@ -3,6 +3,7 @@ import SupplierHeaderNav from "../components/supplier/SupplierHeaderNav.jsx";
 import SupplierBookingManager from "../components/supplier/SupplierBookingManager.jsx";
 import ReviewShareLinks from "../components/supplier/ReviewShareLinks.jsx";
 import SupplierDeparturesPanel from "../components/supplier/SupplierDeparturesPanel.jsx";
+import SupplierDeparturesBoard from "../components/supplier/SupplierDeparturesBoard.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import { api, authHeaders } from "../lib/api.js";
 import { AlertTriangle, Headphones, Star } from "lucide-react";
@@ -69,6 +70,7 @@ export default function SupplierBookingsPage() {
             canManage={role !== "FRONT_DESK"}
           />
         )}
+        {supplierId && <SupplierDeparturesBoard supplierId={supplierId} canAssign={!counterRole} />}
         <SupplierDeparturesPanel supplierId={supplierId} products={supplierData?.products || []} onChanged={fetchSupplierData} canCancel={!counterRole} />
         {counterRole ? null : <>
         <ReviewShareLinks products={supplierData?.products || []} />

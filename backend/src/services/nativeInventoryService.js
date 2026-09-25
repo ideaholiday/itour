@@ -818,10 +818,15 @@ export function listNativeMonthPricing(db, productId, yearMonth) {
 
 // --- Shared resources (supplier extranet) ---------------------------------
 
+export const RESOURCE_KINDS = Object.freeze(["GUIDE", "VEHICLE", "EQUIPMENT", "GENERAL"]);
+
 export const resourceSchema = z.object({
   name: z.string().min(1).max(120),
   capacity: z.number().int().min(0).max(10000),
   optionIds: z.array(z.string().min(1).max(200)).max(50).default([]),
+  // ADR 037: omitted keeps the current value on an update.
+  kind: z.enum(RESOURCE_KINDS).optional(),
+  userId: z.string().min(1).max(200).nullable().optional(),
 });
 
 export function listResources(db, supplierId) {
@@ -854,15 +859,22 @@ export function saveResource(db, supplierId, input, resourceId = null) {
       if (!owned) throw inventoryError("Option not found for this supplier", "OPTION_NOT_FOUND", 404);
     }
 
+    // A guide may be linked to one of this supplier's staff logins (ADR 037).
+    if (resource.userId) {
+      const member = db.prepare("SELECT user_id FROM supplier_members WHERE user_id = ? AND supplier_id = ?").get(resource.userId, supplierId);
+      if (!member) throw inventoryError("Staff member not found for this supplier", "STAFF_MEMBER_NOT_FOUND", 404);
+    }
+
     const id = resourceId || randomUUID();
     if (resourceId) {
-      const existing = db.prepare("SELECT id FROM native_resources WHERE id = ? AND supplier_id = ?").get(resourceId, supplierId);
+      const existing = db.prepare("SELECT id, kind, user_id FROM native_resources WHERE id = ? AND supplier_id = ?").get(resourceId, supplierId);
       if (!existing) throw inventoryError("Resource not found", "RESOURCE_NOT_FOUND", 404);
-      db.prepare("UPDATE native_resources SET name = ?, capacity = ? WHERE id = ?").run(resource.name, resource.capacity, id);
+      db.prepare("UPDATE native_resources SET name = ?, capacity = ?, kind = ?, user_id = ? WHERE id = ?")
+        .run(resource.name, resource.capacity, resource.kind ?? existing.kind, resource.userId === undefined ? existing.user_id : resource.userId, id);
       db.prepare("DELETE FROM native_resource_options WHERE resource_id = ?").run(id);
     } else {
-      db.prepare("INSERT INTO native_resources (id, supplier_id, name, capacity) VALUES (?, ?, ?, ?)")
-        .run(id, supplierId, resource.name, resource.capacity);
+      db.prepare("INSERT INTO native_resources (id, supplier_id, name, capacity, kind, user_id) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, supplierId, resource.name, resource.capacity, resource.kind || "GENERAL", resource.userId || null);
     }
     for (const optionId of resource.optionIds) {
       db.prepare("INSERT INTO native_resource_options (resource_id, option_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
@@ -891,7 +903,10 @@ export function saveResource(db, supplierId, input, resourceId = null) {
 
 export function deleteResource(db, supplierId, resourceId) {
   const removed = db.transaction(() => {
+    const owned = db.prepare("SELECT id FROM native_resources WHERE id = ? AND supplier_id = ?").get(resourceId, supplierId);
+    if (!owned) return { changes: 0 };
     db.prepare("DELETE FROM native_resource_options WHERE resource_id = ?").run(resourceId);
+    optionalQuery(db, () => db.prepare("DELETE FROM departure_assignments WHERE resource_id = ?").run(resourceId));
     return db.prepare("DELETE FROM native_resources WHERE id = ? AND supplier_id = ?").run(resourceId, supplierId);
   })();
   if (!removed.changes) throw inventoryError("Resource not found", "RESOURCE_NOT_FOUND", 404);

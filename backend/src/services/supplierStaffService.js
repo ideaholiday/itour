@@ -21,6 +21,7 @@ const OWNER_ONLY_PATHS = [/^\/kyb(\/|$)/, /^\/payout/, /^\/subscription(\/|$)/, 
 // Front desk and guides are refused anything not listed here.
 const OPERATIONS = [
   ["GET", /^\/?$/],
+  ["GET", /^\/departures$/],
   ["GET", /^\/manifest$/],
   ["POST", /^\/check-in$/],
   ["PATCH", /^\/bookings\/[^/]+\/attendance$/],

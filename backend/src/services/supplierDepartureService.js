@@ -2,6 +2,7 @@ import { saveSlotOverride } from "./nativeInventoryService.js";
 import { creditSupplierCancellationToWallet } from "./refundCreditService.js";
 import { onReferralBookingCancelled } from "./referralService.js";
 import { localDate, productTime } from "../lib/localTime.js";
+import { requireDepartureInScope } from "./departureBoardService.js";
 
 /**
  * Supplier day-of-operations (docs/SUPPLIER_OPERATIONS.md): check travelers in by
@@ -68,11 +69,13 @@ function requireAttendable(booking) {
  * another date is refused unless the supplier confirms it; a second scan reports
  * when the booking was first checked in instead of recording it again.
  */
-export function checkInBooking(db, { supplierId, code, actorId = null, allowOtherDate = false, now = new Date() }) {
+// `scope` (ADR 037) limits a linked guide to the departures they are assigned to.
+export function checkInBooking(db, { supplierId, code, actorId = null, allowOtherDate = false, scope = null, now = new Date() }) {
   const reference = parseBookingReference(code);
   if (!reference) throw departureError("This is not an Idea Holiday booking code", 400, "INVALID_CODE");
   const booking = findSupplierBooking(db, supplierId, reference);
   if (!booking) throw departureError("No booking with this reference belongs to your business", 404, "BOOKING_NOT_FOUND");
+  requireDepartureInScope(scope, booking);
   requireAttendable(booking);
 
   // "Today" is the date where the trip runs: Bangkok is 1.5 hours ahead of India (ADR 023).
@@ -91,10 +94,11 @@ export function checkInBooking(db, { supplierId, code, actorId = null, allowOthe
  * Records attendance from the guest list: checked in, no-show, or cleared (NONE)
  * to undo a mistake. A no-show can only be recorded once the departure date has come.
  */
-export function setAttendance(db, { supplierId, bookingId, status, actorId = null, now = new Date() }) {
+export function setAttendance(db, { supplierId, bookingId, status, actorId = null, scope = null, now = new Date() }) {
   if (!ATTENDANCE_STATUSES.includes(status)) throw departureError("Unknown attendance status", 400, "INVALID_ATTENDANCE");
   const booking = findSupplierBooking(db, supplierId, bookingId);
   if (!booking) throw departureError("Booking was not found for this supplier", 404, "BOOKING_NOT_FOUND");
+  requireDepartureInScope(scope, booking);
   requireAttendable(booking);
   if (status === "NO_SHOW" && booking.activity_date > localDate(now, productTime(db, booking.product_id))) {
     throw departureError("A traveler can only be marked as a no-show on or after the trip date", 409, "TOO_EARLY");

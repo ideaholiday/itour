@@ -24,6 +24,7 @@ function fixture(t) {
   executeMigrationSql(db, readFileSync(new URL("../migrations/022_booking_unit_items.sql", import.meta.url), "utf8").split("-- @down")[0]);
   executeMigrationSql(db, readFileSync(new URL("../migrations/023_shared_resources.sql", import.meta.url), "utf8").split("-- @down")[0]);
   executeMigrationSql(db, readFileSync(new URL("../migrations/024_native_promotions.sql", import.meta.url), "utf8").split("-- @down")[0]);
+  executeMigrationSql(db, readFileSync(new URL("../migrations/064_departure_assignments.sql", import.meta.url), "utf8").split("-- @down")[0]);
   saveInventoryRules(db, "p", "o", rules);
   return db;
 }

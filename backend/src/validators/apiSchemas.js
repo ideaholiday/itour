@@ -204,6 +204,7 @@ const supplierStaffRole = z.enum(["MANAGER", "FRONT_DESK", "GUIDE"]);
 
 export const supplierSchemas = {
   staffMember: object({ name: text(2, 100), email, phone: phone.optional(), role: supplierStaffRole }),
+  departureAssignment: object({ productId: text(1, 200), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date"), time: z.string().regex(/^\d{2}:\d{2}$/, "Use HH:MM").nullable().optional(), resourceId: text(1, 200) }),
   staffMemberUpdate: object({ name: text(2, 100).optional(), phone: phone.optional(), role: supplierStaffRole.optional() }),
   registration: object({ companyName: text(2, 180), contactName: text(2, 120), email, phone, city: text(2, 100), state: text(2, 100) }),
   kyb: object({
