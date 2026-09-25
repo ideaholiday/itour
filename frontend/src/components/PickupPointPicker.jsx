@@ -1,16 +1,41 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../lib/mapTiles.js";
 import {
-  Check, ChevronDown, Crosshair, LoaderCircle, LocateFixed, MapPin,
+  Check, ChevronDown, Clock, Crosshair, LoaderCircle, LocateFixed, MapPin,
   Navigation, Search, X
 } from "lucide-react";
 
 const INDIA_CENTER = { lat: 22.9734, lng: 78.6569 };
+const RECENT_PLACES_KEY = "ih_recent_places_v1";
+const RECENT_PLACES_LIMIT = 5;
 
 function displayAddress(place) {
   if (!place.description || place.description.toLowerCase().includes(place.label.toLowerCase())) return place.label;
   return `${place.label}, ${place.description}`;
+}
+
+function loadRecentPlaces() {
+  try {
+    const raw = window.localStorage.getItem(RECENT_PLACES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.slice(0, RECENT_PLACES_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentPlace(entry) {
+  if (!entry.address || !Number.isFinite(entry.lat) || !Number.isFinite(entry.lng)) return loadRecentPlaces();
+  try {
+    const existing = loadRecentPlaces().filter((place) => place.address !== entry.address);
+    const next = [{ ...entry, ts: Date.now() }, ...existing].slice(0, RECENT_PLACES_LIMIT);
+    window.localStorage.setItem(RECENT_PLACES_KEY, JSON.stringify(next));
+    return next;
+  } catch {
+    return loadRecentPlaces();
+  }
 }
 
 function locationIcon(markerLabel) {
@@ -55,6 +80,9 @@ export default function PickupPointPicker({
   const [locating, setLocating] = useState(false);
   const [pinning, setPinning] = useState(false);
   const [message, setMessage] = useState("");
+  const [recentPlaces, setRecentPlaces] = useState(loadRecentPlaces);
+  const [provider, setProvider] = useState("");
+  const searchCacheRef = useRef(new Map());
   const pointLabel = kind === "dropoff" ? "drop-off" : "pickup";
 
   useEffect(() => {
@@ -88,42 +116,75 @@ export default function PickupPointPicker({
       return;
     }
 
+    const params = new URLSearchParams({ query });
+    const bias = searchBiasRef.current;
+    if (Number.isFinite(bias.lat) && Number.isFinite(bias.lng)) {
+      params.set("lat", String(bias.lat));
+      params.set("lng", String(bias.lng));
+    }
+    // A new booking has no selected pickup/drop-off to bias the first
+    // search. Fall back to the booked product's destination so matching
+    // hotels and places in that city are ranked ahead of other cities.
+    const context = bias.address || searchContext;
+    if (context) params.set("context", context);
+
+    // Backspacing or retyping a query shows its earlier answer at once.
+    const cacheKey = `${productId || ""}|${validationSide}|${params}`;
+    const cached = searchCacheRef.current.get(cacheKey);
+    if (cached) {
+      setSuggestions(cached.suggestions);
+      if (cached.provider) setProvider(cached.provider);
+      setActiveIndex(-1);
+      setSearching(false);
+      setMessage("");
+      return;
+    }
+
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setSearching(true);
       setMessage("");
       try {
-        if (productId) {
-          const scopedResponse = await fetch(`/api/activities/${encodeURIComponent(productId)}/pickup-suggestions?side=${encodeURIComponent(validationSide)}&q=${encodeURIComponent(query)}`, { signal: controller.signal });
-          const scopedData = await scopedResponse.json().catch(() => ({}));
-          if (scopedResponse.ok) {
-            setSuggestions((scopedData.suggestions || []).map((place) => ({
+        // The scoped endpoint only searches a small curated list of
+        // canonical anchors (airports, stations, hotel zones). When it has
+        // no match for what the traveler typed, fall through to the
+        // general address search instead of leaving them stuck with
+        // an empty dropdown for a real hotel/address that just isn't in
+        // that curated list. Both requests start together so a miss costs
+        // no extra round trip.
+        const scopedRequest = productId
+          ? fetch(`/api/activities/${encodeURIComponent(productId)}/pickup-suggestions?side=${encodeURIComponent(validationSide)}&q=${encodeURIComponent(query)}`, { signal: controller.signal })
+            .then(async (response) => (response.ok ? (await response.json().catch(() => ({}))).suggestions || [] : []))
+            .catch((error) => { if (error.name === "AbortError") throw error; return []; })
+          : Promise.resolve([]);
+        const generalRequest = fetch(`/api/places?${params}`, { signal: controller.signal })
+          .then(async (response) => ({ response, data: await response.json().catch(() => ({})) }));
+        // Keep the general request's rejection handled while the scoped one is awaited.
+        generalRequest.catch(() => {});
+
+        const scoped = await scopedRequest;
+        let result;
+        if (scoped.length > 0) {
+          result = {
+            suggestions: scoped.map((place) => ({
               id: place.id,
               label: place.name,
               description: place.displayHint || `${place.city}, ${place.state}`,
               category: String(place.type || "Location").replaceAll("_", " "),
               lat: Number(place.lat),
               lng: Number(place.lng),
-            })));
-            setActiveIndex(-1);
-            return;
-          }
+            })),
+            provider: "",
+          };
+        } else {
+          const { response, data } = await generalRequest;
+          if (!response.ok) throw new Error(data.error || "Location search is unavailable.");
+          result = { suggestions: data.suggestions || [], provider: data.provider || "" };
         }
-        const params = new URLSearchParams({ query });
-        const bias = searchBiasRef.current;
-        if (Number.isFinite(bias.lat) && Number.isFinite(bias.lng)) {
-          params.set("lat", String(bias.lat));
-          params.set("lng", String(bias.lng));
-        }
-        // A new booking has no selected pickup/drop-off to bias the first
-        // search. Fall back to the booked product's destination so matching
-        // hotels and places in that city are ranked ahead of other cities.
-        const context = bias.address || searchContext;
-        if (context) params.set("context", context);
-        const response = await fetch(`/api/places?${params}`, { signal: controller.signal });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || "Location search is unavailable.");
-        setSuggestions(data.suggestions || []);
+        if (searchCacheRef.current.size >= 100) searchCacheRef.current.delete(searchCacheRef.current.keys().next().value);
+        searchCacheRef.current.set(cacheKey, result);
+        setSuggestions(result.suggestions);
+        if (result.provider) setProvider(result.provider);
         setActiveIndex(-1);
       } catch (error) {
         if (error.name !== "AbortError") {
@@ -133,7 +194,7 @@ export default function PickupPointPicker({
       } finally {
         if (!controller.signal.aborted) setSearching(false);
       }
-    }, 300);
+    }, 250);
 
     return () => {
       controller.abort();
@@ -165,6 +226,7 @@ export default function PickupPointPicker({
       mapplsPin: location.mapplsPin || "",
       confirmed,
     });
+    if (confirmed) setRecentPlaces(saveRecentPlace({ address: location.address, lat, lng, mapplsPin: location.mapplsPin || "" }));
     setOpen(false);
     setSuggestions([]);
     setMessage("");
@@ -249,10 +311,7 @@ export default function PickupPointPicker({
     const center = hasPoint ? { lat: value.lat, lng: value.lng } : INDIA_CENTER;
     const map = L.map(mapContainerRef.current, { zoomControl: false }).setView([center.lat, center.lng], hasPoint ? 16 : 5);
     L.control.zoom({ position: "bottomright" }).addTo(map);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: "&copy; OpenStreetMap contributors",
-    }).addTo(map);
+    addBaseTiles(map);
     if (hasPoint) {
       markerRef.current = L.marker([value.lat, value.lng], { draggable: true, icon: locationIcon(markerLabel) }).addTo(map);
       markerRef.current.on("dragend", () => {
@@ -341,6 +400,25 @@ export default function PickupPointPicker({
           )}
         </div>
 
+        {open && input.trim().length < 2 && recentPlaces.length > 0 && !value.confirmed && (
+          <div id={`${inputId}-results`} role="listbox" className="absolute inset-x-0 top-full z-[1000] mt-2 max-h-80 overflow-y-auto rounded-2xl border border-stone-200 bg-white p-2 shadow-2xl">
+            <p className="px-3 pb-1 pt-1 text-[10px] font-bold uppercase tracking-wide text-stone-400">Recent addresses</p>
+            {recentPlaces.map((place, index) => (
+              <button
+                key={`${place.address}-${index}`}
+                role="option"
+                aria-selected={false}
+                type="button"
+                onClick={() => commitLocation(place).then((ok) => { if (ok) setShowMap(true); })}
+                className="flex min-h-14 w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-stone-50"
+              >
+                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-stone-100 text-stone-500"><Clock className="h-4 w-4" /></span>
+                <span className="min-w-0 flex-1"><strong className="block truncate text-sm font-bold text-stone-900">{place.address}</strong></span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {open && input.trim().length >= 2 && (
           <div id={`${inputId}-results`} role="listbox" className="absolute inset-x-0 top-full z-[1000] mt-2 max-h-80 overflow-y-auto rounded-2xl border border-stone-200 bg-white p-2 shadow-2xl">
             {suggestions.map((place, index) => (
@@ -358,8 +436,9 @@ export default function PickupPointPicker({
                 <span className="min-w-0 flex-1"><strong className="block truncate text-sm font-bold text-stone-900">{place.label}</strong><span className="mt-0.5 block text-xs leading-relaxed text-stone-500">{place.description}</span></span>
               </button>
             ))}
-            {!searching && !suggestions.length && !message && <p className="px-4 py-5 text-center text-xs text-stone-500">No matching {pointLabel} points. Try a hotel, landmark, airport or full address.</p>}
-            <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by Mappls</p>
+            {!searching && !suggestions.length && !message && <p className="px-4 py-5 text-center text-xs text-stone-500">No matching {pointLabel} points. Try a hotel, landmark, airport, or drop a pin on the map below.</p>}
+            {(provider === "mappls" || provider === "ola") && <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by {provider === "ola" ? "Ola Maps" : "Mappls"}</p>}
+            {provider === "osm" && <p className="border-t border-stone-100 px-3 pb-1 pt-2 text-right text-[10px] font-semibold text-stone-400">Powered by OpenStreetMap</p>}
           </div>
         )}
       </div>
@@ -372,7 +451,7 @@ export default function PickupPointPicker({
       {value.confirmed && (
         <div className="flex items-start gap-2 rounded-2xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900">
           <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-          <span><strong className="block font-bold text-emerald-900">{kind === "dropoff" ? "Drop-off" : "Pickup"} point confirmed</strong>{value.mapplsPin ? `Mappls Pin ${value.mapplsPin} · ` : ""}{Number(value.lat).toFixed(5)}, {Number(value.lng).toFixed(5)}</span>
+          <span><strong className="block font-bold text-emerald-900">{kind === "dropoff" ? "Drop-off" : "Pickup"} point confirmed</strong>{value.mapplsPin && !/^(ola-platform|osm):/.test(value.mapplsPin) ? `Mappls Pin ${value.mapplsPin} · ` : ""}{Number(value.lat).toFixed(5)}, {Number(value.lng).toFixed(5)}</span>
         </div>
       )}
 

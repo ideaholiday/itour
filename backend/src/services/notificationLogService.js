@@ -15,7 +15,7 @@ export function beginNotificationDelivery({
 }, database = db) {
   if (eventKey) {
     const existing = database.prepare("SELECT * FROM notification_deliveries WHERE event_key = ?").get(eventKey);
-    if (existing?.status === "SENT" || existing?.status === "DELIVERED") return { idempotent: true, delivery: existing };
+    if (["SENT", "DELIVERED", "READ"].includes(existing?.status)) return { idempotent: true, delivery: existing };
   }
   const id = `ntf_${nanoid(14)}`;
   database.prepare(`
@@ -64,7 +64,7 @@ export function updateProviderDeliveryStatus(providerMessageId, status, errorMes
   if (isDelivered) {
     database.prepare(`
       UPDATE notification_deliveries SET status = ?, error_message = COALESCE(?, error_message), updated_at = datetime('now'),
-        sent_at = COALESCE(sent_at, datetime('now'))
+        sent_at = COALESCE(sent_at, CAST(datetime('now') AS TEXT))
       WHERE provider_message_id = ?
     `).run(status, errorMessage, providerMessageId);
   } else {

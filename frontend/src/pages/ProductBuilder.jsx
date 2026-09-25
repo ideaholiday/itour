@@ -5,10 +5,13 @@ import {
   Plus, Trash2, Star, MapPin, Clock, Users, Zap, Globe,
   Camera, Package, Navigation, Ticket, Sparkles, Loader2,
   Building2, Car, Bus, Plane, Train, AlertCircle, CheckCircle2,
-  Eye, DollarSign, Settings, FileText, Calendar, Image
+  Eye, DollarSign, Settings, FileText, Calendar, Image, Copy, ExternalLink
 } from "lucide-react";
 import { useAuth } from "../lib/auth.jsx";
-import { authHeaders } from "../lib/api.js";
+import { api, authHeaders } from "../lib/api.js";
+import { catalogCity } from "../lib/destinations.js";
+import { activityPath } from "../lib/activityUrl.js";
+import { uploadImage } from "../lib/imageUpload.js";
 
 // ─── Product taxonomy ─────────────────────────────────────────────────────────
 const PRODUCT_TYPES = {
@@ -207,7 +210,104 @@ function StepType({ value, onChange }) {
 }
 
 // ─── Step 1: Basic Info ───────────────────────────────────────────────────────
-function StepBasicInfo({ data, onChange, errors }) {
+const MAX_GALLERY_IMAGES = 5;
+
+// A file picker styled as a button. Calls onFiles with the chosen files.
+function PhotoUploadButton({ label, multiple = false, busy, disabled, onFiles }) {
+  return (
+    <label className={`inline-flex shrink-0 items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 ${busy || disabled ? "opacity-60" : "cursor-pointer hover:bg-stone-50"}`}>
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+      {busy ? "Uploading…" : label}
+      <input
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        multiple={multiple}
+        className="sr-only"
+        disabled={busy || disabled}
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          e.target.value = "";
+          if (files.length) onFiles(files);
+        }}
+      />
+    </label>
+  );
+}
+
+function StepBasicInfo({ data, onChange, errors, supplierId }) {
+  const [uploading, setUploading] = useState(null); // "hero" | "gallery" | null
+  const [uploadError, setUploadError] = useState("");
+  // Uploads finish after the form may have changed, so they merge into the latest data.
+  const latest = useRef(data);
+  latest.current = data;
+  const gallery = data.images || [];
+  // City comes from the catalogue and sets the state, as at supplier signup;
+  // the backend refuses any other city.
+  const [cities, setCities] = useState([]);
+  const [citiesError, setCitiesError] = useState("");
+  const [unlistedCity, setUnlistedCity] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    api.getCities()
+      .then((rows) => {
+        if (!active) return;
+        const open = (Array.isArray(rows) ? rows : []).filter((c) => c.listing_open !== false);
+        setCities(open);
+        // A draft saved before the picker may hold a typed city; keep it only if the catalogue has it.
+        const current = latest.current;
+        if (!current.city) return;
+        const match = catalogCity(open, current.city);
+        if (!match) {
+          setUnlistedCity(current.city);
+          onChange({ ...current, city: "", state: "" });
+        } else if (match.name !== current.city || match.state !== current.state) {
+          onChange({ ...current, city: match.name, state: match.state });
+        }
+      })
+      .catch(() => active && setCitiesError("We could not load the city list. Please refresh and try again."));
+    return () => { active = false; };
+  }, []);
+
+  const countries = [...new Set(cities.map((c) => c.country || "India"))];
+  const selectCity = (e) => {
+    const picked = cities.find((c) => c.id === e.target.value);
+    onChange({ ...data, city: picked?.name || "", state: picked?.state || "" });
+    setUnlistedCity("");
+  };
+
+  const uploadHero = async ([file]) => {
+    setUploading("hero");
+    setUploadError("");
+    try {
+      const url = await uploadImage(file, { entityType: "PRODUCT", entityId: supplierId || null });
+      onChange({ ...latest.current, heroImage: url });
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const uploadGallery = async (files) => {
+    const room = MAX_GALLERY_IMAGES - (latest.current.images || []).filter((img) => img.trim()).length;
+    const chosen = files.slice(0, Math.max(0, room));
+    setUploadError(files.length > chosen.length ? `Only ${MAX_GALLERY_IMAGES} gallery photos are allowed; the extra ones were skipped.` : "");
+    setUploading("gallery");
+    try {
+      for (const file of chosen) {
+        const url = await uploadImage(file, { entityType: "PRODUCT", entityId: supplierId || null });
+        const current = (latest.current.images || []).filter((img) => img.trim());
+        latest.current = { ...latest.current, images: [...current, url] };
+        onChange(latest.current);
+      }
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setUploading(null);
+    }
+  };
+
   const upd = (key, val) => onChange({ ...data, [key]: val });
   return (
     <div className="space-y-6">
@@ -230,12 +330,22 @@ function StepBasicInfo({ data, onChange, errors }) {
 
         <div>
           <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">City *</label>
-          <input
-            value={data.city || ""}
-            onChange={(e) => upd("city", e.target.value)}
-            placeholder="e.g. Goa, Bangkok, Pattaya"
-            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
-          />
+          <select
+            value={catalogCity(cities, data.city)?.id || ""}
+            onChange={selectCity}
+            disabled={!cities.length}
+            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:bg-stone-100"
+          >
+            <option value="">{cities.length || citiesError ? "Select a city" : "Loading cities…"}</option>
+            {countries.map((country) => (
+              <optgroup key={country} label={country}>
+                {cities.filter((c) => (c.country || "India") === country).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          {citiesError && <p className="mt-1 text-xs text-red-500">{citiesError}</p>}
+          {unlistedCity && <p className="mt-1 text-xs text-red-500">"{unlistedCity}" isn't in the Idea Holiday city list. Choose the city from the list.</p>}
+          <p className="mt-1 text-xs text-stone-400">City not listed? Ask Idea Holiday support to add it.</p>
           {errors?.city && <p className="mt-1 text-xs text-red-500">{errors.city}</p>}
         </div>
 
@@ -243,9 +353,10 @@ function StepBasicInfo({ data, onChange, errors }) {
           <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">State / Region *</label>
           <input
             value={data.state || ""}
-            onChange={(e) => upd("state", e.target.value)}
-            placeholder="e.g. Goa, Thailand"
-            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
+            readOnly
+            tabIndex={-1}
+            placeholder="Selected automatically"
+            className="w-full rounded-xl border border-stone-200 bg-[#FAF9F6] px-4 py-3 text-sm text-stone-600 focus:outline-none"
           />
           {errors?.state && <p className="mt-1 text-xs text-red-500">{errors.state}</p>}
         </div>
@@ -274,13 +385,16 @@ function StepBasicInfo({ data, onChange, errors }) {
         </div>
 
         <div className="sm:col-span-2">
-          <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">Hero Image URL *</label>
-          <input
-            value={data.heroImage || ""}
-            onChange={(e) => upd("heroImage", e.target.value)}
-            placeholder="https://images.unsplash.com/..."
-            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
-          />
+          <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">Hero Image *</label>
+          <div className="flex gap-2">
+            <input
+              value={data.heroImage || ""}
+              onChange={(e) => upd("heroImage", e.target.value)}
+              placeholder="Upload a photo or paste a link: https://..."
+              className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
+            />
+            <PhotoUploadButton label={data.heroImage ? "Replace" : "Upload photo"} busy={uploading === "hero"} disabled={Boolean(uploading)} onFiles={uploadHero} />
+          </div>
           {data.heroImage && (
             <div className="mt-2 h-40 rounded-2xl overflow-hidden border border-stone-200">
               <img src={data.heroImage} alt="preview" className="h-full w-full object-cover" onError={(e) => (e.target.style.display = "none")} />
@@ -289,9 +403,12 @@ function StepBasicInfo({ data, onChange, errors }) {
         </div>
 
         <div className="sm:col-span-2">
-          <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">Gallery Images <span className="text-stone-400 font-normal">(up to 5 additional)</span></label>
-          {(data.images || []).map((img, i) => (
-            <div key={i} className="flex gap-2 mb-2">
+          <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">Gallery Images <span className="text-stone-400 font-normal">(up to {MAX_GALLERY_IMAGES} additional)</span></label>
+          {gallery.map((img, i) => (
+            <div key={i} className="flex items-center gap-2 mb-2">
+              <div className="h-10 w-14 shrink-0 overflow-hidden rounded-lg border border-stone-200 bg-stone-100">
+                {img.trim() && <img src={img} alt="" className="h-full w-full object-cover" onError={(e) => (e.target.style.visibility = "hidden")} />}
+              </div>
               <input
                 value={img}
                 onChange={(e) => {
@@ -307,11 +424,16 @@ function StepBasicInfo({ data, onChange, errors }) {
               </button>
             </div>
           ))}
-          {(data.images || []).length < 5 && (
-            <button type="button" onClick={() => upd("images", [...(data.images || []), ""])} className="flex items-center gap-2 text-xs font-bold text-amber-700 hover:text-amber-900">
-              <Plus className="h-3.5 w-3.5" /> Add gallery image
-            </button>
+          {gallery.length < MAX_GALLERY_IMAGES && (
+            <div className="flex flex-wrap items-center gap-3">
+              <PhotoUploadButton label="Upload photos" multiple busy={uploading === "gallery"} disabled={Boolean(uploading)} onFiles={uploadGallery} />
+              <button type="button" onClick={() => upd("images", [...gallery, ""])} className="flex items-center gap-2 text-xs font-bold text-amber-700 hover:text-amber-900">
+                <Plus className="h-3.5 w-3.5" /> Add image link
+              </button>
+            </div>
           )}
+          {uploadError && <p className="mt-2 text-xs text-rose-700">{uploadError}</p>}
+          <p className="mt-2 text-[11px] text-stone-400">JPG, PNG or WEBP. Photos are resized before upload.</p>
         </div>
       </div>
     </div>
@@ -961,6 +1083,8 @@ export default function ProductBuilder() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishError, setPublishError] = useState("");
   const [publishedId, setPublishedId] = useState(null);
+  const [publishedProduct, setPublishedProduct] = useState(null);
+  const [copiedSuccessLink, setCopiedSuccessLink] = useState(false);
 
   // Auto-save draft
   const draftTimerRef = useRef(null);
@@ -1026,9 +1150,12 @@ export default function ProductBuilder() {
         return;
       }
       setPublishedId(json.productId);
+      setPublishedProduct({
+        id: json.productId,
+        title: formData.basic?.title || "",
+        url: json.url || activityPath({ id: json.productId, title: formData.basic?.title || "" })
+      });
       localStorage.removeItem(DRAFT_KEY);
-      // Navigate to supplier dashboard
-      setTimeout(() => navigate("/supplier/dashboard"), 2000);
     } catch (err) {
       setPublishError("Network error. Please try again.");
       setIsPublishing(false);
@@ -1037,19 +1164,64 @@ export default function ProductBuilder() {
 
   // Success screen
   if (publishedId) {
+    const canonicalPath = publishedProduct?.url || activityPath({ id: publishedId, title: formData.basic?.title || "" });
+    const fullPublicUrl = `${window.location.origin}${canonicalPath}`;
+
+    const handleCopyPublicUrl = () => {
+      navigator.clipboard?.writeText(fullPublicUrl);
+      setCopiedSuccessLink(true);
+      setTimeout(() => setCopiedSuccessLink(false), 2500);
+    };
+
     return (
-      <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center px-4">
-        <div className="max-w-md w-full text-center">
-          <div className="h-20 w-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-6">
+      <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center px-4 py-12">
+        <div className="max-w-lg w-full bg-white rounded-3xl p-8 border border-stone-200 shadow-sm text-center">
+          <div className="h-20 w-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-5">
             <CheckCircle2 className="h-10 w-10 text-emerald-600" />
           </div>
           <h1 className="text-2xl font-bold text-stone-900">Product Published! 🎉</h1>
-          <p className="mt-2 text-stone-600">Your {PRODUCT_TYPES[productType]?.label} is now live on IdeaHoliday marketplace.</p>
-          <p className="mt-1 text-xs text-stone-400">Product ID: {publishedId}</p>
-          <p className="mt-4 text-sm text-stone-500">Redirecting to dashboard…</p>
-          <Link to="/supplier/dashboard" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-6 py-3 text-sm font-bold text-white hover:bg-amber-600 transition">
-            Go to Dashboard <ArrowRight className="h-4 w-4" />
-          </Link>
+          <p className="mt-2 text-stone-600">
+            "{formData.basic?.title || "Your listing"}" is now live on IdeaHoliday marketplace.
+          </p>
+
+          <div className="mt-6 text-left rounded-2xl bg-stone-50 p-4 border border-stone-200">
+            <span className="text-xs font-semibold uppercase tracking-wider text-stone-500">Public SEO Marketplace Link</span>
+            <div className="mt-1.5 flex items-center gap-2">
+              <input
+                readOnly
+                value={fullPublicUrl}
+                className="flex-1 bg-white border border-stone-300 rounded-xl px-3 py-2 text-xs font-mono text-stone-800 select-all"
+              />
+              <button
+                type="button"
+                onClick={handleCopyPublicUrl}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 px-3.5 py-2 text-xs font-bold text-white transition shadow-sm whitespace-nowrap"
+              >
+                {copiedSuccessLink ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                <span>{copiedSuccessLink ? "Copied!" : "Copy Link"}</span>
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-stone-500 font-mono">
+              Product ID: {publishedId}
+            </p>
+          </div>
+
+          <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+            <a
+              href={canonicalPath}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-stone-300 bg-white px-5 py-3 text-sm font-bold text-stone-700 hover:bg-stone-50 transition shadow-sm"
+            >
+              <ExternalLink className="h-4 w-4 text-amber-600" /> View Live Listing
+            </a>
+            <Link
+              to="/supplier/dashboard?panel=listings"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-stone-900 px-6 py-3 text-sm font-bold text-white hover:bg-stone-800 transition shadow-sm"
+            >
+              Go to Listings <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -1107,7 +1279,7 @@ export default function ProductBuilder() {
             <StepType value={formData.type} onChange={(v) => updStep("type", v)} />
           )}
           {step === 1 && (
-            <StepBasicInfo data={formData.basic} onChange={(v) => updStep("basic", v)} errors={{}} />
+            <StepBasicInfo data={formData.basic} onChange={(v) => updStep("basic", v)} errors={{}} supplierId={supplierId} />
           )}
           {step === 2 && (
             <StepOverview data={formData.overview} onChange={(v) => updStep("overview", v)} />

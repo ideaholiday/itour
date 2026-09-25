@@ -1,5 +1,8 @@
 import db from "../db.js";
 import crypto from "crypto";
+import { cacheService } from "./cacheService.js";
+import { priorMeanRating } from "./reviewService.js";
+import { approvedSupplierSql } from "./supplierKybGate.js";
 
 const CITY_COORDINATES = {
   "delhi": { lat: 28.6139, lng: 77.2090 },
@@ -36,8 +39,16 @@ const CITY_COORDINATES = {
   "madurai": { lat: 9.9252, lng: 78.1198 },
   "mysuru": { lat: 12.2958, lng: 76.6394 },
   "ooty": { lat: 11.4102, lng: 76.6950 },
-  "puducherry": { lat: 11.9416, lng: 79.8083 }
+  "puducherry": { lat: 11.9416, lng: 79.8083 },
+  "bangkok": { lat: 13.7563, lng: 100.5018 },
+  "pattaya": { lat: 12.9236, lng: 100.8825 },
+  "phuket": { lat: 7.8804, lng: 98.3923 },
+  "krabi": { lat: 8.0863, lng: 98.9063 },
+  "chiang mai": { lat: 18.7883, lng: 98.9853 }
 };
+
+// A product's country is its city's (ADR 023); a city outside the catalogue is in India.
+const productCountrySql = (alias = "p") => `COALESCE((SELECT d.country FROM destinations d WHERE LOWER(d.name) = LOWER(TRIM(${alias}.city)) LIMIT 1), 'India')`;
 
 export class SearchService {
   /**
@@ -45,6 +56,10 @@ export class SearchService {
    */
   static getSuggestions(query = "") {
     const q = String(query).trim().toLowerCase();
+    const cacheKey = `suggestions:${q}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) return cached;
+
     if (!q || q.length < 2) {
       // Return popular defaults
       const topDestinations = db.prepare(`
@@ -59,70 +74,91 @@ export class SearchService {
         "Adventure & Wildlife"
       ];
 
-      return {
+      const result = {
         destinations: topDestinations,
         experiences: ["Taj Mahal Sunrise Tour", "Jaipur Heritage City Walk", "Goa Coastal Cruise"],
         categories: topCategories,
       };
+      cacheService.set(cacheKey, result, 300);
+      return result;
     }
 
     const destinations = db.prepare(`
-      SELECT name, state FROM destinations
-      WHERE LOWER(name) LIKE ? OR LOWER(state) LIKE ?
+      SELECT name, state, COALESCE(country, 'India') AS country FROM destinations
+      WHERE LOWER(name) LIKE ? OR LOWER(state) LIKE ? OR LOWER(COALESCE(country, 'India')) LIKE ?
       LIMIT 5
-    `).all(`%${q}%`, `%${q}%`).map(d => `${d.name}, ${d.state}`);
+    `).all(`%${q}%`, `%${q}%`, `%${q}%`).map(d => `${d.name}, ${d.country === "India" ? d.state : d.country}`);
 
-    const experiences = db.prepare(`
-      SELECT title, city FROM products
-      WHERE (is_published = 1 OR status = 'PUBLISHED')
+    const rawProducts = db.prepare(`
+      SELECT id, title, city, price_inr, category FROM products
+      WHERE (is_published = 1 OR status = 'PUBLISHED') AND ${approvedSupplierSql("products")}
         AND (LOWER(title) LIKE ? OR LOWER(city) LIKE ?)
       LIMIT 5
-    `).all(`%${q}%`, `%${q}%`).map(p => p.title);
+    `).all(`%${q}%`, `%${q}%`);
+
+    const experiences = rawProducts.map(p => p.title);
+    const products = rawProducts.map(p => ({
+      id: p.id,
+      title: p.title,
+      destination: p.city,
+      price_inr: p.price_inr,
+      category: p.category,
+    }));
 
     const categories = db.prepare(`
       SELECT DISTINCT category FROM products
-      WHERE (is_published = 1 OR status = 'PUBLISHED')
+      WHERE (is_published = 1 OR status = 'PUBLISHED') AND ${approvedSupplierSql("products")}
         AND LOWER(category) LIKE ?
       LIMIT 4
     `).all(`%${q}%`).map(c => c.category);
 
-    return {
+    const result = {
       destinations,
       experiences,
+      products,
       categories,
     };
+    cacheService.set(cacheKey, result, 300);
+    return result;
   }
 
   /**
    * Search products with faceted filtering, ranking, coordinates, and pagination
    */
-  static searchProducts({
-    query = "",
-    city = "",
-    state = "",
-    category = "",
-    productType = "",
-    type = "",
-    duration = "",
-    vehicleType = "",
-    minPrice = null,
-    maxPrice = null,
-    minRating = null,
-    groupType = "",
-    instantOnly = false,
-    freeCancellation = false,
-    bestseller = false,
-    bounds = null,
-    centerLat = null,
-    centerLng = null,
-    radiusKm = null,
-    sort = "recommended",
-    order = "desc",
-    page = 1,
-    limit = 20,
-  }) {
+  static searchProducts(options = {}) {
+    const {
+      query = "",
+      city = "",
+      state = "",
+      country = "",
+      category = "",
+      productType = "",
+      type = "",
+      duration = "",
+      vehicleType = "",
+      minPrice = null,
+      maxPrice = null,
+      minRating = null,
+      groupType = "",
+      instantOnly = false,
+      freeCancellation = false,
+      bestseller = false,
+      bounds = null,
+      centerLat = null,
+      centerLng = null,
+      radiusKm = null,
+      sort = "recommended",
+      order = "desc",
+      page = 1,
+      limit = 20,
+    } = options;
+
+    const cacheKey = `search:${JSON.stringify(options)}`;
+    const cached = cacheService.get(cacheKey);
+    if (cached) return cached;
+
     const offset = (page - 1) * limit;
-    let whereConditions = ["(p.is_published = 1 OR p.status = 'PUBLISHED')"];
+    let whereConditions = ["(p.is_published = 1 OR p.status = 'PUBLISHED')", approvedSupplierSql("p")];
     const params = [];
 
     if (query && query.trim()) {
@@ -132,14 +168,21 @@ export class SearchService {
         LOWER(p.city) LIKE ? OR 
         LOWER(p.state) LIKE ? OR 
         LOWER(p.short_desc) LIKE ? OR
-        LOWER(p.category) LIKE ?
+        LOWER(p.category) LIKE ? OR
+        LOWER(${productCountrySql("p")}) LIKE ?
       )`);
-      params.push(q, q, q, q, q);
+      params.push(q, q, q, q, q, q);
     }
 
+    // `city` is a city name or a destination id (links use `city_th_bangkok` for Bangkok).
     if (city) {
-      whereConditions.push("LOWER(p.city) = LOWER(?)");
-      params.push(city);
+      whereConditions.push("(LOWER(p.city) = LOWER(?) OR LOWER(p.city) = (SELECT LOWER(name) FROM destinations WHERE id = ?))");
+      params.push(city, city);
+    }
+
+    if (country) {
+      whereConditions.push(`LOWER(${productCountrySql("p")}) = LOWER(?)`);
+      params.push(country);
     }
 
     if (state) {
@@ -154,21 +197,28 @@ export class SearchService {
 
     const effectiveType = productType || type;
     if (effectiveType) {
-      whereConditions.push("p.product_type = ?");
-      params.push(effectiveType);
+      const normalizedType = String(effectiveType).trim().toUpperCase();
+      if (["TOUR", "TOURS", "DAY_TOUR"].includes(normalizedType)) {
+        whereConditions.push("p.product_type IN ('TOUR', 'DAY_TOUR')");
+      } else if (["PACKAGE", "PACKAGES", "MULTI_DAY_PACKAGE"].includes(normalizedType)) {
+        whereConditions.push("p.product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE')");
+      } else {
+        whereConditions.push("p.product_type = ?");
+        params.push(normalizedType);
+      }
     }
 
     // Duration buckets
     if (duration) {
       const d = String(duration).toLowerCase();
       if (d === "short" || d === "under_4h" || d === "0-4") {
-        whereConditions.push("(p.duration_hours < 4 AND p.product_type != 'MULTI_DAY_PACKAGE')");
+        whereConditions.push("(p.duration_hours < 4 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE'))");
       } else if (d === "half_day" || d === "4-8") {
-        whereConditions.push("(p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type != 'MULTI_DAY_PACKAGE')");
+        whereConditions.push("(p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE'))");
       } else if (d === "full_day" || d === "8-24" || d === "day") {
-        whereConditions.push("((p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type = 'DAY_TOUR'))");
+        whereConditions.push("((p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type IN ('TOUR', 'DAY_TOUR')))");
       } else if (d === "multi_day" || d === "package" || d === "multi") {
-        whereConditions.push("(p.product_type = 'MULTI_DAY_PACKAGE' OR p.duration_hours > 24)");
+        whereConditions.push("(p.product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') OR p.duration_hours > 24)");
       }
     }
 
@@ -195,13 +245,23 @@ export class SearchService {
     }
 
     if (minRating !== null && !isNaN(minRating)) {
-      whereConditions.push("p.rating >= ?");
+      // A rating filter matches what travelers actually rated. A listing with
+      // no verified review has no rating and cannot satisfy a rating floor.
+      whereConditions.push(`EXISTS (
+        SELECT 1 FROM quality_scores qs WHERE qs.entity_type = 'PRODUCT' AND qs.entity_id = p.id
+          AND qs.review_count > 0 AND qs.average_rating >= ?
+      )`);
       params.push(Number(minRating));
     }
 
     if (groupType) {
-      whereConditions.push("p.group_type = ?");
-      params.push(groupType);
+      const normalizedGroup = String(groupType).toUpperCase();
+      if (normalizedGroup === "SHARED") {
+        whereConditions.push("(p.group_type IN ('SHARED', 'SIC') OR p.product_sub_type IN ('SIC', 'TICKET_SIC'))");
+      } else {
+        whereConditions.push("p.group_type = ?");
+        params.push(normalizedGroup);
+      }
     }
 
     if (instantOnly) {
@@ -218,16 +278,26 @@ export class SearchService {
 
     const whereClause = whereConditions.join(" AND ");
 
-    // Sorting
-    let orderByClause = "p.bestseller DESC, p.rating DESC";
+    // Sorting. Rating order runs on the smoothed rating so an unreviewed
+    // listing ranks at the prior mean instead of below every rated one; the
+    // rating shown to the traveler is still the real average, or none.
+    const priorMean = priorMeanRating(db, "PRODUCT");
+    const rankRating = "COALESCE(qs_rank.smoothed_rating, ?)";
+    const orderParams = [];
+
+    let orderByClause = `p.bestseller DESC, ${rankRating} DESC`;
+    orderParams.push(priorMean);
     if (sort === "price_asc" || (sort === "price" && order === "asc")) {
       orderByClause = "p.price_inr ASC";
+      orderParams.length = 0;
     } else if (sort === "price_desc" || (sort === "price" && order === "desc")) {
       orderByClause = "p.price_inr DESC";
+      orderParams.length = 0;
     } else if (sort === "rating") {
-      orderByClause = "p.rating DESC, p.review_count DESC";
+      orderByClause = `${rankRating} DESC, COALESCE(p.review_count, 0) DESC`;
     } else if (sort === "newest") {
       orderByClause = "p.created_at DESC";
+      orderParams.length = 0;
     }
 
     // Count total matches
@@ -238,17 +308,19 @@ export class SearchService {
     const dataSql = `
       SELECT p.*, s.company_name as supplier_company_name, s.rating as supplier_rating,
         tr.origin_lat, tr.origin_lng, tr.dest_lat, tr.dest_lng, tr.vehicle_category as transfer_vehicle,
-        pi.total_days as package_days
+        pi.total_days as package_days,
+        qs_rank.smoothed_rating, qs_rank.average_rating as verified_rating, qs_rank.review_count as verified_review_count
       FROM products p
       LEFT JOIN suppliers s ON s.id = p.supplier_id
       LEFT JOIN transfer_routes tr ON tr.product_id = p.id
       LEFT JOIN package_itineraries pi ON pi.product_id = p.id
+      LEFT JOIN quality_scores qs_rank ON qs_rank.entity_type = 'PRODUCT' AND qs_rank.entity_id = p.id
       WHERE ${whereClause}
       ORDER BY ${orderByClause}
       LIMIT ? OFFSET ?
     `;
 
-    const rawProducts = db.prepare(dataSql).all(...params, limit, offset);
+    const rawProducts = db.prepare(dataSql).all(...params, ...orderParams, limit, offset);
 
     // Coordinate enrichment
     const products = rawProducts.map((prod, index) => {
@@ -259,19 +331,24 @@ export class SearchService {
       const jitterLng = (((index + 1) % 5) - 2) * 0.008;
       const lat = prod.origin_lat || Number((cityCoord.lat + jitterLat).toFixed(4));
       const lng = prod.origin_lng || Number((cityCoord.lng + jitterLng).toFixed(4));
+      const reviewCount = Number(prod.verified_review_count || prod.review_count || 0);
       return {
         ...prod,
         lat,
         lng,
+        // No verified review, no rating — `isNewListing` is what the card shows.
+        rating: reviewCount ? (prod.verified_rating ?? prod.rating) : null,
+        review_count: reviewCount,
+        isNewListing: reviewCount === 0,
         inclusions: typeof prod.inclusions === "string" ? JSON.parse(prod.inclusions || "[]") : (prod.inclusions || []),
         exclusions: typeof prod.exclusions === "string" ? JSON.parse(prod.exclusions || "[]") : (prod.exclusions || []),
       };
     });
 
     // Compute dynamic facet aggregations over the current search base
-    const baseWhere = "WHERE (p.is_published = 1 OR p.status = 'PUBLISHED')" + 
-      (query && query.trim() ? ` AND (LOWER(p.title) LIKE ? OR LOWER(p.city) LIKE ? OR LOWER(p.state) LIKE ? OR LOWER(p.short_desc) LIKE ? OR LOWER(p.category) LIKE ?)` : "");
-    const baseParams = query && query.trim() ? [`%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`, `%${query.trim().toLowerCase()}%`] : [];
+    const baseWhere = `WHERE (p.is_published = 1 OR p.status = 'PUBLISHED') AND ${approvedSupplierSql("p")}` + 
+      (query && query.trim() ? ` AND (LOWER(p.title) LIKE ? OR LOWER(p.city) LIKE ? OR LOWER(p.state) LIKE ? OR LOWER(p.short_desc) LIKE ? OR LOWER(p.category) LIKE ? OR LOWER(${productCountrySql("p")}) LIKE ?)` : "");
+    const baseParams = query && query.trim() ? Array(6).fill(`%${query.trim().toLowerCase()}%`) : [];
 
     const categoryFacets = db.prepare(`
       SELECT category as name, COUNT(*) as count FROM products p ${baseWhere} GROUP BY category ORDER BY count DESC
@@ -281,24 +358,55 @@ export class SearchService {
       SELECT city as name, COUNT(*) as count FROM products p ${baseWhere} GROUP BY city ORDER BY count DESC LIMIT 12
     `).all(...baseParams);
 
-    const typeFacets = db.prepare(`
-      SELECT product_type as type, COUNT(*) as count FROM products p ${baseWhere} GROUP BY product_type
+    const countryFacets = db.prepare(`
+      SELECT ${productCountrySql("p")} as name, COUNT(*) as count FROM products p ${baseWhere} GROUP BY 1 ORDER BY count DESC
     `).all(...baseParams);
 
-    const priceStats = db.prepare(`
-      SELECT MIN(price_inr) as min, MAX(price_inr) as max FROM products p ${baseWhere}
-    `).get(...baseParams) || { min: 499, max: 25000 };
+    const typeFacets = db.prepare(`
+      SELECT CASE
+        WHEN product_type IN ('TOUR', 'DAY_TOUR') THEN 'TOUR'
+        WHEN product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 'PACKAGE'
+        ELSE product_type
+      END as type, COUNT(*) as count
+      FROM products p ${baseWhere}
+      GROUP BY CASE
+        WHEN product_type IN ('TOUR', 'DAY_TOUR') THEN 'TOUR'
+        WHEN product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 'PACKAGE'
+        ELSE product_type
+      END
+    `).all(...baseParams);
 
-    const durationCounts = {
-      short: db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.duration_hours < 4 AND p.product_type != 'MULTI_DAY_PACKAGE'`).get(...baseParams)?.count || 0,
-      half_day: db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type != 'MULTI_DAY_PACKAGE'`).get(...baseParams)?.count || 0,
-      full_day: db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND ((p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type = 'DAY_TOUR'))`).get(...baseParams)?.count || 0,
-      multi_day: db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND (p.product_type = 'MULTI_DAY_PACKAGE' OR p.duration_hours > 24)`).get(...baseParams)?.count || 0,
+    const aggStats = db.prepare(`
+      SELECT 
+        MIN(p.price_inr) as min_price,
+        MAX(p.price_inr) as max_price,
+        COALESCE(SUM(CASE WHEN p.duration_hours < 4 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 1 ELSE 0 END), 0) as short_count,
+        COALESCE(SUM(CASE WHEN p.duration_hours >= 4 AND p.duration_hours <= 8 AND p.product_type NOT IN ('PACKAGE', 'MULTI_DAY_PACKAGE') THEN 1 ELSE 0 END), 0) as half_day_count,
+        COALESCE(SUM(CASE WHEN (p.duration_hours > 8 AND p.duration_hours <= 24) OR (p.duration_hours IS NULL AND p.product_type IN ('TOUR', 'DAY_TOUR')) THEN 1 ELSE 0 END), 0) as full_day_count,
+        COALESCE(SUM(CASE WHEN p.product_type IN ('PACKAGE', 'MULTI_DAY_PACKAGE') OR p.duration_hours > 24 THEN 1 ELSE 0 END), 0) as multi_day_count,
+        COALESCE(SUM(CASE WHEN qs.review_count > 0 AND qs.average_rating >= 4.5 THEN 1 ELSE 0 END), 0) as r45,
+        COALESCE(SUM(CASE WHEN qs.review_count > 0 AND qs.average_rating >= 4.0 THEN 1 ELSE 0 END), 0) as r40,
+        COALESCE(SUM(CASE WHEN qs.review_count > 0 AND qs.average_rating >= 3.5 THEN 1 ELSE 0 END), 0) as r35
+      FROM products p
+      LEFT JOIN quality_scores qs ON qs.entity_type = 'PRODUCT' AND qs.entity_id = p.id
+      ${baseWhere}
+    `).get(...baseParams) || {};
+
+    const priceStats = {
+      min: aggStats.min_price || 499,
+      max: aggStats.max_price || 25000,
     };
 
-    const r45 = db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.rating >= 4.5`).get(...baseParams)?.count || 0;
-    const r40 = db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.rating >= 4.0`).get(...baseParams)?.count || 0;
-    const r35 = db.prepare(`SELECT COUNT(*) as count FROM products p ${baseWhere} AND p.rating >= 3.5`).get(...baseParams)?.count || 0;
+    const durationCounts = {
+      short: Number(aggStats.short_count) || 0,
+      half_day: Number(aggStats.half_day_count) || 0,
+      full_day: Number(aggStats.full_day_count) || 0,
+      multi_day: Number(aggStats.multi_day_count) || 0,
+    };
+
+    const r45 = Number(aggStats.r45) || 0;
+    const r40 = Number(aggStats.r40) || 0;
+    const r35 = Number(aggStats.r35) || 0;
 
     const ratingCounts = {
       "4.5": r45,
@@ -310,7 +418,7 @@ export class SearchService {
       "above_3_5": r35,
     };
 
-    return {
+    const response = {
       products,
       pagination: {
         page,
@@ -323,12 +431,15 @@ export class SearchService {
       facets: {
         categories: categoryFacets,
         cities: cityFacets,
+        countries: countryFacets,
         productTypes: typeFacets,
         durations: durationCounts,
         priceRange: { min: priceStats.min || 499, max: priceStats.max || 25000 },
         ratings: ratingCounts,
       }
     };
+    cacheService.set(cacheKey, response, 60);
+    return response;
   }
 
   /**

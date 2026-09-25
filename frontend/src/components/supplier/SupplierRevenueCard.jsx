@@ -3,10 +3,12 @@ import { TrendingUp, IndianRupee, ArrowUpRight } from "lucide-react";
 import Card, { CardHeader, CardTitle, CardContent } from "../ui/Card";
 
 export function SupplierRevenueCard({ stats }) {
-  const todayRevenue = stats?.today?.revenue_inr || 0;
-  const monthRevenue = stats?.month?.revenue_inr || 0;
-  const growthPct = stats?.month?.growth_pct || 14.8;
-  const trend = stats?.week?.trend || [4, 6, 8, 5, 9, 7, 6];
+  // Real numbers only (ADR 038): no growth badge or trend until there is data.
+  const todayRevenue = stats?.today?.earnings_inr || 0;
+  const monthRevenue = stats?.month?.earnings_inr || 0;
+  const growthPct = stats?.month?.growth_pct ?? null;
+  const trend = stats?.week?.trend?.length ? stats.week.trend : [0, 0, 0, 0, 0, 0, 0];
+  const month = stats?.month || {};
 
   // SVG Sparkline
   const maxVal = Math.max(...trend, 10);
@@ -33,16 +35,18 @@ export function SupplierRevenueCard({ stats }) {
             <h4 className="text-base font-bold font-display text-stone-100">Revenue Snapshot</h4>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800">
-          <TrendingUp className="w-3 h-3" />
-          +{growthPct}% YoY
-        </span>
+        {growthPct !== null && (
+          <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full border ${growthPct >= 0 ? "text-emerald-400 bg-emerald-950/60 border-emerald-800" : "text-rose-300 bg-rose-950/60 border-rose-800"}`} title="From the 1st to today, against the same days last month">
+            <TrendingUp className="w-3 h-3" />
+            {growthPct >= 0 ? "+" : ""}{growthPct}% vs last month
+          </span>
+        )}
       </CardHeader>
 
       <CardContent>
         <div className="grid grid-cols-2 gap-4 my-2">
           <div>
-            <span className="text-xs text-stone-400">Today's Payouts</span>
+            <span className="text-xs text-stone-400">Today's earnings</span>
             <div className="text-2xl font-extrabold font-mono text-white mt-0.5">
               ₹{todayRevenue.toLocaleString("en-IN")}
             </div>
@@ -54,13 +58,19 @@ export function SupplierRevenueCard({ stats }) {
             <div className="text-2xl font-extrabold font-mono text-amber-400 mt-0.5">
               ₹{monthRevenue.toLocaleString("en-IN")}
             </div>
-            <span className="text-[11px] text-stone-400">{stats?.month?.bookings || 0} total bookings</span>
+            <span className="text-[11px] text-stone-400">{month.bookings || 0} bookings to date</span>
+            {month.direct_inr > 0 && (
+              <span className="block text-[11px] text-stone-400">
+                Marketplace ₹{(month.marketplace_inr || 0).toLocaleString("en-IN")} · Direct ₹{month.direct_inr.toLocaleString("en-IN")}
+                {month.direct_due_inr > 0 ? ` (₹${month.direct_due_inr.toLocaleString("en-IN")} still to collect)` : ""}
+              </span>
+            )}
           </div>
         </div>
 
         {/* Weekly Trend Sparkline */}
         <div className="mt-4 pt-4 border-t border-stone-800 flex items-center justify-between">
-          <span className="text-xs text-stone-400">7-Day Trip Velocity</span>
+          <span className="text-xs text-stone-400">Earnings, last 7 days</span>
           <svg width={width} height={height} className="overflow-visible">
             <polyline
               fill="none"

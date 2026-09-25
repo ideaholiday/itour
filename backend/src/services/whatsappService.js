@@ -2,14 +2,13 @@ import { nanoid } from "nanoid";
 import db from "../db.js";
 import { beginNotificationDelivery, finishNotificationDelivery } from "./notificationLogService.js";
 import logger from "../config/logger.js";
+import { toE164 } from "../lib/phone.js";
 
 const enabled = () => String(process.env.WHATSAPP_CLOUD_API_ENABLED || "false").toLowerCase() === "true";
 
 export function normalizeWhatsAppPhone(value, countryCode = process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || "91") {
-  let digits = String(value || "").replace(/\D/g, "");
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  if (digits.length === 10) digits = `${String(countryCode).replace(/\D/g, "")}${digits}`;
-  return digits.length >= 11 && digits.length <= 15 ? digits : null;
+  const phone = toE164(value, countryCode);
+  return phone ? phone.slice(1) : null;
 }
 
 export function whatsAppProviderConfiguration() {
@@ -17,6 +16,7 @@ export function whatsAppProviderConfiguration() {
   const baseUrl = String(process.env.WHATSAPP_BASE_URL || "https://graph.facebook.com").replace(/\/$/, "");
   const phoneNumberId = String(process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim();
   const accessToken = String(process.env.WHATSAPP_ACCESS_TOKEN || "").trim();
+  const appId = String(process.env.WHATSAPP_APP_ID || "1488217219329539").trim();
   return {
     provider: "WHATSAPP_CLOUD_API",
     enabled: enabled(),
@@ -24,18 +24,26 @@ export function whatsAppProviderConfiguration() {
     apiVersion,
     baseUrl,
     phoneNumberId,
+    appId,
     timeoutMs: Math.max(1, Number(process.env.WHATSAPP_TIMEOUT || 15)) * 1000,
   };
 }
 
-export function whatsAppTemplate(name, values = []) {
+// Meta rejects template variables containing new lines or tabs, more than four
+// consecutive spaces, or an empty value (error 131008), so values are flattened.
+export function templateParameterText(value) {
+  const text = String(value ?? "").replace(/\s*[\r\n\t]+\s*/g, " · ").replace(/ {5,}/g, "    ").trim();
+  return (text || "-").slice(0, 1024);
+}
+
+export function whatsAppTemplate(name, values = [], languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en") {
   if (!String(name || "").trim()) return undefined;
   return {
     name: String(name).trim(),
-    languageCode: process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en",
+    languageCode: languageCode || process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en",
     components: values.length ? [{
       type: "body",
-      parameters: values.map((value) => ({ type: "text", text: String(value ?? "-").slice(0, 1024) })),
+      parameters: values.map((value) => ({ type: "text", text: templateParameterText(value) })),
     }] : [],
   };
 }
@@ -139,7 +147,7 @@ export async function sendWhatsAppVoucher({
 }, options) {
   const mapsLink = pickupLat && pickupLng
     ? `https://maps.google.com/?q=${pickupLat},${pickupLng}`
-    : pickupLocation ? `https://maps.google.com/?q=${encodeURIComponent(pickupLocation)}` : "https://ideaholiday.in/my-trips";
+    : pickupLocation ? `https://maps.google.com/?q=${encodeURIComponent(pickupLocation)}` : "https://ideaholiday.in/my-bookings";
   const messageBody = `Idea Holiday booking ${bookingRef}\n\nHello ${customerName || "Traveler"}, your trip is confirmed.\nDriver: ${driverName || "To be assigned"}\nDriver phone: ${driverPhone || "To be shared"}\nVehicle: ${vehicleModel || "AC commercial vehicle"} (${vehicleNumber || "TBA"})\nPickup: ${pickupTime || "Time to be confirmed"}, ${pickupLocation || "Location to be confirmed"}\nMap: ${mapsLink}\n\nYour private pickup OTP is available in My Trips. Share it only after checking the driver and number plate.`;
   return sendWhatsAppMessage({
     to: customerPhone,

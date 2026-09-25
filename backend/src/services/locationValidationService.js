@@ -1,4 +1,6 @@
+import { getInventoryRules } from "./nativeInventoryService.js";
 import { calculateHaversineDistanceKm } from "../engine/transferEngine.js";
+import { localDateTimeMs, productTime } from "../lib/localTime.js";
 
 export const LOCATION_TYPES = Object.freeze([
   "AIRPORT", "RAILWAY_STATION", "BUS_STAND", "HOTEL_ZONE",
@@ -17,6 +19,60 @@ function parseJson(value, fallback = []) {
 
 function normalized(value) {
   return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+// Indian state abbreviations → full names.
+// Products may store either form; canonical_locations may use either form too.
+const STATE_ALIASES = new Map([
+  ["an", "andaman and nicobar islands"],
+  ["ap", "andhra pradesh"],
+  ["ar", "arunachal pradesh"],
+  ["as", "assam"],
+  ["br", "bihar"],
+  ["cg", "chhattisgarh"],
+  ["ch", "chandigarh"],
+  ["dd", "dadra and nagar haveli and daman and diu"],
+  ["dl", "delhi"],
+  ["ga", "goa"],
+  ["gj", "gujarat"],
+  ["hp", "himachal pradesh"],
+  ["hr", "haryana"],
+  ["jh", "jharkhand"],
+  ["jk", "jammu and kashmir"],
+  ["ka", "karnataka"],
+  ["kl", "kerala"],
+  ["la", "ladakh"],
+  ["ld", "lakshadweep"],
+  ["mh", "maharashtra"],
+  ["ml", "meghalaya"],
+  ["mn", "manipur"],
+  ["mp", "madhya pradesh"],
+  ["mz", "mizoram"],
+  ["nl", "nagaland"],
+  ["od", "odisha"],
+  ["or", "odisha"],
+  ["pb", "punjab"],
+  ["pn", "puducherry"],
+  ["py", "puducherry"],
+  ["rj", "rajasthan"],
+  ["sk", "sikkim"],
+  ["tn", "tamil nadu"],
+  ["tr", "tripura"],
+  ["ts", "telangana"],
+  ["tg", "telangana"],
+  ["uk", "uttarakhand"],
+  ["up", "uttar pradesh"],
+  ["wb", "west bengal"],
+]);
+
+function expandState(value) {
+  const n = normalized(value);
+  return STATE_ALIASES.get(n) || n;
+}
+
+function stateMatches(a, b) {
+  if (!a || !b) return true; // no constraint to enforce
+  return expandState(a) === expandState(b);
 }
 
 function coordinates(lat, lng) {
@@ -55,7 +111,7 @@ function nearestLocation(db, point, { types = [], state = null, city = null } = 
     return null;
   }
   if (types.length) rows = rows.filter((row) => types.includes(String(row.location_type).toUpperCase()));
-  if (state) rows = rows.filter((row) => normalized(row.state) === normalized(state));
+  if (state) rows = rows.filter((row) => stateMatches(row.state, state));
   if (city) {
     const target = normalized(city);
     rows = rows.filter((row) => normalized(row.city).includes(target) || target.includes(normalized(row.city)));
@@ -159,8 +215,10 @@ export function getProductLocationContext(db, productId) {
   const explicit = explicitRules(db, productId);
   const explicitMap = new Map(explicit.map((rule) => [String(rule.rule_side).toUpperCase(), rule]));
   const route = product.product_type === "TRANSFER" ? routeFor(db, productId) : null;
-  const dayTour = product.product_type === "DAY_TOUR" ? dayTourFor(db, productId) : null;
-  const packageItinerary = product.product_type === "MULTI_DAY_PACKAGE" ? packageFor(db, productId) : null;
+  const isTour = ["TOUR", "DAY_TOUR"].includes(product.product_type);
+  const isPackage = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(product.product_type);
+  const dayTour = isTour ? dayTourFor(db, productId) : null;
+  const packageItinerary = isPackage ? packageFor(db, productId) : null;
   const rules = [];
 
   if (product.product_type === "TRANSFER" && route) {
@@ -168,7 +226,7 @@ export function getProductLocationContext(db, productId) {
     const pickup = type.endsWith("_PICKUP") ? fixedRule("PICKUP", route, product) : radiusRule("PICKUP", route, product);
     const drop = type.endsWith("_DROP") ? fixedRule("DROP", route, product) : radiusRule("DROP", route, product);
     rules.push(explicitMap.get("PICKUP") || pickup, explicitMap.get("DROP") || drop);
-  } else if (product.product_type === "DAY_TOUR") {
+  } else if (isTour) {
     const base = {
       product_id: product.id,
       rule_mode: "CITY_ANYWHERE",
@@ -181,7 +239,7 @@ export function getProductLocationContext(db, productId) {
     };
     rules.push(explicitMap.get("PICKUP") || { ...base, id: `legacy_${product.id}_pickup`, rule_side: "PICKUP" });
     rules.push(explicitMap.get("DROP") || { ...base, id: `legacy_${product.id}_drop`, rule_side: "DROP" });
-  } else if (product.product_type === "MULTI_DAY_PACKAGE") {
+  } else if (isPackage) {
     const startCity = packageItinerary?.start_city || product.city;
     const endCity = packageItinerary?.end_city || product.city;
     rules.push(explicitMap.get("PICKUP") || {
@@ -226,23 +284,30 @@ export function validatePickupPoint(db, productId, side, userLat, userLng, userA
   if (!rule) return { valid: true, rule: null };
   const point = coordinates(userLat, userLng);
   if (!point) {
-    // Legacy day-tour clients may send only a typed address. Keep this path
-    // safe by requiring the address to name the product city and flagging it
-    // for operations review; coordinate-bearing requests always use the full
-    // geo validator below.
+    // The traveler hasn't confirmed an exact map point yet (still typing, or a
+    // suggestion hasn't resolved). City/radius-scoped products may also be
+    // sold in destinations not present in the local canonical registry.
+    // Accept a typed address when it plainly names the configured city/state,
+    // and flag it for operations review. A FIXED_LOCATION rule (an exact
+    // terminal/counter) still requires a confirmed map point — no free-text
+    // address can stand in for a specific pin.
     const address = normalized(userAddress);
     const cityHint = normalized(rule.allowed_city);
     const stateHint = normalized(rule.allowed_state);
-    if (context.product.product_type === "DAY_TOUR" && address
+    const mode = String(rule.rule_mode).toUpperCase();
+    if (mode !== "FIXED_LOCATION" && address
       && ((cityHint && address.includes(cityHint)) || (stateHint && address.includes(stateHint)))) {
       return {
         valid: true,
         needsOpsReview: true,
-        rule: { id: rule.id, side: normalizedSide, mode: String(rule.rule_mode).toUpperCase(), allowedCity: rule.allowed_city, allowedState: rule.allowed_state },
+        rule: { id: rule.id, side: normalizedSide, mode, allowedCity: rule.allowed_city, allowedState: rule.allowed_state },
         point: { lat: null, lng: null, address: String(userAddress || "").trim() },
       };
     }
-    return validationFailure(rule, normalizedSide, { suggestion: "Select a suggestion or confirm the exact point on the map." });
+    if (!address) {
+      return validationFailure(rule, normalizedSide, { suggestion: "Select a suggestion or confirm the exact point on the map." });
+    }
+    return validationFailure(rule, normalizedSide, { suggestion: "Select a suggestion or confirm the exact point on the map so we can verify it." });
   }
 
   const mode = String(rule.rule_mode).toUpperCase();
@@ -269,7 +334,7 @@ export function validatePickupPoint(db, productId, side, userLat, userLng, userA
     if (!pointInPolygon(point, rule.polygon_coordinates)) return validationFailure(rule, normalizedSide);
   } else if (mode === "CITY_ANYWHERE") {
     const nearest = nearestLocation(db, point);
-    if (rule.allowed_state && nearest && normalized(nearest.row.state) !== normalized(rule.allowed_state)) {
+    if (rule.allowed_state && nearest && !stateMatches(nearest.row.state, rule.allowed_state)) {
       return validationFailure(rule, normalizedSide, { detected_state: nearest.row.state, provided_distance_km: Number(nearest.distanceKm.toFixed(1)) });
     }
     if (rule.allowed_city) {
@@ -290,7 +355,7 @@ export function validatePickupPoint(db, productId, side, userLat, userLng, userA
     && Number(context.route.interstate_permit_tax);
   if (rule.allowed_state && !interstateRoute) {
     const nearest = nearestLocation(db, point);
-    if (nearest && nearest.distanceKm < 250 && normalized(nearest.row.state) !== normalized(rule.allowed_state)) {
+    if (nearest && nearest.distanceKm < 250 && !stateMatches(nearest.row.state, rule.allowed_state)) {
       return validationFailure(rule, normalizedSide, { detected_state: nearest.row.state, provided_distance_km: measuredDistance ? Number(measuredDistance.toFixed(1)) : undefined });
     }
   }
@@ -299,7 +364,7 @@ export function validatePickupPoint(db, productId, side, userLat, userLng, userA
   if (allowedTypes.length) {
     const nearestTyped = nearestLocation(db, point, { types: allowedTypes });
     if (!nearestTyped || nearestTyped.distanceKm > 2) {
-      if (mode === "FIXED_LOCATION" || context.product.product_type === "MULTI_DAY_PACKAGE") {
+      if (mode === "FIXED_LOCATION" || ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(context.product.product_type)) {
         return validationFailure(rule, normalizedSide, {
           required_location_types: allowedTypes,
           nearest_matching_distance_km: nearestTyped ? Number(nearestTyped.distanceKm.toFixed(1)) : null,
@@ -365,7 +430,7 @@ function validateFlight(route, input) {
   return null;
 }
 
-function validateDayTour(context, input, now) {
+function validateDayTour(context, input, now, time) {
   const meta = context.dayTour;
   if (!meta) return null;
   const slots = parseJson(meta.available_time_slots).map(timeMinutes).filter(Number.isFinite);
@@ -379,8 +444,8 @@ function validateDayTour(context, input, now) {
     return { valid: false, error: "The selected pickup time is outside this tour's operating hours.", code: "INVALID_BOOKING_PARAMS", detail: { suggestion: `Choose a time between ${meta.operating_start_time || "06:00"} and ${meta.operating_end_time || "22:00"}.` } };
   }
   if (input.activity_date && pickup !== null) {
-    const departure = new Date(`${input.activity_date}T${String(Math.floor(pickup / 60)).padStart(2, "0")}:${String(pickup % 60).padStart(2, "0")}:00`);
-    const hours = (departure.getTime() - now.getTime()) / 3_600_000;
+    const departure = localDateTimeMs(input.activity_date, `${String(Math.floor(pickup / 60)).padStart(2, "0")}:${String(pickup % 60).padStart(2, "0")}`, time);
+    const hours = (departure - now.getTime()) / 3_600_000;
     if (hours < Number(meta.advance_booking_cutoff_hours || 4)) {
       return { valid: false, error: `Bookings close ${Number(meta.advance_booking_cutoff_hours || 4)} hours before departure.`, code: "INVALID_BOOKING_PARAMS", detail: { suggestion: "Choose a later slot or another date." } };
     }
@@ -427,24 +492,30 @@ export function validateBookingLocations(db, input, { requireOperationalDetails 
     || String(input.drop_location ?? input.dropAddress ?? '').trim());
   // Sightseeing returns to the pickup hotel unless the product explicitly
   // supplies a different drop point. Keep that invariant server-side.
-  const effectiveDropLat = context.product.product_type === "DAY_TOUR" && !coordinates(dropLat, dropLng) ? pickupLat : dropLat;
-  const effectiveDropLng = context.product.product_type === "DAY_TOUR" && !coordinates(dropLat, dropLng) ? pickupLng : dropLng;
+  const isTour = ["TOUR", "DAY_TOUR"].includes(context.product.product_type);
+  const isPackage = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(context.product.product_type);
+  const effectiveDropLat = isTour && !coordinates(dropLat, dropLng) ? pickupLat : dropLat;
+  const effectiveDropLng = isTour && !coordinates(dropLat, dropLng) ? pickupLng : dropLng;
+  // For tours, also fall back the drop address to pickup when no drop is supplied.
+  const pickupAddressInput = input.pickup_location ?? input.pickupAddress ?? "";
+  const dropAddressRaw = input.drop_location ?? input.dropAddress ?? "";
+  const effectiveDropAddress = isTour && !String(dropAddressRaw).trim() ? pickupAddressInput : dropAddressRaw;
   // Quote/detail requests intentionally arrive before the guest chooses a
   // pickup point. Defer scoped route validation until the booking payload has
   // an actual location; holds and final booking creation still require it.
   const routeResult = deferLocationValidation && !requireOperationalDetails && !hasLocationInput
     ? { valid: true, pickup: null, drop: null, needsOpsReview: false }
-    : validateTransferRoute(db, productId, pickupLat, pickupLng, effectiveDropLat, effectiveDropLng, input.pickup_location ?? input.pickupAddress, input.drop_location ?? input.dropAddress ?? input.pickup_location);
+    : validateTransferRoute(db, productId, pickupLat, pickupLng, effectiveDropLat, effectiveDropLng, pickupAddressInput, effectiveDropAddress);
   if (!routeResult.valid) return routeResult;
   if (requireOperationalDetails && context.product.product_type === "TRANSFER") {
     const flightError = validateFlight(context.route, input);
     if (flightError) return flightError;
   }
-  if (context.product.product_type === "DAY_TOUR") {
-    const dayTourError = validateDayTour(context, input, now);
+  if (isTour && !getInventoryRules(db, productId, input.product_option_id)) {
+    const dayTourError = validateDayTour(context, input, now, productTime(db, productId));
     if (dayTourError) return dayTourError;
   }
-  if (context.product.product_type === "MULTI_DAY_PACKAGE") {
+  if (isPackage) {
     const hotelResult = deferLocationValidation && !requireOperationalDetails && !hasLocationInput
       ? { valid: true, needsOpsReview: false }
       : validatePackageHotels(db, context, input);
@@ -454,18 +525,37 @@ export function validateBookingLocations(db, input, { requireOperationalDetails 
   return { valid: true, pickup: routeResult.pickup, drop: routeResult.drop, needsOpsReview: Boolean(routeResult.needsOpsReview), productType: context.product.product_type };
 }
 
-export function getPickupSuggestions(db, productId, side, searchQuery = "") {
+/**
+ * Everything pickup suggestions read from the database for one product: its
+ * location context and the active canonical locations (null before migration 014).
+ * Loaded once so a caller can reuse it across keystrokes.
+ */
+export function loadPickupSuggestionSource(db, productId) {
   const context = getProductLocationContext(db, productId);
-  if (!context) return [];
+  if (!context) return null;
+  let locations = null;
+  try {
+    locations = db.prepare("SELECT * FROM canonical_locations WHERE (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").all();
+  } catch {
+    // Handled in filterPickupSuggestions.
+  }
+  return { productId, context, locations };
+}
+
+export function getPickupSuggestions(db, productId, side, searchQuery = "") {
+  return filterPickupSuggestions(loadPickupSuggestionSource(db, productId), side, searchQuery);
+}
+
+export function filterPickupSuggestions(source, side, searchQuery = "") {
+  if (!source) return [];
+  const { productId, context } = source;
   const normalizedSide = String(side || "PICKUP").toUpperCase();
   const rule = context.rules.find((entry) => String(entry.rule_side).toUpperCase() === normalizedSide);
   if (!rule) return [];
   const query = normalized(searchQuery);
   const allowedTypes = parseJson(rule.allowed_location_types).map((type) => String(type).toUpperCase());
-  let rows;
-  try {
-    rows = db.prepare("SELECT * FROM canonical_locations WHERE (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false'))").all();
-  } catch {
+  let rows = source.locations;
+  if (!rows) {
     // Before migration 014 is applied, expose the route's own anchor as a
     // safe, product-scoped suggestion rather than failing the endpoint.
     if (context.route) {
@@ -489,7 +579,13 @@ export function getPickupSuggestions(db, productId, side, searchQuery = "") {
   }
   if (allowedTypes.length) rows = rows.filter((row) => allowedTypes.includes(String(row.location_type).toUpperCase()));
   if (rule.allowed_state) rows = rows.filter((row) => normalized(row.state) === normalized(rule.allowed_state));
-  if (query) rows = rows.filter((row) => normalized(`${row.name} ${row.short_name || ""} ${row.iata_code || ""} ${row.city} ${row.state}`).includes(query));
+  if (query) {
+    const queryWords = query.split(" ").filter(Boolean);
+    rows = rows.filter((row) => {
+      const searchable = normalized(`${row.name} ${row.short_name || ""} ${row.iata_code || ""} ${row.city} ${row.state}`);
+      return queryWords.every((word) => searchable.includes(word));
+    });
+  }
   const center = coordinates(rule.center_lat ?? rule.fixed_lat, rule.center_lng ?? rule.fixed_lng);
   if (center && Number(rule.radius_km || rule.fixed_radius_km)) {
     rows = rows.filter((row) => distanceKm(center, row) <= Number(rule.radius_km || rule.fixed_radius_km));

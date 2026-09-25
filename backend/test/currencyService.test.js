@@ -21,6 +21,7 @@ describe("Multi-Currency Service", () => {
     assert.ok(codes.includes("SGD"));
     assert.ok(codes.includes("AUD"));
     assert.ok(codes.includes("CAD"));
+    assert.ok(codes.includes("THB"));
 
     const inr = currencies.find((c) => c.code === "INR");
     assert.equal(inr.symbol, "₹");
@@ -38,13 +39,13 @@ describe("Multi-Currency Service", () => {
   });
 
   it("converts INR amounts accurately to foreign currencies", () => {
-    // 8650 INR -> approx 100 USD (at 86.50 rate)
-    const usd = convertFromInr(8650, "USD");
+    // 9700 INR -> 100 USD (fixed at 97, owner decision 2026-09-22)
+    const usd = convertFromInr(9700, "USD");
     assert.equal(usd.currency, "USD");
     assert.equal(usd.symbol, "$");
     assert.equal(usd.amount, 100);
     assert.equal(usd.formatted, "$100.00");
-    assert.equal(usd.baseInr, 8650);
+    assert.equal(usd.baseInr, 9700);
 
     // 9280 INR -> approx 100 EUR (at 92.80 rate)
     const eur = convertFromInr(9280, "EUR");
@@ -76,5 +77,37 @@ describe("Multi-Currency Service", () => {
     const zero = convertFromInr(0, "USD");
     assert.equal(zero.amount, 0);
     assert.equal(zero.formatted, "$0.00");
+  });
+
+  it("shows Thai baht in whole baht (ADR 023)", () => {
+    const thb = convertFromInr(2870, "THB");
+    assert.equal(thb.currency, "THB");
+    assert.equal(thb.amount, 1000);
+    assert.equal(thb.formatted, "฿1,000");
+    assert.equal(thb.baseInr, 2870);
+  });
+
+  it("shows Indonesian rupiah at 190 per rupee, in whole rupiah (ADR 024)", () => {
+    const idr = convertFromInr(1000, "IDR");
+    assert.equal(idr.amount, 190000);
+    assert.equal(idr.formatted, "Rp190,000");
+  });
+
+  it("shows Japanese yen at 1.7 per rupee, in whole yen (ADR 024)", () => {
+    assert.equal(convertFromInr(1000, "JPY").amount, 1700);
+  });
+
+  it("shows Vietnamese dong at 295 per rupee, in whole dong (ADR 024)", () => {
+    assert.equal(convertFromInr(1000, "VND").amount, 295000);
+  });
+
+  it("shows Nepalese rupees at the 1.6 peg, in whole rupees (ADR 024)", () => {
+    assert.equal(convertFromInr(1000, "NPR").amount, 1600);
+  });
+
+  it("shows Singapore dollars at the fixed ₹78 rate (ADR 024)", () => {
+    const sgd = convertFromInr(7800, "SGD");
+    assert.equal(sgd.amount, 100);
+    assert.equal(sgd.formatted, "S$100.00");
   });
 });

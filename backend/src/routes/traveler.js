@@ -5,11 +5,16 @@ import { validateBody } from "../middleware/validation.js";
 import { z } from "zod";
 import crypto from "crypto";
 import logger from "../config/logger.js";
+import { PHONE_FORMAT_HINT, toE164 } from "../lib/phone.js";
+import { approvedSupplierSql } from "../services/supplierKybGate.js";
 import { sseService } from "../services/sseService.js";
 import { ItineraryService } from "../services/itineraryService.js";
 import { createCircuitQuote, getCircuitQuote } from "../services/circuitQuoteService.js";
 import { itinerarySchemas } from "../validators/apiSchemas.js";
 import { BookingModificationService } from "../services/bookingModificationService.js";
+import { refundCancelledBooking } from "../services/bookingRefundService.js";
+import { refundCreditToSource } from "../services/refundCreditService.js";
+import { notifyRefundProcessed, queueNotification } from "../services/notificationService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { subscribeNewsletter, unsubscribeNewsletter, getSubscriberStats } from "../services/newsletterService.js";
 import {
@@ -57,7 +62,7 @@ router.get("/users/profile", authenticate, (req, res) => {
 
 const ProfileUpdateSchema = z.object({
   displayName: z.string().min(1).max(100).optional(),
-  phone: z.string().min(5).max(20).optional(),
+  phone: z.string().trim().min(5).max(24).refine((value) => Boolean(toE164(value)), PHONE_FORMAT_HINT).optional(),
   avatarUrl: z.string().url().or(z.string().startsWith("/uploads/")).optional().nullable(),
   travelPreferences: z.record(z.any()).optional(),
   savedAddresses: z.array(z.any()).optional(),
@@ -360,7 +365,7 @@ router.get("/recommendations", optionalAuthenticate, (req, res) => {
     SELECT p.*, s.company_name as supplier_company_name
     FROM products p
     LEFT JOIN suppliers s ON s.id = p.supplier_id
-    WHERE (p.is_published = 1 OR p.status = 'PUBLISHED')
+    WHERE (p.is_published = 1 OR p.status = 'PUBLISHED') AND ${approvedSupplierSql("p")}
     ORDER BY CASE WHEN LOWER(p.city) = LOWER(?) THEN 1 ELSE 2 END, p.rating DESC, p.bestseller DESC
     LIMIT 6
   `).all(preferredCity);
@@ -489,15 +494,54 @@ router.get("/bookings/:id/cancellation-preview", authenticate, (req, res) => {
   }
 });
 
-router.post("/bookings/:id/self-cancel", authenticate, (req, res) => {
+router.post("/bookings/:id/self-cancel", authenticate, async (req, res) => {
   try {
     const { reason } = req.body || {};
     const result = BookingModificationService.executeSelfServiceCancellation(db, req.params.id, { reason }, req.user);
+    // The cancellation stands even if the gateway refund fails; Finance retries from REFUND_INITIATED.
+    try {
+      const refund = await refundCancelledBooking(db, result.bookingId, { reason: result.cancellationReason, actorId: req.user.id });
+      if (refund) {
+        result.refund = refund;
+        result.paymentStatus = refund.paymentStatus;
+        if (refund.status === "PROCESSED") queueNotification(notifyRefundProcessed(db, refund.refundId), "Self-service cancellation refund notification");
+        else logger.error("Self-service cancellation refund failed", { bookingId: result.bookingId, refundId: refund.refundId, error: refund.error });
+      }
+    } catch (refundErr) {
+      logger.error("Self-service cancellation refund failed", { bookingId: result.bookingId, error: refundErr });
+    }
     return res.json(result);
   } catch (err) {
     logger.error("Failed to execute self-service cancellation", { error: err.message, bookingId: req.params.id });
-    const status = err.message === "UNAUTHORIZED" ? 403 : err.message === "BOOKING_NOT_FOUND" ? 404 : 400;
+    const status = err.message === "UNAUTHORIZED" ? 403 : err.message === "BOOKING_NOT_FOUND" ? 404
+      : String(err.message).startsWith("BOOKING_ALREADY_") ? 409 : 400;
     return res.status(status).json({ error: err.message || "FAILED_TO_CANCEL" });
+  }
+});
+
+// A supplier cancelled this booking and refunded it to the wallet: send the unspent credit back
+// to the original payment method instead, within the cash window (ADR 019).
+router.post("/bookings/:id/refund-to-source", authenticate, async (req, res) => {
+  try {
+    const result = await refundCreditToSource(db, { userId: req.user.id, bookingId: req.params.id });
+    if (result.status === "PROCESSED") {
+      queueNotification(notifyRefundProcessed(db, result.refundId, { includeSupplier: false }), "Refund credit cash-out notification");
+    } else {
+      logger.error("Refund credit cash-out gateway refund failed", { bookingId: result.bookingId, refundId: result.refundId, error: result.error });
+    }
+    return res.json({
+      success: true,
+      bookingRef: result.bookingRef,
+      amountInr: result.amountInr,
+      refundStatus: result.status,
+      message: result.status === "PROCESSED"
+        ? `₹${result.amountInr} is on its way back to your original payment method.`
+        : `₹${result.amountInr} left your wallet for a refund to your original payment method. Our finance team will complete it.`,
+    });
+  } catch (err) {
+    const status = err.status && err.status < 500 ? err.status : 500;
+    if (status === 500) logger.error("Refund credit cash-out failed", { bookingId: req.params.id, error: err });
+    return res.status(status).json({ error: status === 500 ? "Could not send the refund back. Please try again." : err.message });
   }
 });
 

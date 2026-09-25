@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import TicketCard from "../components/TicketCard.jsx";
 import SeoHead from "../components/SeoHead.jsx";
+import { displayCity } from "../../../shared/activitySeo.js";
+import { destinationParam } from "../lib/destinations.js";
+import { destinationPath } from "../../../shared/destinationSeo.js";
 import { api } from "../lib/api.js";
 import { analytics } from "../lib/analytics.js";
 import {
@@ -87,16 +90,18 @@ const POPULAR_DESTINATIONS = [
 function FilterSection({ title, children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-b border-stone-100 dark:border-stone-800 py-3.5">
+    <div className="border-b border-stone-100 dark:border-stone-800 py-4">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 hover:text-amber-600 transition"
+        className="flex w-full items-center justify-between text-[11px] font-extrabold uppercase tracking-widest text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
       >
         <span>{title}</span>
-        {open ? <ChevronUp className="h-3.5 w-3.5 text-stone-400" /> : <ChevronDown className="h-3.5 w-3.5 text-stone-400" />}
+        <span className={`grid h-5 w-5 place-items-center rounded-full transition-all duration-200 ${open ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400" : "text-stone-400"}`}>
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </span>
       </button>
-      {open && <div className="mt-3">{children}</div>}
+      {open && <div className="mt-3 space-y-1.5">{children}</div>}
     </div>
   );
 }
@@ -115,12 +120,15 @@ export default function Search() {
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [priceRange, setPriceRange] = useState({ min: "", max: "" });
   const [recentSearches, setRecentSearches] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const cardRefs = useRef({});
+  const searchBoxRef = useRef(null);
 
   // Query Params
   const q = params.get("q") || "";
   const category = params.get("category") || "";
   const destination = params.get("destination") || "";
+  const country = params.get("country") || "";
   const sort = params.get("sort") || "recommended";
   const groupType = params.get("groupType") || "";
   const duration = params.get("duration") || "";
@@ -143,6 +151,16 @@ export default function Search() {
   useEffect(() => {
     setLocalQ(q);
   }, [q]);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     setPriceRange({ min: minPrice, max: maxPrice });
@@ -173,6 +191,7 @@ export default function Search() {
       category,
       city: destination,
       destination,
+      country,
       type,
       productType: type,
       groupType,
@@ -193,7 +212,7 @@ export default function Search() {
         const list = Array.isArray(data) ? data : (data?.products || []);
         setActivities(list);
         if (data?.facets) setFacets(data.facets);
-        analytics.trackViewItemList(list, q || category || destination || "All Experiences");
+        analytics.trackViewItemList(list, q || category || destination || country || "All Experiences");
       })
       .catch((err) => {
         console.error("Search failed:", err);
@@ -204,7 +223,7 @@ export default function Search() {
 
   useEffect(() => {
     loadActivities();
-  }, [q, category, destination, type, groupType, duration, vehicleType, minRating, minPrice, maxPrice, instantOnly, freeCancellation, bestseller, sort]);
+  }, [q, category, destination, country, type, groupType, duration, vehicleType, minRating, minPrice, maxPrice, instantOnly, freeCancellation, bestseller, sort]);
 
   const update = (key, value) => {
     const next = new URLSearchParams(params);
@@ -240,13 +259,17 @@ export default function Search() {
     }
   };
 
+  // Links may carry a destination id (`city_th_bangkok`); show the city's name.
+  const destinationName = destinations.find((d) => d.id === destination)?.name || destination;
+
   // Active filter chips
   const activeFilters = [
     q && { label: `"${q}"`, key: "q" },
     type && { label: TYPE_OPTIONS.find((o) => o.id === type)?.label || type, key: "type" },
     groupType && { label: GROUP_OPTIONS.find((o) => o.id === groupType)?.label || groupType, key: "groupType" },
     category && { label: category, key: "category" },
-    destination && { label: destination, key: "destination" },
+    destination && { label: destinationName, key: "destination" },
+    country && { label: country, key: "country" },
     duration && { label: DURATION_OPTIONS.find((o) => o.id === duration)?.label || duration, key: "duration" },
     vehicleType && { label: VEHICLE_OPTIONS.find((o) => o.id === vehicleType)?.label || vehicleType, key: "vehicleType" },
     minRating && { label: `${minRating}★+`, key: "minRating" },
@@ -361,6 +384,30 @@ export default function Search() {
         </div>
       </FilterSection>
 
+      {/* Country (ADR 023: listings in India and across Asia) */}
+      {(facets?.countries?.length > 1 || country) && (
+        <FilterSection title="Country">
+          <div className="space-y-1">
+            {["", ...(facets?.countries || []).map((c) => c.name).filter((name) => name !== country), ...(country ? [country] : [])].map((name) => {
+              const count = facets?.countries?.find((c) => c.name === name)?.count;
+              return (
+                <button
+                  key={name || "all"}
+                  type="button"
+                  onClick={() => update("country", name)}
+                  className={`w-full rounded-xl px-2.5 py-1.5 text-left text-xs font-semibold transition flex items-center justify-between ${
+                    country === name ? "bg-amber-500 text-stone-950 font-bold" : "text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                  }`}
+                >
+                  <span>{name || "All countries"}</span>
+                  {count != null && <span className="text-[10px] opacity-75 font-mono">({count})</span>}
+                </button>
+              );
+            })}
+          </div>
+        </FilterSection>
+      )}
+
       {/* Categories with Facet Counts */}
       <FilterSection title="Categories" defaultOpen={false}>
         <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
@@ -392,7 +439,7 @@ export default function Search() {
               <button
                 key={d.id || d.name}
                 type="button"
-                onClick={() => update("destination", d.id || d.name)}
+                onClick={() => update("destination", destinationParam(d))}
                 className="w-full rounded-xl px-2.5 py-1.5 text-left text-xs text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
               >
                 {d.name}
@@ -465,36 +512,50 @@ export default function Search() {
     </div>
   );
 
+  const where = country || "India and across Asia";
   const searchTitle = q
     ? `Search results for "${q}" | Idea Holiday`
     : destination
-    ? `${destination} Tours, Cabs & Experiences | Idea Holiday`
+    ? `${destinationName} Tours, Cabs & Experiences | Idea Holiday`
     : category
-    ? `${category} in India | Idea Holiday`
+    ? `${category} in ${where} | Idea Holiday`
     : type === "TRANSFER"
-    ? "Airport & Outstation Cabs Across India | Idea Holiday"
-    : "Explore Tours & Travel Experiences Across India | Idea Holiday";
+    ? `Airport & Outstation Cabs in ${where} | Idea Holiday`
+    : country
+    ? `${country} Tours, Transfers & Experiences | Idea Holiday`
+    : "Explore Tours & Travel Experiences in India and across Asia | Idea Holiday";
 
   const searchDesc = destination
-    ? `Book top-rated tours, day sightseeing, water sports, and airport cabs in ${destination} with verified local operators on Idea Holiday.`
-    : "Discover and book curated day tours, activities, transfers and multi-day packages across India with transparent pricing and instant booking.";
+    ? `Book top-rated tours, day sightseeing, water sports, and airport cabs in ${destinationName} with verified local operators on Idea Holiday.`
+    : `Discover and book curated day tours, activities, transfers and multi-day packages in ${where} with transparent pricing and instant booking.`;
+
+  // Matches the server (searchPage in routes/seo.js): a city alone is a landing
+  // page; keyword searches and filtered views stay out of search results.
+  const activeParams = [...params.keys()].filter((key) => params.get(key));
+  const searchNoindex = activeParams.length > 0 && !((destination || country) && activeParams.length === 1);
+  // A city with its own live listings points at its "things to do" page, as the server does.
+  const cityKey = displayCity(destinationName).toLowerCase();
+  const hasCityPage = Boolean(destination) && activities.some((a) => displayCity(a.city).toLowerCase() === cityKey);
+  const searchCanonical = hasCityPage ? `https://ideaholiday.in${destinationPath(destinationName)}` : `https://ideaholiday.in/search${destination ? `?destination=${encodeURIComponent(displayCity(destinationName))}` : country ? `?country=${encodeURIComponent(country)}` : ""}`;
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] dark:bg-stone-950 text-stone-900 dark:text-stone-100">
       <SeoHead
         title={searchTitle}
         description={searchDesc}
-        canonical={`https://ideaholiday.in/search${params.toString() ? `?${params.toString()}` : ""}`}
+        canonical={searchCanonical}
+        noindex={searchNoindex}
       />
 
       {/* ── Sticky Search & Control Bar ── */}
       <div className="sticky top-[68px] z-30 border-b border-stone-200 dark:border-stone-800 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md shadow-xs">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           {/* Search input with autocomplete */}
-          <div className="relative flex-1">
+          <div ref={searchBoxRef} className="relative flex-1">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                setShowSuggestions(false);
                 update("q", localQ.trim());
               }}
               className="flex items-center gap-2 rounded-full border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/80 px-4 py-2.5 focus-within:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/20 transition"
@@ -502,7 +563,11 @@ export default function Search() {
               <SearchIcon className="h-4 w-4 shrink-0 text-stone-400" />
               <input
                 value={localQ}
-                onChange={(e) => setLocalQ(e.target.value)}
+                onFocus={() => setShowSuggestions(true)}
+                onChange={(e) => {
+                  setLocalQ(e.target.value);
+                  setShowSuggestions(true);
+                }}
                 placeholder="Search destinations, tours, Taj Mahal, Goa scuba, airport cabs…"
                 className="min-w-0 flex-1 bg-transparent text-xs sm:text-sm font-medium text-stone-900 dark:text-stone-100 outline-none placeholder:text-stone-400"
               />
@@ -512,6 +577,7 @@ export default function Search() {
                   onClick={() => {
                     setLocalQ("");
                     update("q", "");
+                    setShowSuggestions(false);
                   }}
                   className="rounded-full p-1 text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition"
                 >
@@ -519,14 +585,17 @@ export default function Search() {
                 </button>
               )}
             </form>
-            <SearchSuggestions
-              query={localQ}
-              onSelect={(item) => {
-                setLocalQ(item.value);
-                if (item.type === "destination") update("destination", item.value);
-                else update("q", item.value);
-              }}
-            />
+            {showSuggestions && (
+              <SearchSuggestions
+                query={localQ}
+                onSelect={(item) => {
+                  setLocalQ(item.value);
+                  setShowSuggestions(false);
+                  if (item.type === "destination") update("destination", item.value);
+                  else update("q", item.value);
+                }}
+              />
+            )}
           </div>
 
           {/* Sort Dropdown */}
@@ -661,11 +730,13 @@ export default function Search() {
           <div>
             <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-stone-900 dark:text-stone-100">
               {destination
-                ? `Experiences in ${destination}`
+                ? `Experiences in ${destinationName}`
                 : q
                 ? `Results for "${q}"`
                 : category
-                ? `${category} in India`
+                ? `${category} in ${where}`
+                : country
+                ? `Experiences in ${country}`
                 : "All Experiences & Cabs"}
             </h1>
             <p className="mt-1 text-xs text-stone-500">

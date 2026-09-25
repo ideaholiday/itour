@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Idea Holiday Driver</string>
+    <string name="channel_trip_location">Live trip location</string>
+    <string name="channel_trip_location_description">Shown while your location is shared for a trip.</string>
+    <string name="notification_title">Sharing live location</string>
+    <string name="notification_title_ref">Sharing live location · %1$s</string>
+    <string name="notification_starting">Getting your GPS position…</string>
+    <string name="notification_on">Last sent %1$s. Stops when you complete the trip.</string>
+    <string name="notification_offline">No network. Your location will be sent when the connection returns.</string>
+    <string name="status_permission_needed">Location permission is needed for this trip. Allow location for Idea Holiday Driver, then tap Share location.</string>
+    <string name="status_location_off">Location is turned off on this phone. Turn it on to share your trip.</string>
+    <string name="status_open_link">Open the trip link from WhatsApp or email to start this trip.</string>
+    <string name="disclosure_title">Share your location for this trip</string>
+    <string name="disclosure_message">Idea Holiday Driver shares your live location with Idea Holiday, your supplier and the traveler from when you go on the way until you complete the trip, including while you use Maps, the app is closed or the screen is locked. Sharing stops automatically when the trip is completed. Positions are deleted after 30 days.</string>
+    <string name="disclosure_continue">Continue</string>
+    <string name="disclosure_not_now">Not now</string>
+</resources>

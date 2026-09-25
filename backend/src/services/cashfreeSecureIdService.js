@@ -7,6 +7,16 @@ const DEFAULT_CLIENT_ID = process.env.CASHFREE_SECUREID_CLIENT_ID || process.env
 const DEFAULT_CLIENT_SECRET = process.env.CASHFREE_SECUREID_CLIENT_SECRET || process.env.CASHFREE_SECRET_KEY || "";
 const DEFAULT_ENV = (process.env.CASHFREE_SECUREID_ENV || process.env.CASHFREE_ENV || "TEST").toUpperCase();
 const DEFAULT_API_VERSION = process.env.CASHFREE_SECUREID_API_VERSION || "2024-01-01";
+const REQUEST_TIMEOUT_MS = Number(process.env.CASHFREE_SECUREID_TIMEOUT_MS) || 30000;
+
+// Cashfree 422 codes that mean "the bank or network hiccuped", not "the account is bad".
+const RETRYABLE_ERROR_CODES = new Set([
+  "insufficient_balance",
+  "verification_already_under_process",
+  "npci_unavailable",
+  "connection_timeout",
+  "benficiary_bank_offline",
+]);
 
 /**
  * Retrieve the Cashfree SecureID RSA Public Key for 2FA signature generation
@@ -125,6 +135,16 @@ export function calculateNameMatchScore(str1 = "", str2 = "") {
 }
 
 /**
+ * Cashfree returns name_match_score as a string ("100.00", or "" when no name
+ * match ran), so Number() alone would turn a skipped match into a score of 0.
+ */
+function resolveNameMatchScore(raw, providedName, officialName) {
+  if (!providedName || !officialName) return 100;
+  const reported = Number.parseFloat(raw.name_match_score);
+  return Number.isFinite(reported) ? reported : calculateNameMatchScore(providedName, officialName);
+}
+
+/**
  * Internal helper to send authenticated requests to Cashfree SecureID API
  */
 async function secureIdRequest(path, { method = "POST", body, query } = {}) {
@@ -132,7 +152,24 @@ async function secureIdRequest(path, { method = "POST", body, query } = {}) {
   const clientSecret = process.env.CASHFREE_SECUREID_CLIENT_SECRET || DEFAULT_CLIENT_SECRET;
   const env = (process.env.CASHFREE_SECUREID_ENV || DEFAULT_ENV).toUpperCase();
   const proxyUrl = process.env.CASHFREE_SECUREID_PROXY_URL;
-  const allowSimulation = process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK !== "false";
+  // The fallback returns VALID for PANs and bank accounts nobody checked, so it
+  // must never kick in on production traffic — an un-whitelisted IP or a
+  // network blip there has to fail loudly, not mark payout details verified.
+  // Cloud Run (K_SERVICE) is live traffic even when NODE_ENV was not set.
+  const liveRuntime = process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE);
+  const allowSimulation = process.env.CASHFREE_SECUREID_SIMULATION_FALLBACK !== "false" && !liveRuntime;
+
+  // Offline mode: never touch the live API at all. Tests and local development
+  // must not depend on a real verification wallet having balance — the fallback
+  // below only catches network failures, not an API that answers with an error.
+  if (process.env.CASHFREE_SECUREID_SIMULATE === "true") {
+    // Simulated verification marks PANs and bank accounts good that nobody
+    // checked. In production that is a payout-fraud hole, not a convenience.
+    if (liveRuntime) {
+      throw new Error("CASHFREE_SECUREID_SIMULATE cannot be used in production");
+    }
+    return { __simulated: true, ...simulateSecureIdResponse(path, body, query) };
+  }
 
   const isProduction = env === "PROD" || env === "PRODUCTION";
   let baseUrl = isProduction
@@ -166,6 +203,7 @@ async function secureIdRequest(path, { method = "POST", body, query } = {}) {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
     const data = await response.json().catch(() => ({}));
@@ -183,7 +221,15 @@ async function secureIdRequest(path, { method = "POST", body, query } = {}) {
 
     if (!response.ok) {
       const errorMsg = data?.message || data?.error?.message || `Cashfree Verification failed with status ${response.status}`;
-      throw new Error(errorMsg);
+      // Keep Cashfree's error code so callers can tell "wallet empty"
+      // (insufficient_balance) or rate limiting (429) apart from a bad account.
+      const error = new Error(errorMsg);
+      error.status = response.status;
+      error.code = data?.code || null;
+      error.type = data?.type || null;
+      error.retryable = response.status === 429 || response.status >= 500
+        || RETRYABLE_ERROR_CODES.has(data?.code);
+      throw error;
     }
 
     return data;
@@ -197,7 +243,9 @@ async function secureIdRequest(path, { method = "POST", body, query } = {}) {
 }
 
 /**
- * Realistic Mock/Simulation Fixture generator for offline tests & dev environments
+ * Realistic Mock/Simulation Fixture generator for offline tests & dev environments.
+ * Field names mirror Cashfree's documented responses so the parsers below are
+ * exercised against the same shape production returns.
  */
 function simulateSecureIdResponse(path, body = {}, query = {}) {
   const gstinInput = body.GSTIN || body.gstin;
@@ -205,44 +253,58 @@ function simulateSecureIdResponse(path, body = {}, query = {}) {
   const businessName = body.business_name || body.name || "Idea Holiday Partner Fleet";
   const bankAcc = body.bank_account || query.bank_account || "91827364512";
   const ifsc = (body.ifsc || query.ifsc || "HDFC0000123").toUpperCase();
+  const referenceId = Math.floor(10000000 + Math.random() * 90000000);
 
-  if (path.includes("/gstin")) {
+  if (path.includes("/gstin") && !path.includes("/pan-gstin")) {
     const isValidGstin = typeof gstinInput === "string" && gstinInput.length === 15;
     return {
-      reference_id: Math.floor(10000000 + Math.random() * 90000000),
-      verification_id: `ver_gstin_${Date.now()}`,
-      status: isValidGstin ? "VALID" : "INVALID",
+      reference_id: referenceId,
       GSTIN: gstinInput,
-      business_name: businessName,
-      legal_name: `${businessName} Private Limited`,
-      trade_name: businessName,
-      registration_date: "2021-04-15",
+      valid: isValidGstin,
+      message: isValidGstin ? "GSTIN Exists" : "GSTIN Doesn't Exist",
+      legal_name_of_business: `${businessName} Private Limited`,
+      trade_name_of_business: businessName,
+      date_of_registration: "2021-04-15",
       taxpayer_type: "Regular",
-      gstin_status: "Active",
+      gst_in_status: "Active",
+      constitution_of_business: "Private Limited Company",
       center_jurisdiction: "Range-IV, Division-II",
       state_jurisdiction: "Ward 12",
-      nature_of_business: ["Transport Services", "Tours and Travels"],
-      registered_address: {
+      nature_of_business_activities: ["Transport Services", "Tours and Travels"],
+      principal_place_address: "Floor 3, Trade Tower, MG Road Commercial Complex, Bengaluru, Karnataka, 560001",
+      principal_place_split_address: {
         building_name: "Floor 3, Trade Tower",
         street: "MG Road Commercial Complex",
         city: "Bengaluru",
         state: "Karnataka",
         pincode: "560001",
       },
-      message: isValidGstin ? "GSTIN verified successfully" : "Invalid GSTIN format",
     };
   }
 
   if (path.includes("/pan-gstin")) {
     return {
-      reference_id: Math.floor(10000000 + Math.random() * 90000000),
+      reference_id: referenceId,
+      verification_id: body.verification_id,
       pan: panInput,
-      status: "VALID",
+      status: "SUCCESS",
       gstin_list: [
         { gstin: `29${panInput}1Z5`, state: "Karnataka", status: "Active" },
         { gstin: `27${panInput}1Z8`, state: "Maharashtra", status: "Active" },
       ],
     };
+  }
+
+  // Driving licence and vehicle RC (ADR 024 C3): valid unless the number ends in "0000".
+  if (path.includes("/driving-license")) {
+    const number = String(body.dl_number || "").toUpperCase();
+    const valid = number.length >= 8 && !number.endsWith("0000");
+    return { verification_id: body.verification_id, reference_id: referenceId, status: valid ? "VALID" : "INVALID", dl_number: number, dob: body.dob, details_of_driving_licence: valid ? { name: "Ramesh K", status: "ACTIVE", date_of_issue: "2018-01-10", cov_details: [{ cov: "TRANS" }] } : null, dl_validity: valid ? { transport: { to: "2031-01-09" }, non_transport: { to: "2038-01-09" } } : null };
+  }
+  if (path.includes("/vehicle-rc")) {
+    const number = String(body.vehicle_number || "").toUpperCase();
+    const valid = number.length >= 6 && !number.endsWith("0000");
+    return { verification_id: body.verification_id, reference_id: referenceId, status: valid ? "VALID" : "INVALID", reg_no: valid ? number : null, owner: valid ? "RAMESH K" : null, rc_status: valid ? "ACTIVE" : null, is_commercial: valid, vehicle_seat_capacity: valid ? "5" : null, rc_expiry_date: valid ? "23/12/2036" : null, vehicle_insurance_upto: valid ? "14/12/2027" : null, permit_valid_upto: valid ? "31/03/2028" : null };
   }
 
   if (path.includes("/pan")) {
@@ -251,39 +313,93 @@ function simulateSecureIdResponse(path, body = {}, query = {}) {
     const panType = fourthChar === "C" ? "Company" : fourthChar === "P" ? "Individual" : fourthChar === "F" ? "Firm" : "Business";
 
     return {
-      reference_id: Math.floor(10000000 + Math.random() * 90000000),
-      verification_id: `ver_pan_${Date.now()}`,
-      status: isValidPan ? "VALID" : "INVALID",
+      reference_id: referenceId,
       pan: panInput,
-      registered_name: businessName || "Verified Partner Entity",
+      valid: isValidPan,
       type: panType,
-      name_match_score: 95,
+      registered_name: businessName || "Verified Partner Entity",
+      name_provided: body.name || "",
+      name_match_score: body.name ? "95.00" : "",
+      name_match_result: body.name ? "GOOD_PARTIAL_MATCH" : "",
+      pan_status: isValidPan ? "E" : "",
+      pan_status_desc: isValidPan ? "Existing and Valid" : "",
       message: isValidPan ? "PAN verified successfully" : "Invalid PAN provided",
     };
   }
 
   if (path.includes("/bank-account")) {
     const isValidIfsc = typeof ifsc === "string" && ifsc.length === 11;
+    const bankName = ifsc.startsWith("HDFC") ? "HDFC Bank" : ifsc.startsWith("ICIC") ? "ICICI Bank" : ifsc.startsWith("SBIN") ? "State Bank of India" : "Commercial Bank of India";
     return {
-      reference_id: Math.floor(10000000 + Math.random() * 90000000),
-      verification_id: `ver_bav_${Date.now()}`,
-      status: isValidIfsc ? "VALID" : "INVALID",
-      account_number: bankAcc,
-      ifsc: ifsc,
-      bank_name: ifsc.startsWith("HDFC") ? "HDFC Bank" : ifsc.startsWith("ICIC") ? "ICICI Bank" : ifsc.startsWith("SBIN") ? "State Bank of India" : "Commercial Bank of India",
-      account_holder_name: businessName || "Idea Holiday Partner",
-      name_match_score: 96,
-      account_status: "ACTIVE",
+      reference_id: referenceId,
+      name_at_bank: businessName || "Idea Holiday Partner",
+      bank_name: bankName,
+      name_match_score: body.name ? "96.00" : "",
+      name_match_result: body.name ? "DIRECT_MATCH" : "",
+      account_status: isValidIfsc ? "VALID" : "INVALID",
+      account_status_code: isValidIfsc ? "ACCOUNT_IS_VALID" : "INVALID_IFSC_FAIL",
       utr: `UTR${Date.now()}`,
-      message: isValidIfsc ? "Bank Account verified successfully (Penny Drop)" : "Invalid IFSC Code",
+      ifsc_details: { bank: bankName, ifsc },
     };
   }
 
-  return { status: "VALID", reference_id: Date.now() };
+  return { valid: true, reference_id: referenceId };
+}
+
+/** Cashfree dates come as DD/MM/YYYY or YYYY-MM-DD; returns YYYY-MM-DD or null. */
+export function secureIdDate(value) {
+  const text = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const match = text.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : null;
+}
+
+const verificationId = (prefix) => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+
+/**
+ * Driving licence (ADR 024 C3). POST /verification/driving-license.
+ * Request and response field names differ between Cashfree's doc versions, so
+ * both shapes are read; confirm against the sandbox before going live.
+ */
+export async function verifyDrivingLicence({ licenseNumber, dob } = {}) {
+  const number = String(licenseNumber || "").replace(/[\s-]/g, "").toUpperCase();
+  if (number.length < 8) throw new Error("Enter the full driving licence number");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dob || ""))) throw new Error("Enter the date of birth as YYYY-MM-DD");
+  const raw = await secureIdRequest("/driving-license", { body: { verification_id: verificationId("dl"), dl_number: number, dob } });
+  const details = raw.details_of_driving_licence || raw.license_details || {};
+  const valid = String(raw.status || raw.verification_status || "").toUpperCase() === "VALID" || String(raw.verification_status || "").toUpperCase() === "SUCCESS";
+  const validUntil = secureIdDate(raw.dl_validity?.transport?.to) || secureIdDate(raw.dl_validity?.non_transport?.to) || secureIdDate(details.validity_date) || secureIdDate(raw.expiry_date);
+  return { success: true, valid, licenseNumber: number, name: details.name || raw.name || null, validUntil, raw, simulated: Boolean(raw.__simulated) };
+}
+
+/**
+ * Vehicle registration certificate (ADR 024 C3). POST /verification/vehicle-rc.
+ * Valid only when Cashfree says VALID and, where reported, the RC is ACTIVE.
+ */
+export async function verifyVehicleRc({ registrationNumber } = {}) {
+  const number = String(registrationNumber || "").replace(/[\s-]/g, "").toUpperCase();
+  if (number.length < 6) throw new Error("Enter the full vehicle registration number");
+  const raw = await secureIdRequest("/vehicle-rc", { body: { verification_id: verificationId("rc"), vehicle_number: number } });
+  const active = !raw.rc_status || /^active$/i.test(String(raw.rc_status).trim());
+  const valid = String(raw.status || raw.verification_status || "").toUpperCase().match(/^(VALID|SUCCESS)$/) !== null && active;
+  return {
+    success: true,
+    valid,
+    registrationNumber: number,
+    owner: raw.owner || raw.owner_details?.name || null,
+    commercial: raw.is_commercial ?? null,
+    seats: Number(raw.vehicle_seat_capacity || raw.vehicle_details?.seating_capacity) || null,
+    rcValidUntil: secureIdDate(raw.rc_expiry_date) || secureIdDate(raw.registration_details?.validity_date),
+    insuranceValidUntil: secureIdDate(raw.vehicle_insurance_upto),
+    permitValidUntil: secureIdDate(raw.permit_valid_upto) || secureIdDate(raw.national_permit_upto),
+    raw,
+    simulated: Boolean(raw.__simulated),
+  };
 }
 
 /**
  * 1. Verify GSTIN (Goods & Services Tax Identification Number)
+ * POST /verification/gstin
  */
 export async function verifyGstin({ gstin, businessName } = {}) {
   const sanitizedGstin = String(gstin || "").trim().toUpperCase();
@@ -297,12 +413,15 @@ export async function verifyGstin({ gstin, businessName } = {}) {
   };
 
   const raw = await secureIdRequest("/gstin", { method: "POST", body: payload });
-  const isValid = raw.status === "VALID" || raw.gstin_status === "Active" || raw.valid === true;
 
-  const legalName = raw.legal_name || raw.legalName || raw.trade_name || raw.tradeName || raw.business_name || "";
-  const tradeName = raw.trade_name || raw.tradeName || legalName;
-  const taxpayerStatus = raw.gstin_status || (isValid ? "Active" : "Inactive");
-  const taxpayerType = raw.taxpayer_type || raw.taxpayerType || "Regular";
+  // `valid` only says the GSTIN exists — a cancelled or suspended registration
+  // still comes back valid: true, so KYB also requires gst_in_status to be Active.
+  const exists = raw.valid === true;
+  const reportedStatus = raw.gst_in_status || null;
+  const isValid = exists && (!reportedStatus || /^active$/i.test(reportedStatus.trim()));
+
+  const legalName = raw.legal_name_of_business || raw.trade_name_of_business || "";
+  const tradeName = raw.trade_name_of_business || legalName;
 
   return {
     success: true,
@@ -310,10 +429,12 @@ export async function verifyGstin({ gstin, businessName } = {}) {
     gstin: sanitizedGstin,
     legalName,
     tradeName,
-    status: taxpayerStatus,
-    taxpayerType,
-    registrationDate: raw.registration_date || raw.registrationDate || null,
-    address: raw.registered_address || raw.address || null,
+    status: reportedStatus || (exists ? "Active" : "Inactive"),
+    taxpayerType: raw.taxpayer_type || "Regular",
+    constitution: raw.constitution_of_business || null,
+    registrationDate: raw.date_of_registration || null,
+    address: raw.principal_place_split_address || raw.principal_place_address || null,
+    message: raw.message || null,
     raw,
     simulated: Boolean(raw.__simulated),
   };
@@ -321,6 +442,7 @@ export async function verifyGstin({ gstin, businessName } = {}) {
 
 /**
  * 2. Verify PAN (Permanent Account Number)
+ * POST /verification/pan
  */
 export async function verifyPan({ pan, name } = {}) {
   const sanitizedPan = String(pan || "").trim().toUpperCase();
@@ -334,13 +456,9 @@ export async function verifyPan({ pan, name } = {}) {
   };
 
   const raw = await secureIdRequest("/pan", { method: "POST", body: payload });
-  const isValid = raw.status === "VALID" || raw.valid === true;
-  const registeredName = raw.registered_name || raw.name || raw.pan_holder_name || "";
-  const panType = raw.type || raw.pan_type || (sanitizedPan[3] === "C" ? "Company" : sanitizedPan[3] === "P" ? "Individual" : "Business");
-
-  const matchScore = name && registeredName
-    ? (raw.name_match_score !== undefined ? Number(raw.name_match_score) : calculateNameMatchScore(name, registeredName))
-    : 100;
+  const isValid = raw.valid === true;
+  const registeredName = raw.registered_name || raw.name_pan_card || "";
+  const panType = raw.type || (sanitizedPan[3] === "C" ? "Company" : sanitizedPan[3] === "P" ? "Individual" : "Business");
 
   return {
     success: true,
@@ -348,7 +466,9 @@ export async function verifyPan({ pan, name } = {}) {
     pan: sanitizedPan,
     registeredName,
     type: panType,
-    nameMatchScore: matchScore,
+    nameMatchScore: resolveNameMatchScore(raw, name, registeredName),
+    nameMatchResult: raw.name_match_result || null,
+    panStatus: raw.pan_status_desc || raw.pan_status || null,
     status: isValid ? "VALID" : "INVALID",
     raw,
     simulated: Boolean(raw.__simulated),
@@ -357,6 +477,7 @@ export async function verifyPan({ pan, name } = {}) {
 
 /**
  * 3. Verify Bank Account (Instant Penny-Drop Sync)
+ * POST /verification/bank-account/sync
  */
 export async function verifyBankAccount({ accountNumber, ifsc, name, phone } = {}) {
   const sanitizedAcc = String(accountNumber || "").trim();
@@ -374,22 +495,22 @@ export async function verifyBankAccount({ accountNumber, ifsc, name, phone } = {
   };
 
   const raw = await secureIdRequest("/bank-account/sync", { method: "POST", body: payload });
-  const isValid = raw.status === "VALID" || raw.account_status === "ACTIVE" || raw.valid === true;
-  const accountHolderName = raw.account_holder_name || raw.name_at_bank || raw.account_name || "";
-  const bankName = raw.bank_name || raw.bank || "Verified Commercial Bank";
-
-  const matchScore = name && accountHolderName
-    ? (raw.name_match_score !== undefined ? Number(raw.name_match_score) : calculateNameMatchScore(name, accountHolderName))
-    : 100;
+  // account_status is "VALID" | "INVALID"; account_status_code carries the reason
+  // (ACCOUNT_BLOCKED, INVALID_IFSC_FAIL, NRE_ACCOUNT_FAIL, ...).
+  const isValid = raw.account_status === "VALID";
+  const accountHolderName = raw.name_at_bank || "";
 
   return {
     success: true,
     valid: isValid,
     accountNumber: sanitizedAcc,
     ifsc: sanitizedIfsc,
-    bankName,
+    // null rather than a placeholder, so callers keep a bank name they already had
+    bankName: raw.bank_name || raw.ifsc_details?.bank || null,
     accountHolderName,
-    nameMatchScore: matchScore,
+    nameMatchScore: resolveNameMatchScore(raw, name, accountHolderName),
+    nameMatchResult: raw.name_match_result || null,
+    accountStatusCode: raw.account_status_code || null,
     status: isValid ? "VALID" : "INVALID",
     raw,
     simulated: Boolean(raw.__simulated),
@@ -398,6 +519,7 @@ export async function verifyBankAccount({ accountNumber, ifsc, name, phone } = {
 
 /**
  * 4. Look up GSTINs associated with a PAN
+ * POST /verification/pan-gstin — verification_id is required by Cashfree.
  */
 export async function verifyPanToGstin({ pan } = {}) {
   const sanitizedPan = String(pan || "").trim().toUpperCase();
@@ -405,11 +527,17 @@ export async function verifyPanToGstin({ pan } = {}) {
     throw new Error("Valid 10-character PAN is required");
   }
 
-  const raw = await secureIdRequest("/pan-gstin", { method: "POST", body: { pan: sanitizedPan } });
+  const payload = {
+    pan: sanitizedPan,
+    verification_id: `pg_${sanitizedPan}_${Date.now()}`,
+  };
+
+  const raw = await secureIdRequest("/pan-gstin", { method: "POST", body: payload });
   return {
     success: true,
     pan: sanitizedPan,
-    gstinList: raw.gstin_list || raw.gstins || [],
+    found: raw.status !== "GSTIN_NOT_FOUND",
+    gstinList: raw.gstin_list || [],
     raw,
     simulated: Boolean(raw.__simulated),
   };

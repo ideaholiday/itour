@@ -1,7 +1,10 @@
+import { checkNativeInventory, normalizeUnitItems, priceUnitItems } from "./nativeInventoryService.js";
 import crypto from "crypto";
 import { computeTransferQuote, VEHICLE_TAXONOMY } from "../engine/transferEngine.js";
+import { productGstPercent } from "../lib/productTax.js";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
+import { isSupplierKybApproved, isSupplierSubscriptionCovered } from "./supplierKybGate.js";
 
 const OTP_DIGITS = 6;
 export const MAX_OTP_ATTEMPTS = 5;
@@ -150,7 +153,7 @@ function validateCapacity(vehicleCategory, passengers, luggage) {
   }
 }
 
-export function calculateBookingQuote(db, input, { enforceListingSupplierAvailability = true } = {}) {
+export function calculateBookingQuote(db, input, { enforceListingSupplierAvailability = true, ownerId, counterSale = false } = {}) {
   const productId = input.product_id || input.productId || input.activity_id || input.activityId;
   const product = db.prepare(
     `SELECT p.*, s.kyb_status, s.commission_rate, s.supplier_code, s.company_name AS supplier_name
@@ -162,9 +165,17 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     error.status = 404;
     throw error;
   }
-  if (product.kyb_status && product.kyb_status !== "APPROVED") {
+  // No supplier, or a supplier without an approved KYB, cannot take bookings.
+  if (!isSupplierKybApproved(product.kyb_status)) {
     const error = new Error("This operator is not accepting bookings right now");
     error.status = 409;
+    throw error;
+  }
+  // A supplier who signed up from 2026-09-14 also needs a subscription or waiver (ADR 017).
+  if (!isSupplierSubscriptionCovered(db, product.supplier_id)) {
+    const error = new Error("This operator is not accepting bookings right now");
+    error.status = 409;
+    error.code = "SUPPLIER_SUBSCRIPTION_REQUIRED";
     throw error;
   }
 
@@ -179,6 +190,10 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     throw error;
   }
 
+  let unitBreakdown = normalizeUnitItems(input.unit_items || input.unitItems, { adults, children });
+  const nativeSlot = checkNativeInventory(db, input, { ownerId, counterSale });
+  // A held reservation already froze its breakdown; keep the booking identical to it.
+  if (nativeSlot?.unitItems?.length) unitBreakdown = normalizeUnitItems(nativeSlot.unitItems);
   const vehicleCategory = String(input.vehicle_category || input.selectedVehicle || (product.group_type === "SHARED" ? "SHARED_SEAT" : "SEDAN")).toUpperCase();
   if (enforceListingSupplierAvailability) {
     const availability = evaluateSupplierAvailability(db, {
@@ -189,7 +204,8 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
       vehicleCategory,
     });
     if (!availability.available) {
-      const error = new Error(availability.reasons[0] || "The selected date or time is unavailable. Please choose another option");
+      // Closed, blocked or full all read the same to a traveler; the supplier's note stays internal.
+      const error = new Error("Sold out on the selected date. Please choose another date.");
       error.status = 409;
       throw error;
     }
@@ -197,8 +213,11 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
   // Vehicle capacity is a transport constraint, not a package-room or ticket constraint.
   const isNonVehicleProduct = ["PACKAGE", "MULTI_DAY_PACKAGE"].includes(product.product_type) ||
     ["TICKET_ONLY", "SIC", "TICKET_SIC"].includes(product.product_sub_type);
-  if (!isNonVehicleProduct) validateCapacity(vehicleCategory, passengers, luggage);
-  const commissionRate = resolveCommissionRate(db, product.supplier_id, product.product_type);
+  if (!nativeSlot && !isNonVehicleProduct) validateCapacity(vehicleCategory, passengers, luggage);
+  const commissionRate = resolveCommissionRate(db, product.supplier_id, product.id);
+  // India keeps its rates; an Indian supplier's product abroad pays 18% (ADR 024);
+  // a Thai supplier's product in Thailand pays none (ADR 023).
+  const gstRate = (indiaRate) => productGstPercent(db, product.id, indiaRate);
   let baseAmount;
   let tolls = 0;
   let stateTax = 0;
@@ -232,7 +251,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
     baseAmount = transferQuote.costBreakdown.baseFare + nightAllowance;
     tolls = transferQuote.costBreakdown.fastagTolls;
     stateTax = transferQuote.costBreakdown.stateBorderTax;
-    gstAmount = roundMoney((baseAmount + tolls + stateTax) * 0.05);
+    gstAmount = roundMoney((baseAmount + tolls + stateTax) * gstRate(5) / 100);
     totalAmount = baseAmount + tolls + stateTax + gstAmount;
     variantName = transferQuote.vehicleDisplayName;
   } else {
@@ -292,17 +311,31 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
 
     tolls = roundMoney(variant?.estimated_fastag_tolls);
     stateTax = roundMoney(variant?.estimated_state_tax);
-    const taxRate = Number(variant?.tax_percentage ?? 5);
+    const taxRate = gstRate(Number(variant?.tax_percentage ?? 5));
     gstAmount = roundMoney((baseAmount + tolls + stateTax) * taxRate / 100);
     totalAmount = baseAmount + tolls + stateTax + gstAmount;
   }
 
+  if (nativeSlot) {
+    // A held reservation carries its own frozen total; otherwise price the
+    // requested unit breakdown against the rate resolved for this date.
+    if (nativeSlot.unitTotal != null) {
+      baseAmount = Number(nativeSlot.unitTotal);
+    } else {
+      baseAmount = priceUnitItems(unitBreakdown.items, nativeSlot.unitPrices || { ADULT: nativeSlot.adultPrice, CHILD: nativeSlot.childPrice });
+    }
+    tolls = 0; stateTax = 0; gstAmount = roundMoney(baseAmount * gstRate(5) / 100);
+    totalAmount = baseAmount + gstAmount;
+    pricingModel = "PER_PERSON";
+  }
   const commissionAmount = roundMoney(totalAmount * commissionRate / 100);
   return {
     product,
+    nativeSlot,
     activityDate,
     adults,
     children,
+    unitItems: unitBreakdown.items,
     luggage,
     vehicleCategory,
     variantName,
@@ -321,6 +354,7 @@ export function calculateBookingQuote(db, input, { enforceListingSupplierAvailab
 
 export function publicQuote(quote) {
   return {
+    nativeSlot: quote.nativeSlot || null,
     productId: quote.product.id,
     productTitle: quote.product.title,
     productType: quote.product.product_type,

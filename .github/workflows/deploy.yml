@@ -14,7 +14,8 @@ env:
   GAR_REGISTRY: us-central1-docker.pkg.dev
   GAR_REPOSITORY: idea-holiday
   SERVICE_NAME: idea-holiday-marketplace
-  REGION: us-central1
+  # Cloud Run runs in Tokyo next to the database (ADR 016); images stay in the US registry.
+  REGION: asia-northeast1
   IMAGE_TAG: ${{ github.sha }}
 
 permissions:
@@ -98,7 +99,7 @@ jobs:
             --image="${{ needs.build-and-push.outputs.image }}" \
             --project="${GCP_PROJECT_ID}" \
             --region="${REGION}" \
-            --set-env-vars="NODE_ENV=staging" \
+            --update-env-vars="NODE_ENV=staging" \
             --allow-unauthenticated \
             --memory=1Gi \
             --cpu=1 \
@@ -153,7 +154,7 @@ jobs:
             --image="${{ needs.build-and-push.outputs.image }}" \
             --project="${GCP_PROJECT_ID}" \
             --region="${REGION}" \
-            --set-env-vars="NODE_ENV=production" \
+            --update-env-vars="NODE_ENV=production" \
             --allow-unauthenticated \
             --memory=2Gi \
             --cpu=2 \

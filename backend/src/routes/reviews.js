@@ -2,12 +2,44 @@ import express from "express";
 import { nanoid } from "nanoid";
 import db from "../db.js";
 import { authenticate, optionalAuthMiddleware, requireRoles } from "../middleware/auth.js";
-import { createVerifiedReview, moderateReview, recalculateQualityScores, respondToReview, reviewDetails } from "../services/reviewService.js";
+import { createShareLinkReview, createVerifiedReview, moderateReview, RATED_REVIEW_SOURCES, recalculateQualityScores, respondToReview, reviewDetails } from "../services/reviewService.js";
 import { validateBody } from "../middleware/validation.js";
+import { supplierMay } from "../services/supplierStaffService.js";
 import { reviewSchemas } from "../validators/apiSchemas.js";
+import { createRateLimiter } from "../middleware/security.js";
+import {
+  activeShareLink, CLAIM_RATE_LIMIT, claimShareLink, consumeInvite, createShareLink, inviteStats,
+  listShareLinks, resolveInvite, resolveShareLink, setShareLinkActive,
+} from "../services/reviewInviteService.js";
 
 const router = express.Router();
 router.use(optionalAuthMiddleware);
+
+// The invite and share-link endpoints are the only unauthenticated write path
+// into reviews, so they are the ones worth throttling: a share link hands out
+// no information until a booking reference and phone match.
+const claimLimiter = createRateLimiter({
+  windowMs: CLAIM_RATE_LIMIT.windowMinutes * 60 * 1000,
+  limit: CLAIM_RATE_LIMIT.max,
+  scope: "review-share-claim",
+});
+const inviteLimiter = createRateLimiter({ windowMs: 60 * 1000, limit: 30, scope: "review-invite" });
+const openReviewLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 10, scope: "review-share-open" });
+const RATED_SOURCES_SQL = RATED_REVIEW_SOURCES.map((value) => `'${value}'`).join(", ");
+
+function inviteContext(booking) {
+  return {
+    bookingRef: booking.ref,
+    productId: booking.product_id,
+    productTitle: booking.product_title,
+    heroImage: booking.hero_image,
+    supplierName: booking.supplier_name,
+    activityDate: booking.activity_date,
+    travelerName: booking.traveler_name,
+    driverName: booking.driver_name || null,
+    requiresDriverRating: Boolean(booking.driver_assignment_id),
+  };
+}
 
 function requester(req) {
   return req.user || null;
@@ -42,7 +74,7 @@ router.get("/mine", authenticate, (req, res) => {
   const actor = requester(req);
   if (!actor) return res.status(401).json({ error: "Sign in to view reviews" });
   const rows = db.prepare(`SELECT r.*, b.ref AS booking_ref, b.activity_date, p.title AS product_title, s.company_name AS supplier_name, da.driver_name
-    FROM reviews r JOIN bookings b ON b.id = r.booking_id JOIN products p ON p.id = r.product_id
+    FROM reviews r LEFT JOIN bookings b ON b.id = r.booking_id JOIN products p ON p.id = r.product_id
     JOIN suppliers s ON s.id = r.supplier_id LEFT JOIN driver_assignments da ON da.id = r.driver_assignment_id
     WHERE r.user_id = ? OR (? != '' AND LOWER(b.traveler_email) = LOWER(?)) ORDER BY r.created_at DESC`).all(actor.id || "", actor.email || "", actor.email || "").map((row) => {
       const photos = db.prepare("SELECT photo_url, caption FROM review_photos WHERE review_id = ? ORDER BY sort_order ASC").all(row.id);
@@ -70,6 +102,138 @@ router.post("/", authenticate, validateBody(reviewSchemas.create), (req, res) =>
   }
 });
 
+// ── Review collection links ──────────────────────────────────────────────────
+// A traveler with an invite token, or a share-link claim, reviews without
+// signing in. Both paths still resolve to one completed booking.
+
+// What the review form shows before anything is submitted.
+router.get("/invite/:token", inviteLimiter, (req, res) => {
+  try {
+    const { booking } = resolveInvite(db, req.params.token);
+    return res.json({ success: true, booking: inviteContext(booking) });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "This review link could not be opened" });
+  }
+});
+
+router.post("/invite/:token", inviteLimiter, validateBody(reviewSchemas.create), (req, res) => {
+  try {
+    const { invite, booking } = resolveInvite(db, req.params.token, { markOpened: false });
+    if (!booking.user_id) return res.status(409).json({ error: "This booking has no traveler account to attribute the review to" });
+
+    const review = createVerifiedReview(db, {
+      booking,
+      actor: { id: booking.user_id },
+      input: req.body,
+      meta: {
+        inviteId: invite.id,
+        verificationMethod: invite.share_link_id ? "BOOKING_REF" : "BOOKING_TOKEN",
+      },
+    });
+    consumeInvite(db, invite.id, review.id);
+
+    return res.status(201).json({
+      success: true,
+      review,
+      message: review.status === "PUBLISHED"
+        ? "Your verified review is now published."
+        : "Your review was received and is awaiting moderation.",
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "Review could not be submitted" });
+  }
+});
+
+// A supplier's public link: says who is asking, and nothing about any booking.
+router.get("/share/:slug", claimLimiter, (req, res) => {
+  try {
+    return res.json({ success: true, link: resolveShareLink(db, req.params.slug) });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "This review link could not be opened" });
+  }
+});
+
+// Claiming the link with a booking reference and the phone's last four digits
+// mints the same single-use invite the post-trip email would have carried.
+router.post("/share/:slug/claim", claimLimiter, validateBody(reviewSchemas.claim), (req, res) => {
+  try {
+    const { token, booking } = claimShareLink(db, {
+      slug: req.params.slug,
+      bookingRef: req.body.bookingRef,
+      phoneLast4: req.body.phoneLast4,
+    });
+    return res.json({ success: true, token, booking: inviteContext(booking) });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "That booking could not be matched" });
+  }
+});
+
+// A signed-in traveler reviewing straight from the link, with no booking. The
+// review is shown on the listing but never counted in a rating.
+router.post("/share/:slug/review", openReviewLimiter, authenticate, validateBody(reviewSchemas.shareReview), (req, res) => {
+  try {
+    const link = activeShareLink(db, req.params.slug);
+    const review = createShareLinkReview(db, { link, actor: requester(req), input: req.body });
+    return res.status(201).json({
+      success: true,
+      review,
+      message: review.status === "PUBLISHED"
+        ? "Thank you! Your review is now live on the listing."
+        : "Thank you! Your review was received and is awaiting moderation.",
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "Review could not be submitted" });
+  }
+});
+
+// ── Supplier-owned share links ───────────────────────────────────────────────
+
+function supplierActor(req, res) {
+  const actor = requester(req);
+  if (String(actor?.role || "").toUpperCase() !== "SUPPLIER" || !actor.supplier_id || !supplierMay(actor, "manage")) {
+    res.status(403).json({ error: "Supplier access required" });
+    return null;
+  }
+  return actor;
+}
+
+router.get("/share-links", authenticate, requireRoles("SUPPLIER"), (req, res) => {
+  const actor = supplierActor(req, res);
+  if (!actor) return undefined;
+  return res.json({
+    success: true,
+    links: listShareLinks(db, actor.supplier_id),
+    stats: inviteStats(db, actor.supplier_id),
+  });
+});
+
+router.post("/share-links", authenticate, requireRoles("SUPPLIER"), validateBody(reviewSchemas.shareLink), (req, res) => {
+  try {
+    const actor = supplierActor(req, res);
+    if (!actor) return undefined;
+    const link = createShareLink(db, {
+      supplierId: actor.supplier_id,
+      productId: req.body.productId || null,
+      label: req.body.label || null,
+      createdBy: actor.id,
+    });
+    return res.status(201).json({ success: true, link });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "Share link could not be created" });
+  }
+});
+
+router.patch("/share-links/:id", authenticate, requireRoles("SUPPLIER"), validateBody(reviewSchemas.shareLinkUpdate), (req, res) => {
+  try {
+    const actor = supplierActor(req, res);
+    if (!actor) return undefined;
+    const link = setShareLinkActive(db, { id: req.params.id, supplierId: actor.supplier_id, isActive: req.body.isActive !== false });
+    return res.json({ success: true, link });
+  } catch (error) {
+    return res.status(error.status || 500).json({ error: error.message || "Share link could not be updated" });
+  }
+});
+
 router.get("/product/:id", (req, res) => {
   const productId = req.params.id;
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -89,7 +253,7 @@ router.get("/product/:id", (req, res) => {
       SUM(CASE WHEN experience_rating = 2 THEN 1 ELSE 0 END) AS count_2,
       SUM(CASE WHEN experience_rating = 1 THEN 1 ELSE 0 END) AS count_1
     FROM reviews 
-    WHERE product_id = ? AND status = 'PUBLISHED'
+    WHERE product_id = ? AND status = 'PUBLISHED' AND source IN (${RATED_SOURCES_SQL})
   `).get(productId) || {};
 
   const totalReviews = Number(distRow.total || 0);
@@ -130,11 +294,12 @@ router.get("/product/:id", (req, res) => {
   const listParams = [...params, limit, offset];
   const reviews = db.prepare(`
     SELECT r.id, r.experience_rating, r.supplier_rating, r.driver_rating, r.title, r.comment, r.tags, r.would_recommend,
-      r.supplier_response, r.supplier_responded_at, r.created_at, b.traveler_name, b.activity_date,
+      r.supplier_response, r.supplier_responded_at, r.created_at, r.source, COALESCE(b.traveler_name, u.name) AS traveler_name, b.activity_date,
       COALESCE(h.helpful_count, 0) AS helpful_count,
       COALESCE(h.unhelpful_count, 0) AS unhelpful_count
     FROM reviews r 
-    JOIN bookings b ON b.id = r.booking_id 
+    LEFT JOIN bookings b ON b.id = r.booking_id 
+    LEFT JOIN users u ON u.id = r.user_id
     LEFT JOIN (
       SELECT review_id,
         SUM(CASE WHEN is_helpful = 1 THEN 1 ELSE 0 END) AS helpful_count,
@@ -239,7 +404,7 @@ router.get("/supplier/:id", optionalAuthMiddleware, (req, res) => {
   const internal = ["ADMIN", "STAFF"].includes(role);
   const statusClause = internal ? "r.status != 'REJECTED'" : "r.status = 'PUBLISHED'";
   const reviews = db.prepare(`SELECT r.*, b.ref AS booking_ref, p.title AS product_title, da.driver_name
-    FROM reviews r JOIN bookings b ON b.id = r.booking_id JOIN products p ON p.id = r.product_id
+    FROM reviews r LEFT JOIN bookings b ON b.id = r.booking_id JOIN products p ON p.id = r.product_id
     LEFT JOIN driver_assignments da ON da.id = r.driver_assignment_id WHERE r.supplier_id = ? AND ${statusClause} ORDER BY r.created_at DESC LIMIT 200`).all(req.params.id).map((row) => ({ ...row, tags: JSON.parse(row.tags || "[]") }));
   const quality = db.prepare("SELECT * FROM quality_scores WHERE entity_type = 'SUPPLIER' AND entity_id = ?").get(req.params.id) || recalculateQualityScores(db, { supplierId: req.params.id }).supplier;
   return res.json({ success: true, reviews, quality });
@@ -248,7 +413,7 @@ router.get("/supplier/:id", optionalAuthMiddleware, (req, res) => {
 router.post("/:id/response", authenticate, requireRoles("SUPPLIER"), validateBody(reviewSchemas.response), (req, res) => {
   try {
     const actor = requester(req);
-    if (String(actor?.role || "").toUpperCase() !== "SUPPLIER" || !actor.supplier_id) return res.status(403).json({ error: "Supplier access required" });
+    if (String(actor?.role || "").toUpperCase() !== "SUPPLIER" || !actor.supplier_id || !supplierMay(actor, "manage")) return res.status(403).json({ error: "Supplier access required" });
     return res.json({ success: true, review: respondToReview(db, req.params.id, { supplierId: actor.supplier_id, response: req.body.response }) });
   } catch (error) {
     return res.status(error.status || 500).json({ error: error.message || "Response could not be published" });
@@ -264,8 +429,8 @@ router.get("/admin/dashboard", authenticate, requireRoles("ADMIN", "STAFF"), (re
   for (const row of reviewedProducts) recalculateQualityScores(db, { productId: row.product_id });
   for (const row of reviewedSuppliers) recalculateQualityScores(db, { supplierId: row.supplier_id });
   for (const row of reviewedDrivers) recalculateQualityScores(db, { supplierDriverId: row.supplier_driver_id });
-  const reviews = db.prepare(`SELECT r.*, b.ref AS booking_ref, b.traveler_name, p.title AS product_title,
-    s.company_name AS supplier_name, da.driver_name FROM reviews r JOIN bookings b ON b.id = r.booking_id
+  const reviews = db.prepare(`SELECT r.*, b.ref AS booking_ref, COALESCE(b.traveler_name, u.name) AS traveler_name, p.title AS product_title,
+    s.company_name AS supplier_name, da.driver_name FROM reviews r LEFT JOIN bookings b ON b.id = r.booking_id LEFT JOIN users u ON u.id = r.user_id
     JOIN products p ON p.id = r.product_id JOIN suppliers s ON s.id = r.supplier_id
     LEFT JOIN driver_assignments da ON da.id = r.driver_assignment_id ORDER BY CASE r.status WHEN 'PENDING' THEN 1 WHEN 'FLAGGED' THEN 2 ELSE 3 END, r.created_at DESC LIMIT 300`).all().map((row) => ({ ...row, tags: JSON.parse(row.tags || "[]") }));
   const scores = db.prepare(`SELECT qs.*, CASE qs.entity_type WHEN 'SUPPLIER' THEN s.company_name WHEN 'PRODUCT' THEN p.title WHEN 'DRIVER' THEN sd.driver_name END AS entity_name

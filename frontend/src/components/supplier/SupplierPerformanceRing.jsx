@@ -3,14 +3,17 @@ import { Star, ShieldCheck, Award } from "lucide-react";
 import Card, { CardHeader, CardTitle, CardContent } from "../ui/Card";
 
 export function SupplierPerformanceRing({ stats }) {
-  const rating = stats?.ratings?.avg || 4.8;
-  const completionRate = stats?.ratings?.completion_rate || 98;
-  const cancellationRate = stats?.ratings?.cancellation_rate || 1.2;
+  // Null until travelers leave verified reviews — shown as such, not as a number.
+  const rating = Number(stats?.ratings?.avg) || null;
+  const reviewCount = Number(stats?.ratings?.total_reviews || 0);
+  // Null until there are enough past trips (ADR 038); never a flattering default.
+  const completionRate = stats?.ratings?.completion_rate ?? null;
+  const cancellationRate = stats?.ratings?.cancellation_rate ?? null;
 
   // SVG Circular Gauge
   const radius = 32;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (completionRate / 100) * circumference;
+  const strokeDashoffset = circumference - ((completionRate ?? 0) / 100) * circumference;
 
   return (
     <Card elevation="sm" className="border-stone-200 dark:border-stone-800">
@@ -55,7 +58,7 @@ export function SupplierPerformanceRing({ stats }) {
             </svg>
             <div className="absolute flex flex-col items-center">
               <span className="text-sm font-extrabold text-stone-900 dark:text-stone-100 font-mono">
-                {completionRate}%
+                {completionRate === null ? "—" : `${completionRate}%`}
               </span>
               <span className="text-[9px] text-stone-400 font-medium uppercase">Fulfillment</span>
             </div>
@@ -64,16 +67,22 @@ export function SupplierPerformanceRing({ stats }) {
           {/* Key Metrics */}
           <div className="space-y-2.5">
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 text-amber-500">
-                <Star className="w-4 h-4 fill-amber-500" />
-                <span className="text-base font-bold text-stone-900 dark:text-stone-100 font-mono">{rating}</span>
-              </div>
-              <span className="text-xs text-stone-500">Avg Rating</span>
+              {rating ? (
+                <>
+                  <div className="flex items-center gap-1 text-amber-500">
+                    <Star className="w-4 h-4 fill-amber-500" />
+                    <span className="text-base font-bold text-stone-900 dark:text-stone-100 font-mono">{rating.toFixed(1)}</span>
+                  </div>
+                  <span className="text-xs text-stone-500">Avg Rating{reviewCount ? ` · ${reviewCount} reviews` : ""}</span>
+                </>
+              ) : (
+                <span className="text-xs text-stone-500">No verified reviews yet</span>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-stone-700 dark:text-stone-300 font-mono">
-                {cancellationRate}%
+                {cancellationRate === null ? "Not enough data" : `${cancellationRate}%`}
               </span>
               <span className="text-xs text-stone-500">Cancellation Rate</span>
             </div>

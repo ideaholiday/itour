@@ -1,10 +1,14 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 const workspace = mkdtempSync(path.join(tmpdir(), "idea-holiday-browser-e2e-"));
 const databasePath = path.join(workspace, "browser-e2e.sqlite");
 writeFileSync(databasePath, "");
+// Browser tests that need a server-signed link (a driver's private trip link)
+// read the test database; this file tells them where it is.
+mkdirSync(path.join(import.meta.dirname, "..", "test-results"), { recursive: true });
+writeFileSync(path.join(import.meta.dirname, "..", "test-results", "browser-e2e-database-path.txt"), databasePath);
 
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -17,6 +21,7 @@ Object.assign(process.env, {
   OTP_SECRET: "browser-e2e-otp-secret-with-at-least-32-characters",
   DEMO_PAYMENT_ONLY: "true",
   ENABLE_DEMO_PAYMENT: "true",
+  SEED_DEMO_DATA: "true",
   EMAIL_NOTIFICATIONS_ENABLED: "false",
   WHATSAPP_CLOUD_API_ENABLED: "false",
   NOTIFICATIONS_ENABLED: "false",
@@ -47,6 +52,17 @@ db.prepare(`
   "browser.e2e.ops@example.test",
   hashPassword("BrowserOps@2026"),
   "+919876543211",
+);
+
+db.prepare(`
+  INSERT INTO users (id, name, email, password, phone, role)
+  VALUES (?, ?, ?, ?, ?, 'ADMIN')
+`).run(
+  "user_browser_e2e_admin",
+  "Browser E2E Admin",
+  "browser.e2e.admin@example.test",
+  hashPassword("BrowserAdmin@2026"),
+  "+919876543212",
 );
 
 db.prepare(`

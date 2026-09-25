@@ -81,12 +81,15 @@ function countBookings(db, { supplierId, activityDate, vehicleCategory, rule }) 
   const params = [supplierId, activityDate, ...ACTIVE_BOOKING_STATUSES];
   let sql = `SELECT COUNT(*) AS count FROM bookings WHERE supplier_id = ? AND activity_date = ? AND LOWER(status) IN (${statusSlots})`;
   if (supportsCircuitOrders(db)) {
+    // hold_expires_at is an ISO text column. Comparing it to datetime('now') fails on
+    // PostgreSQL (text <= timestamptz) and misorders same-day values on SQLite.
     sql += ` AND (circuit_order_id IS NULL OR NOT EXISTS (
       SELECT 1 FROM circuit_orders co
       WHERE co.id = bookings.circuit_order_id
         AND co.status = 'PENDING_PAYMENT'
-        AND co.hold_expires_at <= datetime('now')
+        AND co.hold_expires_at <= ?
     ))`;
+    params.push(new Date().toISOString());
   }
   if (upper(rule.scope_type) === "PRODUCT" && rule.product_id) {
     sql += " AND COALESCE(assigned_supplier_product_id, product_id) = ?";

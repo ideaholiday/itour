@@ -2,14 +2,27 @@ import logger from "../config/logger.js";
 
 const BLOCKED_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 
+// POST /api/uploads carries the file as base64 in `data`; the route itself caps
+// the decoded file at 10MB, so its string may be that long (about 14M chars).
+// Any other string over 100k chars is refused.
+const UPLOAD_DATA_MAX_CHARS = 14_000_000;
+
+function isUploadData(req, path) {
+  return req.method === "POST" && path.length === 1 && path[0] === "data"
+    && /^\/api(\/v1)?\/uploads\/?$/.test(String(req.originalUrl || "").split("?")[0]);
+}
+
 function assertSafeValue(value, path = [], depth = 0, state = { nodes: 0 }) {
   state.nodes += 1;
   if (state.nodes > 5_000) throw new Error("Request contains too many values");
-  if (depth > 10) throw new Error("Request nesting is too deep");
-  if (typeof value === "string" && value.length > 100_000) {
+  if (typeof value === "string" && value.length > (state.req && isUploadData(state.req, path) ? UPLOAD_DATA_MAX_CHARS : 100_000)) {
     throw new Error(`Value at ${path.join(".") || "request"} is too long`);
   }
   if (!value || typeof value !== "object") return;
+  // Depth counts containers only. Meta's failed-delivery status nests a
+  // string at entry[].changes[].value.statuses[].errors[].error_data.details
+  // (11 levels); rejecting it dropped WhatsApp delivery failures with a 400.
+  if (depth > 16) throw new Error("Request nesting is too deep");
   if (Array.isArray(value)) {
     if (value.length > 1_000) throw new Error(`Array at ${path.join(".") || "request"} is too large`);
     value.forEach((item, index) => assertSafeValue(item, [...path, index], depth + 1, state));
@@ -45,7 +58,7 @@ export function requestBoundary(req, res, next) {
   try {
     if (String(req.originalUrl || "").length > 8_192) throw new Error("Request URL is too long");
     assertSafeValue(req.query || {});
-    if (req.body !== undefined) assertSafeValue(req.body);
+    if (req.body !== undefined) assertSafeValue(req.body, [], 0, { nodes: 0, req });
     next();
   } catch (error) {
     return validationFailure(req, res, [{ path: [], code: "unsafe_structure", message: error.message }]);

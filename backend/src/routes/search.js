@@ -19,11 +19,12 @@ router.get("/search/suggestions", cacheResponse(300), (req, res) => {
  * GET /api/search
  * Advanced search with filters and pagination
  */
-router.get("/search", optionalBearer, (req, res) => {
+router.get("/search", optionalBearer, cacheResponse(60), (req, res) => {
   const {
     q,
     city,
     state,
+    country,
     category,
     productType,
     type,
@@ -50,6 +51,7 @@ router.get("/search", optionalBearer, (req, res) => {
     query: q,
     city,
     state,
+    country,
     category,
     productType,
     type,

@@ -53,15 +53,15 @@ export function getDailyOverview(database, { days = 30 } = {}) {
   `).get();
 
   const refundsResult = database.prepare(`
-    SELECT COUNT(*) AS count, COALESCE(SUM(amount), 0) AS total
+    SELECT COUNT(*) AS count, COALESCE(SUM(refund_amount), 0) AS total
     FROM refunds
-    WHERE created_at >= ${sqliteDate(days)}
+    WHERE requested_at >= ${sqliteDate(days)}
   `).get();
 
   const prevRefunds = database.prepare(`
     SELECT COUNT(*) AS count
     FROM refunds
-    WHERE created_at >= ${sqliteDate(days * 2)} AND created_at < ${sqliteDate(days)}
+    WHERE requested_at >= ${sqliteDate(days * 2)} AND requested_at < ${sqliteDate(days)}
   `).get();
 
   const cancellationRate = currentPeriod.total_bookings > 0
@@ -272,7 +272,7 @@ export function getRevenueBreakdown(database, { days = 30 } = {}) {
 
   const byDestination = database.prepare(`
     SELECT
-      COALESCE(p.destination_name, b.pickup_location, 'Unknown') AS destination,
+      COALESCE(p.city, b.pickup_location, 'Unknown') AS destination,
       COUNT(*) AS bookings,
       SUM(CASE WHEN LOWER(b.status) NOT IN ('cancelled','pending_payment') THEN b.amount_inr ELSE 0 END) AS revenue
     FROM bookings b
@@ -416,8 +416,17 @@ export function getAnomalyAlerts(database) {
     return { alerts: [], message: "Insufficient data for anomaly detection (need 7+ days)" };
   }
 
-  const bookings = dailyData.map((d) => d.bookings);
-  const revenues = dailyData.map((d) => d.revenue || 0);
+  // A day without bookings has no row; count it as zero from the first day with
+  // data through today, so bookings dropping to none still raises an alert.
+  const byDay = new Map(dailyData.map((d) => [d.day, d]));
+  const today = new Date().toISOString().slice(0, 10);
+  const series = [];
+  for (let day = dailyData[0].day; day <= today; day = new Date(Date.parse(`${day}T00:00:00Z`) + 86400000).toISOString().slice(0, 10)) {
+    series.push(byDay.get(day) || { day, bookings: 0, revenue: 0 });
+  }
+
+  const bookings = series.map((d) => d.bookings);
+  const revenues = series.map((d) => d.revenue || 0);
 
   function stats(arr) {
     const n = arr.length;
@@ -431,7 +440,7 @@ export function getAnomalyAlerts(database) {
   const revenueStats = stats(revenues);
 
   const alerts = [];
-  const recent = dailyData.slice(-2); // yesterday + today
+  const recent = series.slice(-2); // yesterday + today
 
   for (const day of recent) {
     // Booking anomaly (low)

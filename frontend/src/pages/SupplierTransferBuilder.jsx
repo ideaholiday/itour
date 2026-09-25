@@ -90,7 +90,7 @@ function list(value) {
 export default function SupplierTransferBuilder() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const supplierId = user?.user_metadata?.supplier_id || user?.supplier_id || "sup_lucknow_cabs";
+  const supplierId = user?.user_metadata?.supplier_id || user?.supplier_id || null;
 
   const [routeType, setRouteType] = useState("AIRPORT_TRANSFER");
   const [serviceDirection, setServiceDirection] = useState("ARRIVAL");
@@ -287,6 +287,7 @@ export default function SupplierTransferBuilder() {
       const hubLabel = selectedHub?.name || origin.address;
       const zoneLabel = customZoneName || destination.address;
 
+      if (!supplierId) throw new Error("Your account is not linked to a supplier. Sign in again or contact support.");
       const response = await fetch(`/api/suppliers/${supplierId}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -296,7 +297,6 @@ export default function SupplierTransferBuilder() {
           title: title.trim(),
           city: city.trim(),
           state: state.trim(),
-          country: "India",
           category: selectedType.category,
           shortDesc: description.trim(),
           fullDesc: description.trim(),
@@ -396,7 +396,7 @@ export default function SupplierTransferBuilder() {
           <div className="mt-6 rounded-3xl border border-emerald-300 bg-emerald-50 p-10 text-center animate-in fade-in zoom-in-95">
             <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
             <h2 className="mt-4 font-display text-2xl font-bold text-emerald-950">Transfer listing published</h2>
-            <p className="mt-2 text-sm text-emerald-800">It is now live in your supplier inventory and bookable across India.</p>
+            <p className="mt-2 text-sm text-emerald-800">It is now live in your supplier inventory and bookable on Idea Holiday.</p>
           </div>
         ) : (
           <form onSubmit={publish} className="mt-6 space-y-6">

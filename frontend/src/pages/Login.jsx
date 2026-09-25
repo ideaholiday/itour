@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Gift, Sparkles } from "lucide-react";
 import { api } from "../lib/api.js";
+import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
 import GoogleAuthButton from "../components/GoogleAuthButton.jsx";
+import PhoneInput from "../components/PhoneInput.jsx";
+import { toE164 } from "../lib/phone.js";
+import { clearStoredTravelerReferral, getStoredTravelerReferralCode, getVisitorId } from "../lib/affiliateAttribution.js";
 
 export default function Login({ initialMode = "login" }) {
   const location = useLocation();
@@ -19,8 +23,16 @@ export default function Login({ initialMode = "login" }) {
       sessionStorage.setItem("ih_ref_code", refCodeParam);
       return refCodeParam;
     }
-    return sessionStorage.getItem("ih_ref_code") || "";
+    return sessionStorage.getItem("ih_ref_code") || getStoredTravelerReferralCode() || "";
   });
+  const [referrerName, setReferrerName] = useState("");
+
+  useEffect(() => {
+    if (!referralCode) return;
+    api.getPublicReferralInfo(referralCode)
+      .then((info) => setReferrerName(info?.valid ? info.referrerName : ""))
+      .catch(() => setReferrerName(""));
+  }, [referralCode]);
   const [form, setForm] = useState({ name: "", email: "", password: "", phone: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -68,10 +80,17 @@ export default function Login({ initialMode = "login" }) {
         ...form,
         email: form.email.trim(),
         name: form.name.trim(),
+        phone: toE164(form.phone) || form.phone.trim(),
         ...(mode === "signup" && referralCode ? { referralCode } : {}),
+        ...(mode === "signup" && getVisitorId() ? { visitorId: getVisitorId() } : {}),
       };
       const fn = mode === "login" ? api.login : api.signup;
       const result = await fn(payload);
+      if (mode === "signup") {
+        analytics.trackSignUp("email");
+        sessionStorage.removeItem("ih_ref_code");
+        clearStoredTravelerReferral();
+      }
       login(result.token, result.user);
       navigate(getRedirectTarget(result.user), { replace: true });
     } catch (err) {
@@ -91,7 +110,7 @@ export default function Login({ initialMode = "login" }) {
           Book remarkable trips. Keep every ticket close.
         </h1>
         <p className="mt-5 max-w-lg text-base leading-7 text-stone-600">
-          Save favorites, manage bookings, and get trip updates from verified local travel partners across India.
+          Save favorites, manage bookings, and get trip updates from verified local travel partners in India and across Asia.
         </p>
         <div className="mt-8 flex gap-6 text-sm font-semibold text-stone-700">
           <span className="flex items-center gap-1.5"><span className="text-emerald-600 font-bold">✓</span> Secure checkout</span>
@@ -113,9 +132,9 @@ export default function Login({ initialMode = "login" }) {
           <div className="mb-5 flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-300/80 p-3.5 text-amber-900 shadow-xs">
             <Gift className="h-5 w-5 text-amber-600 shrink-0" />
             <div className="text-xs">
-              <span className="font-bold block">Referral Discount Activated! 🎉</span>
+              <span className="font-bold block">{referrerName ? `${referrerName} invited you` : "You were invited by a friend"}</span>
               <span className="text-amber-800">
-                Code <strong className="font-mono font-bold bg-amber-200/70 px-1.5 py-0.5 rounded">{referralCode}</strong> applied. ₹250 welcome gift ready.
+                Sign up with code <strong className="font-mono font-bold bg-amber-200/70 px-1.5 py-0.5 rounded">{referralCode}</strong> and your first trip gets a friend discount, shown at checkout.
               </span>
             </div>
           </div>
@@ -147,8 +166,8 @@ export default function Login({ initialMode = "login" }) {
           {isSignup && (
             <div>
               <label htmlFor="auth-phone" className="mb-1.5 block text-xs font-bold text-stone-700">Mobile number</label>
-              <input id="auth-phone" required type="tel" autoComplete="tel" inputMode="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                placeholder="+91 98765 43210" className="w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-3.5 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20" />
+              <PhoneInput id="auth-phone" required value={form.phone} onChange={(phone) => setForm({ ...form, phone })}
+                inputClassName="rounded-xl border border-stone-300 bg-[#FAF9F6] px-3.5 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20" />
             </div>
           )}
           <div>
@@ -171,7 +190,9 @@ export default function Login({ initialMode = "login" }) {
           </button>
         </p>
         <p className="mt-4 text-center text-[11px] leading-5 text-stone-500">
-          By continuing, you agree to Idea Holiday's terms and privacy policy.
+          By continuing, you agree to Idea Holiday's{" "}
+          <Link to="/terms" className="font-semibold underline hover:text-amber-800">terms</Link> and{" "}
+          <Link to="/privacy-policy" className="font-semibold underline hover:text-amber-800">privacy policy</Link>.
         </p>
       </section>
     </div>

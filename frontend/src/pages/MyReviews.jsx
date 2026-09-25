@@ -37,6 +37,21 @@ export default function MyReviews() {
     loadData();
   }, []);
 
+  // Post-trip messages link here with ?bookingRef=IH-REF: open that trip's review form directly.
+  const [linkedRef, setLinkedRef] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get("bookingRef") || ""; } catch { return ""; }
+  });
+  useEffect(() => {
+    if (!linkedRef || loading) return;
+    const match = eligibleBookings.find((b) => b.ref === linkedRef || b.id === linkedRef);
+    if (match) {
+      setActiveTab("UNREVIEWED");
+      setSelectedBookingForReview(match);
+    }
+    setLinkedRef("");
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [linkedRef, loading, eligibleBookings]);
+
   const totalReviews = reviews.length;
   const totalPhotos = reviews.reduce((acc, r) => acc + (r.photos?.length || 0), 0);
   const avgRatingGiven = totalReviews > 0

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
+import { applySupplierSubscriptionMigration } from "./fixtures/supplierSubscriptions.js";
 import { findAutomaticSupplierAssignment, rankSupplierCandidates } from "../src/services/supplierAssignmentService.js";
 
 const approvedFence = {
@@ -123,6 +124,10 @@ test("assigns the purchased transfer variant instead of the route's default vehi
       commission_rate REAL, commission_override_rate REAL
     );
     CREATE TABLE category_commissions (category_code TEXT, default_commission_rate REAL);
+    CREATE TABLE quality_scores (
+      entity_type TEXT, entity_id TEXT, review_count INTEGER DEFAULT 0, average_rating REAL,
+      smoothed_rating REAL, PRIMARY KEY (entity_type, entity_id)
+    );
     CREATE TABLE transfer_routes (
       product_id TEXT, route_type TEXT, vehicle_category TEXT,
       max_passengers INTEGER, max_luggage INTEGER
@@ -159,6 +164,7 @@ test("assigns the purchased transfer variant instead of the route's default vehi
     .run("lucknow-zone", "lucknow-supplier", "Lucknow", 26.7606, 80.8893, 35, "[]", 1, "APPROVED");
   db.prepare("INSERT INTO supplier_drivers VALUES (?, ?, ?, ?)")
     .run("ertiga-1", "lucknow-supplier", "Maruti Ertiga ZXI (SUV)", "AVAILABLE");
+  applySupplierSubscriptionMigration(db);
 
   const product = db.prepare("SELECT * FROM products WHERE id = ?").get("lucknow-transfer");
   const result = findAutomaticSupplierAssignment(db, {

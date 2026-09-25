@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../lib/auth.jsx";
 import { authHeaders } from "../../lib/api.js";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
+import { getPortalUrls } from "../../lib/domainContext.js";
 import {
   Users,
   Package,
@@ -19,7 +20,14 @@ import {
   AlertTriangle,
   LayoutDashboard,
   MapPinned,
-  Star
+  Star,
+  Wallet,
+  Gift,
+  UserCog,
+  SlidersHorizontal,
+  TicketPercent,
+  BadgeCheck,
+  Newspaper
 } from "lucide-react";
 
 export default function AdminLayout({ children }) {
@@ -90,6 +98,55 @@ export default function AdminLayout({ children }) {
       icon: Star,
       badge: metrics?.pendingReviews > 0 ? `${metrics.pendingReviews} New` : null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/creators",
+      label: "Creators & Payouts",
+      icon: Wallet,
+      badge: metrics?.pendingAffiliatePayouts > 0 ? `${metrics.pendingAffiliatePayouts} To Pay` : null,
+      badgeColor: "bg-emerald-500/20 text-emerald-600 border-emerald-500/30"
+    },
+    {
+      path: "/admin/referrals",
+      label: "Travel & Earn",
+      icon: Gift,
+      badge: metrics?.heldReferralRewards > 0 ? `${metrics.heldReferralRewards} To Review` : null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/verifications",
+      label: "Verified checks",
+      icon: BadgeCheck,
+      badge: metrics?.pendingVerificationChecks > 0 ? `${metrics.pendingVerificationChecks} To Check` : null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/coupons",
+      label: "Coupons",
+      icon: TicketPercent,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/blog",
+      label: "Blog",
+      icon: Newspaper,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/programs",
+      label: "Programs",
+      icon: SlidersHorizontal,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/team",
+      label: "Team",
+      icon: UserCog,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     }
   ];
 
@@ -136,7 +193,7 @@ export default function AdminLayout({ children }) {
 
           {/* Admin User Profile & Controls */}
           <div className="flex items-center gap-3">
-            <Link to="/" className="hidden rounded-xl px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 md:block">View site</Link>
+            <a href={getPortalUrls().traveler} target="_blank" rel="noopener noreferrer" className="hidden rounded-xl px-3 py-2 text-xs font-bold text-stone-600 transition hover:bg-stone-100 hover:text-stone-900 md:block">View site</a>
             <button
               onClick={fetchGlobalMetrics}
               title="Refresh Metrics"

@@ -141,13 +141,28 @@ export function verifyCashfreeWebhookSignature(rawBody, signature, timestamp) {
  */
 export async function processCashfreeRefund({ orderId, refundId, amount, reason }) {
   const sanitizedOrderId = encodeURIComponent(orderId);
-  const refundIdGen = refundId || `rfnd_${Date.now()}`;
+
+  // Fail locally rather than posting a null or negative amount to the provider:
+  // callers pass a computed quote, and a failed quote must not reach Cashfree.
+  const refundAmount = Number(amount);
+  if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+    throw Object.assign(new Error(`Refund amount must be a positive number, received ${JSON.stringify(amount)}`),
+      { code: "INVALID_REFUND_AMOUNT" });
+  }
+  if (!orderId) {
+    throw Object.assign(new Error("Refund requires an order reference"), { code: "MISSING_ORDER_ID" });
+  }
+
+  // refund_id is the provider's idempotency key. A bare timestamp collides for
+  // two refunds raised in the same millisecond, which would silently make the
+  // second a duplicate of the first.
+  const refundIdGen = refundId || `rfnd_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
 
   const refund = await cashfreeRequest(`/orders/${sanitizedOrderId}/refunds`, {
     method: "POST",
     body: {
       refund_id: refundIdGen,
-      refund_amount: Math.round(Number(amount) * 100) / 100,
+      refund_amount: Math.round(refundAmount * 100) / 100,
       refund_note: (reason || "Traveler cancellation").slice(0, 100),
       refund_speed: "STANDARD",
     },
@@ -189,6 +204,10 @@ export async function initiateCashfreeTransfer({
   const appId = process.env.CASHFREE_APP_ID || CASHFREE_APP_ID;
   const secretKey = process.env.CASHFREE_SECRET_KEY || CASHFREE_SECRET_KEY;
 
+  // Live traffic must never record a settlement that did not move money: a
+  // simulated UTR would mark a supplier paid while nothing reached their bank.
+  const liveRuntime = env === "PROD" || env === "PRODUCTION" || process.env.NODE_ENV === "production" || Boolean(process.env.K_SERVICE);
+
   if (appId && secretKey && (env === "PROD" || env === "PRODUCTION")) {
     try {
       const payoutBase = "https://api.cashfree.com/payout/v1";
@@ -215,6 +234,9 @@ export async function initiateCashfreeTransfer({
       });
 
       const data = await res.json().catch(() => ({}));
+      if (!(res.ok && data.status === "SUCCESS") && liveRuntime) {
+        throw Object.assign(new Error(`Cashfree transfer did not complete${data.message ? `: ${data.message}` : ""}. Pay the supplier manually and record the bank UTR.`), { status: 502, code: "PAYOUT_NOT_COMPLETED" });
+      }
       if (res.ok && data.status === "SUCCESS") {
         return {
           success: true,
@@ -227,8 +249,16 @@ export async function initiateCashfreeTransfer({
         };
       }
     } catch (err) {
+      if (liveRuntime) {
+        if (err.code === "PAYOUT_NOT_COMPLETED") throw err;
+        throw Object.assign(new Error(`Cashfree transfer failed: ${err.message}. Pay the supplier manually and record the bank UTR.`), { status: 502, code: "PAYOUT_NOT_COMPLETED" });
+      }
       console.warn("Cashfree Payouts API live call failed, falling back to simulated settlement:", err.message);
     }
+  }
+
+  if (liveRuntime) {
+    throw Object.assign(new Error("Automated Cashfree payouts are not configured for live mode. Pay the supplier manually and record the bank UTR."), { status: 503, code: "PAYOUT_NOT_CONFIGURED" });
   }
 
   // Realistic verified settlement execution in sandbox/simulation mode

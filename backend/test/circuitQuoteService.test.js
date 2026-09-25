@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
+import { applySupplierSubscriptionMigration } from "./fixtures/supplierSubscriptions.js";
 import { createCircuitQuote, getCircuitQuote } from "../src/services/circuitQuoteService.js";
 
 function futureDate(days = 10) {
@@ -50,6 +51,7 @@ function testDatabase() {
     .run("tour_1", "Shared Heritage Walk", "DAY_TOUR", "SHARED", "Panaji", 1000, "FLEXIBLE_24H");
   database.prepare("INSERT INTO products VALUES (?, 'supplier_1', ?, ?, ?, ?, 'Goa', ?, 'PUBLISHED', 1, ?)")
     .run("transfer_1", "Private Hotel Transfer", "TRANSFER", "PRIVATE", "Goa", 2000, "MODERATE_48H");
+  applySupplierSubscriptionMigration(database);
   return database;
 }
 
@@ -111,7 +113,7 @@ test("flags custom and unavailable items without trusting planner estimates", ()
   assert.equal(quote.status, "ACTION_REQUIRED");
   assert.equal(quote.breakdown.totalAmount, 0);
   assert.deepEqual(quote.issues.map((issue) => issue.code), ["ITEM_UNAVAILABLE", "PRODUCT_LINK_REQUIRED"]);
-  assert.equal(quote.issues[0].message, "Sold out");
+  assert.equal(quote.issues[0].message, "Sold out on the selected date. Please choose another date.");
 });
 
 test("requires itinerary ownership and a valid future travel date", () => {

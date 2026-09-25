@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { authHeaders } from "../../lib/api.js";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../../lib/auth.jsx";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import {
   Activity,
@@ -16,14 +17,29 @@ import {
   Layers,
   MessageSquare,
   Headphones,
-  Route
+  Route,
+  LogOut,
+  LayoutDashboard,
+  Gift
 } from "lucide-react";
 
 export default function OpsLayout({ children }) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
+  const displayName = user?.name || user?.email || "Operations";
+  const initials = displayName.split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
+
+  const signOut = () => {
+    logout();
+    navigate("/admin/login", { replace: true });
+  };
   const [metrics, setMetrics] = useState(null);
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [isRealtimeActive, setIsRealtimeActive] = useState(true);
+  const [openCriticalTaskCount, setOpenCriticalTaskCount] = useState(0);
+  const [heldReferralRewards, setHeldReferralRewards] = useState(0);
 
   const fetchOpsMetrics = async () => {
     try {
@@ -39,14 +55,43 @@ export default function OpsLayout({ children }) {
     }
   };
 
+  const fetchOpenCriticalTasks = async () => {
+    try {
+      const res = await fetch("/api/ops/tasks", { headers: authHeaders() });
+      const data = await res.json();
+      if (data.success) {
+        setOpenCriticalTaskCount((data.tasks || []).filter((t) => t.status === "OPEN" && t.priority === "CRITICAL").length);
+      }
+    } catch (err) {
+      console.error("Failed to fetch ops task escalations", err);
+    }
+  };
+
   useEffect(() => {
     fetchOpsMetrics();
+    fetchOpenCriticalTasks();
     // Realtime auto-poll interval every 5s
-    const interval = setInterval(fetchOpsMetrics, 5000);
+    const interval = setInterval(() => { fetchOpsMetrics(); fetchOpenCriticalTasks(); }, 5000);
     return () => clearInterval(interval);
   }, [location.pathname]);
 
+  // Referral rewards waiting on a person. Checked on navigation, not every 5s:
+  // the review queue is heavier than the live-trip poll.
+  useEffect(() => {
+    fetch("/api/referral/admin/review", { headers: authHeaders() })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setHeldReferralRewards(data?.rewards?.length || 0))
+      .catch(() => {});
+  }, [location.pathname]);
+
   const navItems = [
+    {
+      path: "/ops/live",
+      label: "Live 24h Trip Board",
+      icon: Activity,
+      badge: metrics?.totalSlaBreaches > 0 ? `${metrics.totalSlaBreaches} SLA ALERT` : null,
+      badgeColor: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse font-bold"
+    },
     {
       path: "/ops/circuits",
       label: "Circuit Changes & Refunds",
@@ -62,13 +107,6 @@ export default function OpsLayout({ children }) {
       badgeColor: ""
     },
     {
-      path: "/ops/live",
-      label: "Live 24h Trip Board",
-      icon: Activity,
-      badge: metrics?.totalSlaBreaches > 0 ? `${metrics.totalSlaBreaches} SLA ALERT` : null,
-      badgeColor: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse font-bold"
-    },
-    {
       path: "/ops/notifications",
       label: "WhatsApp Vouchers & Dispatches",
       icon: MessageSquare,
@@ -79,8 +117,15 @@ export default function OpsLayout({ children }) {
       path: "/ops/tasks",
       label: "Staff Resolution Queue",
       icon: Layers,
-      badge: null,
-      badgeColor: ""
+      badge: openCriticalTaskCount > 0 ? `${openCriticalTaskCount} CRITICAL` : null,
+      badgeColor: "bg-rose-100 text-rose-800 border-rose-300 animate-pulse font-bold"
+    },
+    {
+      path: "/ops/referrals",
+      label: "Referral Reviews",
+      icon: Gift,
+      badge: heldReferralRewards > 0 ? `${heldReferralRewards} TO REVIEW` : null,
+      badgeColor: "bg-amber-100 text-amber-800 border-amber-300 font-bold"
     }
   ];
 
@@ -121,6 +166,13 @@ export default function OpsLayout({ children }) {
               </span>
             </div>
             <div className="h-4 w-px bg-stone-200" />
+            <div className="flex items-center gap-2">
+              <span className="text-stone-500">Open Escalations:</span>
+              <span className={`font-bold ${openCriticalTaskCount > 0 ? "text-rose-600 animate-pulse" : "text-emerald-700"}`}>
+                {openCriticalTaskCount}
+              </span>
+            </div>
+            <div className="h-4 w-px bg-stone-200" />
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-700 font-bold">
               <Radio className="w-3.5 h-3.5 animate-pulse" />
               <span>REALTIME AUTO-SYNC</span>
@@ -137,15 +189,32 @@ export default function OpsLayout({ children }) {
               <RefreshCw className={`w-4 h-4 ${loadingMetrics ? "animate-spin text-amber-600" : ""}`} />
             </button>
 
+            {isAdmin && (
+              <Link to="/admin" className="hidden md:flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-stone-600 hover:bg-stone-100 hover:text-stone-900">
+                <LayoutDashboard className="w-3.5 h-3.5" /> Admin panel
+              </Link>
+            )}
+
             <div className="bg-[#FAF9F6] border border-stone-200 rounded-2xl px-3 py-1.5 flex items-center gap-2">
               <div className="w-7 h-7 rounded-full bg-amber-500/20 text-amber-800 font-bold flex items-center justify-center text-xs">
-                GO
+                {initials || "OP"}
               </div>
-              <div className="hidden sm:block text-left text-xs font-mono">
-                <span className="text-stone-800 block leading-tight font-bold">Ground Ops</span>
-                <span className="text-[10px] text-emerald-700 block">Status: Online</span>
+              <div className="hidden sm:block text-left text-xs">
+                <span className="text-stone-800 block leading-tight font-bold max-w-[160px] truncate">{displayName}</span>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-700 block">{isAdmin ? "Administrator" : "Operations staff"}</span>
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={signOut}
+              title="Sign out"
+              aria-label="Sign out"
+              className="flex items-center gap-1.5 p-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-all text-xs font-bold"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden md:inline">Sign out</span>
+            </button>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { CheckCircle2, Star, X, Camera, Upload, Trash2, Loader2 } from "lucide-react";
 import { api } from "../lib/api.js";
+import { uploadImage } from "../lib/imageUpload.js";
 
 const tagOptions = ["ON_TIME", "FRIENDLY_DRIVER", "CLEAN_VEHICLE", "GREAT_GUIDE", "GOOD_VALUE", "ACCURATE_LISTING", "SAFE_DRIVING", "POOR_COMMUNICATION", "LATE_PICKUP", "VEHICLE_ISSUE", "ITINERARY_ISSUE"];
 
@@ -52,36 +53,11 @@ export default function ReviewModal({ booking, onClose, onSuccess }) {
 
     try {
       for (const file of files) {
-        if (!file.type.startsWith("image/")) continue;
-        if (file.size > 5 * 1024 * 1024) {
-          setError("Each photo must be under 5MB.");
-          continue;
-        }
-
-        // Convert file to base64
-        const base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        // Upload to backend
-        const res = await api.uploadFile({
-          data: base64,
-          filename: file.name,
-          mimeType: file.type,
-          entityType: "REVIEW",
-          entityId: booking?.id || null,
-        });
-
-        if (res?.url) {
-          setPhotos((prev) => [...prev, res.url]);
-        }
+        const url = await uploadImage(file, { entityType: "REVIEW", entityId: booking?.id || null });
+        setPhotos((prev) => [...prev, url]);
       }
     } catch (err) {
-      console.error("Photo upload error", err);
-      setError("Failed to upload photo. You can still submit the review without it.");
+      setError(`${err.message} You can still submit the review without it.`);
     } finally {
       setUploadingPhoto(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -100,7 +76,8 @@ export default function ReviewModal({ booking, onClose, onSuccess }) {
         bookingId: booking.id,
         experienceRating,
         supplierRating,
-        driverRating,
+        // No driver on the trip: leave the rating out (the API rejects null).
+        driverRating: driverRating ?? undefined,
         title,
         comment,
         tags,

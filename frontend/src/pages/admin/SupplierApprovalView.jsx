@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import SupplierProfileAdminPanel from "../../components/admin/SupplierProfileAdminPanel.jsx";
+import KybDocumentViewer, { kybDocLabel } from "../../components/KybDocumentViewer.jsx";
 import {
   Users,
   Search,
@@ -24,6 +26,14 @@ import {
   Check
 } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
+
+const formatDate = (value) => {
+  if (!value) return null;
+  const date = new Date(String(value).includes("T") ? value : `${String(value).replace(" ", "T")}Z`);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+};
+
+const NotProvided = () => <span className="text-stone-400 font-normal italic">Not provided</span>;
 
 export default function SupplierApprovalView() {
   const [suppliers, setSuppliers] = useState([]);
@@ -89,8 +99,8 @@ export default function SupplierApprovalView() {
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           action, // 'APPROVED' | 'REJECTED' | 'SUSPENDED'
-          reason,
-          commissionRate: selectedSupplier.commission_rate ?? 15.0
+          // Commission is set in Products → Commission; approving must not pin a rate.
+          reason
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -114,6 +124,38 @@ export default function SupplierApprovalView() {
     }
   };
 
+  // Sends one document back to the supplier to upload again; their KYB status stays as it is.
+  const handleRequestReupload = async (doc) => {
+    if (!selectedSupplier) return;
+    const reason = window.prompt(`Why should ${kybDocLabel(doc.doc_type)} be uploaded again? The supplier sees this.`, "Name does not match your PAN");
+    if (reason === null) return;
+    if (reason.trim().length < 5) {
+      setMessage({ type: "error", text: "Write a reason of at least 5 characters." });
+      return;
+    }
+    setActionLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/admin/suppliers/${selectedSupplier.id}/kyb/${doc.id}/reupload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ reason: reason.trim() })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || "Could not ask for the document again");
+      setSelectedSupplier((prev) => prev && ({
+        ...prev,
+        kybDocs: (prev.kybDocs || []).map((item) => (item.id === doc.id ? { ...item, ...data.document } : item)),
+      }));
+      setMessage({ type: "success", text: data.message });
+      await fetchSuppliers();
+    } catch (err) {
+      setMessage({ type: "error", text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleRunAutoVerify = async () => {
     if (!selectedSupplier) return;
     setAutoVerifying(true);
@@ -126,11 +168,13 @@ export default function SupplierApprovalView() {
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || "Cashfree SecureID check failed");
 
-      setMessage({ type: "success", text: "Cashfree SecureID KYB Verification audit completed." });
+      setMessage({ type: "success", text: data.message || "Cashfree SecureID KYB Verification audit completed." });
       if (data.supplier) {
         setSelectedSupplier((prev) => ({
           ...prev,
           ...data.supplier,
+          is_verified: Boolean(data.supplier.is_verified || data.supplier.kyb_status === "APPROVED"),
+          kybReadiness: data.kybReadiness || prev?.kybReadiness,
           secureIdVerifications: data.verifications || prev?.secureIdVerifications || [],
         }));
       }
@@ -320,7 +364,7 @@ export default function SupplierApprovalView() {
                       <div>PAN: <span className="text-stone-500">{s.pan_number || "N/A"}</span></div>
                     </td>
                     <td className="py-4 px-4 font-mono font-bold text-amber-700">
-                      {s.commission_rate || 15.0}%
+                      {s.commission_rate_effective}%
                     </td>
                     <td className="py-4 px-4 font-mono text-stone-700">
                       <div className="font-bold text-emerald-700">{s.published_products || 0} live</div>
@@ -387,10 +431,16 @@ export default function SupplierApprovalView() {
                   <div className="mt-1">
                     {getStatusBadge(selectedSupplier.kyb_status, selectedSupplier.is_verified)}
                   </div>
+                  {selectedSupplier.kyb_status === "APPROVED" && selectedSupplier.kyb_approval_source && (
+                    <span className="text-[10px] text-stone-500 block mt-1">
+                      {selectedSupplier.kyb_approval_source === "CASHFREE_SECUREID" ? "Approved automatically (Cashfree SecureID)" : "Approved by an administrator"}
+                      {formatDate(selectedSupplier.kyb_approved_at) ? ` on ${formatDate(selectedSupplier.kyb_approved_at)}` : ""}
+                    </span>
+                  )}
                 </div>
                 <div className="text-right font-mono text-xs">
                   <span className="text-stone-500 block">Platform Commission</span>
-                  <span className="text-amber-700 font-bold text-base">{selectedSupplier.commission_rate || 15}%</span>
+                  <span className="text-amber-700 font-bold text-base">{selectedSupplier.commission_rate_effective}%</span>
                 </div>
               </div>
 
@@ -430,79 +480,97 @@ export default function SupplierApprovalView() {
                 </div>
               </div>
 
-              {/* Cashfree SecureID KYB Verification Suite Section */}
-              <div className="bg-gradient-to-br from-amber-500/10 via-amber-50 to-emerald-500/10 border border-amber-300 rounded-2xl p-5 space-y-4 shadow-xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-amber-700" />
-                    <div>
-                      <h3 className="text-xs font-mono font-bold text-stone-900 uppercase tracking-wider">
-                        Cashfree SecureID KYB Engine
-                      </h3>
-                      <span className="text-[10px] text-stone-500">Real-Time GSTIN, PAN & Bank Account Verification</span>
+              {/* Cashfree SecureID KYB Verification Suite Section: Indian suppliers only (ADR 023) */}
+              {selectedSupplier.kybReadiness?.cashfree !== false && (
+                <div className="bg-gradient-to-br from-amber-500/10 via-amber-50 to-emerald-500/10 border border-amber-300 rounded-2xl p-5 space-y-4 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-5 h-5 text-amber-700" />
+                      <div>
+                        <h3 className="text-xs font-mono font-bold text-stone-900 uppercase tracking-wider">
+                          Cashfree SecureID KYB Engine
+                        </h3>
+                        <span className="text-[10px] text-stone-500">Real-Time GSTIN, PAN & Bank Account Verification</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={autoVerifying}
+                      onClick={handleRunAutoVerify}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs transition shadow-xs disabled:opacity-50"
+                    >
+                      {autoVerifying ? (
+                        <>
+                          <Clock className="w-3.5 h-3.5 animate-spin" />
+                          <span>Auditing…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Run SecureID Audit</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2.5 text-xs font-mono">
+                    {/* GSTIN Badge */}
+                    <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-stone-500 block">GSTIN STATUS</span>
+                      <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.gstin_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                        {selectedSupplier.gstin_verified === 1 ? `Active (${selectedSupplier.gstin_verified_status || "Valid"})` : "Unverified"}
+                      </span>
+                      {selectedSupplier.gstin_verified_name && (
+                        <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.gstin_verified_name}>
+                          {selectedSupplier.gstin_verified_name}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* PAN Badge */}
+                    <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-stone-500 block">PAN STATUS</span>
+                      <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.pan_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                        {selectedSupplier.pan_verified === 1 ? `Valid (${selectedSupplier.pan_type || "Company"})` : "Unverified"}
+                      </span>
+                      {selectedSupplier.pan_verified_name && (
+                        <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.pan_verified_name}>
+                          {selectedSupplier.pan_verified_name}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Bank Penny Drop Badge */}
+                    <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
+                      <span className="text-[10px] text-stone-500 block">BANK PENNY-DROP</span>
+                      <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.bank_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
+                        {selectedSupplier.bank_verified === 1 ? `Match: ${selectedSupplier.bank_match_score || 100}%` : "Unverified"}
+                      </span>
+                      {selectedSupplier.bank_verified_name && (
+                        <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.bank_verified_name}>
+                          {selectedSupplier.bank_verified_name}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    disabled={autoVerifying}
-                    onClick={handleRunAutoVerify}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs transition shadow-xs disabled:opacity-50"
-                  >
-                    {autoVerifying ? (
-                      <>
-                        <Clock className="w-3.5 h-3.5 animate-spin" />
-                        <span>Auditing…</span>
-                      </>
+
+                  {selectedSupplier.kybReadiness?.identity && (
+                    selectedSupplier.kybReadiness.identity.verified ? (
+                      <p className="text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                        GSTIN and PAN verified by Cashfree SecureID, and the GSTIN is registered to this PAN.
+                        {selectedSupplier.kyb_status === "PENDING" ? " Approval will apply automatically." : ""}
+                      </p>
                     ) : (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span>Run SecureID Audit</span>
-                      </>
-                    )}
-                  </button>
+                      <div className="text-[11px] text-amber-900 bg-white/80 border border-amber-200 rounded-xl px-3 py-2">
+                        <span className="font-bold block">Not eligible for automatic approval:</span>
+                        <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                          {selectedSupplier.kybReadiness.identity.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                        </ul>
+                      </div>
+                    )
+                  )}
                 </div>
-
-                <div className="grid grid-cols-3 gap-2.5 text-xs font-mono">
-                  {/* GSTIN Badge */}
-                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
-                    <span className="text-[10px] text-stone-500 block">GSTIN STATUS</span>
-                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.gstin_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
-                      {selectedSupplier.gstin_verified === 1 ? `Active (${selectedSupplier.gstin_verified_status || "Valid"})` : "Unverified"}
-                    </span>
-                    {selectedSupplier.gstin_verified_name && (
-                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.gstin_verified_name}>
-                        {selectedSupplier.gstin_verified_name}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* PAN Badge */}
-                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
-                    <span className="text-[10px] text-stone-500 block">PAN STATUS</span>
-                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.pan_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
-                      {selectedSupplier.pan_verified === 1 ? `Valid (${selectedSupplier.pan_type || "Company"})` : "Unverified"}
-                    </span>
-                    {selectedSupplier.pan_verified_name && (
-                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.pan_verified_name}>
-                        {selectedSupplier.pan_verified_name}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Bank Penny Drop Badge */}
-                  <div className="bg-white/90 border border-stone-200 p-2.5 rounded-xl">
-                    <span className="text-[10px] text-stone-500 block">BANK PENNY-DROP</span>
-                    <span className={`font-bold block mt-0.5 text-xs ${selectedSupplier.bank_verified === 1 ? "text-emerald-700" : "text-amber-800"}`}>
-                      {selectedSupplier.bank_verified === 1 ? `Match: ${selectedSupplier.bank_match_score || 100}%` : "Unverified"}
-                    </span>
-                    {selectedSupplier.bank_verified_name && (
-                      <span className="text-[9px] text-stone-600 block mt-0.5 truncate font-sans" title={selectedSupplier.bank_verified_name}>
-                        {selectedSupplier.bank_verified_name}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
+              )}
 
               {/* Tax & Legal Documents (GSTIN, PAN) */}
               <div className="bg-[#FAF9F6] border border-stone-200 rounded-2xl p-5 space-y-3">
@@ -512,11 +580,11 @@ export default function SupplierApprovalView() {
                 <div className="grid grid-cols-2 gap-4 text-xs font-mono">
                   <div className="bg-white border border-stone-200 p-3 rounded-xl">
                     <span className="text-stone-500 text-[10px] block uppercase">GSTIN Number</span>
-                    <span className="text-amber-800 font-bold text-sm block mt-0.5">{selectedSupplier.gstin || "09AAACA1234A1Z5"}</span>
+                    <span className="text-amber-800 font-bold text-sm block mt-0.5">{selectedSupplier.gstin || <NotProvided />}</span>
                   </div>
                   <div className="bg-white border border-stone-200 p-3 rounded-xl">
                     <span className="text-stone-500 text-[10px] block uppercase">PAN Number</span>
-                    <span className="text-stone-900 font-bold text-sm block mt-0.5">{selectedSupplier.pan_number || "AAACA1234A"}</span>
+                    <span className="text-stone-900 font-bold text-sm block mt-0.5">{selectedSupplier.pan_number || <NotProvided />}</span>
                   </div>
                 </div>
               </div>
@@ -529,47 +597,107 @@ export default function SupplierApprovalView() {
                 <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                   <div className="bg-white border border-stone-200 p-3 rounded-xl">
                     <span className="text-stone-500 block">Account Number</span>
-                    <span className="text-emerald-700 font-bold">{selectedSupplier.bankDetails?.account_number || "91827364512"}</span>
+                    <span className="text-emerald-700 font-bold">{selectedSupplier.bankDetails?.account_number || <NotProvided />}</span>
                   </div>
                   <div className="bg-white border border-stone-200 p-3 rounded-xl">
                     <span className="text-stone-500 block">IFSC Code</span>
-                    <span className="text-stone-900 font-bold">{selectedSupplier.bankDetails?.ifsc || "HDFC0000123"}</span>
+                    <span className="text-stone-900 font-bold">{selectedSupplier.bankDetails?.ifsc || <NotProvided />}</span>
                   </div>
                   <div className="bg-white border border-stone-200 p-3 rounded-xl">
                     <span className="text-stone-500 block">Bank Name</span>
-                    <span className="text-stone-900 font-bold">{selectedSupplier.bankDetails?.bank_name || "HDFC Bank"}</span>
+                    <span className="text-stone-900 font-bold">{selectedSupplier.bankDetails?.bank_name || <NotProvided />}</span>
                   </div>
                   <div className="bg-white border border-stone-200 p-3 rounded-xl">
                     <span className="text-stone-500 block">UPI ID</span>
-                    <span className="text-stone-900 font-bold">{selectedSupplier.bankDetails?.upi_id || `${selectedSupplier.company_name?.toLowerCase().replace(/\s+/g, "")}@upi`}</span>
+                    <span className="text-stone-900 font-bold">{selectedSupplier.bankDetails?.upi_id || <NotProvided />}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Commercial Transport License Attachment */}
+              {/* KYB Documents uploaded by the supplier */}
               <div className="bg-[#FAF9F6] border border-stone-200 rounded-2xl p-5 space-y-3">
                 <h3 className="text-xs font-mono font-bold text-amber-800 uppercase tracking-wider flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-amber-600" /> Commercial Transport License Attachment
+                  <ShieldCheck className="w-4 h-4 text-amber-600" /> KYB Documents{selectedSupplier.kybReadiness?.country ? ` · ${selectedSupplier.kybReadiness.country}` : ""}
                 </h3>
 
-                <div className="bg-white border border-stone-200 rounded-xl p-4 flex items-center justify-between">
-                  <div className="space-y-1">
-                    <div className="font-bold text-xs text-stone-900 font-mono">
-                      {selectedSupplier.attachments?.commercialLicense?.doc_number || "CTL-COMMERCIAL-PERMIT-2026"}
-                    </div>
-                    <div className="text-[10px] text-stone-500">
-                      Official Commercial Fleet Operator Permit & License
-                    </div>
+                {(selectedSupplier.kybReadiness?.requiredDocuments || []).length > 0 && (
+                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    {selectedSupplier.kybReadiness.requiredDocuments.map((required) => (
+                      <li
+                        key={required.docType}
+                        className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${required.uploaded ? "bg-emerald-50 border-emerald-200 text-emerald-900" : "bg-rose-50 border-rose-200 text-rose-900"}`}
+                      >
+                        {required.uploaded ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <XCircle className="w-4 h-4 shrink-0" />}
+                        <span><strong>{required.label}</strong> — {required.uploaded ? "uploaded" : "missing (required)"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {selectedSupplier.kybReadiness?.ownerChecks && (
+                  <div className="mb-3 text-[11px] bg-white border border-stone-200 rounded-xl p-3 space-y-0.5">
+                    <div className="font-bold text-stone-900">Names from Cashfree: check they are the same person</div>
+                    <div>PAN: <strong>{selectedSupplier.kybReadiness.ownerChecks.pan?.name || "Not verified"}</strong></div>
+                    <div>Driving licence: <strong>{selectedSupplier.kybReadiness.ownerChecks.licence?.name || "Not checked"}</strong></div>
+                    <div>Vehicle RC owner: <strong>{selectedSupplier.kybReadiness.ownerChecks.vehicle?.name || "Not checked"}</strong></div>
                   </div>
-                  <button
-                    onClick={() => setPreviewDoc(selectedSupplier.attachments?.commercialLicense?.doc_url || "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80")}
-                    className="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5"
-                  >
-                    <Eye className="w-3.5 h-3.5" /> View Document
-                  </button>
-                </div>
+                )}
+
+                {(selectedSupplier.kybDocs || []).length === 0 ? (
+                  <p className="text-xs text-stone-500 bg-white border border-dashed border-stone-300 rounded-xl p-4 text-center">
+                    This supplier has not uploaded any KYB documents.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {selectedSupplier.kybDocs.map((doc) => (
+                      <li key={doc.id} className="bg-white border border-stone-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="font-bold text-xs text-stone-900">{kybDocLabel(doc.doc_type)}</div>
+                          <div className="text-[11px] font-mono text-stone-600">
+                            Number: {doc.doc_number || <NotProvided />}
+                          </div>
+                          <div className="text-[10px] text-stone-500 flex flex-wrap gap-x-3">
+                            <span>Status: <strong className="text-stone-700">{doc.status || "PENDING"}</strong></span>
+                            {formatDate(doc.submitted_at) && <span>Submitted {formatDate(doc.submitted_at)}</span>}
+                          </div>
+                          {doc.rejection_reason && <div className="text-[10px] text-rose-700">Note: {doc.rejection_reason}</div>}
+                        </div>
+                        <div className="shrink-0 flex flex-wrap gap-2">
+                        {doc.has_file && doc.status !== "REJECTED" && (
+                          <button
+                            type="button"
+                            disabled={actionLoading}
+                            onClick={() => handleRequestReupload(doc)}
+                            className="bg-white hover:bg-rose-50 text-rose-800 border border-rose-300 px-3 py-1.5 rounded-xl font-bold text-xs disabled:opacity-50"
+                          >
+                            Ask to upload again
+                          </button>
+                        )}
+                        {doc.has_file ? (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewDoc({
+                              fileUrl: `/api/admin/suppliers/${selectedSupplier.id}/kyb/${doc.id}/file`,
+                              title: `${kybDocLabel(doc.doc_type)} — ${selectedSupplier.company_name}`,
+                            })}
+                            className="shrink-0 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> View Document
+                          </button>
+                        ) : (
+                          <span className="shrink-0 text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-1.5">
+                            No file uploaded
+                          </span>
+                        )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
+
+            <SupplierProfileAdminPanel supplierId={selectedSupplier.id} />
 
             {/* Action Buttons: One-Click Approve / Reject / Suspend */}
             <div className="pt-6 border-t border-stone-200 space-y-3">
@@ -577,12 +705,19 @@ export default function SupplierApprovalView() {
                 Approving or rejecting updates <code className="text-amber-800 font-bold">supplier.is_verified</code> and records email and WhatsApp delivery results for this partner.
               </div>
 
+              {selectedSupplier.kyb_status !== "APPROVED" && selectedSupplier.kybReadiness && !selectedSupplier.kybReadiness.canApprove && (
+                <div role="note" className="text-xs text-rose-900 bg-rose-50 border border-rose-200 rounded-2xl px-4 py-3">
+                  <strong>Approval is blocked.</strong> Missing: {selectedSupplier.kybReadiness.missingDocuments.join(", ")}.
+                  {selectedSupplier.kybReadiness.cashfree ? "The supplier must upload these, or verify their GSTIN and PAN with Cashfree SecureID." : "The supplier must upload these."}
+                </div>
+              )}
+
               {!["APPROVED", "SUSPENDED"].includes(selectedSupplier.kyb_status) && (
                 <div className="grid grid-cols-2 gap-3">
                   <button
-                    disabled={actionLoading}
+                    disabled={actionLoading || selectedSupplier.kybReadiness?.canApprove === false}
                     onClick={() => handleVerifyAction("APPROVED", "Supplier approved by administrator.")}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 text-xs"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <CheckCircle2 className="w-4 h-4" />
                     {actionLoading ? "Saving KYB Decision…" : "Approve Supplier & Send Email"}
@@ -613,7 +748,7 @@ export default function SupplierApprovalView() {
 
               {selectedSupplier.kyb_status === "SUSPENDED" && (
                 <button
-                  disabled={actionLoading}
+                  disabled={actionLoading || selectedSupplier.kybReadiness?.canApprove === false}
                   onClick={() => handleVerifyAction("APPROVED", "Supplier account reactivated by administrator.")}
                   className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-2xl transition-all flex items-center justify-center gap-2 text-xs disabled:opacity-50 shadow-sm"
                 >
@@ -701,28 +836,9 @@ export default function SupplierApprovalView() {
         </div>
       )}
 
-      {/* DOCUMENT ATTACHMENT PREVIEW MODAL */}
+      {/* DOCUMENT PREVIEW MODAL */}
       {previewDoc && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="max-w-3xl w-full bg-white border border-stone-200 rounded-3xl p-6 space-y-4 shadow-2xl relative">
-            <button
-              onClick={() => setPreviewDoc(null)}
-              className="absolute top-4 right-4 p-2 bg-stone-100 text-stone-600 hover:text-stone-900 border border-stone-200 rounded-xl"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <h3 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-amber-600" /> Attachment Document Viewer
-            </h3>
-            <div className="bg-[#FAF9F6] border border-stone-200 rounded-2xl overflow-hidden h-96 flex items-center justify-center">
-              <img
-                src={previewDoc}
-                alt="Commercial Transport License"
-                className="max-h-full object-contain"
-              />
-            </div>
-          </div>
-        </div>
+        <KybDocumentViewer fileUrl={previewDoc.fileUrl} title={previewDoc.title} onClose={() => setPreviewDoc(null)} />
       )}
     </div>
   );

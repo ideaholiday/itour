@@ -1,10 +1,28 @@
+import { z } from "zod";
+import { confirmDriverByPhone, dispatchReadiness, effectiveDispatchSettings, listDispatchExceptions, processDispatchSchedule, TRIP_ISSUE_TASK_TYPES } from "../services/dispatchWorkflowService.js";
+import { dispatchTransaction } from "../services/dispatchStateService.js";
+import {
+  getInventoryRules, saveInventoryRules,
+  listPriceSchedules, savePriceSchedule, deletePriceSchedule,
+  listSlotOverrides, saveSlotOverride, deleteSlotOverride,
+  saveSlotOverrideRange, deleteSlotOverrideRange,
+  listResources, saveResource, deleteResource,
+  listPromotions, savePromotion, deletePromotion,
+  listNativeAvailability,
+} from "../services/nativeInventoryService.js";
+import { createSupplierBooking, listDirectPayments, quoteSupplierBooking, recordDirectPayment, supplierDayAvailability } from "../services/supplierBookingService.js";
+import { isServiceablePayment } from "../lib/bookingSources.js";
+import { guestDocumentLinks } from "../services/guestDocumentService.js";
+import { getProductOptions, ensureDefaultProductOption } from "../services/logisticsService.js";
+import { activityPath } from "../../../shared/activityUrl.js";
 import express from "express";
 import db, { databaseInfo } from "../db.js";
 import { canTransitionBooking } from "../services/bookingService.js";
 import { authenticate, optionalAuthMiddleware, requireRoles, requireSupplierSelf } from "../middleware/auth.js";
 import logger from "../config/logger.js";
 import { validateTransferMeta } from "../lib/transferListing.js";
-import { resolveIndiaCatalogLocation } from "../lib/locationCatalog.js";
+import { listingOpenIn, resolveCatalogLocation } from "../lib/locationCatalog.js";
+import { productTime } from "../lib/localTime.js";
 import { respondToSupplierAssignment } from "../services/assignmentSlaService.js";
 import { respondToCircuitReconfirmation } from "../services/circuitOrchestrationService.js";
 import { evaluateSupplierAvailability, normalizeAvailabilityRule } from "../services/availabilityService.js";
@@ -12,10 +30,12 @@ import {
   notifyDispatchStatusChanged,
   notifyDriverAssigned,
   notifyCircuitReschedule,
-  notifyRefundProcessed,
+  notifySupplierVerification,
   queueNotification,
   sendGuestBookingNotification,
 } from "../services/notificationService.js";
+import { KYB_FILE_SCHEME, kybFileName, sendKybDocumentFile } from "../services/kybFileService.js";
+import { autoApproveSupplierKyb, getKybApprovalReadiness, isIndividualOwner, missingTransferDocument, supplierCountry, supplierKybRules, transferDocumentError } from "../services/supplierVerificationService.js";
 import {
   assignDriverToBooking,
   getDispatchTimeline,
@@ -25,23 +45,93 @@ import {
   updateDispatchStatus,
 } from "../services/driverDispatchService.js";
 
-import { calculateRefundQuote, createRefundRecord, finalizeRefund, getSupplierPayoutLedger } from "../services/financeService.js";
+import { getSupplierPayoutLedger, resolveCommissionRate } from "../services/financeService.js";
+import { cancelBookingBySupplier, cancelDeparture, checkInBooking, departureManifest, manifestCsv, setAttendance } from "../services/supplierDepartureService.js";
+import { getSubscriptionStatus } from "../services/supplierSubscriptionService.js";
+import {
+  listSubscriptionPayments, listSupplierSpotlights, quotePlanPayment, quoteSubscriptionPayment, renderSubscriptionInvoice,
+  startPlanPayment, startSubscriptionPayment, swapSpotlight, verifySubscriptionPayment,
+} from "../services/supplierPlanPaymentService.js";
+import { deriveBadge } from "../services/supplierProfileService.js";
+import { getSettings } from "../services/programSettingsService.js";
+import { supplierShareKit } from "../services/supplierShareKitService.js";
 import {
   verifyGstin,
   verifyPan,
   verifyBankAccount,
   verifyPanToGstin,
+  verifyDrivingLicence,
+  verifyVehicleRc,
   runComprehensiveSupplierKyb,
 } from "../services/cashfreeSecureIdService.js";
 import { nanoid } from "nanoid";
-import { validateBody } from "../middleware/validation.js";
-import { bookingSchemas, supplierSchemas } from "../validators/apiSchemas.js";
+import { validateBody, validateQuery } from "../middleware/validation.js";
+import { bookingSchemas, profileSchemas, supplierSchemas } from "../validators/apiSchemas.js";
+import { ensurePublicSlug, ownerProfileView, updateSupplierProfile } from "../services/supplierProfileService.js";
 import { PricingRuleService } from "../services/pricingRuleService.js";
 import { backfillProductOptions } from "../services/logisticsService.js";
+import { backfillProductLocationRules } from "../data/canonicalLocations.js";
+import { onReferralBookingCancelled, onReferralTripCompleted } from "../services/referralService.js";
+import { assignResource, bookingCalendar, departureBoard, guideDepartureScope, unassignResource } from "../services/departureBoardService.js";
+import { rescheduleBySupplier } from "../services/supplierRescheduleService.js";
+import { supplierAnalytics, supplierDashboardStats } from "../services/supplierDashboardService.js";
+import { agentStatement, listAgents, recordAgentPayment, saveAgent, setAgentRates } from "../services/supplierAgentService.js";
+import { addHotelRate, deleteHotelRate, listHotels, saveHotel } from "../services/supplierHotelService.js";
+import { bookQuotationLine, findQuotation, listQuotations, quotationShareUrl, quotationView, recordQuotationPayment, saveQuotation, setQuotationStatus } from "../services/quotationService.js";
+import { quotationPdf } from "../services/quotationPdfService.js";
+import { createResellerKey, listResellerKeys, revokeResellerKey, setProductChannels } from "../services/supplierChannelSettingsService.js";
+import { sendEmail } from "../services/emailService.js";
+import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
 
 const router = express.Router();
+
+// Approves a pending supplier once Cashfree has verified their GSTIN and PAN,
+// and tells them by email and WhatsApp. Never fails the check that triggered it.
+function applyKybAutoApproval(req, supplierId) {
+  try {
+    const outcome = autoApproveSupplierKyb(db, supplierId, {
+      notify: (payload) => queueNotification(notifySupplierVerification(payload), `KYB auto-approval notification for ${supplierId}`),
+    });
+    if (outcome.approved) logger.info("Supplier KYB auto-approved by Cashfree SecureID", { requestId: req.requestId, supplierId });
+    return outcome;
+  } catch (error) {
+    logger.error("Supplier KYB auto-approval failed", { requestId: req.requestId, supplierId, error });
+    return { approved: false, supplier: null, identity: null };
+  }
+}
+
+// An individual owner whose checks already passed is approved when the last
+// required document arrives (ADR 024 C4). Businesses still approve on GSTIN + PAN.
+function ownerDocumentAutoApproval(req, supplierId) {
+  const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
+  return isIndividualOwner(supplier) ? applyKybAutoApproval(req, supplierId).approved : false;
+}
+
+// A transfer goes live only once its supplier's vehicle document is on file
+// where their country requires one (Thailand, ADR 023). Returns the error or null.
+// Checks the supplier's own country only: an Indian supplier's transfer abroad
+// is covered by its Indian KYB (owner decision 2026-09-22, ADR 024).
+function transferPublishRefusal(supplierId) {
+  const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
+  const missing = supplier && missingTransferDocument(db, supplier);
+  return missing ? transferDocumentError(missing) : null;
+}
+
+// Cashfree SecureID checks Indian GSTIN and PAN only; suppliers abroad are
+// approved by an admin from their own country's documents (ADR 023), and so are
+// individual vehicle owners, who have no GSTIN (ADR 024).
+// `check` is GSTIN (the default), PAN, DRIVING_LICENSE or VEHICLE_RC: every Indian
+// supplier may check PAN, licences and vehicles; only businesses check a GSTIN.
+function cashfreeIdentityRefusal(supplier, check = "GSTIN") {
+  if (supplierKybRules(db, supplier).cashfree) return null;
+  if (isIndividualOwner(supplier) && supplierCountry(db, supplier) === "India" && check !== "GSTIN") return null;
+  if (isIndividualOwner(supplier)) return "GSTIN checks are for registered businesses. Individual vehicle owners upload their documents for an admin to review.";
+  return `GSTIN and PAN checks are for Indian suppliers. Suppliers in ${supplierCountry(db, supplier)} upload their documents for an admin to review.`;
+}
+
+const autoApprovalMessage = "Your GSTIN and PAN are verified, so your account is now approved and your published listings can be booked.";
 router.use(authenticate);
-const databaseList = (value) => databaseInfo.engine === "postgres" ? value : JSON.stringify(value);
+const databaseList = (value) => JSON.stringify(value);
 
 function requireSupplierAccess(req, res, next) {
   const role = String(req.user?.role || "").toUpperCase();
@@ -72,6 +162,184 @@ router.get("/", requireRoles("ADMIN", "STAFF"), (req, res) => {
 
 router.use("/:id", requireSupplierSelf("id"));
 
+// Staff logins (ADR 036): a manager, front desk or guide reaches only what their
+// role allows. Admins, operations staff and the owner (no member role) pass.
+router.use("/:id", (req, res, next) => {
+  const supplierRole = String(req.user?.role || "").toUpperCase() === "SUPPLIER" ? req.user?.supplier_role : null;
+  if (!supplierRole || supplierRoleAllows(supplierRole, req.method, req.path)) return next();
+  logger.warn("Supplier staff action denied", { requestId: req.requestId, actorId: req.user.id, supplierRole, method: req.method, path: req.path });
+  return res.status(403).json({ error: "Your staff role does not allow this. Ask the account owner.", code: "SUPPLIER_ROLE_FORBIDDEN" });
+});
+
+/** The signed-in supplier user's role on this account; admins and ops count as the owner. */
+function supplierRoleOf(req) {
+  return String(req.user?.role || "").toUpperCase() === "SUPPLIER" ? req.user?.supplier_role || OWNER_ROLE : OWNER_ROLE;
+}
+
+/** A guide linked to a guide resource works only their assigned departures (ADR 037); null is no limit. */
+function departureScopeOf(req) {
+  return supplierRoleOf(req) === "GUIDE" ? guideDepartureScope(db, req.params.id, req.user.id) : null;
+}
+
+// Supplier subscription (ADR 017): status, price, online payment and GST invoices.
+function subscriptionFailure(res, req, error, fallback) {
+  if (error.status && error.status < 500 || error.status === 502) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+// Staff logins (ADR 036). Owner only: the role gate above refuses /staff to members.
+function staffFailure(res, req, error, fallback) {
+  if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+router.get("/:id/staff", (req, res) => {
+  try {
+    res.json({ success: true, members: listStaff(db, req.params.id) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not load your staff");
+  }
+});
+
+// Temporary password returned once.
+router.post("/:id/staff", validateBody(supplierSchemas.staffMember), (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.status(201).json({ success: true, ...addStaffMember(db, req.params.id, req.body, req.user) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not add the staff member");
+  }
+});
+
+router.patch("/:id/staff/:userId", validateBody(supplierSchemas.staffMemberUpdate), (req, res) => {
+  try {
+    res.json({ success: true, member: updateStaffMember(db, req.params.id, req.params.userId, req.body) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not update the staff member");
+  }
+});
+
+router.delete("/:id/staff/:userId", (req, res) => {
+  try {
+    res.json({ success: true, ...removeStaffMember(db, req.params.id, req.params.userId) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not remove the staff member");
+  }
+});
+
+router.post("/:id/staff/:userId/reset-password", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...resetStaffPassword(db, req.params.id, req.params.userId) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not reset the password");
+  }
+});
+
+// Share kit (docs/SHARE_KIT.md): links, QR/print URLs, embed code and scan counts.
+router.get("/:id/share-kit", (req, res) => {
+  try {
+    res.json({ success: true, shareKit: supplierShareKit(db, req.params.id, { actorId: req.user.id }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the share kit");
+  }
+});
+
+router.get("/:id/subscription", (req, res) => {
+  try {
+    const { priceInr, billingPeriodMonths } = getSettings(db, "supplier_subscriptions");
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(req.params.id);
+    const pendingCheck = db.prepare("SELECT created_at FROM supplier_verifications WHERE supplier_id = ? AND status = 'PENDING_CHECKS'").get(req.params.id);
+    res.json({
+      success: true,
+      subscription: getSubscriptionStatus(db, req.params.id),
+      plan: priceInr ? { priceInr, billingPeriodMonths, gstRatePct: 18 } : null,
+      // Profile plans (ADR 008): the Verified check, Spotlights and Verified Plus.
+      profilePlans: { ...getSettings(db, "supplier_plans"), gstRatePct: 18 },
+      verification: { badge: supplier ? deriveBadge(db, supplier) : null, checkPendingSince: pendingCheck?.created_at || null, kybStatus: supplier?.kyb_status || null },
+      spotlights: listSupplierSpotlights(db, req.params.id),
+      spotlightableProducts: db.prepare(`
+        SELECT id, title FROM products WHERE supplier_id = ? AND status = 'PUBLISHED'
+          AND id NOT IN (SELECT product_id FROM product_spotlights WHERE status = 'ACTIVE') ORDER BY title
+      `).all(req.params.id),
+      payments: listSubscriptionPayments(db, req.params.id),
+    });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the subscription");
+  }
+});
+
+router.post("/:id/subscription/quote", (req, res) => {
+  try {
+    res.json({ success: true, quote: quoteSubscriptionPayment(db, req.params.id, { couponCode: req.body?.couponCode || null }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not price the subscription");
+  }
+});
+
+router.post("/:id/subscription/checkout", async (req, res) => {
+  try {
+    const result = await startSubscriptionPayment(db, req.params.id, {
+      couponCode: req.body?.couponCode || null,
+      actorId: req.user.id,
+      returnUrl: typeof req.body?.returnUrl === "string" ? req.body.returnUrl : null,
+    });
+    res.status(201).json({ success: true, ...result, payment: listSubscriptionPayments(db, req.params.id).find((row) => row.id === result.payment.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not start the payment");
+  }
+});
+
+router.post("/:id/plans/quote", (req, res) => {
+  try {
+    res.json({ success: true, quote: quotePlanPayment(db, req.params.id, { planCode: req.body?.planCode, productId: req.body?.productId || null, couponCode: req.body?.couponCode || null }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not price the plan");
+  }
+});
+
+router.post("/:id/plans/checkout", async (req, res) => {
+  try {
+    const result = await startPlanPayment(db, req.params.id, {
+      planCode: req.body?.planCode,
+      productId: req.body?.productId || null,
+      couponCode: req.body?.couponCode || null,
+      actorId: req.user.id,
+      returnUrl: typeof req.body?.returnUrl === "string" ? req.body.returnUrl : null,
+    });
+    res.status(201).json({ success: true, ...result, payment: listSubscriptionPayments(db, req.params.id).find((row) => row.id === result.payment.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not start the payment");
+  }
+});
+
+router.post("/:id/spotlights/:spotlightId/swap", (req, res) => {
+  try {
+    res.json({ success: true, spotlight: swapSpotlight(db, req.params.id, req.params.spotlightId, { productId: String(req.body?.productId || "") }) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not change the Spotlight");
+  }
+});
+
+router.post("/:id/subscription/payments/:paymentId/verify", async (req, res) => {
+  try {
+    const payment = await verifySubscriptionPayment(db, req.params.id, req.params.paymentId);
+    res.json({ success: true, status: payment.status, invoiceNumber: payment.invoice_number, subscription: getSubscriptionStatus(db, req.params.id) });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not verify the payment");
+  }
+});
+
+router.get("/:id/subscription/payments/:paymentId/invoice", (req, res) => {
+  try {
+    res.type("html").send(renderSubscriptionInvoice(db, req.params.id, req.params.paymentId));
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the invoice");
+  }
+});
+
 // GET /api/suppliers/:id - Fetch single supplier profile with KYB, products, bookings, drivers, blocked dates & payouts
 router.get("/:id", (req, res) => {
   try {
@@ -89,13 +357,15 @@ router.get("/:id", (req, res) => {
       ORDER BY COALESCE(p.created_at, '') DESC, p.rowid DESC
     `).all(id);
     const bookings = db.prepare(`
-      SELECT b.*, p.title as product_title, p.hero_image, p.city, p.is_instant_booking, p.cancellation_policy,
+      SELECT b.*, p.title as product_title, p.hero_image, p.city, p.is_instant_booking, p.cancellation_policy, ag.name AS agent_name,
              da.driver_name, da.driver_phone, da.vehicle_model, da.vehicle_number, da.assignment_status,
-             da.supplier_driver_id, da.assignment_source, da.assigned_at, da.last_status_at,
-             da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at
+             da.supplier_driver_id, da.acknowledgement, da.response_deadline, da.driver_email, da.assignment_source, da.assigned_at, da.last_status_at,
+             da.en_route_at, da.arrived_at, da.trip_started_at, da.completed_at,
+             da.last_lat AS driver_last_lat, da.last_lng AS driver_last_lng, da.last_accuracy_m AS driver_last_accuracy_m, da.last_location_at AS driver_last_location_at
       FROM bookings b
       LEFT JOIN products p ON b.product_id = p.id
       LEFT JOIN driver_assignments da ON b.id = da.booking_id
+      LEFT JOIN supplier_agents ag ON ag.id = b.agent_id
       WHERE b.supplier_id = ?
       ORDER BY b.created_at DESC
     `).all(id).map((booking) => {
@@ -111,22 +381,39 @@ router.get("/:id", (req, res) => {
       WHERE p.supplier_id = ? ORDER BY COALESCE(p.processed_at, p.created_at) DESC
     `).all(id);
 
-    res.json({
+    const detail = {
       success: true,
-      supplier,
+      access: { role: supplierRoleOf(req) },
+      supplier: { ...supplier, commission_rate_effective: resolveCommissionRate(db, supplier.id) },
+      subscription: getSubscriptionStatus(db, supplier.id),
       kybDocs,
+      kybReadiness: getKybApprovalReadiness(db, supplier),
       geoFences,
-      products,
+      products: products.map((product) => ({ ...product, commission_rate_effective: resolveCommissionRate(db, supplier.id, product.id) })),
       bookings,
       drivers,
       blockedDates,
       payouts
-    });
+    };
+    res.json(staffSupplierView(detail));
   } catch (err) {
     logger.error("Supplier lookup failed", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to fetch supplier details" });
   }
 });
+
+// Staff never see bank, PAN, KYB documents or payouts (ADR 036). A guide works
+// from the departure manifest, so gets no booking, driver or payment lists.
+const OWNER_ONLY_SUPPLIER_FIELDS = ["payout_bank_details", "pan_number", "pan_verified_name", "bank_verified_name", "bank_match_score"];
+function staffSupplierView(detail) {
+  const { role } = detail.access;
+  if (role === OWNER_ROLE) return detail;
+  const supplier = { ...detail.supplier };
+  for (const field of OWNER_ONLY_SUPPLIER_FIELDS) delete supplier[field];
+  const view = { ...detail, supplier, kybDocs: [], kybReadiness: null, payouts: [] };
+  if (role === "GUIDE") Object.assign(view, { bookings: [], drivers: [], blockedDates: [], geoFences: [] });
+  return view;
+}
 
 // POST /api/suppliers/register - Register a new fleet vendor / tour operator
 router.post("/register", validateBody(supplierSchemas.registration), (req, res) => {
@@ -139,6 +426,7 @@ router.post("/register", validateBody(supplierSchemas.registration), (req, res) 
       `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, gstin, pan_number, kyb_status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`
     ).run(id, id, companyName, contactName, email, phone, city, state, gstin || null, panNumber || null);
+    ensurePublicSlug(db, { id, company_name: companyName, city });
 
     res.json({ success: true, supplierId: id, message: "Supplier registered successfully! KYB verification pending." });
   } catch (err) {
@@ -151,10 +439,34 @@ router.post("/register", validateBody(supplierSchemas.registration), (req, res) 
 router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
   try {
     const { id } = req.params;
-    const docType = req.body.docType || req.body.doc_type || "OTHER";
-    const docNumber = req.body.docNumber || req.body.doc_number || `DOC-${Date.now().toString().slice(-6)}`;
-    const docUrl = req.body.docUrl || req.body.doc_url || "https://example.com/docs/uploaded.pdf";
+    const docType = String(req.body.docType || req.body.doc_type || "OTHER").trim().toUpperCase();
+    const docNumber = String(req.body.docNumber || req.body.doc_number || "").trim() || null;
+    const docUrl = String(req.body.docUrl || req.body.doc_url || "").trim();
     const docId = `kyb_${nanoid(10)}`;
+    // The full Aadhaar number is never stored; at most its last 4 digits (ADR 024).
+    if (docType === "AADHAAR_MASKED" && docNumber && !/^\d{4}$/.test(docNumber)) {
+      return res.status(400).json({ error: "Enter only the last 4 digits of your Aadhaar number." });
+    }
+
+    // A document is only accepted with a file this supplier uploaded as KYB,
+    // so an admin never reviews a placeholder link or someone else's file.
+    const filename = docUrl.startsWith(KYB_FILE_SCHEME) ? kybFileName(docUrl) : null;
+    const upload = filename
+      ? db.prepare("SELECT id, mime_type FROM uploads WHERE filename = ? AND UPPER(COALESCE(entity_type, '')) = 'KYB' AND entity_id = ?").get(filename, id)
+      : null;
+    if (!upload) {
+      return res.status(400).json({ error: "Upload the document file (PDF or image) before submitting it." });
+    }
+    if (docType === "SELFIE" && !String(upload.mime_type || "").startsWith("image/")) {
+      return res.status(400).json({ error: "Take your selfie with the camera; a PDF is not accepted." });
+    }
+    // An individual owner verifies their PAN with Cashfree before uploading the card (owner decision 2026-09-24).
+    if (docType === "PAN") {
+      const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+      if (isIndividualOwner(supplier) && Number(supplier.pan_verified) !== 1) {
+        return res.status(400).json({ error: "Verify your PAN number first, then upload the PAN card." });
+      }
+    }
 
     // Check if a document of this type already exists for this supplier
     const existing = db.prepare("SELECT * FROM kyb_documents WHERE supplier_id = ? AND doc_type = ?").get(id, docType);
@@ -164,22 +476,34 @@ router.post("/:id/kyb", validateBody(supplierSchemas.kyb), (req, res) => {
         `UPDATE kyb_documents
          SET doc_number = ?, doc_url = ?, status = 'PENDING', rejection_reason = NULL, review_note = NULL, submitted_at = datetime('now')
          WHERE id = ?`
-      ).run(docNumber, docUrl || existing.doc_url || "https://example.com/docs/uploaded.pdf", existing.id);
+      ).run(docNumber, docUrl, existing.id);
 
       const updatedDoc = db.prepare("SELECT * FROM kyb_documents WHERE id = ?").get(existing.id);
-      return res.json({ success: true, docId: existing.id, document: updatedDoc, message: "KYB Document re-submitted for review." });
+      return res.json({ success: true, docId: existing.id, document: updatedDoc, kybAutoApproved: ownerDocumentAutoApproval(req, id), message: "KYB Document re-submitted for review." });
     }
 
     db.prepare(
       `INSERT INTO kyb_documents (id, supplier_id, doc_type, doc_number, doc_url, status, submitted_at)
        VALUES (?, ?, ?, ?, ?, 'PENDING', datetime('now'))`
-    ).run(docId, id, docType, docNumber, docUrl || "https://example.com/docs/uploaded.pdf");
+    ).run(docId, id, docType, docNumber, docUrl);
 
     const createdDoc = db.prepare("SELECT * FROM kyb_documents WHERE id = ?").get(docId);
-    res.json({ success: true, docId, document: createdDoc, message: "KYB Document submitted for review." });
+    res.json({ success: true, docId, document: createdDoc, kybAutoApproved: ownerDocumentAutoApproval(req, id), message: "KYB Document submitted for review." });
   } catch (err) {
     logger.error("Failed to submit KYB document", { requestId: req.requestId, error: err });
     res.status(500).json({ error: err.message || "Failed to submit KYB document" });
+  }
+});
+
+// GET /api/suppliers/:id/kyb/:docId/file - The supplier's own uploaded KYB file
+router.get("/:id/kyb/:docId/file", (req, res) => {
+  try {
+    const doc = db.prepare("SELECT * FROM kyb_documents WHERE id = ? AND supplier_id = ?").get(req.params.docId, req.params.id);
+    if (!doc) return res.status(404).json({ error: "Document not found" });
+    return sendKybDocumentFile(res, doc);
+  } catch (err) {
+    logger.error("Failed to send KYB document file", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not open the document" });
   }
 });
 
@@ -209,6 +533,8 @@ router.post("/:id/kyb/verify-gstin", validateBody(supplierSchemas.verifyGstin), 
     const { gstin, businessName, business_name } = req.body;
     const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const refusal = cashfreeIdentityRefusal(supplier);
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
 
     const targetGstin = (gstin || supplier.gstin || "").trim().toUpperCase();
     const targetName = businessName || business_name || supplier.company_name;
@@ -238,19 +564,84 @@ router.post("/:id/kyb/verify-gstin", validateBody(supplierSchemas.verifyGstin), 
       WHERE id = ?
     `).run(targetGstin, result.valid ? 1 : 0, result.legalName || null, result.status || null, id);
 
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
     const updatedSupplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
 
     res.json({
       success: true,
       verification: result,
       supplier: updatedSupplier,
+      kybAutoApproved: autoApproval.approved,
       message: result.valid
-        ? `GSTIN verified: ${result.legalName} (${result.status})`
+        ? `GSTIN verified: ${result.legalName} (${result.status})${autoApproval.approved ? `. ${autoApprovalMessage}` : ""}`
         : "GSTIN verification was not successful",
     });
   } catch (err) {
     logger.error("GSTIN verification failed", { requestId: req.requestId, error: err.message });
     res.status(400).json({ error: err.message || "Failed to verify GSTIN with Cashfree SecureID" });
+  }
+});
+
+// Records a SecureID check in the audit table, as the GSTIN and PAN checks do.
+function recordSecureIdCheck(req, supplierId, type, result, input) {
+  db.prepare(`
+    INSERT INTO supplier_kyb_verifications (
+      id, supplier_id, verification_type, reference_id, status, input_data, response_data, score, verified_at, actor_id, actor_role, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 100, datetime('now'), ?, ?, datetime('now'))
+  `).run(`ver_${type.toLowerCase()}_${nanoid(8)}`, supplierId, type, String(result.raw?.reference_id || ""), result.valid ? "VALID" : "INVALID",
+    JSON.stringify(input), JSON.stringify(result), req.user?.id || supplierId, req.user?.role || "SUPPLIER");
+}
+
+// A fleet row of this supplier, when the check names one; its expiry dates follow a valid result (ADR 024 C2, C3).
+function ownFleetRow(supplierId, driverId) {
+  return driverId ? db.prepare("SELECT id FROM supplier_drivers WHERE id = ? AND supplier_id = ?").get(driverId, supplierId) : null;
+}
+
+// POST /api/suppliers/:id/kyb/verify-dl - Cashfree SecureID driving licence check (ADR 024 C3)
+router.post("/:id/kyb/verify-dl", validateBody(supplierSchemas.verifyDrivingLicence), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const refusal = cashfreeIdentityRefusal(supplier, "DRIVING_LICENSE");
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
+    const driver = ownFleetRow(id, req.body.driverId);
+    if (req.body.driverId && !driver) return res.status(404).json({ error: "Choose a driver from your own fleet" });
+
+    const result = await verifyDrivingLicence({ licenseNumber: req.body.licenseNumber, dob: req.body.dob });
+    recordSecureIdCheck(req, id, "DRIVING_LICENSE", result, { licenseNumber: result.licenseNumber, driverId: driver?.id || null });
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
+    if (result.valid && driver) {
+      db.prepare("UPDATE supplier_drivers SET license_number = ?, license_expiry = COALESCE(?, license_expiry) WHERE id = ?").run(result.licenseNumber, result.validUntil, driver.id);
+    }
+    res.json({ success: true, kybAutoApproved: autoApproval.approved, verification: { valid: result.valid, name: result.name, validUntil: result.validUntil, simulated: result.simulated }, message: result.valid ? `Driving licence verified${result.validUntil ? `, valid until ${result.validUntil}` : ""}` : "The driving licence could not be verified" });
+  } catch (err) {
+    logger.error("Driving licence verification failed", { requestId: req.requestId, error: err.message });
+    res.status(400).json({ error: err.message || "Failed to verify the driving licence" });
+  }
+});
+
+// POST /api/suppliers/:id/kyb/verify-rc - Cashfree SecureID vehicle RC check (ADR 024 C3)
+router.post("/:id/kyb/verify-rc", validateBody(supplierSchemas.verifyVehicleRc), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+    if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const refusal = cashfreeIdentityRefusal(supplier, "VEHICLE_RC");
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
+    const driver = ownFleetRow(id, req.body.driverId);
+    if (req.body.driverId && !driver) return res.status(404).json({ error: "Choose a vehicle from your own fleet" });
+
+    const result = await verifyVehicleRc({ registrationNumber: req.body.registrationNumber });
+    recordSecureIdCheck(req, id, "VEHICLE_RC", result, { registrationNumber: result.registrationNumber, driverId: driver?.id || null });
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
+    if (result.valid && driver) {
+      db.prepare("UPDATE supplier_drivers SET insurance_expiry = COALESCE(?, insurance_expiry), permit_expiry = COALESCE(?, permit_expiry) WHERE id = ?").run(result.insuranceValidUntil, result.permitValidUntil, driver.id);
+    }
+    res.json({ success: true, kybAutoApproved: autoApproval.approved, verification: { valid: result.valid, owner: result.owner, commercial: result.commercial, insuranceValidUntil: result.insuranceValidUntil, permitValidUntil: result.permitValidUntil, simulated: result.simulated }, message: result.valid ? `Vehicle ${result.registrationNumber} verified${result.owner ? `, owner ${result.owner}` : ""}` : "The vehicle registration could not be verified" });
+  } catch (err) {
+    logger.error("Vehicle RC verification failed", { requestId: req.requestId, error: err.message });
+    res.status(400).json({ error: err.message || "Failed to verify the vehicle registration" });
   }
 });
 
@@ -261,6 +652,8 @@ router.post("/:id/kyb/verify-pan", validateBody(supplierSchemas.verifyPan), asyn
     const { pan, name } = req.body;
     const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const refusal = cashfreeIdentityRefusal(supplier, "PAN");
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
 
     const targetPan = (pan || supplier.pan_number || "").trim().toUpperCase();
     const targetName = name || supplier.contact_name || supplier.company_name;
@@ -290,14 +683,16 @@ router.post("/:id/kyb/verify-pan", validateBody(supplierSchemas.verifyPan), asyn
       WHERE id = ?
     `).run(targetPan, result.valid ? 1 : 0, result.registeredName || null, result.type || null, id);
 
+    const autoApproval = result.valid ? applyKybAutoApproval(req, id) : { approved: false };
     const updatedSupplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
 
     res.json({
       success: true,
       verification: result,
       supplier: updatedSupplier,
+      kybAutoApproved: autoApproval.approved,
       message: result.valid
-        ? `PAN verified: ${result.registeredName} (${result.type}) - Match: ${result.nameMatchScore}%`
+        ? `PAN verified: ${result.registeredName} (${result.type}) - Match: ${result.nameMatchScore}%${autoApproval.approved ? `. ${autoApprovalMessage}` : ""}`
         : "PAN verification was not successful",
     });
   } catch (err) {
@@ -403,16 +798,24 @@ router.get("/:id/kyb/verifications", (req, res) => {
 router.post("/:id/kyb/verify-all", async (req, res) => {
   try {
     const { id } = req.params;
+    const supplier = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
+    const refusal = supplier && cashfreeIdentityRefusal(supplier);
+    if (refusal) return res.status(400).json({ error: refusal, code: "CASHFREE_INDIA_ONLY" });
     const report = await runComprehensiveSupplierKyb(db, {
       supplierId: id,
       actorId: req.user?.id || id,
       actorRole: req.user?.role || "SUPPLIER",
     });
+    const autoApproval = applyKybAutoApproval(req, id);
+    if (autoApproval.supplier) report.updatedSupplier = autoApproval.supplier;
 
     res.json({
       success: true,
       report,
-      message: "Comprehensive Cashfree SecureID KYB audit completed.",
+      kybAutoApproved: autoApproval.approved,
+      message: autoApproval.approved
+        ? `Comprehensive Cashfree SecureID KYB audit completed. ${autoApprovalMessage}`
+        : "Comprehensive Cashfree SecureID KYB audit completed.",
     });
   } catch (err) {
     logger.error("Comprehensive KYB failed", { requestId: req.requestId, error: err.message });
@@ -464,11 +867,41 @@ router.patch("/:id/profile", validateBody(supplierSchemas.profileUpdate), (req, 
        WHERE id = ?`
     ).run(finalCompany, finalContact, finalPhone, finalCity, finalState, finalGstin, finalPan, finalWebsite, finalBusinessType, finalYears, id);
 
+    // A new GSTIN or PAN has not been checked yet, whatever the old one showed.
+    if ((finalGstin || null) !== (supplier.gstin || null)) {
+      db.prepare("UPDATE suppliers SET gstin_verified = 0, gstin_verified_name = NULL, gstin_verified_status = NULL WHERE id = ?").run(id);
+    }
+    if ((finalPan || null) !== (supplier.pan_number || null)) {
+      db.prepare("UPDATE suppliers SET pan_verified = 0, pan_verified_name = NULL, pan_type = NULL WHERE id = ?").run(id);
+    }
+
     const updated = db.prepare("SELECT * FROM suppliers WHERE id = ?").get(id);
     res.json({ success: true, supplier: updated, message: "Business details updated successfully." });
   } catch (err) {
     logger.error("Failed to update supplier profile", { requestId: req.requestId, error: err });
     res.status(500).json({ error: "Failed to update supplier profile" });
+  }
+});
+
+// GET /api/suppliers/:id/public-profile - The supplier's own view of their public profile
+router.get("/:id/public-profile", (req, res) => {
+  try {
+    return res.json({ success: true, ...ownerProfileView(db, req.params.id) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Supplier public profile lookup failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not load your public profile" });
+  }
+});
+
+// PATCH /api/suppliers/:id/public-profile - Edit tagline, about, images, languages, cities, links, visibility
+router.patch("/:id/public-profile", validateBody(profileSchemas.update), (req, res) => {
+  try {
+    return res.json({ success: true, ...updateSupplierProfile(db, req.params.id, req.body) });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    logger.error("Supplier public profile update failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Could not save your public profile" });
   }
 });
 
@@ -553,10 +986,9 @@ router.post("/:id/geofences", validateBody(supplierSchemas.geofence), (req, res)
     const fenceId = `fence_${Date.now()}`;
 
     if (!zoneName?.trim() || !city?.trim()) return res.status(400).json({ error: "Zone name and city are required" });
-    const locationValidation = resolveIndiaCatalogLocation(
-      db.prepare("SELECT id, name, state FROM destinations WHERE COALESCE(is_active, 1) = 1").all(),
+    const locationValidation = resolveCatalogLocation(
+      db.prepare("SELECT id, name, state, country FROM destinations WHERE COALESCE(is_active, 1) = 1").all(),
       city,
-      "India",
     );
     if (locationValidation.error) return res.status(400).json({ error: locationValidation.error });
     const canonicalCity = locationValidation.value.city;
@@ -627,12 +1059,19 @@ router.post("/:id/products/v2", (req, res) => {
     if (!title?.trim()) return res.status(400).json({ error: "Title is required" });
     if (!city?.trim()) return res.status(400).json({ error: "City is required" });
     if (!state?.trim()) return res.status(400).json({ error: "State / Region is required" });
+    // Free-text cities stay allowed; a catalogue city abroad must be open for listing (ADR 023).
+    const catalogCity = db.prepare("SELECT name, country FROM destinations WHERE LOWER(name) = LOWER(?) AND COALESCE(is_active, 1) = 1").get(city.trim());
+    if (catalogCity && !listingOpenIn(catalogCity.country)) {
+      return res.status(400).json({ error: `Listings in ${catalogCity.country} open soon. ${catalogCity.name} can't hold a product yet.` });
+    }
     const normPrice = Number(priceInr);
     if (!Number.isFinite(normPrice) || normPrice <= 0)
       return res.status(400).json({ error: "Price must be greater than zero" });
 
     const supplier = db.prepare("SELECT id FROM suppliers WHERE id = ?").get(id);
     if (!supplier) return res.status(404).json({ error: "Supplier not found" });
+    const transferRefusal = normType === "TRANSFER" && status !== "DRAFT" && transferPublishRefusal(id);
+    if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
 
     const typeCode = normType.slice(0, 3).toLowerCase();
     const cityCode = city.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 4);
@@ -688,7 +1127,7 @@ router.post("/:id/products/v2", (req, res) => {
           VALUES (?,?,?,?,?,?,?,?,?,?)`);
         itineraryItems.forEach((item, i) => ins.run(
           `itin_${nanoid(10)}`, productId,
-          Number(item.dayNumber)||1, String(item.timeLabel||`Step ${i+1}`),
+          Number.isFinite(Number(item.dayNumber)) ? Number(item.dayNumber) : 1, String(item.timeLabel||`Step ${i+1}`),
           String(item.title||""), String(item.description||""),
           item.location||null, item.durationText||null, item.icon||"📍", i));
       }
@@ -742,12 +1181,19 @@ router.post("/:id/products/v2", (req, res) => {
           Number(t.pricePerPersonPerNightInr)||0,
           t.isRecommended?1:0, i));
       }
+      // Required booking data belongs to the same transaction as publication.
+      backfillProductLocationRules(db, productId);
+      backfillProductOptions(db, productId);
     })();
 
+    const createdProduct = db.prepare("SELECT id,title,product_type,product_sub_type,city,price_inr,status,is_published FROM products WHERE id=?").get(productId);
+
     return res.status(201).json({
-      success: true, productId,
+      success: true,
+      productId,
+      url: activityPath(createdProduct || { id: productId, title }),
       message: `${normType} product created successfully`,
-      product: db.prepare("SELECT id,title,product_type,product_sub_type,city,price_inr,status FROM products WHERE id=?").get(productId),
+      product: createdProduct,
     });
   } catch (err) {
     logger.error("Product v2 creation failed", { error: err.message });
@@ -765,7 +1211,7 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
       title,
       city,
       state,
-      country = "India",
+      country,
       category,
       shortDesc,
       fullDesc,
@@ -791,6 +1237,8 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
     if (!["TRANSFER", "DAY_TOUR", "MULTI_DAY_PACKAGE"].includes(normalizedProductType)) {
       return res.status(400).json({ error: "Choose a valid product type" });
     }
+    const transferRefusal = normalizedProductType === "TRANSFER" && transferPublishRefusal(id);
+    if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
     if (!title?.trim() || !city?.trim()) {
       return res.status(400).json({ error: "Title and city are required" });
     }
@@ -817,8 +1265,8 @@ router.post("/:id/products", validateBody(supplierSchemas.product), (req, res) =
         return res.status(400).json({ error: "Each stop description cannot exceed 1,000 characters" });
       }
     }
-    const locationValidation = resolveIndiaCatalogLocation(
-      db.prepare("SELECT id, name, state FROM destinations WHERE COALESCE(is_active, 1) = 1").all(),
+    const locationValidation = resolveCatalogLocation(
+      db.prepare("SELECT id, name, state, country FROM destinations WHERE COALESCE(is_active, 1) = 1").all(),
       city,
       country,
     );
@@ -1067,6 +1515,8 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
 
     const isPublished = Boolean(req.body?.isPublished);
     const status = isPublished ? "PUBLISHED" : "DRAFT";
+    const transferRefusal = isPublished && String(product.product_type).toUpperCase() === "TRANSFER" && transferPublishRefusal(id);
+    if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
     db.prepare("UPDATE products SET is_published = ?, status = ? WHERE id = ? AND supplier_id = ?")
       .run(isPublished ? 1 : 0, status, productId, id);
 
@@ -1074,6 +1524,7 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
       success: true,
       is_published: isPublished,
       status,
+      url: activityPath(product),
       message: isPublished ? "Listing is live in marketplace search." : "Listing moved to draft and removed from marketplace search."
     });
   } catch (err) {
@@ -1082,23 +1533,61 @@ router.patch("/:id/products/:productId/publication", validateBody(supplierSchema
   }
 });
 
+const dispatchSettingsSchema = z.object({ automaticEnabled: z.boolean(), leadHours: z.number().int().min(24).max(168).default(48), responseMinutes: z.number().int().min(5).max(120).default(30), maxAttempts: z.number().int().min(1).max(10).default(3), bufferMinutes: z.number().int().min(0).max(240).default(30) }).strict();
+router.get("/:id/dispatch", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  const settings = effectiveDispatchSettings(db, req.params.id);
+  const readiness = dispatchReadiness(db, req.params.id);
+  const tasks = listDispatchExceptions(db, { supplierId: req.params.id });
+  const tripIssues = listDispatchExceptions(db, { supplierId: req.params.id, taskTypes: TRIP_ISSUE_TASK_TYPES });
+  const deliveries = db.prepare("SELECT o.booking_id, o.event_type, o.status, o.last_error, o.attempts FROM dispatch_outbox o JOIN bookings b ON b.id = o.booking_id WHERE b.supplier_id = ? ORDER BY o.available_at DESC LIMIT 100").all(req.params.id);
+  res.json({ success: true, settings, readiness, tasks, tripIssues, deliveries });
+});
+router.put("/:id/dispatch", optionalAuthMiddleware, requireSupplierAccess, validateBody(dispatchSettingsSchema), (req, res) => {
+  const v = req.body;
+  dispatchTransaction(db, () => {
+    db.prepare(`INSERT INTO dispatch_settings (supplier_id, automatic_enabled, lead_hours, response_minutes, max_attempts, buffer_minutes) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (supplier_id) DO UPDATE SET automatic_enabled = excluded.automatic_enabled, lead_hours = excluded.lead_hours, response_minutes = excluded.response_minutes, max_attempts = excluded.max_attempts, buffer_minutes = excluded.buffer_minutes`)
+      .run(req.params.id, v.automaticEnabled ? 1 : 0, v.leadHours, v.responseMinutes, v.maxAttempts, v.bufferMinutes);
+  });
+  res.json({ success: true });
+});
+router.patch("/:id/drivers/:driverId/contact", optionalAuthMiddleware, requireSupplierAccess, validateBody(z.object({ driverEmail: z.string().email(), seatCapacity: z.number().int().min(1).max(100), dispatchPriority: z.number().int().min(0).max(100).default(0) }).strict()), (req, res) => {
+  const result = dispatchTransaction(db, () => db.prepare("UPDATE supplier_drivers SET driver_email = ?, seat_capacity = ?, dispatch_priority = ? WHERE id = ? AND supplier_id = ?")
+    .run(req.body.driverEmail, req.body.seatCapacity, req.body.dispatchPriority, req.params.driverId, req.params.id));
+  res.status(result.changes ? 200 : 404).json({ success: Boolean(result.changes) });
+});
+
+// Expiry dates of a fleet vehicle's papers, updated when they are renewed (ADR 024).
+const fleetDocumentDate = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal(""), z.null()]).optional();
+router.patch("/:id/drivers/:driverId/documents", optionalAuthMiddleware, requireSupplierAccess, validateBody(z.object({ licenseExpiry: fleetDocumentDate, permitExpiry: fleetDocumentDate, insuranceExpiry: fleetDocumentDate, fitnessExpiry: fleetDocumentDate }).strict()), (req, res) => {
+  const v = req.body;
+  const result = db.prepare("UPDATE supplier_drivers SET license_expiry = ?, permit_expiry = ?, insurance_expiry = ?, fitness_expiry = ? WHERE id = ? AND supplier_id = ?")
+    .run(v.licenseExpiry || null, v.permitExpiry || null, v.insuranceExpiry || null, v.fitnessExpiry || null, req.params.driverId, req.params.id);
+  res.status(result.changes ? 200 : 404).json({ success: Boolean(result.changes) });
+});
+
 // POST /api/suppliers/:id/assign-driver - Dispatch driver and vehicle to booking
 router.post("/:id/assign-driver", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.assignment), (req, res) => {
   try {
     const { id } = req.params;
-    const { bookingId, supplierDriverId, driverName, driverPhone, vehicleModel, vehicleNumber } = req.body;
+    const { bookingId, supplierDriverId, driverName, driverPhone, driverEmail, seatCapacity, vehicleModel, vehicleNumber, confirmedByPhone, note } = req.body;
     if (!bookingId) return res.status(400).json({ error: "Booking is required" });
+    const phoneConfirmed = confirmedByPhone === true || confirmedByPhone === "true" || confirmedByPhone === 1;
+    if (phoneConfirmed && String(note || "").trim().length < 3) return res.status(400).json({ error: "Add a note about the phone confirmation (who you spoke to and when)" });
     const assignment = assignDriverToBooking(db, {
       supplierId: id,
       bookingId,
       supplierDriverId,
-      manualDriver: { driverName, driverPhone, vehicleModel, vehicleNumber },
+      manualDriver: { driverName, driverPhone, driverEmail, seatCapacity, vehicleModel, vehicleNumber },
       actorId: req.user?.id,
     });
 
-    queueNotification(notifyDriverAssigned(db, bookingId), "Driver assignment notification");
-
-    res.json({ success: true, assignment, assignmentId: assignment.id, message: `Driver ${assignment.driver_name} assigned successfully.` });
+    // Assignment transaction writes the durable driver request; traveler details follow acknowledgement.
+    if (phoneConfirmed) {
+      const confirmed = confirmDriverByPhone(db, { bookingId, supplierId: id, actorId: req.user?.id, note });
+      return res.json({ success: true, assignment: confirmed, assignmentId: confirmed.id, message: `Driver ${confirmed.driver_name} assigned and confirmed by phone. The traveler has been notified.` });
+    }
+    res.json({ success: true, assignment, assignmentId: assignment.id, message: `Driver ${assignment.driver_name} assigned. Waiting for the driver to accept.` });
   } catch (err) {
     logger.error("Driver assignment failed", { requestId: req.requestId, error: err });
     res.status(err.status || 500).json({ error: err.message || "Failed to assign driver" });
@@ -1141,12 +1630,69 @@ router.post("/:id/bookings/:bookingId/respond-assignment", optionalAuthMiddlewar
   }
 });
 
+// Supplier-direct bookings (ADR 034): walk-in, phone and manual bookings on the shared inventory.
+function directBookingFailure(res, req, error, fallback) {
+  if (error.name === "ZodError") {
+    const issue = error.issues?.[0];
+    return res.status(400).json({ error: issue ? `${issue.path.join(".") || "request"}: ${issue.message}` : "Check the booking details", code: "VALIDATION_ERROR" });
+  }
+  if (error.status && error.status < 500) return res.status(error.status).json({ error: error.message, code: error.code });
+  logger.error(fallback, { requestId: req.requestId, error });
+  return res.status(500).json({ error: fallback });
+}
+
+// GET /api/suppliers/:id/availability?date=YYYY-MM-DD - Live seats on every departure that day, as sold at the counter
+router.get("/:id/availability", requireSupplierAccess, (req, res) => {
+  try {
+    const date = String(req.query.date || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "Choose a date as YYYY-MM-DD", code: "VALIDATION_ERROR" });
+    return res.json({ success: true, date, products: supplierDayAvailability(db, req.params.id, date, listNativeAvailability) });
+  } catch (error) {
+    return directBookingFailure(res, req, error, "Availability could not be loaded");
+  }
+});
+
+// POST /api/suppliers/:id/bookings/quote - Price a counter sale before taking the guest's money
+router.post("/:id/bookings/quote", requireSupplierAccess, (req, res) => {
+  try {
+    return res.json({ success: true, quote: quoteSupplierBooking(db, { supplierId: req.params.id, input: req.body }) });
+  } catch (error) {
+    return directBookingFailure(res, req, error, "The booking could not be priced");
+  }
+});
+
+// POST /api/suppliers/:id/bookings - Walk-in, phone or manual booking, confirmed at once
+router.post("/:id/bookings", requireSupplierAccess, (req, res) => {
+  try {
+    const { booking, idempotent } = createSupplierBooking(db, { supplierId: req.params.id, actor: req.user, input: req.body });
+    return res.status(idempotent ? 200 : 201).json({ success: true, idempotent, booking, payments: listDirectPayments(db, booking.id), documents: guestDocumentLinks(booking) });
+  } catch (error) {
+    return directBookingFailure(res, req, error, "The booking could not be created");
+  }
+});
+
+// GET /api/suppliers/:id/bookings/:bookingId/payments - What the supplier has collected for a direct booking
+router.get("/:id/bookings/:bookingId/payments", requireSupplierAccess, (req, res) => {
+  const booking = db.prepare("SELECT id, ref, amount_inr, balance_due_inr, payment_status FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
+  if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
+  return res.json({ success: true, amountInr: booking.amount_inr, balanceDueInr: booking.balance_due_inr, payments: listDirectPayments(db, booking.id), documents: guestDocumentLinks(booking) });
+});
+
+// POST /api/suppliers/:id/bookings/:bookingId/payments - Record cash, UPI, card or bank money collected later
+router.post("/:id/bookings/:bookingId/payments", requireSupplierAccess, (req, res) => {
+  try {
+    return res.status(201).json({ success: true, ...recordDirectPayment(db, { supplierId: req.params.id, bookingId: req.params.bookingId, actor: req.user, input: req.body }) });
+  } catch (error) {
+    return directBookingFailure(res, req, error, "The payment could not be recorded");
+  }
+});
+
 // POST /api/suppliers/:id/bookings/:bookingId/notifications/resend - Supplier/admin resend of an approved guest update
 router.post("/:id/bookings/:bookingId/notifications/resend", optionalAuthMiddleware, requireSupplierAccess, validateBody(bookingSchemas.resend), async (req, res) => {
   try {
     const booking = db.prepare("SELECT id, ref, payment_status, supplier_response_status FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
     if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
-    if (booking.payment_status !== "PAID") return res.status(409).json({ error: "Guest notifications are available after payment is confirmed" });
+    if (!isServiceablePayment(booking)) return res.status(409).json({ error: "Guest notifications are available after payment is confirmed" });
     if (booking.supplier_response_status !== "ACCEPTED") return res.status(409).json({ error: "Accept the booking before sending the guest confirmation" });
 
     const eventType = String(req.body?.eventType || "BOOKING_CONFIRMED").toUpperCase();
@@ -1172,6 +1718,24 @@ router.post("/:id/bookings/:bookingId/notifications/resend", optionalAuthMiddlew
     return res.json({ success: true, ...result });
   } catch (error) {
     return res.status(error.status || 500).json({ error: error.message || "Guest notification could not be sent" });
+  }
+});
+
+// GET /api/suppliers/:id/bookings/:bookingId/dispatch-timeline - Assignment and trip history for one booking
+router.get("/:id/bookings/:bookingId/dispatch-timeline", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
+  const booking = db.prepare("SELECT id, product_id FROM bookings WHERE id = ? AND supplier_id = ?").get(req.params.bookingId, req.params.id);
+  if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
+  const time = productTime(db, booking.product_id);
+  res.json({ success: true, timeline: getDispatchTimeline(db, booking.id), timeZone: time.timeZone, timeLabel: time.label });
+});
+
+// POST /api/suppliers/:id/bookings/:bookingId/confirm-driver - Record a driver's acceptance taken by phone
+router.post("/:id/bookings/:bookingId/confirm-driver", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.confirmDriver), (req, res) => {
+  try {
+    const assignment = confirmDriverByPhone(db, { bookingId: req.params.bookingId, supplierId: req.params.id, actorId: req.user?.id, note: req.body.note });
+    res.json({ success: true, assignment, message: `${assignment.driver_name} confirmed by phone. The traveler has been notified.` });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : "Driver confirmation failed" });
   }
 });
 
@@ -1254,7 +1818,7 @@ router.get("/:id/drivers/availability", optionalAuthMiddleware, requireSupplierA
 router.post("/:id/drivers", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.driver), (req, res) => {
   try {
     const { id } = req.params;
-    const { driverName, driverPhone, vehicleModel, vehicleNumber, licenseNumber } = req.body;
+    const { driverName, driverPhone, driverEmail, seatCapacity, dispatchPriority, vehicleModel, vehicleNumber, licenseNumber } = req.body;
     if (!driverName?.trim() || !driverPhone || !vehicleNumber) {
       return res.status(400).json({ error: "Driver Name, Phone and Vehicle Number are required." });
     }
@@ -1270,6 +1834,9 @@ router.post("/:id/drivers", optionalAuthMiddleware, requireSupplierAccess, valid
        VALUES (?, ?, ?, ?, ?, ?, ?, 4.9, 'AVAILABLE')`
     ).run(driverId, id, driverName.trim(), phone, vehicleModel || "Commercial Cab", plate, licenseNumber?.trim() || null);
 
+    db.prepare("UPDATE supplier_drivers SET driver_email = ?, seat_capacity = ?, dispatch_priority = ? WHERE id = ?").run(driverEmail || null, seatCapacity || 0, dispatchPriority || 0, driverId);
+    db.prepare("UPDATE supplier_drivers SET license_expiry = ?, permit_expiry = ?, insurance_expiry = ?, fitness_expiry = ? WHERE id = ?")
+      .run(req.body.licenseExpiry || null, req.body.permitExpiry || null, req.body.insuranceExpiry || null, req.body.fitnessExpiry || null, driverId);
     res.json({ success: true, driverId, message: `Driver ${driverName} added to fleet.` });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || "Failed to add driver to fleet" });
@@ -1301,7 +1868,7 @@ router.patch("/:id/bookings/:bookingId/dispatch-status", optionalAuthMiddleware,
       note: req.body?.note,
       actorId: req.user?.id,
     });
-    queueNotification(notifyDispatchStatusChanged(db, req.params.bookingId), "Dispatch status notification");
+    // Status notifications are delivered from the transaction-owned dispatch outbox.
     res.json({ success: true, assignment: result.assignment, timeline: getDispatchTimeline(db, req.params.bookingId), message: `Dispatch updated to ${result.assignment.assignment_status.replaceAll("_", " ").toLowerCase()}.` });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || "Failed to update dispatch" });
@@ -1420,45 +1987,101 @@ router.post("/:id/bookings/:bookingId/cancel", optionalAuthMiddleware, requireSu
       return res.status(409).json({ error: `Cannot cancel a booking that is already ${currentStatus}.` });
     }
 
-    // Calculate refund quote
-    const isPaid = booking.payment_status === "PAID";
-    let quote = null;
-    if (isPaid) {
-      // If supplier is initiating cancellation due to operational issues, traveler typically gets 100% full refund
-      quote = calculateRefundQuote(db, booking, { overridePercentage: 100 });
-      const refundRecord = createRefundRecord(db, {
-        booking,
-        quote,
-        reason: `Supplier cancellation: ${reason}${notes ? ` - ${notes}` : ""}`,
-        actorId: req.user?.id || id,
-        idempotencyKey: `sup-cancel:${booking.id}:${Date.now()}`
-      });
-      finalizeRefund(db, { booking, refund: refundRecord, providerResult: { status: "PROCESSED" } });
-    } else {
-      db.transaction(() => {
-        db.prepare("UPDATE bookings SET status = 'cancelled', cancellation_reason = ? WHERE id = ?").run(reason, booking.id);
-        db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
-        db.prepare("UPDATE driver_assignments SET assignment_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
-      })();
-    }
+    // A supplier cancellation refunds the traveler in full, to their wallet first (ADR 019):
+    // they can rebook with it or, for 10 days, send it back to the original payment method.
+    const wallet = cancelBookingBySupplier(db, { booking, reason, notes });
 
-    try {
-      if (refundRecord?.id) {
-        queueNotification(notifyRefundProcessed(db, refundRecord.id), "Supplier cancellation refund notification");
-      }
-    } catch (notifErr) {
-      logger.warn("Supplier cancellation notification failed", { requestId: req.requestId, error: notifErr });
-    }
+    queueNotification(sendGuestBookingNotification(db, booking.id, "BOOKING_CANCELLED", { eventKeySuffix: "SUPPLIER_CANCEL" }), "Supplier cancellation traveler notification");
 
     res.json({
       success: true,
-      message: `Booking ${booking.ref} cancelled successfully.`,
+      message: wallet
+        ? `Booking ${booking.ref} cancelled. ₹${wallet.creditInr} was refunded to the traveler's wallet.`
+        : `Booking ${booking.ref} cancelled successfully.`,
       status: "cancelled",
-      refundQuote: quote
+      walletCreditInr: wallet?.creditInr ?? null,
+      cashRefundableUntil: wallet?.cashRefundableUntil ?? null
     });
   } catch (err) {
     logger.error("Supplier cancellation failed", { requestId: req.requestId, error: err });
-    res.status(500).json({ error: err.message || "Failed to cancel booking" });
+    res.status(err.status || 500).json({ error: err.message || "Failed to cancel booking" });
+  }
+});
+
+// POST /api/suppliers/:id/bookings/:bookingId/reschedule - Move a booking to another departure (ADR 037).
+// Price unchanged; a traveler who paid IdeaHoliday is told and may decline for a full wallet refund.
+router.post("/:id/bookings/:bookingId/reschedule", validateBody(supplierSchemas.reschedule), (req, res) => {
+  try {
+    const result = rescheduleBySupplier(db, { supplierId: req.params.id, bookingId: req.params.bookingId, date: req.body.date, time: req.body.time || null, reason: req.body.reason, actor: req.user });
+    if (result.travelerMayDecline) {
+      queueNotification(sendGuestBookingNotification(db, result.bookingId, "SUPPLIER_RESCHEDULED", { eventKeySuffix: `${result.to.date}_${result.to.time || ""}` }), "Supplier reschedule traveler notification");
+    }
+    res.json({ success: true, ...result });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not move the booking");
+  }
+});
+
+// Day-of-operations (docs/SUPPLIER_OPERATIONS.md): voucher check-in, no-shows,
+// the guest list for a departure, and cancelling a whole departure.
+
+// POST /api/suppliers/:id/check-in - Check a traveler in from a scanned voucher QR or typed reference
+router.post("/:id/check-in", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.checkIn), (req, res) => {
+  try {
+    const result = checkInBooking(db, { supplierId: req.params.id, code: req.body.code, actorId: req.user?.id, allowOtherDate: req.body.allowOtherDate === true, scope: departureScopeOf(req) });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not check this traveler in");
+  }
+});
+
+// PATCH /api/suppliers/:id/bookings/:bookingId/attendance - Mark checked in, no-show, or clear
+router.patch("/:id/bookings/:bookingId/attendance", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.attendance), (req, res) => {
+  try {
+    const booking = setAttendance(db, { supplierId: req.params.id, bookingId: req.params.bookingId, status: req.body.status, actorId: req.user?.id, scope: departureScopeOf(req) });
+    res.json({ success: true, booking });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not update attendance");
+  }
+});
+
+// GET /api/suppliers/:id/manifest?productId=&date=&time=&format=csv - Guest list for one departure
+router.get("/:id/manifest", optionalAuthMiddleware, requireSupplierAccess, validateQuery(supplierSchemas.manifestQuery), (req, res) => {
+  try {
+    const { productId, date, time, format } = req.query;
+    const full = departureManifest(db, { supplierId: req.params.id, productId, date, time: time || null });
+    // Guides see names, headcount, pickup and phone, not what a guest owes (ADR 036),
+    // and a linked guide only their assigned departures (ADR 037).
+    const scope = departureScopeOf(req);
+    const assigned = (row) => !scope || scope.has(`${productId}|${date}|${row.pickupTime || ""}`);
+    const manifest = supplierRoleOf(req) === "GUIDE"
+      ? { ...full, bookings: full.bookings.filter(assigned).map((row) => ({ ...row, balanceDueInr: null })) }
+      : full;
+    if (format === "csv") {
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="manifest_${date}${time ? `_${time.replace(":", "")}` : ""}.csv"`);
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(manifestCsv(manifest));
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ success: true, manifest });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not load the guest list");
+  }
+});
+
+// POST /api/suppliers/:id/products/:productId/departures/cancel - Cancel every booking on a departure and close it
+router.post("/:id/products/:productId/departures/cancel", optionalAuthMiddleware, requireSupplierAccess, validateBody(supplierSchemas.departureCancel), (req, res) => {
+  try {
+    const { date, time, reason, notes, dryRun } = req.body;
+    const result = cancelDeparture(db, { supplierId: req.params.id, productId: req.params.productId, date, time: time || null, reason, notes: notes || null, dryRun: dryRun === true });
+    for (const booking of result.cancelled) {
+      queueNotification(sendGuestBookingNotification(db, booking.id, "BOOKING_CANCELLED", { eventKeySuffix: "SUPPLIER_CANCEL" }), "Departure cancellation traveler notification");
+    }
+    if (!result.dryRun) logger.info("Supplier cancelled a departure", { requestId: req.requestId, supplierId: req.params.id, productId: req.params.productId, date, time: time || null, bookings: result.cancelled.length });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    subscriptionFailure(res, req, error, "Could not cancel the departure");
   }
 });
 
@@ -1470,6 +2093,13 @@ router.patch("/:id/bookings/:bookingId/status", optionalAuthMiddleware, requireS
     const booking = db.prepare("SELECT * FROM bookings WHERE id = ? AND supplier_id = ?").get(bookingId, id);
     if (!booking) return res.status(404).json({ error: "Booking was not found for this supplier" });
     if (nextStatus === "in_progress") return res.status(409).json({ error: "Verify the traveler's pickup OTP to start this trip" });
+    // A dispatched trip completes through the dispatch workflow, so the traveler, audit trail,
+    // payout and open trip tasks all see it.
+    const dispatched = db.prepare("SELECT id FROM driver_assignments WHERE booking_id = ? AND assignment_status <> 'CANCELLED'").get(bookingId);
+    if (nextStatus === "completed" && dispatched) {
+      const result = updateDispatchStatus(db, { supplierId: id, bookingId, nextStatus: "COMPLETED", actorId: req.user?.id, note: req.body.reason || "Marked complete by supplier" });
+      return res.json({ success: true, status: "completed", assignment: result.assignment, message: "Booking status updated to completed" });
+    }
     if (!canTransitionBooking(booking.status, nextStatus)) return res.status(409).json({ error: `Cannot move booking from ${booking.status} to ${nextStatus}` });
     db.transaction(() => {
       db.prepare("UPDATE bookings SET status = ? WHERE id = ? AND supplier_id = ?").run(nextStatus, bookingId, id);
@@ -1479,105 +2109,21 @@ router.patch("/:id/bookings/:bookingId/status", optionalAuthMiddleware, requireS
       }
       if (nextStatus === "cancelled") db.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(bookingId);
     })();
+    if (nextStatus === "completed") onReferralTripCompleted(db, bookingId);
+    if (nextStatus === "cancelled") onReferralBookingCancelled(db, bookingId, { reason: "Cancelled by supplier" });
     res.json({ success: true, status: nextStatus, message: `Booking status updated to ${nextStatus}` });
   } catch (err) {
-    res.status(500).json({ error: "Failed to update booking status" });
+    res.status(err.status && err.status < 500 ? err.status : 500).json({ error: err.status && err.status < 500 ? err.message : "Failed to update booking status" });
   }
 });
 
 // --- PHASE 4: SUPPLIER DASHBOARD STATS & REVENUE CARDS ---
+// Real numbers or null, never placeholders (ADR 038).
 router.get("/:id/dashboard-stats", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
   try {
-    const { id } = req.params;
-    const today = new Date().toISOString().split("T")[0];
-
-    // Today's trips
-    const todayStats = db.prepare(`
-      SELECT 
-        COUNT(*) as total_today,
-        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as trips_in_progress,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as trips_completed,
-        SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as trips_upcoming,
-        COALESCE(SUM(supplier_payout_amount), 0) as revenue_inr
-      FROM bookings
-      WHERE supplier_id = ? AND activity_date = ?
-    `).get(id, today);
-
-    // Month stats
-    const monthStart = today.slice(0, 7) + "-01";
-    const monthStats = db.prepare(`
-      SELECT 
-        COUNT(*) as total_month,
-        COALESCE(SUM(supplier_payout_amount), 0) as revenue_inr
-      FROM bookings
-      WHERE supplier_id = ? AND activity_date >= ? AND status != 'cancelled'
-    `).get(id, monthStart);
-
-    // Supplier rating & completion
-    const supplier = db.prepare("SELECT rating FROM suppliers WHERE id = ?").get(id);
-    const bookingCounts = db.prepare(`
-      SELECT 
-        COUNT(*) as total_all,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_all,
-        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_all
-      FROM bookings
-      WHERE supplier_id = ?
-    `).get(id);
-
-    const completionRate = bookingCounts.total_all > 0
-      ? Number(((bookingCounts.completed_all / bookingCounts.total_all) * 100).toFixed(1))
-      : 100;
-
-    const cancellationRate = bookingCounts.total_all > 0
-      ? Number(((bookingCounts.cancelled_all / bookingCounts.total_all) * 100).toFixed(1))
-      : 0;
-
-    // Unread notifications count
-    const unreadNotifications = db.prepare(
-      "SELECT COUNT(*) as count FROM supplier_notifications WHERE supplier_id = ? AND is_read = 0"
-    ).get(id)?.count || 0;
-
-    // Pending SLA alerts
-    const slaAlerts = db.prepare(`
-      SELECT id, ref, supplier_response_deadline, activity_date
-      FROM bookings
-      WHERE supplier_id = ? AND supplier_assignment_status = 'PENDING'
-      LIMIT 5
-    `).all(id);
-
-    return res.json({
-      today: {
-        bookings: todayStats.total_today || 0,
-        trips_in_progress: todayStats.trips_in_progress || 0,
-        trips_completed: todayStats.trips_completed || 0,
-        trips_upcoming: todayStats.trips_upcoming || 0,
-        revenue_inr: Math.round(todayStats.revenue_inr || 0),
-      },
-      week: {
-        bookings: Math.max(todayStats.total_today * 5, 12),
-        revenue_inr: Math.round((monthStats.revenue_inr || 0) / 4),
-        trend: [4, 6, 8, 5, 9, 7, todayStats.total_today || 5],
-      },
-      month: {
-        bookings: monthStats.total_month || 0,
-        revenue_inr: Math.round(monthStats.revenue_inr || 0),
-        growth_pct: 14.8,
-      },
-      ratings: {
-        avg: supplier?.rating || 4.8,
-        total_reviews: 42,
-        completion_rate: completionRate,
-        cancellation_rate: cancellationRate,
-      },
-      unread_notifications_count: unreadNotifications,
-      alerts: slaAlerts.map(a => ({
-        type: "SLA_PENDING",
-        booking_id: a.id,
-        booking_ref: a.ref,
-        deadline: a.supplier_response_deadline || "Action required",
-      })),
-    });
+    return res.json(supplierDashboardStats(db, req.params.id));
   } catch (err) {
+    logger.error("Supplier dashboard stats failed", { requestId: req.requestId, error: err });
     return res.status(500).json({ error: "Failed to fetch supplier dashboard stats" });
   }
 });
@@ -1635,6 +2181,309 @@ router.delete("/:id/products/:productId/media/:mediaId", optionalAuthMiddleware,
 });
 
 // --- INVENTORY CALENDAR & CAPACITY ---
+router.get("/:id/products/:productId/inventory", requireSupplierAccess, (req, res) => {
+  const product = db.prepare("SELECT * FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+  if (!product) return res.status(404).json({ error: "Product not found" });
+  let options = getProductOptions(db, product.id);
+  if (!options || options.length === 0) {
+    try {
+      ensureDefaultProductOption(db, product);
+      options = getProductOptions(db, product.id);
+    } catch (e) {
+      logger.warn("Failed to ensure default product option for inventory", { productId: product.id, error: e.message });
+    }
+  }
+  res.json({ options: (options || []).map(option => ({ ...option, inventory: getInventoryRules(db, product.id, option.id) || null })) });
+});
+router.put("/:id/products/:productId/inventory/:optionId", requireSupplierAccess, (req, res) => {
+  try {
+    const product = db.prepare("SELECT id, product_type FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+    if (!product) return res.status(404).json({ error: "Product not found" });
+    if (product.product_type === "TRANSFER") return res.status(400).json({ error: "Seat inventory is for experiences. Transfers use vehicle availability." });
+    const rules = saveInventoryRules(db, product.id, req.params.optionId, req.body);
+    res.json({ success: true, rules });
+  } catch (error) { res.status(error.status || 400).json({ error: error.message, code: error.code }); }
+});
+
+// --- SEASONAL RATES & CALENDAR OVERRIDES (Reservation engine v2) ---
+// Both are scoped to a product the calling supplier owns, like the rest of the
+// extranet; see docs/RESERVATION_ENGINE_V2_PLAN.md.
+function ownedProduct(req, res) {
+  const product = db.prepare("SELECT id, product_type FROM products WHERE id = ? AND supplier_id = ?").get(req.params.productId, req.params.id);
+  if (!product) { res.status(404).json({ error: "Product not found" }); return null; }
+  return product;
+}
+function inventoryFailure(res, error) {
+  const validationIssue = error?.name === "ZodError" || Array.isArray(error?.issues);
+  return res.status(validationIssue ? 400 : error.status || 400).json({
+    error: validationIssue ? "Check the submitted dates, prices and capacity." : error.message,
+    code: validationIssue ? "VALIDATION_ERROR" : error.code,
+  });
+}
+
+router.get("/:id/products/:productId/inventory/:optionId/rates", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ rates: listPriceSchedules(db, product.id, req.params.optionId) });
+});
+router.post("/:id/products/:productId/inventory/:optionId/rates", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.status(201).json({ success: true, rate: savePriceSchedule(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/rates/:rateId", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deletePriceSchedule(db, product.id, req.params.optionId, req.params.rateId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+router.get("/:id/products/:productId/inventory/:optionId/promotions", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ promotions: listPromotions(db, product.id, req.params.optionId) });
+});
+router.post("/:id/products/:productId/inventory/:optionId/promotions", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.status(201).json({ success: true, promotion: savePromotion(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/promotions/:promotionId", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deletePromotion(db, product.id, req.params.optionId, req.params.promotionId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+router.get("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  res.json({ overrides: listSlotOverrides(db, product.id, req.params.optionId, { from: req.query.from, to: req.query.to }) });
+});
+router.put("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, override: saveSlotOverride(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.put("/:id/products/:productId/inventory/:optionId/calendar/range", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...saveSlotOverrideRange(db, product.id, req.params.optionId, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/products/:productId/inventory/:optionId/calendar/range", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try {
+    res.json({ success: true, ...deleteSlotOverrideRange(db, product.id, req.params.optionId, {
+      from: req.query.from, to: req.query.to, localTime: req.query.localTime || "",
+    }) });
+  } catch (error) { inventoryFailure(res, error); }
+});
+
+router.delete("/:id/products/:productId/inventory/:optionId/calendar", requireSupplierAccess, (req, res) => {
+  const product = ownedProduct(req, res);
+  if (!product) return;
+  try { res.json({ success: true, ...deleteSlotOverride(db, product.id, req.params.optionId, req.query.localDate, req.query.localTime || "") }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
+// --- SHARED RESOURCES (one vehicle or guide across several options) ---
+router.get("/:id/resources", requireSupplierAccess, (req, res) => {
+  // Staff names let a manager link a guide resource to a login (ADR 037).
+  res.json({ resources: listResources(db, req.params.id), staff: listStaff(db, req.params.id).map(({ id, name, role }) => ({ id, name, role })) });
+});
+
+// Departures board (ADR 037): every departure for 1 to 14 days with seats, head counts and crew.
+router.get("/:id/departures", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...departureBoard(db, req.params.id, { from: req.query.from, days: req.query.days, listAvailability: listNativeAvailability, scope: departureScopeOf(req) }) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not load departures");
+  }
+});
+
+// Supplier agents (ADR 039): the supplier's own agents, hotels and resellers, at a net rate on credit.
+router.get("/:id/agents", (req, res) => {
+  try {
+    res.json({ success: true, agents: listAgents(db, req.params.id) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not load agents");
+  }
+});
+
+router.post("/:id/agents", (req, res) => {
+  try {
+    res.status(201).json({ success: true, agent: saveAgent(db, req.params.id, req.body) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not add the agent");
+  }
+});
+
+router.put("/:id/agents/:agentId", (req, res) => {
+  try {
+    res.json({ success: true, agent: saveAgent(db, req.params.id, req.body, req.params.agentId) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not save the agent");
+  }
+});
+
+router.put("/:id/agents/:agentId/rates", (req, res) => {
+  try {
+    res.json({ success: true, agent: setAgentRates(db, req.params.id, req.params.agentId, req.body) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not save the agent's rates");
+  }
+});
+
+router.get("/:id/agents/:agentId/statement", (req, res) => {
+  try {
+    const dateOrNull = (value) => (/^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : null);
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...agentStatement(db, req.params.id, req.params.agentId, { from: dateOrNull(req.query.from), to: dateOrNull(req.query.to) }) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not load the statement");
+  }
+});
+
+router.post("/:id/agents/:agentId/payments", (req, res) => {
+  try {
+    res.status(201).json({ success: true, ...recordAgentPayment(db, { supplierId: req.params.id, agentId: req.params.agentId, actor: req.user, input: req.body }) });
+  } catch (error) {
+    directBookingFailure(res, req, error, "Could not record the payment");
+  }
+});
+
+// Sales channels (ADR 041): three switches per listing; reseller keys are owner-only (role gate).
+router.patch("/:id/products/:productId/channels", (req, res) => {
+  try { res.json({ success: true, ...setProductChannels(db, req.params.id, req.params.productId, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the channels"); }
+});
+router.get("/:id/api-keys", (req, res) => {
+  try { res.json({ success: true, resellers: listResellerKeys(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load keys"); }
+});
+router.post("/:id/api-keys", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.status(201).json({ success: true, ...createResellerKey(db, req.params.id, req.body, req.user) });
+  } catch (error) { directBookingFailure(res, req, error, "Could not create the key"); }
+});
+router.delete("/:id/api-keys/:partnerId", (req, res) => {
+  try { res.json({ success: true, ...revokeResellerKey(db, req.params.id, req.params.partnerId) }); } catch (error) { directBookingFailure(res, req, error, "Could not revoke the key"); }
+});
+
+// Hotel rate sheet (ADR 040): contracted net rates, used only to price quotations.
+router.get("/:id/hotels", (req, res) => {
+  try { res.json({ success: true, hotels: listHotels(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load hotels"); }
+});
+router.post("/:id/hotels", (req, res) => {
+  try { res.status(201).json({ success: true, hotel: saveHotel(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add the hotel"); }
+});
+router.put("/:id/hotels/:hotelId", (req, res) => {
+  try { res.json({ success: true, hotel: saveHotel(db, req.params.id, req.body, req.params.hotelId) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the hotel"); }
+});
+router.post("/:id/hotels/:hotelId/rates", (req, res) => {
+  try { res.status(201).json({ success: true, hotel: addHotelRate(db, req.params.id, req.params.hotelId, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add the rate"); }
+});
+router.delete("/:id/hotels/:hotelId/rates/:rateId", (req, res) => {
+  try { res.json({ success: true, hotel: deleteHotelRate(db, req.params.id, req.params.hotelId, req.params.rateId) }); } catch (error) { directBookingFailure(res, req, error, "Could not remove the rate"); }
+});
+
+// Package quotations (ADR 040): priced on the server, sent as a PDF, booked line by line once accepted.
+router.get("/:id/quotations", (req, res) => {
+  try { res.json({ success: true, quotations: listQuotations(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load quotations"); }
+});
+router.post("/:id/quotations", (req, res) => {
+  try { res.status(201).json({ success: true, quotation: saveQuotation(db, req.params.id, req.body, { actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the quotation"); }
+});
+router.get("/:id/quotations/:quotationId", (req, res) => {
+  try { res.json({ success: true, quotation: quotationView(db, findQuotation(db, req.params.id, req.params.quotationId)) }); } catch (error) { directBookingFailure(res, req, error, "Could not load the quotation"); }
+});
+router.put("/:id/quotations/:quotationId", (req, res) => {
+  try { res.json({ success: true, quotation: saveQuotation(db, req.params.id, req.body, { actor: req.user, quotationId: req.params.quotationId }) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the quotation"); }
+});
+router.post("/:id/quotations/:quotationId/status", (req, res) => {
+  try { res.json({ success: true, quotation: setQuotationStatus(db, req.params.id, req.params.quotationId, String(req.body?.status || "").toUpperCase()) }); } catch (error) { directBookingFailure(res, req, error, "Could not change the status"); }
+});
+router.post("/:id/quotations/:quotationId/payments", (req, res) => {
+  try { res.status(201).json({ success: true, quotation: recordQuotationPayment(db, { supplierId: req.params.id, quotationId: req.params.quotationId, actor: req.user, input: req.body }) }); } catch (error) { directBookingFailure(res, req, error, "Could not record the payment"); }
+});
+router.post("/:id/quotations/:quotationId/lines/:lineId/book", (req, res) => {
+  try { res.status(201).json({ success: true, ...bookQuotationLine(db, { supplierId: req.params.id, quotationId: req.params.quotationId, lineId: req.params.lineId, actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not book this line"); }
+});
+router.get("/:id/quotations/:quotationId/pdf", async (req, res) => {
+  try {
+    const { buffer, filename } = await quotationPdf(db, req.params.id, req.params.quotationId);
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store" });
+    res.send(buffer);
+  } catch (error) { directBookingFailure(res, req, error, "Could not make the PDF"); }
+});
+
+// Sends the PDF by email (attached where the provider allows, with the link in the body)
+// and returns the link and a WhatsApp message for the same quotation. A draft becomes sent.
+router.post("/:id/quotations/:quotationId/send", async (req, res) => {
+  try {
+    let row = findQuotation(db, req.params.id, req.params.quotationId);
+    if (row.status === "DECLINED") return res.status(409).json({ error: "This quotation was declined", code: "QUOTATION_FINAL" });
+    const supplier = db.prepare("SELECT company_name FROM suppliers WHERE id = ?").get(req.params.id);
+    const shareUrl = quotationShareUrl(row);
+    const view = quotationView(db, row);
+    const message = `Hello ${row.customer_name},\n\nHere is your quotation ${row.ref} for ${row.title}: INR ${view.totals.totalInr.toLocaleString("en-IN")} for the whole group.\n\nView or download it: ${shareUrl}\n\n${supplier?.company_name || ""}`.trim();
+    let email = { status: "SKIPPED", error: "No customer email on the quotation" };
+    if (req.body?.email !== false && row.customer_email) {
+      const { buffer, filename } = await quotationPdf(db, req.params.id, row.id);
+      email = await sendEmail({
+        to: row.customer_email, recipientName: row.customer_name, recipientRole: "TRAVELER", eventType: "QUOTATION_SENT",
+        eventKey: `quotation:${row.id}:${Date.now()}`, subject: `Your quotation ${row.ref}: ${row.title}`, text: message,
+        metadata: { quotationId: row.id, ref: row.ref }, attachments: [{ name: filename, contentBase64: buffer.toString("base64") }],
+      });
+    }
+    if (row.status === "DRAFT") row = findQuotation(db, req.params.id, setQuotationStatus(db, req.params.id, row.id, "SENT").id);
+    res.json({ success: true, shareUrl, whatsappText: message, email: { status: email.status, error: email.error || null }, quotation: quotationView(db, row) });
+  } catch (error) { directBookingFailure(res, req, error, "Could not send the quotation"); }
+});
+
+// Booking calendar (ADR 037): bookings and guests per day for one month.
+router.get("/:id/booking-calendar", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, ...bookingCalendar(db, req.params.id, { month: req.query.month }) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not load the calendar");
+  }
+});
+
+router.post("/:id/departures/assignments", validateBody(supplierSchemas.departureAssignment), (req, res) => {
+  try {
+    res.status(201).json({ success: true, assignment: assignResource(db, req.params.id, req.body, req.user) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not assign to the departure");
+  }
+});
+
+router.delete("/:id/departures/assignments/:assignmentId", (req, res) => {
+  try {
+    res.json({ success: true, ...unassignResource(db, req.params.id, req.params.assignmentId) });
+  } catch (error) {
+    staffFailure(res, req, error, "Could not remove the assignment");
+  }
+});
+router.post("/:id/resources", requireSupplierAccess, (req, res) => {
+  try { res.status(201).json({ success: true, resource: saveResource(db, req.params.id, req.body) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.put("/:id/resources/:resourceId", requireSupplierAccess, (req, res) => {
+  try { res.json({ success: true, resource: saveResource(db, req.params.id, req.body, req.params.resourceId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+router.delete("/:id/resources/:resourceId", requireSupplierAccess, (req, res) => {
+  try { res.json({ success: true, ...deleteResource(db, req.params.id, req.params.resourceId) }); }
+  catch (error) { inventoryFailure(res, error); }
+});
+
 router.get("/:id/products/:productId/availability", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
   const { productId } = req.params;
   const availability = db.prepare("SELECT * FROM product_availability WHERE product_id = ?").all(productId);
@@ -1672,6 +2521,13 @@ router.post("/:id/products/bulk-action", optionalAuthMiddleware, requireSupplier
 
   if (!Array.isArray(productIds) || productIds.length === 0) {
     return res.status(400).json({ error: "PRODUCT_IDS_REQUIRED" });
+  }
+
+  if (action === "publish") {
+    const placeholders = productIds.map(() => "?").join(", ");
+    const transfers = db.prepare(`SELECT 1 FROM products WHERE supplier_id = ? AND id IN (${placeholders}) AND UPPER(COALESCE(product_type, '')) = 'TRANSFER' LIMIT 1`).get(id, ...productIds);
+    const transferRefusal = transfers && transferPublishRefusal(id);
+    if (transferRefusal) return res.status(409).json({ error: transferRefusal, code: "TRANSFER_DOCUMENT_REQUIRED" });
   }
 
   let updatedCount = 0;
@@ -1728,6 +2584,8 @@ router.post("/:id/products/:productId/clone", optionalAuthMiddleware, requireSup
     original.group_type, original.hero_image, original.images, original.inclusions, original.exclusions, original.itinerary
   );
 
+  backfillProductLocationRules(db);
+  backfillProductOptions(db);
   return res.status(201).json({ success: true, clonedProductId: newId, title: newTitle });
 });
 
@@ -1793,40 +2651,12 @@ router.post("/:id/pricing-rules", optionalAuthMiddleware, requireSupplierAccess,
 
 // --- SUPPLIER ANALYTICS OVERVIEW ---
 router.get("/:id/analytics/overview", optionalAuthMiddleware, requireSupplierAccess, (req, res) => {
-  const { id } = req.params;
-
-  // Monthly revenue trend (last 6 months)
-  const revenueTrend = [
-    { month: "Mar 2026", revenue_inr: 185000, bookings: 42 },
-    { month: "Apr 2026", revenue_inr: 220000, bookings: 53 },
-    { month: "May 2026", revenue_inr: 310000, bookings: 78 },
-    { month: "Jun 2026", revenue_inr: 280000, bookings: 69 },
-    { month: "Jul 2026", revenue_inr: 340000, bookings: 85 },
-    { month: "Aug 2026", revenue_inr: 410000, bookings: 104 },
-  ];
-
-  // Top products leaderboard
-  const topProducts = db.prepare(`
-    SELECT p.id, p.title, p.price_inr, p.rating, COUNT(b.id) as booking_count,
-           COALESCE(SUM(b.supplier_payout_amount), 0) as total_earnings
-    FROM products p
-    LEFT JOIN bookings b ON b.product_id = p.id AND b.status != 'cancelled'
-    WHERE p.supplier_id = ?
-    GROUP BY p.id
-    ORDER BY total_earnings DESC
-    LIMIT 5
-  `).all(id);
-
-  return res.json({
-    revenueTrend,
-    topProducts,
-    operationalMetrics: {
-      avgResponseTimeMins: 24,
-      slaComplianceRate: 98.2,
-      driverAssignmentEfficiency: 95.5,
-      otpSuccessRate: 99.1,
-    },
-  });
+  try {
+    return res.json(supplierAnalytics(db, req.params.id));
+  } catch (err) {
+    logger.error("Supplier analytics failed", { requestId: req.requestId, error: err });
+    return res.status(500).json({ error: "Failed to load analytics" });
+  }
 });
 
 // --- SUPPLIER DYNAMIC PRICING RULES ---

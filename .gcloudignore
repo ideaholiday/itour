@@ -1,0 +1,10 @@
+.gcloudignore
+.git
+.gitignore
+#!include:.gitignore
+**/.next
+**/node_modules
+**/*.sqlite
+**/*.sqlite3
+test-results
+playwright-report

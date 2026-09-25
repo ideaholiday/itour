@@ -2,6 +2,17 @@
  * Google Tag Manager & Google Analytics 4 Telemetry Layer for Idea Holiday
  * Container ID: GTM-KV6P5HRR
  */
+import { activeCampaign, parseCampaignParams } from "../../../shared/campaignAttribution.js";
+
+const CAMPAIGN_STORAGE_KEY = "ih_campaign";
+
+function storedCampaign() {
+  try {
+    return activeCampaign(JSON.parse(window.localStorage.getItem(CAMPAIGN_STORAGE_KEY) || "null"));
+  } catch {
+    return null;
+  }
+}
 
 export const analytics = {
   // Push raw event to window.dataLayer
@@ -13,6 +24,32 @@ export const analytics = {
       ...eventData,
       timestamp: new Date().toISOString(),
     });
+  },
+
+  // Remember the latest ad or post (UTM tags, gclid, fbclid) a visitor arrived from.
+  captureCampaign(search) {
+    const campaign = parseCampaignParams(search);
+    if (!campaign) return;
+    try {
+      window.localStorage.setItem(CAMPAIGN_STORAGE_KEY, JSON.stringify({ ...campaign, capturedAt: Date.now() }));
+    } catch {
+      // Private mode or blocked storage: GA4 still sees this visit's tags.
+    }
+  },
+
+  // Campaign fields for conversion events, empty when there is none.
+  campaignFields() {
+    return storedCampaign() || {};
+  },
+
+  // Conversions: traveler account created
+  trackSignUp(method = "email") {
+    this.pushEvent("sign_up", { method, ...this.campaignFields() });
+  },
+
+  // Conversions: supplier (operator) account created, the supplier-onboarding lead
+  trackSupplierSignup(city = "") {
+    this.pushEvent("generate_lead", { lead_type: "supplier_signup", supplier_city: city, ...this.campaignFields() });
   },
 
   // Track virtual pageview on React router navigation
@@ -88,6 +125,7 @@ export const analytics = {
   // E-Commerce: Purchase (Payment Complete)
   trackPurchase(bookingRef, product, totalAmount, paymentMethod = "CASHFREE") {
     this.pushEvent("purchase", {
+      ...this.campaignFields(),
       ecommerce: {
         transaction_id: bookingRef,
         value: totalAmount || (product ? product.price_inr : 0),

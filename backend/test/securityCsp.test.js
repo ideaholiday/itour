@@ -24,22 +24,43 @@ test("buildCspDirectives constructs allowed directives for third-party integrati
   assert.ok(directives.objectSrc.includes("'none'"));
 });
 
-test("security.txt route serves RFC 9116 content", async () => {
+test("CSP lets the Meta Pixel and Google Ads tags from Tag Manager load and report", () => {
+  const directives = buildCspDirectives({ NODE_ENV: "production" });
+  assert.ok(directives.scriptSrc.includes("https://connect.facebook.net"));
+  assert.ok(directives.connectSrc.includes("https://www.facebook.com"));
+  assert.ok(directives.scriptSrc.includes("https://www.googleadservices.com"));
+  assert.ok(directives.connectSrc.includes("https://googleads.g.doubleclick.net"));
+  assert.ok(directives.frameSrc.includes("https://td.doubleclick.net"));
+});
+
+test("security.txt route serves RFC 9116 content", () => {
+  const headers = {};
+  let body = "";
+  const req = { method: "GET", url: "/.well-known/security.txt" };
+  const res = {
+    setHeader(name, value) {
+      headers[name.toLowerCase()] = value;
+    },
+    send(text) {
+      body = text;
+    },
+  };
+
+  securityTxtRouter.handle(req, res);
+  assert.ok(headers["content-type"].includes("text/plain"));
+  assert.ok(body.includes("Contact: mailto:security@ideaholiday.in"));
+  assert.ok(body.includes("Expires:"));
+  assert.ok(body.includes("Canonical:"));
+});
+
+test("pages send a Referer origin so OpenStreetMap serves map tiles", async () => {
   const app = express();
-  app.use("/", securityTxtRouter);
-
+  configureSecurity(app, { NODE_ENV: "test" });
+  app.get("/", (_req, res) => res.send("ok"));
   const server = app.listen(0);
-  const port = server.address().port;
-
   try {
-    const res = await fetch(`http://localhost:${port}/.well-known/security.txt`);
-    assert.equal(res.status, 200);
-    assert.ok(res.headers.get("content-type").includes("text/plain"));
-
-    const text = await res.text();
-    assert.ok(text.includes("Contact: mailto:security@ideaholiday.in"));
-    assert.ok(text.includes("Expires:"));
-    assert.ok(text.includes("Canonical:"));
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/`);
+    assert.equal(response.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
   } finally {
     server.close();
   }

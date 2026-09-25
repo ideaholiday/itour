@@ -1,9 +1,20 @@
+import { moveNativeReservation } from "./nativeInventoryService.js";
+import { isSupplierDirect } from "../lib/bookingSources.js";
+import { onBookingCancelled } from "./affiliateService.js";
+import { onReferralBookingCancelled } from "./referralService.js";
 import crypto from "crypto";
+import { INDIA_TIME, localDateTimeMs, productTime } from "../lib/localTime.js";
 
 export class BookingModificationService {
   /**
    * Helper to verify if actor is authorized to modify the booking
    */
+  // A supplier-direct booking (ADR 034) is changed by the operator, never by the
+  // guest through IdeaHoliday: the guest paid the operator, not us.
+  static isTravelerLockedOut(actor, booking) {
+    return isSupplierDirect(booking) && !["ADMIN", "STAFF"].includes(String(actor?.role || "").toUpperCase());
+  }
+
   static verifyActorAuthorization(actor, booking) {
     if (!actor) return false;
     const role = String(actor.role || "").toUpperCase();
@@ -18,14 +29,14 @@ export class BookingModificationService {
   /**
    * Computes remaining hours before trip start
    */
-  static getHoursUntilDeparture(activityDate, pickupTime = "09:00") {
+  static getHoursUntilDeparture(activityDate, pickupTime = "09:00", time = INDIA_TIME) {
     try {
       const timeParts = String(pickupTime || "09:00").split(":");
       const hours = parseInt(timeParts[0], 10) || 9;
       const minutes = parseInt(timeParts[1], 10) || 0;
-      const departureDate = new Date(`${activityDate}T${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:00`);
+      const departureMs = localDateTimeMs(activityDate, `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`, time);
       const now = new Date();
-      const diffMs = departureDate.getTime() - now.getTime();
+      const diffMs = departureMs - now.getTime();
       return diffMs / (1000 * 60 * 60);
     } catch {
       return 0;
@@ -43,6 +54,9 @@ export class BookingModificationService {
 
     if (actor && !this.verifyActorAuthorization(actor, booking)) {
       return { eligible: false, error: "UNAUTHORIZED" };
+    }
+    if (this.isTravelerLockedOut(actor, booking)) {
+      return { eligible: false, error: "SUPPLIER_DIRECT_BOOKING", message: "This booking was made directly with the operator. Contact them to change it." };
     }
 
     const rawStatus = String(booking.status || "").toLowerCase();
@@ -67,7 +81,7 @@ export class BookingModificationService {
     if (policy === "MODERATE_48H") cutoffHours = 48;
     if (policy === "STRICT") cutoffHours = 72;
 
-    const hoursUntilDeparture = this.getHoursUntilDeparture(booking.activity_date, booking.pickup_time);
+    const hoursUntilDeparture = this.getHoursUntilDeparture(booking.activity_date, booking.pickup_time, productTime(database, booking.product_id));
     const isAdmin = actor && ["ADMIN", "STAFF"].includes(String(actor.role || "").toUpperCase());
 
     const isEligible = isAdmin || hoursUntilDeparture >= cutoffHours;
@@ -107,6 +121,7 @@ export class BookingModificationService {
     const requesterId = actor?.id || booking.user_id || "traveler";
 
     database.transaction(() => {
+      moveNativeReservation(database, booking, newDate, targetTime);
       database.prepare(`
         UPDATE bookings
         SET
@@ -151,6 +166,7 @@ export class BookingModificationService {
     const booking = database.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
     if (!booking) throw new Error("BOOKING_NOT_FOUND");
     if (actor && !this.verifyActorAuthorization(actor, booking)) throw new Error("UNAUTHORIZED");
+    if (this.isTravelerLockedOut(actor, booking)) throw new Error("SUPPLIER_DIRECT_BOOKING");
 
     let policy = "FLEXIBLE_24H";
     if (booking.product_id) {
@@ -158,7 +174,7 @@ export class BookingModificationService {
       if (product?.cancellation_policy) policy = product.cancellation_policy;
     }
 
-    const hoursUntilDeparture = this.getHoursUntilDeparture(booking.activity_date, booking.pickup_time);
+    const hoursUntilDeparture = this.getHoursUntilDeparture(booking.activity_date, booking.pickup_time, productTime(database, booking.product_id));
     const totalAmountInr = Number(booking.amount_inr || 0);
 
     let refundPercentage = 0;
@@ -211,10 +227,20 @@ export class BookingModificationService {
   static executeSelfServiceCancellation(database, bookingId, { reason }, actor = null) {
     const preview = this.calculateCancellationRefundPreview(database, bookingId, actor);
     const booking = database.prepare("SELECT * FROM bookings WHERE id = ? OR ref = ?").get(bookingId, bookingId);
+    // A second cancel would overwrite the refund state the first one recorded.
+    if (["cancelled", "completed", "in_progress"].includes(String(booking.status).toLowerCase())) {
+      throw new Error(`BOOKING_ALREADY_${String(booking.status).toUpperCase()}`);
+    }
 
     const modificationId = `mod_${crypto.randomBytes(6).toString("hex")}`;
     const requesterId = actor?.id || booking.user_id || "traveler";
-    const paymentStatus = preview.refundAmountInr > 0 ? "REFUND_INITIATED" : "REFUND_NOT_APPLICABLE";
+    // Only money actually collected can be refunded.
+    const paid = booking.payment_status === "PAID";
+    if (!paid) {
+      preview.refundAmountInr = 0;
+      preview.cancellationFeeInr = 0;
+    }
+    const paymentStatus = !paid ? booking.payment_status : preview.refundAmountInr > 0 ? "REFUND_INITIATED" : "REFUND_NOT_APPLICABLE";
 
     database.transaction(() => {
       database.prepare(`
@@ -233,6 +259,11 @@ export class BookingModificationService {
         database.prepare("UPDATE payouts SET payout_status = 'CANCELLED' WHERE booking_id = ?").run(booking.id);
       } catch {}
 
+      // Void any pending affiliate referral earning
+      try {
+        onBookingCancelled(database, booking.id);
+      } catch {}
+
       // Log in booking_modifications
       database.prepare(`
         INSERT INTO booking_modifications (
@@ -249,6 +280,8 @@ export class BookingModificationService {
         reason || "Traveler self-service cancellation"
       );
     })();
+    // Spent wallet credit comes back at the policy's refund share, even when credit paid for all of it.
+    onReferralBookingCancelled(database, booking.id, { reason: reason || "Traveler cancelled", creditShare: paid ? preview.refundPercentage / 100 : null });
 
     return {
       success: true,

@@ -58,7 +58,7 @@ function header({ documentLabel, title, destination, status, reference }) {
 }
 
 function footer(link) {
-  return `<footer class="footer"><p><strong>Idea Holiday traveler support</strong><br>support@ideaholiday.com · Available 24/7</p><p class="page-number">Generated ${escapeHtml(new Date().toLocaleString("en-IN"))}${link ? `<br><a href="${escapeHtml(link)}">${escapeHtml(link)}</a>` : ""}</p></footer>`;
+  return `<footer class="footer"><p><strong>Idea Holiday traveler support</strong><br>support@ideaholiday.in · +91 9696777391 / +91 9336757106 · Available 24/7</p><p class="page-number">Generated ${escapeHtml(new Date().toLocaleString("en-IN"))}${link ? `<br><a href="${escapeHtml(link)}">${escapeHtml(link)}</a>` : ""}</p></footer>`;
 }
 
 export function printCircuitPlan({

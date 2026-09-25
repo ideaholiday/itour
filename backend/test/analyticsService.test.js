@@ -11,6 +11,7 @@ import {
   getAnomalyAlerts
 } from "../src/services/analyticsService.js";
 import { logAnalyticsEvent } from "../src/services/eventLogService.js";
+import { migratedDb } from "./helpers/migratedDb.js";
 
 function setupTestDb() {
   const db = new Database(":memory:");
@@ -23,7 +24,7 @@ function setupTestDb() {
     );
     CREATE TABLE products (
       id TEXT PRIMARY KEY,
-      destination_name TEXT,
+      city TEXT,
       product_type TEXT
     );
     CREATE TABLE bookings (
@@ -45,8 +46,8 @@ function setupTestDb() {
     CREATE TABLE refunds (
       id TEXT PRIMARY KEY,
       booking_id TEXT,
-      amount REAL,
-      created_at TEXT DEFAULT (datetime('now'))
+      refund_amount REAL,
+      requested_at TEXT DEFAULT (datetime('now'))
     );
     CREATE TABLE quality_scores (
       entity_type TEXT,
@@ -190,4 +191,109 @@ test("logAnalyticsEvent writes event safely to audit_logs", () => {
   assert.equal(row.actor_id, "u-123");
   assert.equal(row.actor_role, "TRAVELER");
   assert.ok(row.metadata.includes("scuba diving"));
+});
+
+// A migrated database with no bookings, refunds or audit events, and a helper
+// that adds `count` bookings created `daysAgo` days ago.
+function emptyAnalyticsDb(t) {
+  const db = migratedDb(t);
+  db.pragma("foreign_keys = OFF");
+  db.exec("DELETE FROM bookings; DELETE FROM refunds; DELETE FROM audit_logs;");
+  let next = 0;
+  const insert = db.prepare(`INSERT INTO bookings (id, ref, product_type, activity_date, pickup_location, amount_inr, status, payment_status, created_at)
+    VALUES (?, ?, 'ACTIVITY', '2099-01-01', 'Jetty', ?, ?, ?, datetime('now', ?))`);
+  const addBookings = (daysAgo, count, { amount = 1000, status = "confirmed", paymentStatus = "PAID" } = {}) => {
+    for (let i = 0; i < count; i++) {
+      next += 1;
+      insert.run(`bk_a${next}`, `IH-A${next}`, amount, status, paymentStatus, `-${daysAgo} days`);
+    }
+  };
+  return { db, addBookings };
+}
+
+const alertTypes = (result) => result.alerts.map((alert) => alert.type).sort();
+
+test("bookings dropping to none today and yesterday raise low-volume alerts", t => {
+  const { db, addBookings } = emptyAnalyticsDb(t);
+  for (let day = 2; day <= 11; day++) addBookings(day, 10);
+  const result = getAnomalyAlerts(db);
+  assert.deepEqual(alertTypes(result), ["LOW_BOOKINGS", "LOW_BOOKINGS", "LOW_REVENUE", "LOW_REVENUE"]);
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal(result.alerts.filter((alert) => alert.day === today).length, 2);
+  assert.ok(result.alerts.every((alert) => alert.value === 0 && alert.zScore < -2));
+});
+
+test("a steady week raises nothing, and fewer than seven days of data is not judged", t => {
+  const { db, addBookings } = emptyAnalyticsDb(t);
+  for (let day = 0; day <= 5; day++) addBookings(day, 3);
+  assert.match(getAnomalyAlerts(db).message, /need 7\+ days/);
+  addBookings(6, 3);
+  const steady = getAnomalyAlerts(db);
+  assert.deepEqual(steady.alerts, []);
+  assert.deepEqual(steady.stats.bookings, { mean: 3, stdDev: 0 });
+});
+
+test("a burst of bookings is flagged as unusually high, and a burst of cancellations as a spike", t => {
+  const { db, addBookings } = emptyAnalyticsDb(t);
+  for (let day = 1; day <= 11; day++) addBookings(day, 1);
+  addBookings(0, 16);
+  addBookings(0, 4, { status: "cancelled", paymentStatus: "REFUNDED" });
+  const result = getAnomalyAlerts(db);
+  assert.deepEqual(alertTypes(result), ["CANCELLATION_SPIKE", "HIGH_BOOKINGS"]);
+  const spike = result.alerts.find((alert) => alert.type === "CANCELLATION_SPIKE");
+  assert.equal(spike.value, 4);
+  assert.equal(spike.expected, 0.13);
+});
+
+test("KPIs compare with the previous period, and weekly trends group by week", t => {
+  const { db, addBookings } = emptyAnalyticsDb(t);
+  addBookings(40, 2, { amount: 1000 });
+  addBookings(5, 3, { amount: 1000 });
+  const overview = getDailyOverview(db, { days: 30 });
+  assert.deepEqual(overview.kpis.totalBookings, { value: 3, change: 50 });
+  assert.deepEqual(overview.kpis.revenue, { value: 3000, change: 50 });
+  assert.deepEqual(overview.kpis.cancellationRate, { value: 0, change: 0 });
+
+  const weekly = getBookingTrends(db, { days: 90, groupBy: "week" });
+  assert.equal(weekly.groupBy, "week");
+  assert.ok(weekly.points.every((point) => /^\d{4}-W\d{2}$/.test(point.period)));
+});
+
+test("the funnel starts at searches and views once audit events exist", t => {
+  const { db, addBookings } = emptyAnalyticsDb(t);
+  addBookings(1, 1, { status: "pending_payment", paymentStatus: "PENDING" });
+  addBookings(1, 2, { status: "confirmed" });
+  addBookings(1, 1, { status: "completed" });
+  assert.deepEqual(getConversionFunnel(db).stages.map((stage) => stage.count), [4, 3, 3, 1]);
+
+  const event = db.prepare("INSERT INTO audit_logs (id, action, resource_type) VALUES (?, ?, 'product')");
+  for (let i = 0; i < 20; i++) event.run(`al_s${i}`, "search");
+  for (let i = 0; i < 8; i++) event.run(`al_v${i}`, "product_view");
+  const funnel = getConversionFunnel(db);
+  assert.deepEqual(funnel.stages.map((stage) => [stage.name, stage.count, stage.conversionFromPrev]), [
+    ["Searches", 20, 100],
+    ["Product Views", 8, 40],
+    ["Bookings Created", 4, 50],
+    ["Payment Initiated", 3, 75],
+    ["Confirmed", 3, 100],
+    ["Completed", 1, 33.33],
+  ]);
+  assert.equal(funnel.overallConversion, 5);
+});
+
+test("the overview counts refunds and the breakdown groups revenue by city on the migrated schema", t => {
+  const { db, addBookings } = emptyAnalyticsDb(t);
+  addBookings(3, 2, { amount: 2000 });
+  db.prepare("UPDATE bookings SET product_id = (SELECT id FROM products WHERE city = 'Goa' LIMIT 1)").run();
+  const refund = db.prepare(`INSERT INTO refunds (id, booking_id, booking_ref, refund_amount, refund_percentage, policy_tier, status, requested_at)
+    VALUES (?, ?, ?, ?, 100, 'FULL', 'PROCESSED', datetime('now', ?))`);
+  refund.run("rf_1", "bk_a1", "IH-A1", 1500, "-2 days");
+  refund.run("rf_old", "bk_a2", "IH-A2", 900, "-45 days");
+
+  const overview = getDailyOverview(db, { days: 30 });
+  assert.deepEqual(overview.kpis.refundsTotal, { value: 1500 });
+  assert.deepEqual(overview.kpis.refundRate, { value: 50, change: 0 });
+
+  const breakdown = getRevenueBreakdown(db, { days: 30 });
+  assert.deepEqual(breakdown.byDestination, [{ destination: "Goa", bookings: 2, revenue: 4000, share: 100 }]);
 });

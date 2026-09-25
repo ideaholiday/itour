@@ -1,4 +1,11 @@
 -- ====================================================================
+-- LEGACY — NOT USED. Nothing executes or imports this file.
+-- An early UUID-based design; the live schema differs (TEXT ids, 100+ tables).
+-- Schema source of truth: backend/migrations/ (see docs/DATA_MODEL.md).
+-- Do not edit or copy from it.
+-- ====================================================================
+
+-- ====================================================================
 -- IDEA HOLIDAY SUPABASE / POSTGRESQL MASTER DATABASE SCHEMA
 -- Tailored for Transfers, Sightseeing, Multi-Day Packages & 4 Role Ecosystem
 -- ====================================================================
@@ -35,7 +42,7 @@ CREATE TABLE IF NOT EXISTS suppliers (
     kyb_status VARCHAR(50) DEFAULT 'PENDING', -- 'PENDING', 'APPROVED', 'REJECTED'
     commission_rate DECIMAL(5, 2) DEFAULT 18.00, -- 18% platform commission
     payout_bank_details JSONB DEFAULT '{}', -- { account_number, ifsc, bank_name, upi_id }
-    rating DECIMAL(3, 2) DEFAULT 4.8,
+    rating DECIMAL(3, 2), -- NULL until a verified review exists
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -87,7 +94,7 @@ CREATE TABLE IF NOT EXISTS products (
     cancellation_policy JSONB DEFAULT '{"type": "FLEXIBLE", "free_cancellation_hours": 24}',
     is_instant_booking BOOLEAN DEFAULT true,
     status VARCHAR(50) DEFAULT 'PUBLISHED', -- 'DRAFT', 'PENDING_REVIEW', 'PUBLISHED', 'ARCHIVED'
-    rating DECIMAL(3, 2) DEFAULT 4.5,
+    rating DECIMAL(3, 2), -- NULL until a verified review exists
     review_count INT DEFAULT 0,
     bestseller BOOLEAN DEFAULT false,
     hero_image TEXT,

@@ -1,7 +1,9 @@
+import { moveNativeReservation } from "./nativeInventoryService.js";
 import { nanoid } from "nanoid";
 import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { calculateRefundQuote, createRefundRecord, finalizeRefund } from "./financeService.js";
 import { beginCircuitReconfirmation, registerCircuitRefundSubmission } from "./circuitOrchestrationService.js";
+import { localDateTimeMs, productTime } from "../lib/localTime.js";
 
 const ACTIVE_REQUEST_STATUSES = new Set(["PENDING", "REFUND_FAILED", "REFUND_RECONCILIATION_REQUIRED"]);
 const STAFF_ROLES = new Set(["ADMIN", "STAFF"]);
@@ -180,7 +182,7 @@ export function previewCircuitReschedule(database, target, actor, { newStartDate
 
   const lines = items.map((item) => {
     const proposedDate = shiftDate(item.activity_date, shiftDays);
-    const pickupAt = new Date(`${item.activity_date}T${item.pickup_time || "09:00"}:00`).getTime();
+    const pickupAt = localDateTimeMs(item.activity_date, item.pickup_time, productTime(database, item.product_id));
     const hoursUntilPickup = Math.max(0, Math.round(((pickupAt - now.getTime()) / 3_600_000) * 10) / 10);
     const cutoffHours = rescheduleCutoff(item.cancellation_policy);
     const availability = evaluateSupplierAvailability(database, {
@@ -326,6 +328,7 @@ function applyReschedule(database, request, order, actor, now) {
   database.transaction(() => {
     for (const item of preview.items) {
       const modificationId = `mod_${nanoid(12)}`;
+      moveNativeReservation(database, database.prepare("SELECT * FROM bookings WHERE id = ?").get(item.bookingId), item.proposedDate);
       database.prepare(`
         UPDATE bookings SET original_activity_date = COALESCE(original_activity_date, activity_date),
           activity_date = ?, rescheduled_at = ?, supplier_assignment_status = 'RESCHEDULED_RECONFIRMATION_REQUIRED',

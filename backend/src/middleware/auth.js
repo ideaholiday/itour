@@ -5,6 +5,7 @@ import { hashPassword } from "../lib/passwords.js";
 import { supabase } from "../supabaseClient.js";
 import logger from "../config/logger.js";
 import { recordAuditEvent } from "../services/auditService.js";
+import { supplierAccessForUser } from "../services/supplierStaffService.js";
 
 const LOCAL_JWT_SECRET = process.env.JWT_SECRET
   || (process.env.NODE_ENV === "production" ? null : "dev-secret-change-me");
@@ -108,15 +109,17 @@ export function resolveDatabasePrincipal(identity, database = db) {
 
   if (!user) return null;
   const role = normalizeRole(user.role);
-  const supplier = role === "SUPPLIER" && (identity.source !== "supabase" || identity.emailVerified)
-    ? database.prepare("SELECT id, email FROM suppliers WHERE LOWER(email) = ? LIMIT 1").get(String(user.email || "").toLowerCase())
+  // The owner is linked by email; staff by supplier_members (ADR 036).
+  const supplierAccess = role === "SUPPLIER" && (identity.source !== "supabase" || identity.emailVerified)
+    ? supplierAccessForUser(database, user)
     : null;
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     role,
-    supplier_id: role === "SUPPLIER" ? supplier?.id || null : null,
+    supplier_id: supplierAccess?.supplierId || null,
+    supplier_role: supplierAccess?.role || null,
     auth_source: identity.source,
   };
 }

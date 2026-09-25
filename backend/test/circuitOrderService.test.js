@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Database from "better-sqlite3";
+import { applySupplierSubscriptionMigration } from "./fixtures/supplierSubscriptions.js";
 import {
   CIRCUIT_ORDER_HOLD_VALIDITY_MS,
   consumeCircuitQuote,
@@ -167,6 +168,7 @@ function testDatabase() {
     .run("product_1", "PROD-1", "Heritage Walk");
   database.prepare("INSERT INTO products VALUES (?, 'supplier_1', ?, ?, 'DAY_TOUR', 'Goa', 'Goa', 'PUBLISHED', 1, 'FLEXIBLE_24H')")
     .run("product_2", "PROD-2", "Island Tour");
+  applySupplierSubscriptionMigration(database);
   return database;
 }
 
@@ -343,6 +345,12 @@ test("requires quote ownership, readiness, freshness, and complete traveler cont
   insertQuote(database, { id: "no_contact" });
   assert.throws(
     () => consumeCircuitQuote(database, { quoteId: "no_contact", userId: "traveler_1", idempotencyKey: "circuit-request-008" }, { now: NOW }),
+    (error) => error.code === "TRAVELER_CONTACT_REQUIRED",
+  );
+  // A Thai local number with no country code would otherwise be sent to +91.
+  database.prepare("UPDATE users SET phone = '0812345678' WHERE id = 'traveler_1'").run();
+  assert.throws(
+    () => consumeCircuitQuote(database, { quoteId: "no_contact", userId: "traveler_1", idempotencyKey: "circuit-request-009" }, { now: NOW }),
     (error) => error.code === "TRAVELER_CONTACT_REQUIRED",
   );
 });

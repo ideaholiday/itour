@@ -16,9 +16,13 @@ import {
 } from "lucide-react";
 import IdeaHolidayLogo from "../components/IdeaHolidayLogo.jsx";
 import { api } from "../lib/api.js";
+import { analytics } from "../lib/analytics.js";
 import { useAuth } from "../lib/auth.jsx";
+import PhoneInput from "../components/PhoneInput.jsx";
+import { phoneCountryForName } from "../lib/phone.js";
 
 const initialForm = {
+  supplierKind: "BUSINESS",
   companyName: "",
   contactName: "",
   email: "",
@@ -26,13 +30,14 @@ const initialForm = {
   cityId: "",
   city: "",
   state: "",
+  country: "",
   password: "",
   confirmPassword: "",
   agreed: false,
 };
 
 const benefits = [
-  [BarChart3, "Reach more travelers", "Sell tours and transfers to guests planning trips across India."],
+  [BarChart3, "Reach more travelers", "Sell tours and transfers to guests planning trips in India and across Asia."],
   [ShieldCheck, "Secure partner tools", "Manage bookings, pricing, fleet readiness and payouts from one workspace."],
   [Headphones, "Local support", "Get onboarding and operations support when you need a hand."],
 ];
@@ -76,6 +81,10 @@ export default function SupplierSignup() {
     if (error) setError("");
   };
 
+  // Cities come from the catalogue with their country (ADR 022: India, Thailand, UAE).
+  const indiaCities = cities.filter((city) => (city.country || "India") === "India");
+  const abroadCountries = [...new Set(cities.map((city) => city.country).filter((country) => country && country !== "India"))];
+
   const selectCity = (event) => {
     const selected = cities.find((city) => city.id === event.target.value);
     setForm((current) => ({
@@ -83,6 +92,7 @@ export default function SupplierSignup() {
       cityId: selected?.id || "",
       city: selected?.name || "",
       state: selected?.state || "",
+      country: selected?.country || "India",
     }));
     if (error) setError("");
   };
@@ -114,7 +124,9 @@ export default function SupplierSignup() {
         city: form.city.trim(),
         state: form.state.trim(),
         password: form.password,
+        supplierKind: form.supplierKind,
       });
+      analytics.trackSupplierSignup(form.city.trim());
       login(result.token, result.user);
       navigate("/supplier/dashboard?welcome=1", { replace: true });
     } catch (err) {
@@ -144,7 +156,7 @@ export default function SupplierSignup() {
             Turn your local expertise into unforgettable trips.
           </h1>
           <p className="mt-5 max-w-xl text-base leading-7 text-stone-600">
-            Join India’s growing network of tour operators and mobility partners. Publish experiences, manage every booking, and grow from a single partner workspace.
+            Join the growing network of tour operators and mobility partners in India and across Asia. Publish experiences, manage every booking, and grow from a single partner workspace.
           </p>
 
           <div className="mt-9 space-y-5">
@@ -170,13 +182,25 @@ export default function SupplierSignup() {
           </div>
 
           <form onSubmit={submit} className="space-y-4">
-            <Field id="supplier-company" label="Business or company name">
+            {/* Individual vehicle owners (no GSTIN) register in India only (ADR 024). */}
+            <fieldset>
+              <legend className="mb-1.5 block text-xs font-bold text-slate-700">I am registering as</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[["BUSINESS", "A company or firm"], ["INDIVIDUAL_OWNER", "An individual vehicle owner (no GST)"]].map(([value, label]) => (
+                  <label key={value} className={`flex cursor-pointer items-center gap-2 rounded-2xl border p-3 text-xs font-semibold ${form.supplierKind === value ? "border-amber-700 bg-amber-50 text-stone-900" : "border-stone-200 text-stone-600"}`}>
+                    <input type="radio" name="supplierKind" value={value} checked={form.supplierKind === value} onChange={() => setForm((current) => ({ ...current, supplierKind: value, ...(value === "INDIVIDUAL_OWNER" && current.country && current.country !== "India" ? { cityId: "", city: "", state: "", country: "" } : {}) }))} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <Field id="supplier-company" label={form.supplierKind === "INDIVIDUAL_OWNER" ? "Display name for travelers" : "Business or company name"}>
               <div className="relative"><Building2 className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" /><input id="supplier-company" required autoComplete="organization" value={form.companyName} onChange={update("companyName")} placeholder="e.g. Coastal Trails Goa" className={`${inputClass} pl-10`} /></div>
             </Field>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field id="supplier-name" label="Contact person"><input id="supplier-name" required autoComplete="name" value={form.contactName} onChange={update("contactName")} placeholder="Full name" className={inputClass} /></Field>
-              <Field id="supplier-phone" label="Mobile number"><input id="supplier-phone" required type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={update("phone")} placeholder="+91 98765 43210" className={inputClass} /></Field>
+              <Field id="supplier-phone" label="Mobile number"><PhoneInput id="supplier-phone" required defaultCountry={phoneCountryForName(form.country)} value={form.phone} onChange={(phone) => { setForm((current) => ({ ...current, phone })); if (error) setError(""); }} inputClassName={inputClass} /></Field>
             </div>
 
             <Field id="supplier-email" label="Work email address"><input id="supplier-email" required type="email" autoComplete="email" value={form.email} onChange={update("email")} placeholder="you@company.com" className={inputClass} /></Field>
@@ -188,15 +212,20 @@ export default function SupplierSignup() {
                   <select id="supplier-city" required disabled={citiesLoading} value={form.cityId} onChange={selectCity} className={`${inputClass} appearance-none pl-10 disabled:bg-stone-100`}>
                     <option value="">{citiesLoading ? "Loading approved cities…" : "Select a city"}</option>
                     <optgroup label="India metro cities">
-                      {cities.filter((city) => city.category === "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
+                      {indiaCities.filter((city) => city.category === "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
                     </optgroup>
-                    <optgroup label="Tourism cities">
-                      {cities.filter((city) => city.category !== "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
+                    <optgroup label="India tourism cities">
+                      {indiaCities.filter((city) => city.category !== "METRO").map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
                     </optgroup>
+                    {form.supplierKind !== "INDIVIDUAL_OWNER" && abroadCountries.map((country) => (
+                      <optgroup key={country} label={country}>
+                        {cities.filter((city) => city.country === country).map((city) => <option key={city.id} value={city.id}>{city.name}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
               </Field>
-              <Field id="supplier-state" label="State"><input id="supplier-state" readOnly tabIndex={-1} value={form.state} placeholder="Selected automatically" className={`${inputClass} bg-[#FAF9F6] text-stone-600`} /></Field>
+              <Field id="supplier-state" label={form.country && form.country !== "India" ? "Province / emirate" : "State"}><input id="supplier-state" readOnly tabIndex={-1} value={form.state} placeholder="Selected automatically" className={`${inputClass} bg-[#FAF9F6] text-stone-600`} /></Field>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -206,7 +235,7 @@ export default function SupplierSignup() {
 
             <label className="flex cursor-pointer items-start gap-3 rounded-2xl bg-[#FAF9F6] border border-stone-200 p-3 text-xs leading-5 text-stone-600">
               <input required type="checkbox" checked={form.agreed} onChange={update("agreed")} className="mt-0.5 h-4 w-4 rounded border-stone-300 accent-amber-500" />
-              <span>I agree to the <Link to="/terms" className="font-bold text-stone-900 underline decoration-stone-300 underline-offset-2">partner terms</Link> and confirm I’m authorized to represent this business.</span>
+              <span>I agree to the <Link to="/terms" className="font-bold text-stone-900 underline decoration-stone-300 underline-offset-2">partner terms</Link> and <Link to="/privacy-policy" className="font-bold text-stone-900 underline decoration-stone-300 underline-offset-2">privacy policy</Link>, and confirm I’m authorized to represent this business.</span>
             </label>
 
             {error && <p role="alert" className="rounded-2xl border border-rose-300 bg-rose-50 px-3.5 py-3 text-sm font-semibold text-rose-800">{error}</p>}

@@ -40,7 +40,7 @@ export default function TourProductBuilder() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
-  const supplierId = user?.user_metadata?.supplier_id || user?.supplier_id || "sup_lucknow_cabs";
+  const supplierId = user?.user_metadata?.supplier_id || user?.supplier_id || null;
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState(() => ({
     ...DEFAULT_TOUR_FORM_STATE,
@@ -287,7 +287,6 @@ export default function TourProductBuilder() {
         title: formData.step1.title,
         city: formData.step1.city,
         state: formData.step1.state,
-        country: "India",
         category: pType === "DAY_TOUR" ? "Day Sightseeing" : "Multi-Day Packages",
         shortDesc: formData.step1.shortDescription,
         fullDesc: formData.step1.shortDescription,
@@ -364,6 +363,7 @@ export default function TourProductBuilder() {
             : null,
       };
 
+      if (!supplierId) throw new Error("Your account is not linked to a supplier. Sign in again or contact support.");
       const response = await fetch(`/api/suppliers/${supplierId}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },

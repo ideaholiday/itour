@@ -26,6 +26,8 @@ import {
   X
 } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
+import KybDocumentViewer, { kybDocLabel } from "../KybDocumentViewer.jsx";
+import SelfieCapture from "./SelfieCapture.jsx";
 
 const parseBankDetails = (raw) => {
   if (!raw) return null;
@@ -53,6 +55,13 @@ const DOC_TYPES = [
 export default function SupplierCompliancePanel({ supplierData, supplierId, onRefresh }) {
   const supplier = supplierData?.supplier || {};
   const kybDocs = supplierData?.kybDocs || [];
+  // Documents and checks for the country of the supplier's base city (ADR 023).
+  const kybReadiness = supplierData?.kybReadiness;
+  // The selfie is taken with the live camera only, never picked from the gallery.
+  const docTypes = kybReadiness?.documentTypes?.filter((type) => type.docType !== "SELFIE").map((type) => ({ value: type.docType, label: type.label })) || DOC_TYPES;
+  const cashfree = kybReadiness?.cashfree !== false;
+  const isOwner = kybReadiness?.supplierKind === "INDIVIDUAL_OWNER";
+  const ownerChecks = kybReadiness?.ownerChecks;
   const bankDetails = parseBankDetails(supplier.payout_bank_details);
 
   const [copiedRef, setCopiedRef] = useState("");
@@ -63,9 +72,17 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
   const [taxModalOpen, setTaxModalOpen] = useState(false);
   const [payoutModalOpen, setPayoutModalOpen] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [selfieOpen, setSelfieOpen] = useState(false);
 
   // Pre-selected doc type when clicking upload for a specific slot
   const [presetDocType, setPresetDocType] = useState("");
+  const [presetDocNumber, setPresetDocNumber] = useState("");
+  const openUpload = (type = "", number = "") => {
+    setPresetDocType(type);
+    setPresetDocNumber(number);
+    setUploadModalOpen(true);
+  };
+  const [viewingDoc, setViewingDoc] = useState(null);
 
   const handleCopyRef = (ref) => {
     if (!ref) return;
@@ -80,8 +97,9 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
   };
 
   // Cashfree SecureID verification triggers
-  const handleVerifyGstin = async () => {
-    if (!supplier.gstin) {
+  const handleVerifyGstin = async (typed) => {
+    const gstin = String(typed ?? supplier.gstin ?? "").trim().toUpperCase();
+    if (!gstin) {
       showToast("error", "Please add a GSTIN number before verifying.");
       return;
     }
@@ -90,11 +108,11 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       const res = await fetch(`/api/suppliers/${supplierId}/kyb/verify-gstin`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ gstin: supplier.gstin, businessName: supplier.company_name })
+        body: JSON.stringify({ gstin, businessName: supplier.company_name })
       });
       const data = await res.json();
       if (data.success && data.verification?.valid) {
-        showToast("success", `GSTIN Verified with Cashfree: ${data.verification.legalName} (${data.verification.status})`);
+        showToast("success", data.kybAutoApproved ? data.message : `GSTIN Verified with Cashfree: ${data.verification.legalName} (${data.verification.status})`);
         if (onRefresh) onRefresh();
       } else {
         showToast("error", data.error || data.message || "GSTIN verification failed");
@@ -106,8 +124,9 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
     }
   };
 
-  const handleVerifyPan = async () => {
-    if (!supplier.pan_number) {
+  const handleVerifyPan = async (typed) => {
+    const pan = String(typed ?? supplier.pan_number ?? "").trim().toUpperCase();
+    if (!pan) {
       showToast("error", "Please add a PAN number before verifying.");
       return;
     }
@@ -116,17 +135,43 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       const res = await fetch(`/api/suppliers/${supplierId}/kyb/verify-pan`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ pan: supplier.pan_number, name: supplier.contact_name || supplier.company_name })
+        body: JSON.stringify({ pan, name: supplier.contact_name || supplier.company_name })
       });
       const data = await res.json();
       if (data.success && data.verification?.valid) {
-        showToast("success", `PAN Verified with Cashfree: ${data.verification.registeredName} (${data.verification.type})`);
+        showToast("success", data.kybAutoApproved ? data.message : `PAN Verified with Cashfree: ${data.verification.registeredName} (${data.verification.type})`);
         if (onRefresh) onRefresh();
       } else {
         showToast("error", data.error || data.message || "PAN verification failed");
       }
     } catch {
       showToast("error", "Network error running PAN verification");
+    } finally {
+      setVerifyingField(null);
+    }
+  };
+
+  // Driving licence and vehicle RC checks for an individual owner. Optional:
+  // the document can be uploaded without them, but they speed up approval.
+  const handleVerifyOwnerDocument = async (kind, number, dob) => {
+    const path = kind === "licence" ? "verify-dl" : "verify-rc";
+    const body = kind === "licence" ? { licenseNumber: number, dob } : { registrationNumber: number };
+    setVerifyingField(kind);
+    try {
+      const res = await fetch(`/api/suppliers/${supplierId}/kyb/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.verification?.valid) {
+        showToast("success", data.message);
+        if (onRefresh) onRefresh();
+      } else {
+        showToast("error", data.error || data.message || "Verification failed");
+      }
+    } catch {
+      showToast("error", "Network error running the verification");
     } finally {
       setVerifyingField(null);
     }
@@ -171,7 +216,7 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       });
       const data = await res.json();
       if (data.success) {
-        showToast("success", "Full Cashfree SecureID KYB Verification completed!");
+        showToast("success", data.kybAutoApproved ? data.message : "Full Cashfree SecureID KYB Verification completed!");
         if (onRefresh) onRefresh();
       } else {
         showToast("error", data.error || "Failed to execute comprehensive verification");
@@ -346,6 +391,110 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
               </button>
             </div>
 
+            {cashfree && (
+              <div className="mt-5 space-y-3">
+                <IdentityStep
+                  step={1}
+                  title="PAN"
+                  docType="PAN"
+                  placeholder="ABCDE1234F"
+                  pattern={/^[A-Z]{5}[0-9]{4}[A-Z]$/}
+                  savedNumber={supplier.pan_number}
+                  verified={supplier.pan_verified === 1}
+                  verifiedName={supplier.pan_verified_name}
+                  verifying={verifyingField === "pan"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={handleVerifyPan}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "PAN")}
+                  onUpload={openUpload}
+                />
+                <IdentityStep
+                  step={2}
+                  title="GSTIN"
+                  docType="GSTIN"
+                  placeholder="22ABCDE1234F1Z5"
+                  pattern={/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/}
+                  savedNumber={supplier.gstin}
+                  verified={supplier.gstin_verified === 1}
+                  verifiedName={supplier.gstin_verified_name}
+                  verifying={verifyingField === "gstin"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={handleVerifyGstin}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "GSTIN")}
+                  onUpload={openUpload}
+                />
+              </div>
+            )}
+
+            {isOwner && (
+              <div className="mt-5 space-y-3">
+                <IdentityStep
+                  step={1}
+                  title="PAN"
+                  docType="PAN"
+                  placeholder="ABCDE1234F"
+                  pattern={/^[A-Z]{5}[0-9]{4}[A-Z]$/}
+                  savedNumber={supplier.pan_number}
+                  verified={supplier.pan_verified === 1}
+                  verifiedName={supplier.pan_verified_name}
+                  verifying={verifyingField === "pan"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={handleVerifyPan}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "PAN")}
+                  onUpload={openUpload}
+                />
+                <SelfieStep
+                  step={2}
+                  panVerified={supplier.pan_verified === 1}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "SELFIE")}
+                  onStart={() => setSelfieOpen(true)}
+                />
+                <NumberStep
+                  step={3}
+                  title="Aadhaar"
+                  docType="AADHAAR_MASKED"
+                  hint="Enter only the last 4 digits. Upload the front (only the last 4 digits visible) and the back of your Aadhaar."
+                  placeholder="Last 4 digits"
+                  pattern={/^\d{4}$/}
+                  maxLength={4}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "AADHAAR_MASKED")}
+                  uploadLabel="Aadhaar front"
+                  backDocType="AADHAAR_BACK"
+                  backUploadedDoc={kybDocs.find((d) => d.doc_type === "AADHAAR_BACK")}
+                  onUpload={openUpload}
+                />
+                <NumberStep
+                  step={4}
+                  title="Driving licence"
+                  docType="DRIVING_LICENSE"
+                  placeholder="UP3220180012345"
+                  pattern={/^[A-Z]{2}[0-9A-Z-]{6,18}$/}
+                  maxLength={20}
+                  askDob
+                  verifiedNumber={ownerChecks?.licence?.number}
+                  verifying={verifyingField === "licence"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={(number, dob) => handleVerifyOwnerDocument("licence", number, dob)}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "DRIVING_LICENSE")}
+                  onUpload={openUpload}
+                />
+                <NumberStep
+                  step={5}
+                  title="Vehicle RC"
+                  docType="VEHICLE_REGISTRATION"
+                  placeholder="UP32AB1234"
+                  pattern={/^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}$/}
+                  maxLength={12}
+                  verifiedNumber={ownerChecks?.vehicle?.number}
+                  verifying={verifyingField === "vehicle"}
+                  busy={Boolean(verifyingField)}
+                  onVerify={(number) => handleVerifyOwnerDocument("vehicle", number)}
+                  uploadedDoc={kybDocs.find((d) => d.doc_type === "VEHICLE_REGISTRATION")}
+                  onUpload={openUpload}
+                />
+              </div>
+            )}
+
             {/* Documents List */}
             <div className="mt-5 space-y-3">
               {kybDocs.map((doc) => {
@@ -402,15 +551,15 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                       </span>
 
                       {doc.doc_url && (
-                        <a
-                          href={doc.doc_url}
-                          target="_blank"
-                          rel="noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => setViewingDoc(doc)}
                           className="rounded-lg border border-stone-200 bg-white p-1.5 text-stone-600 hover:text-amber-800 hover:border-amber-300 transition"
                           title="View uploaded document"
+                          aria-label={`View ${kybDocLabel(doc.doc_type)}`}
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
+                        </button>
                       )}
 
                       {!isApproved && (
@@ -432,17 +581,17 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                   <UploadCloud className="mx-auto h-8 w-8 text-amber-600" />
                   <h3 className="mt-2 text-sm font-bold text-stone-800">No documents submitted yet</h3>
                   <p className="mt-1 text-xs text-stone-500 max-w-sm mx-auto">
-                    Upload your Commercial Transport Permit, PAN copy, or GSTIN certificate to start receiving marketplace bookings.
+                    {cashfree ? "Upload your Commercial Transport Permit, PAN copy, or GSTIN certificate to start receiving marketplace bookings." : kybReadiness.supplierKind === "INDIVIDUAL_OWNER" ? "Upload your PAN, masked Aadhaar, driving licence and vehicle documents to start receiving marketplace bookings." : `Upload your business documents from ${kybReadiness.country} to start receiving marketplace bookings.`}
                   </p>
                   <button
                     onClick={() => {
-                      setPresetDocType("COMMERCIAL_TRANSPORT_LICENSE");
+                      setPresetDocType(docTypes[0].value);
                       setUploadModalOpen(true);
                     }}
                     className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-stone-950 hover:bg-amber-400 shadow-sm"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    <span>Upload Commercial Permit</span>
+                    <span>Upload {cashfree ? "Commercial Permit" : docTypes[0].label}</span>
                   </button>
                 </div>
               )}
@@ -452,10 +601,10 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
           {/* Quick upload triggers for standard required documents */}
           <div className="mt-6 pt-5 border-t border-stone-200">
             <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 block mb-2">
-              Recommended Document Checklist
+              {cashfree ? "Other documents (optional)" : "Recommended Document Checklist"}
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {DOC_TYPES.slice(0, 4).map((type) => {
+              {docTypes.filter((type) => !cashfree || !["PAN", "GSTIN"].includes(type.value)).slice(0, 4).map((type) => {
                 const uploaded = kybDocs.find((d) => d.doc_type === type.value);
                 return (
                   <button
@@ -505,39 +654,41 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
               </span>
             </div>
 
-            {/* Cashfree SecureID 1-Click Verification Trigger */}
-            <div className="mt-4 p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-amber-100 text-amber-900 shrink-0">
-                  <Shield className="h-4 w-4 text-amber-700" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-stone-900">Cashfree SecureID KYB</span>
-                    <span className="text-[9px] font-mono font-bold bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded">API ACTIVE</span>
+            {cashfree && (<>
+              {/* Cashfree SecureID 1-Click Verification Trigger */}
+              <div className="mt-4 p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-amber-100 text-amber-900 shrink-0">
+                    <Shield className="h-4 w-4 text-amber-700" />
                   </div>
-                  <p className="text-[10px] text-stone-600">Instant real-time GSTIN, PAN & Bank Penny-Drop Validation</p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-stone-900">Cashfree SecureID KYB</span>
+                      <span className="text-[9px] font-mono font-bold bg-amber-200/80 text-amber-900 px-1.5 py-0.5 rounded">API ACTIVE</span>
+                    </div>
+                    <p className="text-[10px] text-stone-600">Instant real-time GSTIN, PAN & Bank Penny-Drop Validation</p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  disabled={Boolean(verifyingField)}
+                  onClick={handleVerifyAll}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 px-3 py-2 text-xs font-bold transition shadow-xs disabled:opacity-50 shrink-0"
+                >
+                  {verifyingField === "all" ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Verifying…</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Verify All</span>
+                    </>
+                  )}
+                </button>
               </div>
-              <button
-                type="button"
-                disabled={Boolean(verifyingField)}
-                onClick={handleVerifyAll}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 px-3 py-2 text-xs font-bold transition shadow-xs disabled:opacity-50 shrink-0"
-              >
-                {verifyingField === "all" ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>Verifying…</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-3.5 w-3.5" />
-                    <span>Verify All</span>
-                  </>
-                )}
-              </button>
-            </div>
+            </>)}
 
             <div className="mt-5 space-y-4">
               {/* Row 1: Business Verification */}
@@ -562,87 +713,89 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                 </div>
               </div>
 
-              {/* Row 2: GSTIN */}
-              <div className="flex items-center justify-between border-b border-stone-100 pb-3 text-sm">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-stone-700 font-medium">GSTIN on file</span>
-                    {supplier.gstin_verified === 1 && (
-                      <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
-                        VERIFIED ({supplier.gstin_verified_status || "Active"})
-                      </span>
-                    )}
+              {cashfree && (<>
+                {/* Row 2: GSTIN */}
+                <div className="flex items-center justify-between border-b border-stone-100 pb-3 text-sm">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-stone-700 font-medium">GSTIN on file</span>
+                      {supplier.gstin_verified === 1 && (
+                        <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                          VERIFIED ({supplier.gstin_verified_status || "Active"})
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] font-mono text-stone-400">
+                      {supplier.gstin ? supplier.gstin : "Not provided"}
+                      {supplier.gstin_verified_name && (
+                        <span className="block text-emerald-700 font-sans text-[10px] font-semibold">
+                          Legal Entity: {supplier.gstin_verified_name}
+                        </span>
+                      )}
+                    </p>
                   </div>
-                  <p className="text-[11px] font-mono text-stone-400">
-                    {supplier.gstin ? supplier.gstin : "Not provided"}
-                    {supplier.gstin_verified_name && (
-                      <span className="block text-emerald-700 font-sans text-[10px] font-semibold">
-                        Legal Entity: {supplier.gstin_verified_name}
-                      </span>
+                  <div className="flex items-center gap-2">
+                    {supplier.gstin && supplier.gstin_verified !== 1 && (
+                      <button
+                        type="button"
+                        disabled={verifyingField === "gstin"}
+                        onClick={() => handleVerifyGstin()}
+                        className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
+                      >
+                        {verifyingField === "gstin" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
+                        <span>Verify GSTIN</span>
+                      </button>
                     )}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {supplier.gstin && supplier.gstin_verified !== 1 && (
                     <button
-                      type="button"
-                      disabled={verifyingField === "gstin"}
-                      onClick={handleVerifyGstin}
-                      className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
+                      onClick={() => setTaxModalOpen(true)}
+                      className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700 hover:bg-amber-100 hover:text-amber-900 border border-stone-300 transition"
                     >
-                      {verifyingField === "gstin" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
-                      <span>Verify GSTIN</span>
+                      {hasGstin ? "Edit" : "+ Add"}
                     </button>
-                  )}
-                  <button
-                    onClick={() => setTaxModalOpen(true)}
-                    className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700 hover:bg-amber-100 hover:text-amber-900 border border-stone-300 transition"
-                  >
-                    {hasGstin ? "Edit" : "+ Add"}
-                  </button>
+                  </div>
                 </div>
-              </div>
 
-              {/* Row 3: PAN */}
-              <div className="flex items-center justify-between border-b border-stone-100 pb-3 text-sm">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-stone-700 font-medium">PAN on file</span>
-                    {supplier.pan_verified === 1 && (
-                      <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
-                        VERIFIED ({supplier.pan_type || "Business"})
-                      </span>
-                    )}
+                {/* Row 3: PAN */}
+                <div className="flex items-center justify-between border-b border-stone-100 pb-3 text-sm">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-stone-700 font-medium">PAN on file</span>
+                      {supplier.pan_verified === 1 && (
+                        <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                          VERIFIED ({supplier.pan_type || "Business"})
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] font-mono text-stone-400">
+                      {supplier.pan_number ? supplier.pan_number : "Not provided"}
+                      {supplier.pan_verified_name && (
+                        <span className="block text-emerald-700 font-sans text-[10px] font-semibold">
+                          Registered Name: {supplier.pan_verified_name}
+                        </span>
+                      )}
+                    </p>
                   </div>
-                  <p className="text-[11px] font-mono text-stone-400">
-                    {supplier.pan_number ? supplier.pan_number : "Not provided"}
-                    {supplier.pan_verified_name && (
-                      <span className="block text-emerald-700 font-sans text-[10px] font-semibold">
-                        Registered Name: {supplier.pan_verified_name}
-                      </span>
+                  <div className="flex items-center gap-2">
+                    {supplier.pan_number && supplier.pan_verified !== 1 && (
+                      <button
+                        type="button"
+                        disabled={verifyingField === "pan"}
+                        onClick={() => handleVerifyPan()}
+                        className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
+                      >
+                        {verifyingField === "pan" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
+                        <span>Verify PAN</span>
+                      </button>
                     )}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {supplier.pan_number && supplier.pan_verified !== 1 && (
                     <button
-                      type="button"
-                      disabled={verifyingField === "pan"}
-                      onClick={handleVerifyPan}
-                      className="inline-flex items-center gap-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-[11px] font-bold transition disabled:opacity-50"
+                      onClick={() => setTaxModalOpen(true)}
+                      className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700 hover:bg-amber-100 hover:text-amber-900 border border-stone-300 transition"
                     >
-                      {verifyingField === "pan" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3 text-amber-700" />}
-                      <span>Verify PAN</span>
+                      {hasPan ? "Edit" : "+ Add"}
                     </button>
-                  )}
-                  <button
-                    onClick={() => setTaxModalOpen(true)}
-                    className="rounded-lg bg-stone-100 px-2 py-1 text-[11px] font-bold text-stone-700 hover:bg-amber-100 hover:text-amber-900 border border-stone-300 transition"
-                  >
-                    {hasPan ? "Edit" : "+ Add"}
-                  </button>
+                  </div>
                 </div>
-              </div>
+              </>)}
 
               {/* Row 4: Payout Account */}
               <div className="flex items-center justify-between pb-1 text-sm">
@@ -697,12 +850,12 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
                 <h3 className="font-display text-lg font-bold text-stone-900">Tax & Bank Profile</h3>
               </div>
               <div className="flex items-center gap-1.5">
-                <button
+                {cashfree && <button
                   onClick={() => setTaxModalOpen(true)}
                   className="rounded-lg border border-stone-300 bg-stone-50 px-2.5 py-1 text-xs font-bold text-stone-700 hover:bg-stone-100 transition"
                 >
                   Edit Tax Info
-                </button>
+                </button>}
                 <button
                   onClick={() => setPayoutModalOpen(true)}
                   className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-900 hover:bg-amber-100 transition"
@@ -713,42 +866,45 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
-              <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-stone-400 block">GSTIN</span>
-                  {supplier.gstin_verified === 1 && (
-                    <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-300">
-                      Active
+              {cashfree && (<>
+                {/* GSTIN and PAN tiles */}
+                <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-stone-400 block">GSTIN</span>
+                    {supplier.gstin_verified === 1 && (
+                      <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-300">
+                        Active
+                      </span>
+                    )}
+                  </div>
+                  <strong className="mt-1 block font-mono text-xs text-stone-900 truncate">
+                    {supplier.gstin || "—"}
+                  </strong>
+                  {supplier.gstin_verified_name && (
+                    <span className="mt-0.5 block text-[10px] text-emerald-700 font-medium truncate">
+                      {supplier.gstin_verified_name}
                     </span>
                   )}
                 </div>
-                <strong className="mt-1 block font-mono text-xs text-stone-900 truncate">
-                  {supplier.gstin || "—"}
-                </strong>
-                {supplier.gstin_verified_name && (
-                  <span className="mt-0.5 block text-[10px] text-emerald-700 font-medium truncate">
-                    {supplier.gstin_verified_name}
-                  </span>
-                )}
-              </div>
-              <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-stone-400 block">PAN Number</span>
-                  {supplier.pan_verified === 1 && (
-                    <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-300">
-                      Valid
+                <div className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-stone-400 block">PAN Number</span>
+                    {supplier.pan_verified === 1 && (
+                      <span className="text-[9px] font-mono font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-300">
+                        Valid
+                      </span>
+                    )}
+                  </div>
+                  <strong className="mt-1 block font-mono text-xs text-stone-900 truncate">
+                    {supplier.pan_number || "—"}
+                  </strong>
+                  {supplier.pan_verified_name && (
+                    <span className="mt-0.5 block text-[10px] text-emerald-700 font-medium truncate">
+                      {supplier.pan_verified_name}
                     </span>
                   )}
                 </div>
-                <strong className="mt-1 block font-mono text-xs text-stone-900 truncate">
-                  {supplier.pan_number || "—"}
-                </strong>
-                {supplier.pan_verified_name && (
-                  <span className="mt-0.5 block text-[10px] text-emerald-700 font-medium truncate">
-                    {supplier.pan_verified_name}
-                  </span>
-                )}
-              </div>
+              </>)}
               <div className="col-span-2 rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3.5">
                 <div className="flex justify-between items-start">
                   <div>
@@ -816,12 +972,33 @@ export default function SupplierCompliancePanel({ supplierData, supplierId, onRe
       )}
 
       {/* Modal 3: Upload Document */}
+      {viewingDoc && (
+        <KybDocumentViewer
+          fileUrl={`/api/suppliers/${supplierId}/kyb/${viewingDoc.id}/file`}
+          title={kybDocLabel(viewingDoc.doc_type)}
+          onClose={() => setViewingDoc(null)}
+        />
+      )}
+
+      {selfieOpen && (
+        <SelfieCapture
+          supplierId={supplierId}
+          onClose={() => setSelfieOpen(false)}
+          onSuccess={(data) => {
+            setSelfieOpen(false);
+            showToast("success", data.kybAutoApproved ? "All checks passed. Your account is approved." : "Selfie submitted for verification");
+            if (onRefresh) onRefresh();
+          }}
+        />
+      )}
       {uploadModalOpen && (
         <DocumentUploadModal
           isOpen={uploadModalOpen}
           onClose={() => setUploadModalOpen(false)}
           supplierId={supplierId}
           presetType={presetDocType}
+          presetNumber={presetDocNumber}
+          docTypes={docTypes}
           onSuccess={() => {
             setUploadModalOpen(false);
             showToast("success", "Document submitted for verification");
@@ -1211,12 +1388,219 @@ function PayoutBankModal({ isOpen, onClose, supplier, supplierId, bankDetails, o
   );
 }
 
+// The API sends a readable reason in `error` (its `message` is stripped from
+// error responses), so show that instead of a generic line.
+function uploadErrorMessage(status, body, fallback = "The file could not be uploaded. Please try again.") {
+  if (status === 401) return "Your session has expired. Please sign in again and retry.";
+  if (status === 413) return "The file is too large. Please upload a file under 5MB.";
+  if (status === 429) return "Too many uploads in the last hour. Please wait a few minutes and try again.";
+  if (status >= 500) return `${fallback}${body?.requestId ? ` (reference ${body.requestId})` : ""}`;
+  return body?.error || body?.message || fallback;
+}
+
+// A required identity check: enter the number, verify it with Cashfree, then
+// upload the matching document.
+// A document an admin sent back (REJECTED) must be uploaded again; says why.
+const sentBack = (doc) => doc?.status === "REJECTED";
+function SentBackNote({ doc }) {
+  return sentBack(doc) ? <p className="mt-1 text-[11px] font-medium text-rose-700">Please upload again{doc.rejection_reason ? `: ${doc.rejection_reason}` : "."}</p> : null;
+}
+
+function IdentityStep({ step, title, docType, placeholder, pattern, savedNumber, verified, verifiedName, verifying, busy, onVerify, uploadedDoc, onUpload }) {
+  const [value, setValue] = useState(savedNumber || "");
+  const number = value.trim().toUpperCase();
+  const valid = pattern.test(number);
+  const isVerified = verified && number === String(savedNumber || "").toUpperCase();
+
+  return (
+    <article className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-bold text-stone-900">
+          Step {step}: Verify {title}, then upload the {title} document
+        </h3>
+        <span className="text-[10px] font-bold uppercase text-rose-700">Required</span>
+      </div>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value.toUpperCase())}
+          placeholder={placeholder}
+          maxLength={15}
+          aria-label={`${title} number`}
+          className="min-w-0 flex-1 rounded-xl border border-stone-300 bg-white px-3 py-2 font-mono text-sm uppercase focus:border-amber-500 focus:outline-none"
+        />
+        {isVerified ? (
+          <span className="inline-flex items-center justify-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Verified
+          </span>
+        ) : (
+          <button
+            type="button"
+            disabled={!valid || busy}
+            onClick={() => onVerify(number)}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-stone-950 hover:bg-amber-400 disabled:opacity-50"
+          >
+            {verifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            <span>Verify {title}</span>
+          </button>
+        )}
+      </div>
+      {number && !valid && <p className="mt-1 text-[11px] text-rose-600">Enter a valid {title} ({placeholder}).</p>}
+      {isVerified && verifiedName && <p className="mt-1 text-[11px] text-emerald-800">Registered to {verifiedName}</p>}
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-stone-200 pt-3">
+        <span className="text-[11px] text-stone-600">
+          {uploadedDoc && !sentBack(uploadedDoc)
+            ? `${title} document uploaded (${uploadedDoc.status || "PENDING"})`
+            : isVerified ? `Now upload a copy of your ${title} document.` : `Verify your ${title} first, then upload its document.`}
+        </span>
+        {(!uploadedDoc || sentBack(uploadedDoc)) && (
+          <button
+            type="button"
+            disabled={!isVerified}
+            onClick={() => onUpload(docType, number)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>Upload {title}</span>
+          </button>
+        )}
+      </div>
+      <SentBackNote doc={uploadedDoc} />
+    </article>
+  );
+}
+
+// The owner's live selfie, taken after the PAN is verified.
+function SelfieStep({ step, panVerified, uploadedDoc, onStart }) {
+  return (
+    <article className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-bold text-stone-900">Step {step}: Take a live selfie</h3>
+        <span className="text-[10px] font-bold uppercase text-rose-700">Required</span>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className="text-[11px] text-stone-600">
+          {uploadedDoc && !sentBack(uploadedDoc)
+            ? `Selfie uploaded (${uploadedDoc.status || "PENDING"})`
+            : panVerified ? "Use your phone's front camera. We check that your face is clearly visible." : "Verify your PAN first."}
+        </span>
+        {(!uploadedDoc || sentBack(uploadedDoc)) && (
+          <button
+            type="button"
+            disabled={!panVerified}
+            onClick={onStart}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>Open camera</span>
+          </button>
+        )}
+      </div>
+      <SentBackNote doc={uploadedDoc} />
+    </article>
+  );
+}
+
+// An owner document: enter its number, optionally verify it with Cashfree,
+// then upload the document.
+function NumberStep({ step, title, docType, hint, placeholder, pattern, maxLength, askDob = false, verifiedNumber, verifying, busy, onVerify, uploadedDoc, uploadLabel = title, backDocType, backUploadedDoc, onUpload }) {
+  const [value, setValue] = useState(uploadedDoc?.doc_number || verifiedNumber || "");
+  const [dob, setDob] = useState("");
+  const number = value.trim().toUpperCase().replace(/\s+/g, "");
+  const valid = pattern.test(number);
+  const isVerified = Boolean(verifiedNumber) && number === verifiedNumber;
+
+  return (
+    <article className="rounded-2xl border border-stone-200 bg-[#FAF9F6] p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-bold text-stone-900">Step {step}: Enter your {title} number, then upload it</h3>
+        <span className="text-[10px] font-bold uppercase text-rose-700">Required</span>
+      </div>
+      {hint && <p className="mt-1 text-[11px] text-stone-500">{hint}</p>}
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value.toUpperCase())}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          inputMode={docType === "AADHAAR_MASKED" ? "numeric" : undefined}
+          aria-label={`${title} number`}
+          className="min-w-0 flex-1 rounded-xl border border-stone-300 bg-white px-3 py-2 font-mono text-sm uppercase focus:border-amber-500 focus:outline-none"
+        />
+        {askDob && !isVerified && onVerify && (
+          <input
+            type="date"
+            value={dob}
+            onChange={(e) => setDob(e.target.value)}
+            aria-label="Date of birth"
+            className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
+          />
+        )}
+        {onVerify && (isVerified ? (
+          <span className="inline-flex items-center justify-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Verified
+          </span>
+        ) : (
+          <button
+            type="button"
+            disabled={!valid || busy || (askDob && !dob)}
+            onClick={() => onVerify(number, dob)}
+            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+          >
+            {verifying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+            <span>Verify</span>
+          </button>
+        ))}
+      </div>
+      {number && !valid && <p className="mt-1 text-[11px] text-rose-600">Enter a valid {title} number ({placeholder}).</p>}
+      {onVerify && !isVerified && <p className="mt-1 text-[11px] text-stone-500">Verifying is optional.</p>}
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-stone-200 pt-3">
+        <span className="text-[11px] text-stone-600">
+          {uploadedDoc && !sentBack(uploadedDoc) ? `${uploadLabel} uploaded (${uploadedDoc.status || "PENDING"})` : valid ? `Now upload your ${uploadLabel}.` : `Enter your ${title} number first.`}
+        </span>
+        {(!uploadedDoc || sentBack(uploadedDoc)) && (
+          <button
+            type="button"
+            disabled={!valid}
+            onClick={() => onUpload(docType, number)}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            <span>Upload {uploadLabel}</span>
+          </button>
+        )}
+      </div>
+      <SentBackNote doc={uploadedDoc} />
+      {backDocType && (
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-stone-600">
+            {backUploadedDoc && !sentBack(backUploadedDoc) ? `${title} back uploaded (${backUploadedDoc.status || "PENDING"})` : `Now upload the back of your ${title}.`}
+          </span>
+          {(!backUploadedDoc || sentBack(backUploadedDoc)) && (
+            <button
+              type="button"
+              onClick={() => onUpload(backDocType)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-50"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              <span>Upload {title} back</span>
+            </button>
+          )}
+        </div>
+      )}
+      {backDocType && <SentBackNote doc={backUploadedDoc} />}
+    </article>
+  );
+}
+
 // -------------------------------------------------------------
 // Sub-component Modal: Document Upload
 // -------------------------------------------------------------
-function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, onSuccess }) {
-  const [docType, setDocType] = useState(presetType || "COMMERCIAL_TRANSPORT_LICENSE");
-  const [docNumber, setDocNumber] = useState("");
+function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, presetNumber = "", docTypes = DOC_TYPES, onSuccess }) {
+  const [docType, setDocType] = useState(presetType || docTypes[0].value);
+  const [docNumber, setDocNumber] = useState(presetNumber || "");
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1250,32 +1634,34 @@ function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, onSucces
       setError("Please select a document type");
       return;
     }
+    if (!selectedFile || !filePreview) {
+      setError("Please choose the document file (PDF or image) to upload");
+      return;
+    }
 
     setLoading(true);
     setError("");
 
     try {
-      let docUrl = "https://example.com/docs/uploaded.pdf";
+      // Upload the file privately first; the KYB record points at it.
+      const uploadRes = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          data: filePreview,
+          filename: selectedFile.name,
+          mimeType: selectedFile.type || "application/pdf",
+          entityType: "KYB",
+          entityId: supplierId
+        })
+      });
 
-      // If user picked a file, upload to /api/uploads via base64
-      if (filePreview && selectedFile) {
-        const uploadRes = await fetch("/api/uploads", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify({
-            data: filePreview,
-            filename: selectedFile.name,
-            mimeType: selectedFile.type || "application/pdf",
-            entityType: "KYB",
-            entityId: supplierId
-          })
-        });
-
-        const uploadData = await uploadRes.json();
-        if (uploadData.success && uploadData.upload?.url) {
-          docUrl = uploadData.upload.url;
-        }
+      const uploadData = await uploadRes.json().catch(() => ({}));
+      if (!uploadRes.ok || !uploadData.success || !uploadData.upload?.url) {
+        setError(uploadErrorMessage(uploadRes.status, uploadData));
+        return;
       }
+      const docUrl = uploadData.upload.url;
 
       // Now submit the KYB record
       const res = await fetch(`/api/suppliers/${supplierId}/kyb`, {
@@ -1283,16 +1669,16 @@ function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, onSucces
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           docType,
-          docNumber: docNumber.trim() || `DOC-${Date.now().toString().slice(-6)}`,
+          docNumber: docNumber.trim() || null,
           docUrl
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.success) {
         onSuccess();
       } else {
-        setError(data.error || "Failed to submit document");
+        setError(uploadErrorMessage(res.status, data, "The document could not be submitted. Please try again."));
       }
     } catch {
       setError("Network error uploading document");
@@ -1335,7 +1721,7 @@ function DocumentUploadModal({ isOpen, onClose, supplierId, presetType, onSucces
               onChange={(e) => setDocType(e.target.value)}
               className="w-full rounded-xl border border-stone-300 px-3.5 py-2.5 text-xs bg-white focus:border-amber-500 focus:outline-hidden"
             >
-              {DOC_TYPES.map((t) => (
+              {docTypes.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
                 </option>

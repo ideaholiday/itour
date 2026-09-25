@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../../lib/mapTiles.js";
 import { normalizePolygon } from "../../lib/geo.js";
 
 const markerIcon = (label, color) => L.divIcon({
@@ -22,7 +23,7 @@ export default function GeoFenceMap({ center = [26.7606, 80.8893], radiusKm = 35
     let map;
     try {
       map = L.map(containerRef.current, { zoomControl: true }).setView(center, 10);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+      addBaseTiles(map);
       map.on("click", ({ latlng }) => {
         const callbacks = callbacksRef.current;
         const point = [Number(latlng.lat.toFixed(6)), Number(latlng.lng.toFixed(6))];

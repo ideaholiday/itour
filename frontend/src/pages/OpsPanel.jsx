@@ -1,3 +1,4 @@
+import DispatchQueue from "../components/supplier/DispatchQueue.jsx";
 import React from "react";
 import { useLocation } from "react-router-dom";
 import OpsLayout from "../components/ops/OpsLayout.jsx";
@@ -5,6 +6,7 @@ import LiveTripBoardView from "./ops/LiveTripBoardView.jsx";
 import WhatsAppNotificationView from "./ops/WhatsAppNotificationView.jsx";
 import SupportCasesView from "./ops/SupportCasesView.jsx";
 import CircuitManagementQueueView from "./ops/CircuitManagementQueueView.jsx";
+import ReferralProgramView from "./admin/ReferralProgramView.jsx";
 import { authHeaders } from "../lib/api.js";
 
 function OpsTaskQueueView() {
@@ -22,6 +24,7 @@ function OpsTaskQueueView() {
 
   return (
     <div className="space-y-6">
+      <DispatchQueue />
       <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm">
         <h2 className="text-xl font-serif font-bold text-stone-900 mb-4">
           Operations Task Queue & Resolution Audit Log
@@ -84,6 +87,7 @@ export default function OpsPanel({ view }) {
     else if (location.pathname.includes("/notifications")) activeView = "notifications";
     else if (location.pathname.includes("/circuits")) activeView = "circuits";
     else if (location.pathname.includes("/tasks")) activeView = "tasks";
+    else if (location.pathname.includes("/referrals")) activeView = "referrals";
     else activeView = "live";
   }
 
@@ -94,6 +98,8 @@ export default function OpsPanel({ view }) {
       {activeView === "support" && <SupportCasesView />}
       {activeView === "tasks" && <OpsTaskQueueView />}
       {activeView === "circuits" && <CircuitManagementQueueView />}
+      {/* Staff review Travel & Earn referrals too (ADR 020); the API allows ADMIN and STAFF. */}
+      {activeView === "referrals" && <ReferralProgramView />}
     </OpsLayout>
   );
 }

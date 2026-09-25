@@ -1,13 +1,17 @@
 import { Router } from "express";
+import { ensureLaunchWaiver } from "../services/supplierSubscriptionService.js";
 import { nanoid } from "nanoid";
 import jwt from "jsonwebtoken";
 import db from "../db.js";
 import { hashPassword, passwordMatches } from "../lib/passwords.js";
+import { supplierAccessForUser } from "../services/supplierStaffService.js";
 import { authenticate } from "../middleware/auth.js";
 import logger from "../config/logger.js";
+import { toE164 } from "../lib/phone.js";
 import { validateBody } from "../middleware/validation.js";
 import { authSchemas } from "../validators/apiSchemas.js";
-import { recordReferralSignup } from "../services/loyaltyService.js";
+import { establishReferralRelationship } from "../services/referralService.js";
+import { ensurePublicSlug } from "../services/supplierProfileService.js";
 
 const router = Router();
 const SECRET = process.env.JWT_SECRET
@@ -27,8 +31,9 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   const name = normalizeText(req.body.name);
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || "");
-  const phone = normalizeText(req.body.phone) || null;
+  const phone = toE164(req.body.phone) || null;
   const referralCode = normalizeText(req.body.referralCode || req.body.ref);
+  const visitorId = normalizeText(req.body.visitorId) || null;
 
   if (!name || !email || !password) return res.status(400).json({ error: "name, email, password required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -45,26 +50,31 @@ router.post("/signup", validateBody(authSchemas.signup), (req, res) => {
   db.prepare("INSERT INTO users (id,name,email,password,phone) VALUES (?,?,?,?,?)")
     .run(id, name, email, hashPassword(password), phone);
 
-  if (referralCode) {
-    try {
-      recordReferralSignup(db, { newUserId: id, referralCode });
-    } catch (refErr) {
-      logger.warn("Referral tracking error on signup", { error: refErr.message, referralCode });
+  let referral = null;
+  try {
+    if (visitorId) db.prepare("UPDATE users SET signup_visitor_id = ? WHERE id = ?").run(visitorId.slice(0, 120), id);
+    // A typed code wins; with none, the referral link this browser opened is used.
+    if (referralCode || visitorId) {
+      const result = establishReferralRelationship(db, { referredUserId: id, referralCode: referralCode || null, visitorId, source: "SIGNUP_LINK" });
+      referral = result.established ? { referred: true } : null;
     }
+  } catch (refErr) {
+    logger.warn("Referral tracking error on signup", { error: refErr.message, referralCode });
   }
 
   const token = jwt.sign({ id, email, name, role: "TRAVELER" }, SECRET, { expiresIn: "30d" });
-  res.json({ token, user: { id, name, email, phone, role: "TRAVELER" } });
+  res.json({ token, user: { id, name, email, phone, role: "TRAVELER" }, referral });
 });
 
 router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, res) => {
   const companyName = normalizeText(req.body.companyName);
   const contactName = normalizeText(req.body.contactName);
   const email = normalizeEmail(req.body.email);
-  const phone = normalizeText(req.body.phone);
+  const phone = toE164(req.body.phone);
   const requestedCity = normalizeText(req.body.city);
   const requestedState = normalizeText(req.body.state);
   const password = String(req.body.password || "");
+  const supplierKind = req.body.supplierKind === "INDIVIDUAL_OWNER" ? "INDIVIDUAL_OWNER" : "BUSINESS";
 
   if (!companyName || !contactName || !email || !phone || !requestedCity || !requestedState || !password) {
     return res.status(400).json({ error: "All supplier signup fields are required" });
@@ -75,12 +85,9 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   if (password.length < 8) {
     return res.status(400).json({ error: "Password must be at least 8 characters" });
   }
-  if (phone.replace(/\D/g, "").length < 10) {
-    return res.status(400).json({ error: "Enter a valid mobile number" });
-  }
 
   const approvedCity = db.prepare(`
-    SELECT name, state FROM destinations
+    SELECT name, state, country FROM destinations
     WHERE LOWER(name) = LOWER(?) AND LOWER(state) = LOWER(?) AND COALESCE(is_active, 1) = 1
   `).get(requestedCity, requestedState);
   if (!approvedCity) {
@@ -88,6 +95,10 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   }
   const city = approvedCity.name;
   const state = approvedCity.state;
+  // Individual vehicle owners register in India only (ADR 024).
+  if (supplierKind === "INDIVIDUAL_OWNER" && (approvedCity.country || "India") !== "India") {
+    return res.status(400).json({ error: "Individual vehicle owners can register in India only. Businesses abroad sign up as a company." });
+  }
 
   const existingUser = db.prepare("SELECT id FROM users WHERE LOWER(email) = ?").get(email);
   const existingSupplier = db.prepare("SELECT id FROM suppliers WHERE LOWER(email) = ?").get(email);
@@ -101,9 +112,12 @@ router.post("/supplier-signup", validateBody(authSchemas.supplierSignup), (req, 
   try {
     db.transaction(() => {
       db.prepare(
-        `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, kyb_status, is_verified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0)`
-      ).run(supplierId, supplierId, companyName, contactName, email, phone, city, state);
+        `INSERT INTO suppliers (id, supplier_code, company_name, contact_name, email, phone, city, state, kyb_status, is_verified, supplier_kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?)`
+      ).run(supplierId, supplierId, companyName, contactName, email, phone, city, state, supplierKind);
+      ensurePublicSlug(db, { id: supplierId, company_name: companyName, city });
+      // A supplier signing up now needs a subscription; the launch waiver covers it for free (ADR 017).
+      ensureLaunchWaiver(db, supplierId);
 
       db.prepare(
         "INSERT INTO users (id, name, email, password, phone, role) VALUES (?, ?, ?, ?, ?, 'SUPPLIER')"
@@ -165,12 +179,35 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
     db.prepare("UPDATE users SET password = ? WHERE id = ?").run(hashPassword(password), user.id);
   }
 
-  const supplier = user.role === "SUPPLIER" ? db.prepare("SELECT id FROM suppliers WHERE LOWER(email) = ?").get(user.email.toLowerCase()) : null;
+  const portal = String(req.body.portal || req.headers["x-portal-type"] || req.query.portal || "").trim().toLowerCase();
+
+  // Enforce portal-specific role access when specified
+  if (portal === "admin" && user.role !== "ADMIN" && user.role !== "STAFF") {
+    return res.status(403).json({ error: "Access denied. Admin portal is restricted to platform administrators." });
+  }
+
+  if (portal === "supplier" && user.role !== "SUPPLIER") {
+    return res.status(403).json({ error: "Access restricted to registered suppliers. Please sign in with your supplier credentials or register on supply.ideaholiday.in." });
+  }
+
+  // The owner is linked by email; staff by supplier_members (ADR 036).
+  const supplierAccess = user.role === "SUPPLIER" ? supplierAccessForUser(db, user) : null;
+  const supplier = supplierAccess ? db.prepare("SELECT id, company_name, kyb_status, is_verified FROM suppliers WHERE id = ?").get(supplierAccess.supplierId) : null;
   const token = jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role, supplier_id: supplier?.id || null },
     SECRET,
     { expiresIn: "30d" }
   );
+
+  let portalRedirect = "/";
+  if (user.role === "SUPPLIER") {
+    portalRedirect = "/supplier";
+  } else if (user.role === "ADMIN") {
+    portalRedirect = "/admin";
+  } else if (user.role === "STAFF") {
+    // Staff work in operations; the admin panel is ADMIN-only.
+    portalRedirect = "/ops";
+  }
 
   res.json({
     token,
@@ -180,8 +217,11 @@ router.post("/login", validateBody(authSchemas.login), (req, res) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      supplier_id: supplier?.id || null
-    }
+      supplier_id: supplier?.id || null,
+      supplier_role: supplier ? supplierAccess.role : null
+    },
+    supplier: supplier || null,
+    portalRedirect
   });
 });
 

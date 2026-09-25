@@ -75,6 +75,7 @@ export async function startTestServer(overrides = {}) {
       OTP_SECRET: "integration-otp-secret-with-at-least-32-characters",
       DEMO_PAYMENT_ONLY: "true",
       ENABLE_DEMO_PAYMENT: "true",
+      SEED_DEMO_DATA: "true",
       EMAIL_NOTIFICATIONS_ENABLED: "false",
       WHATSAPP_CLOUD_API_ENABLED: "false",
       NOTIFICATIONS_ENABLED: "false",
@@ -82,6 +83,9 @@ export async function startTestServer(overrides = {}) {
       SUPABASE_ANON_KEY: "",
       CASHFREE_CLIENT_ID: "",
       CASHFREE_CLIENT_SECRET: "",
+      // The payment client reads these names; blank them so tests never reach the gateway with local keys.
+      CASHFREE_APP_ID: "",
+      CASHFREE_SECRET_KEY: "",
       RAZORPAY_KEY_ID: "",
       RAZORPAY_KEY_SECRET: "",
       LOG_LEVEL: "error",

@@ -31,16 +31,10 @@ export function SupplierAnalyticsDashboard({ supplierId, onBack }) {
     );
   }
 
-  const revenueTrend = data?.revenueTrend || [
-    { month: "Mar 2026", revenue_inr: 185000, bookings: 42 },
-    { month: "Apr 2026", revenue_inr: 220000, bookings: 53 },
-    { month: "May 2026", revenue_inr: 310000, bookings: 78 },
-    { month: "Jun 2026", revenue_inr: 280000, bookings: 69 },
-    { month: "Jul 2026", revenue_inr: 340000, bookings: 85 },
-    { month: "Aug 2026", revenue_inr: 410000, bookings: 104 },
-  ];
-
-  const maxRevenue = Math.max(...revenueTrend.map((r) => r.revenue_inr), 100000);
+  // Real numbers only (ADR 038): an empty chart and "Not enough data", never sample values.
+  const revenueTrend = data?.revenueTrend || [];
+  const metrics = data?.operationalMetrics || {};
+  const maxRevenue = Math.max(...revenueTrend.map((r) => r.revenue_inr), 1);
 
   return (
     <div className="space-y-6">
@@ -105,31 +99,20 @@ export function SupplierAnalyticsDashboard({ supplierId, onBack }) {
         </CardContent>
       </Card>
 
-      {/* Operational Metrics Cards */}
+      {/* Operational metrics, last 90 days (ADR 038) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-4 rounded-3xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
-          <span className="text-[11px] text-stone-500 font-medium">Avg Response Time</span>
-          <div className="text-xl font-extrabold font-mono text-stone-900 dark:text-stone-100 mt-1">24 mins</div>
-          <span className="text-[10px] text-emerald-600 font-bold">Top 5% Supplier</span>
-        </div>
-
-        <div className="p-4 rounded-3xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
-          <span className="text-[11px] text-stone-500 font-medium">SLA Compliance</span>
-          <div className="text-xl font-extrabold font-mono text-emerald-600 mt-1">98.2%</div>
-          <span className="text-[10px] text-stone-400">Target: &gt;95%</span>
-        </div>
-
-        <div className="p-4 rounded-3xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
-          <span className="text-[11px] text-stone-500 font-medium">Driver Assignment</span>
-          <div className="text-xl font-extrabold font-mono text-blue-600 mt-1">95.5%</div>
-          <span className="text-[10px] text-stone-400">Under 15 mins</span>
-        </div>
-
-        <div className="p-4 rounded-3xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
-          <span className="text-[11px] text-stone-500 font-medium">OTP Verification</span>
-          <div className="text-xl font-extrabold font-mono text-amber-600 mt-1">99.1%</div>
-          <span className="text-[10px] text-emerald-600 font-bold">Zero disputes</span>
-        </div>
+        {[
+          ["Median response time", metrics.medianResponseMins == null ? null : `${metrics.medianResponseMins} min`, `${metrics.responseSample || 0} answered requests`],
+          ["Answered before deadline", metrics.onTimeResponsePct == null ? null : `${metrics.onTimeResponsePct}%`, `${metrics.onTimeSample || 0} requests`],
+          ["No-shows", metrics.noShowPct == null ? null : `${metrics.noShowPct}%`, `${metrics.noShowSample || 0} bookings checked`],
+          ["Pickup OTP verified", metrics.otpVerifiedPct == null ? null : `${metrics.otpVerifiedPct}%`, `${metrics.otpSample || 0} completed trips`],
+        ].map(([label, value, sample]) => (
+          <div key={label} className="p-4 rounded-3xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900">
+            <span className="text-[11px] text-stone-500 font-medium">{label}</span>
+            <div className={`mt-1 font-extrabold font-mono ${value ? "text-xl text-stone-900 dark:text-stone-100" : "text-sm text-stone-400"}`}>{value || "Not enough data"}</div>
+            <span className="text-[10px] text-stone-400">{sample} · last {metrics.days || 90} days</span>
+          </div>
+        ))}
       </div>
     </div>
   );

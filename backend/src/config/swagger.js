@@ -86,7 +86,12 @@ export const swaggerSpec = {
             },
           },
         },
-        responses: { 201: { description: "File uploaded successfully" } },
+        responses: {
+          201: { description: "File uploaded successfully" },
+          400: { description: "Not a PNG, JPG or WEBP image (photos), or not an accepted KYB document type" },
+          401: { description: "Sign-in required" },
+          429: { description: "Too many uploads" },
+        },
       },
     },
     "/exports": {

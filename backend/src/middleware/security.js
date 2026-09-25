@@ -2,7 +2,14 @@ import cors from "cors";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 
-const LOCAL_ORIGINS = ["http://localhost:3000", "http://localhost:5173"];
+const LOCAL_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://supply.localhost:5173",
+  "http://admin.localhost:5173",
+  "http://supply.localhost:3000",
+  "http://admin.localhost:3000",
+];
 const CASHFREE_CHECKOUT_ORIGINS = [
   "https://sdk.cashfree.com",
   "https://sandbox.cashfree.com",
@@ -10,6 +17,25 @@ const CASHFREE_CHECKOUT_ORIGINS = [
   "https://payments-test.cashfree.com",
   "https://payments.cashfree.com",
   "https://*.cashfree.com",
+];
+// Marketing tags loaded through Google Tag Manager: Meta Pixel (Instagram and
+// Facebook ads) and Google Ads conversions. Without these the tags fail silently.
+const MARKETING_SCRIPT_ORIGINS = [
+  "https://connect.facebook.net",
+  "https://www.googleadservices.com",
+  "https://googleads.g.doubleclick.net",
+];
+const MARKETING_CONNECT_ORIGINS = [
+  "https://connect.facebook.net",
+  "https://www.facebook.com",
+  "https://www.googleadservices.com",
+  "https://googleads.g.doubleclick.net",
+  "https://*.doubleclick.net",
+  "https://www.google.com",
+];
+const MARKETING_FRAME_ORIGINS = [
+  "https://www.googletagmanager.com",
+  "https://td.doubleclick.net",
 ];
 
 function positiveInteger(value, fallback) {
@@ -59,6 +85,7 @@ export function buildCspDirectives(environment = process.env) {
     "https://*.google-analytics.com",
     "https://*.analytics.google.com",
     "https://*.googletagmanager.com",
+    ...MARKETING_CONNECT_ORIGINS,
     ...allowed,
   ];
 
@@ -77,6 +104,7 @@ export function buildCspDirectives(environment = process.env) {
       "https://checkout.razorpay.com",
       "https://*.razorpay.com",
       "https://www.googletagmanager.com",
+      ...MARKETING_SCRIPT_ORIGINS,
     ],
     styleSrc: [
       "'self'",
@@ -92,6 +120,7 @@ export function buildCspDirectives(environment = process.env) {
       "data:",
       "blob:",
       "https:",
+      "https://tile.openstreetmap.org",
       "https://*.tile.openstreetmap.org",
       "https://apis.mappls.com",
       "https://images.unsplash.com",
@@ -108,11 +137,14 @@ export function buildCspDirectives(environment = process.env) {
     connectSrc: [...new Set(connectSources)],
     frameSrc: [
       "'self'",
+      // PDF previews of private documents, fetched with the viewer's token.
+      "blob:",
       ...CASHFREE_CHECKOUT_ORIGINS,
       "https://*.cashfree.com",
       "https://api.razorpay.com",
       "https://checkout.razorpay.com",
       "https://*.razorpay.com",
+      ...MARKETING_FRAME_ORIGINS,
     ],
     objectSrc: ["'none'"],
     baseUri: ["'self'"],
@@ -164,6 +196,9 @@ export function configureSecurity(app, environment = process.env) {
     },
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
+    // Helmet's default "no-referrer" makes OpenStreetMap block every map tile (403 "Access blocked").
+    // Cross-origin requests get only our origin, so paths with trip tokens never leak.
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
   }));
 
   app.use(cors(corsOptions(environment)));
@@ -189,7 +224,15 @@ export function configureSecurity(app, environment = process.env) {
     scope: "checkout",
   });
 
-  app.use("/api", globalLimiter);
+  const mapTileLimiter = createRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    limit: positiveInteger(environment.MAP_TILE_RATE_LIMIT, 5_000),
+    scope: "map-tiles",
+  });
+
+  // A single map view loads dozens of tiles, so tiles get their own, larger budget.
+  const isMapTile = (req) => /^\/(v1\/)?maps\/tiles\//.test(req.path);
+  app.use("/api", (req, res, next) => (isMapTile(req) ? mapTileLimiter : globalLimiter)(req, res, next));
   app.use([
     "/api/auth/login",
     "/api/auth/signup",

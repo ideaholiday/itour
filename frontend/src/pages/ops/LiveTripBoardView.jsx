@@ -25,6 +25,7 @@ import EmergencyReallocationModal from "../../components/ops/EmergencyReallocati
 import LiveTripMapView from "../../components/ops/LiveTripMapView.jsx";
 import TripStatusActionModal from "../../components/ops/TripStatusActionModal.jsx";
 import { api } from "../../lib/api.js";
+import PhoneInput from "../../components/PhoneInput.jsx";
 
 export default function LiveTripBoardView() {
   const [boardData, setBoardData] = useState({
@@ -44,10 +45,13 @@ export default function LiveTripBoardView() {
   const [message, setMessage] = useState(null);
 
   // Fallback Dispatch Modal State
-  const [fallbackDriverName, setFallbackDriverName] = useState("Vikram Singh (On-Call Ground Ops)");
-  const [fallbackDriverPhone, setFallbackDriverPhone] = useState("+919811009988");
-  const [fallbackVehicleModel, setFallbackVehicleModel] = useState("Toyota Innova Crysta");
-  const [fallbackVehicleNumber, setFallbackVehicleNumber] = useState("UP-32-T-9999");
+  // No defaults: a prefilled phone number would send a real trip link to a stranger.
+  const [fallbackDriverName, setFallbackDriverName] = useState("");
+  const [fallbackDriverPhone, setFallbackDriverPhone] = useState("");
+  const [fallbackDriverEmail, setFallbackDriverEmail] = useState("");
+  const [fallbackSeatCapacity, setFallbackSeatCapacity] = useState(4);
+  const [fallbackVehicleModel, setFallbackVehicleModel] = useState("");
+  const [fallbackVehicleNumber, setFallbackVehicleNumber] = useState("");
   const [dispatchLoading, setDispatchLoading] = useState(false);
 
   const fetchLiveBoard = async () => {
@@ -88,6 +92,8 @@ export default function LiveTripBoardView() {
           bookingId: fallbackModalBooking.id || fallbackModalBooking.ref,
           fallbackDriverName,
           fallbackDriverPhone,
+          fallbackDriverEmail,
+          seatCapacity: Number(fallbackSeatCapacity),
           fallbackVehicleModel,
           fallbackVehicleNumber,
           notes: `Emergency fallback driver ${fallbackDriverName} dispatched for booking ${fallbackModalBooking.ref}`
@@ -185,7 +191,7 @@ export default function LiveTripBoardView() {
             Live 24-Hour Trip Fulfillment & Dispatch Center
           </h1>
           <p className="text-xs text-stone-600 dark:text-stone-400 mt-1 max-w-2xl">
-            Real-time fleet tracking, traveler OTP check-in, and Kanban dispatch board tracking ground fulfillment stages across India.
+            Real-time fleet tracking, traveler OTP check-in, and Kanban dispatch board tracking ground fulfillment stages in India and across Asia.
           </p>
         </div>
 
@@ -218,10 +224,17 @@ export default function LiveTripBoardView() {
             </button>
           </div>
 
-          <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 px-3.5 py-1.5 rounded-2xl text-xs font-mono text-emerald-900 dark:text-emerald-300 font-bold">
-            <Radio className="w-3.5 h-3.5 text-emerald-600 animate-ping" />
-            <span>LIVE GPS ACTIVE</span>
-          </div>
+          {trackingTrips.some((trip) => trip.driver_telemetry) ? (
+            <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 px-3.5 py-1.5 rounded-2xl text-xs font-mono text-emerald-900 dark:text-emerald-300 font-bold">
+              <Radio className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+              <span>LIVE GPS {trackingTrips.filter((trip) => trip.driver_telemetry).length}/{trackingTrips.length}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-stone-100 border border-stone-300 px-3.5 py-1.5 rounded-2xl text-xs font-mono text-stone-600 font-bold" title="Drivers are not sharing phone location yet">
+              <Radio className="w-3.5 h-3.5 text-stone-400" />
+              <span>NO LIVE GPS YET</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -429,13 +442,36 @@ export default function LiveTripBoardView() {
               </div>
 
               <div>
-                <label className="text-stone-700 block mb-1 font-bold">Backup Driver Phone</label>
-                <input
-                  type="text"
+                <label htmlFor="backup-driver-phone" className="text-stone-700 block mb-1 font-bold">Backup Driver Phone</label>
+                <PhoneInput
+                  id="backup-driver-phone"
                   value={fallbackDriverPhone}
-                  onChange={(e) => setFallbackDriverPhone(e.target.value)}
-                  className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                  onChange={setFallbackDriverPhone}
+                  inputClassName="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-stone-700 block mb-1 font-bold">Driver Email (trip link)</label>
+                  <input
+                    type="email"
+                    value={fallbackDriverEmail}
+                    onChange={(e) => setFallbackDriverEmail(e.target.value)}
+                    className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-stone-700 block mb-1 font-bold">Vehicle Seats</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={fallbackSeatCapacity}
+                    onChange={(e) => setFallbackSeatCapacity(e.target.value)}
+                    className="w-full bg-[#FAF9F6] border border-stone-300 rounded-xl p-2.5 text-stone-900 focus:outline-none focus:border-amber-500 focus:bg-white"
+                  />
+                </div>
               </div>
 
               <div>

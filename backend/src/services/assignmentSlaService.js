@@ -5,7 +5,10 @@ import { notifyAssignmentUpdate, queueNotification } from "./notificationService
 export const DEFAULT_SUPPLIER_ACCEPTANCE_MINUTES = 10;
 
 function queueAssignmentNotification(db, bookingId, result, label) {
-  const notificationsAvailable = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'notification_deliveries'").get();
+  const isPostgres = Boolean(db?.connection?.schema || db?.transactionDepth !== undefined);
+  const notificationsAvailable = isPostgres
+    ? db.prepare("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA AND table_name = 'notification_deliveries'").get()
+    : db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'notification_deliveries'").get();
   if (notificationsAvailable) queueNotification(notifyAssignmentUpdate(db, bookingId, result), label);
 }
 

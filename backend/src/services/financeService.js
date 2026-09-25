@@ -1,4 +1,7 @@
 import { nanoid } from "nanoid";
+import { onReferralBookingCancelled } from "./referralService.js";
+import { getSettings } from "./programSettingsService.js";
+import { INDIA_TIME, localDateTimeMs, productTime } from "../lib/localTime.js";
 
 function financeError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -6,33 +9,45 @@ function financeError(message, status = 400) {
 
 const money = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
-export function resolveCommissionRate(database, supplierId, productType) {
-  const row = database.prepare(`
-    SELECT s.commission_override_rate, s.commission_rate, cc.default_commission_rate
-    FROM suppliers s
-    LEFT JOIN category_commissions cc ON UPPER(cc.category_code) = UPPER(?)
-    WHERE s.id = ?
-  `).get(productType, supplierId);
-  if (!row) return 18;
-  const resolved = row.commission_override_rate ?? row.default_commission_rate ?? row.commission_rate ?? 18;
+/**
+ * The commission % for a booking of this supplier's product, most specific
+ * first: product override → supplier override → platform default (ADR 017).
+ * Callers freeze the result onto the booking.
+ */
+export function resolveCommissionRate(database, supplierId, productId = null) {
+  const override = (table, id) => {
+    if (!id) return null;
+    try {
+      return database.prepare(`SELECT commission_override_rate FROM ${table} WHERE id = ?`).get(id);
+    } catch (error) {
+      // Before migration 038 products have no override column.
+      if (/no such column|does not exist/i.test(error.message)) return null;
+      throw error;
+    }
+  };
+  const product = override("products", productId);
+  const supplier = override("suppliers", supplierId);
+  const resolved = product?.commission_override_rate
+    ?? supplier?.commission_override_rate
+    ?? getSettings(database, "commission").defaultRatePercent;
   return Math.max(0, Math.min(50, Number(resolved) || 0));
 }
 
-function pickupTimestamp(dateValue, timeValue = "09:00") {
+function pickupTimestamp(dateValue, timeValue = "09:00", time = INDIA_TIME) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateValue || ""))) return null;
   const match = String(timeValue || "09:00").trim().match(/^(\d{1,2}):(\d{2})(?:\s*([AP]M))?$/i);
-  if (!match) return new Date(`${dateValue}T09:00:00`).getTime();
+  if (!match) return localDateTimeMs(dateValue, "09:00", time);
   let hour = Number(match[1]);
   const minute = Number(match[2]);
   const meridiem = match[3]?.toUpperCase();
   if (meridiem === "PM" && hour < 12) hour += 12;
   if (meridiem === "AM" && hour === 12) hour = 0;
   if (hour > 23 || minute > 59) return null;
-  return new Date(`${dateValue}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`).getTime();
+  return localDateTimeMs(dateValue, `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`, time);
 }
 
-export function hoursUntilPickup(booking, now = new Date()) {
-  const pickup = pickupTimestamp(booking.activity_date || booking.travel_date, booking.pickup_time);
+export function hoursUntilPickup(booking, now = new Date(), time = INDIA_TIME) {
+  const pickup = pickupTimestamp(booking.activity_date || booking.travel_date, booking.pickup_time, time);
   return pickup === null ? 0 : Math.max(0, money((pickup - now.getTime()) / 3_600_000));
 }
 
@@ -42,7 +57,11 @@ export function calculateRefundQuote(database, bookingOrId, { now = new Date(), 
     : database.prepare(`SELECT b.*, p.cancellation_policy FROM bookings b LEFT JOIN products p ON p.id = b.product_id WHERE b.id = ? OR b.ref = ?`).get(bookingOrId, bookingOrId);
   if (!booking) throw financeError("Booking not found", 404);
   const totalAmount = money(booking.amount_inr);
-  const hours = hoursUntilPickup(booking, now);
+  // Deadlines run on the clock of the product's city (ADR 023).
+  const time = productTime(database, booking.product_id);
+  const hours = hoursUntilPickup(booking, now, time);
+  const snapshot = typeof booking.logistics_snapshot === "string" ? JSON.parse(booking.logistics_snapshot || "{}") : booking.logistics_snapshot || {};
+  const nativeCancellationHours = snapshot.nativeCancellationHours;
   const policy = String(booking.cancellation_policy || "FLEXIBLE_24H").toUpperCase();
   
   // Calculate hours elapsed since booking was created
@@ -57,6 +76,10 @@ export function calculateRefundQuote(database, bookingOrId, { now = new Date(), 
     percentage = Number(overridePercentage);
     if (![0, 50, 100].includes(percentage)) throw financeError("Refund override must be 0%, 50% or 100%");
     tier = `Admin override (${percentage}% refund)`;
+  } else if (nativeCancellationHours != null) {
+    const startsAt = localDateTimeMs(booking.activity_date, booking.pickup_time, time);
+    percentage = (startsAt - now.getTime()) / 3600000 >= Number(nativeCancellationHours) ? 100 : 0;
+    tier = `Full refund until ${nativeCancellationHours} hours before departure`;
   } else if (isWithinBookingGrace && policy !== "NON_REFUNDABLE") {
     percentage = 100;
     tier = "Booking Grace Period: 100% full refund within 24 hours of booking";
@@ -149,7 +172,9 @@ export function failRefund(database, refundId, errorMessage) {
 
 export function finalizeRefund(database, { booking, refund, providerResult }) {
   const refundAmount = money(refund.refund_amount);
-  const retainedAmount = money(Number(booking.amount_inr) - refundAmount);
+  // A booking a supplier cancelled to the wallet pays the supplier nothing; what was not
+  // sent back as cash is still the traveler's refund credit, not retained money (ADR 019).
+  const retainedAmount = Number(booking.refunded_to_wallet_inr) > 0 ? 0 : money(Number(booking.amount_inr) - refundAmount);
   const commissionRate = Number(booking.commission_rate_snapshot) || (Number(booking.amount_inr) ? Number(booking.commission_amount) / Number(booking.amount_inr) * 100 : 0);
   const retainedCommission = money(retainedAmount * commissionRate / 100);
   const retainedSupplierShare = money(retainedAmount - retainedCommission);
@@ -173,6 +198,7 @@ export function finalizeRefund(database, { booking, refund, providerResult }) {
       metadata: { retainedAmount, retainedCommission, retainedSupplierShare },
     });
   })();
+  onReferralBookingCancelled(database, booking.id, { reason: refundAmount > 0 ? "Booking refunded" : "Booking cancelled" });
   return { refundAmount, retainedAmount, retainedCommission, retainedSupplierShare, paymentStatus };
 }
 
@@ -330,7 +356,7 @@ export function getSupplierPayoutLedger(database, supplierId) {
       acc.totalEarned += t.net_payout;
       if (t.payout_status === "PROCESSED" || t.payout_status === "RECONCILED") {
         acc.totalSettled += t.net_payout;
-      } else if (t.payout_status === "SCHEDULED" || t.payout_status === "BATCHED") {
+      } else if (["SCHEDULED", "BATCHED", "ISSUE_HOLD"].includes(t.payout_status)) {
         acc.pendingScheduled += t.net_payout;
       }
     }

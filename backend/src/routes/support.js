@@ -14,6 +14,7 @@ import {
   updateSupportCase,
 } from "../services/supportCaseService.js";
 import { validateBody } from "../middleware/validation.js";
+import { supplierMay } from "../services/supplierStaffService.js";
 import { supportSchemas } from "../validators/apiSchemas.js";
 
 const router = express.Router();
@@ -28,7 +29,8 @@ function canAccess(actor, item) {
   if (!actor) return false;
   const role = String(actor.role || "").toUpperCase();
   if (OPS_ROLES.has(role)) return true;
-  if (role === "SUPPLIER") return actor.supplier_id === item.supplier_id;
+  // Support cases are manager work; front desk and guides don't see them (ADR 036).
+  if (role === "SUPPLIER") return supplierMay(actor, "manage") && actor.supplier_id === item.supplier_id;
   return actor.id === item.user_id || (actor.email && actor.email.toLowerCase() === String(item.traveler_email || "").toLowerCase());
 }
 
@@ -44,7 +46,7 @@ router.get("/cases", (req, res) => {
     const conditions = [];
     const values = [];
     if (!OPS_ROLES.has(role)) {
-      if (role === "SUPPLIER") { conditions.push("sc.supplier_id = ?"); values.push(actor.supplier_id || ""); }
+      if (role === "SUPPLIER") { conditions.push("sc.supplier_id = ?"); values.push(supplierMay(actor, "manage") ? actor.supplier_id || "" : ""); }
       else { conditions.push("(b.user_id = ? OR (? != '' AND LOWER(b.traveler_email) = LOWER(?)))"); values.push(actor.id || "", actor.email || "", actor.email || ""); }
     }
     if (req.query.status && req.query.status !== "ALL") { conditions.push("sc.status = ?"); values.push(String(req.query.status).toUpperCase()); }

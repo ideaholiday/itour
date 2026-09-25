@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import SupplierHeaderNav from "../components/supplier/SupplierHeaderNav.jsx";
 import SupplierDashboardOverview from "../components/supplier/SupplierDashboardOverview.jsx";
 import { Activity, AlertTriangle, MapPinned, Plus, RefreshCw, ShieldAlert } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth.jsx";
 import { authHeaders } from "../lib/api.js";
 
@@ -63,6 +63,10 @@ export default function SupplierDashboardPage() {
     );
   }
 
+  // Front desk and guides work from the bookings page (ADR 036).
+  const role = supplierData?.access?.role || "OWNER";
+  if (role === "FRONT_DESK" || role === "GUIDE") return <Navigate to="/supplier/bookings" replace />;
+
   const kybStatus = supplierData?.supplier?.kyb_status;
   // Show KYB banner only when not APPROVED and not already on the compliance panel (redundant there)
   const showKybBanner = !loading && supplierData && kybStatus !== "APPROVED" && panel !== "compliance";
@@ -72,7 +76,8 @@ export default function SupplierDashboardPage() {
       <div className="max-w-7xl mx-auto space-y-6">
         <SupplierHeaderNav
           supplierData={supplierData}
-          activeTab={panel === "fleet" ? "FLEET" : panel === "compliance" ? "KYB" : panel === "listings" ? "BUILDER" : "DASHBOARD"}
+          activeTab={panel === "fleet" ? "FLEET" : panel === "compliance" ? "KYB" : panel === "listings" ? "BUILDER" : panel === "profile" ? "PROFILE" : panel === "enquiries" ? "ENQUIRIES" : "DASHBOARD"}
+          onBookingCreated={fetchSupplierData}
         />
 
         {/* KYB Status Banner — hidden on compliance tab (already shown there) */}
@@ -108,7 +113,7 @@ export default function SupplierDashboardPage() {
                   ? "Your KYB documents were reviewed and could not be approved. Please re-submit valid documents or contact support for assistance."
                   : "Our team is reviewing your business documents. You will receive an email once approved. Until then, your listings are not visible to travellers and you cannot receive bookings."}
               </p>
-              {(kybStatus === "PENDING" || kybStatus === "REJECTED") && (
+              {role === "OWNER" && (kybStatus === "PENDING" || kybStatus === "REJECTED") && (
                 <a href="?panel=compliance" className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-bold text-amber-900 hover:bg-amber-200 border border-amber-300">
                   View your documents →
                 </a>

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addBaseTiles } from "../../lib/mapTiles.js";
+import { api } from "../../lib/api.js";
 import {
   Car,
   Navigation,
@@ -21,6 +23,17 @@ import {
 
 const INDIA_CENTER = { lat: 22.5937, lng: 78.9629 };
 
+const FRESHNESS = {
+  LIVE: { label: "Live", className: "bg-emerald-100 text-emerald-900 border-emerald-300" },
+  DELAYED: { label: "Delayed", className: "bg-amber-100 text-amber-900 border-amber-300" },
+  LOST: { label: "Signal lost", className: "bg-rose-100 text-rose-900 border-rose-300" },
+};
+
+function minutesAgo(iso) {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+  return minutes < 1 ? "just now" : `${minutes} min ago`;
+}
+
 function createDriverIcon(trip, isSelected) {
   const status = (trip.assignment_status || "ASSIGNED").toUpperCase();
   const speed = trip.driver_telemetry?.speed_kmh || 0;
@@ -28,7 +41,12 @@ function createDriverIcon(trip, isSelected) {
   let bgClass = "bg-stone-900 border-white text-white";
   let pulseClass = "";
 
-  if (status === "EN_ROUTE") {
+  if (!trip.driver_telemetry) {
+    // No reported position: the pin sits at the pickup point and says so.
+    bgClass = "bg-white border-dashed border-stone-400 text-stone-500";
+  } else if (trip.driver_telemetry.freshness === "LOST") {
+    bgClass = "bg-stone-300 border-rose-600 text-stone-700 opacity-80";
+  } else if (status === "EN_ROUTE") {
     bgClass = "bg-amber-500 border-amber-900 text-stone-950 ring-2 ring-amber-400";
     pulseClass = "animate-pulse";
   } else if (status === "ARRIVED") {
@@ -43,7 +61,7 @@ function createDriverIcon(trip, isSelected) {
   const html = `
     <div class="relative transition-all duration-300 transform cursor-pointer ${selectedRing}">
       <div class="w-9 h-9 rounded-2xl border-2 flex items-center justify-center font-bold text-sm ${bgClass} ${pulseClass}">
-        🚗
+        ${trip.driver_telemetry ? "🚗" : "📍"}
       </div>
       ${speed > 0 ? `<div class="absolute -bottom-2 -right-2 bg-stone-900 text-amber-300 border border-stone-700 px-1 py-0.2 text-[9px] font-mono font-bold rounded-md shadow-xs">${speed}k</div>` : ""}
     </div>
@@ -93,6 +111,23 @@ export default function LiveTripMapView({
   const [selectedTrip, setSelectedTrip] = useState(null);
   const [filterStatus, setFilterStatus] = useState("ALL");
 
+  const unmappedCount = trips.filter((t) => !t.driver_telemetry && !(Number.isFinite(t.pickup_lat) && Number.isFinite(t.pickup_lng))).length;
+  const liveGpsCount = trips.filter((t) => t.driver_telemetry && t.driver_telemetry.freshness !== "LOST").length;
+  // The selected trip is re-read from each poll so its position and freshness stay current.
+  const liveSelected = selectedTrip ? trips.find((t) => t.booking_id === selectedTrip.booking_id) || selectedTrip : null;
+  const [trail, setTrail] = useState([]);
+  const selectedAssignmentId = liveSelected?.driver_telemetry ? liveSelected.assignment_id : null;
+  const selectedFixAt = liveSelected?.driver_telemetry?.updated_at;
+
+  useEffect(() => {
+    if (!selectedAssignmentId) { setTrail([]); return undefined; }
+    let active = true;
+    api.getDriverTrail(selectedAssignmentId)
+      .then((res) => { if (active) setTrail(res.trail || []); })
+      .catch(() => { if (active) setTrail([]); });
+    return () => { active = false; };
+  }, [selectedAssignmentId, selectedFixAt]);
+
   const filteredTrips = trips.filter((t) => {
     if (filterStatus === "ALL") return true;
     const status = (t.assignment_status || "ASSIGNED").toUpperCase();
@@ -111,13 +146,7 @@ export default function LiveTripMapView({
         scrollWheelZoom: true,
       });
 
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-        {
-          attribution: '&copy; <a href="https://carto.com/">CARTO</a> & Idea Holiday Ops',
-          maxZoom: 19,
-        }
-      ).addTo(map);
+      addBaseTiles(map);
 
       markersGroupRef.current = L.featureGroup().addTo(map);
       polylinesGroupRef.current = L.featureGroup().addTo(map);
@@ -142,9 +171,9 @@ export default function LiveTripMapView({
     const bounds = [];
 
     filteredTrips.forEach((trip) => {
-      const driverLat = trip.driver_telemetry?.lat || trip.pickup_lat;
-      const driverLng = trip.driver_telemetry?.lng || trip.pickup_lng;
-      const isSelected = selectedTrip?.booking_id === trip.booking_id;
+      const driverLat = trip.driver_telemetry ? trip.driver_telemetry.lat : trip.pickup_lat;
+      const driverLng = trip.driver_telemetry ? trip.driver_telemetry.lng : trip.pickup_lng;
+      const isSelected = liveSelected?.booking_id === trip.booking_id;
 
       if (typeof driverLat === "number" && typeof driverLng === "number") {
         // Driver marker
@@ -160,8 +189,17 @@ export default function LiveTripMapView({
         markersGroup.addLayer(driverMarker);
         bounds.push([driverLat, driverLng]);
 
+        if (isSelected && trip.driver_telemetry) {
+          if (trip.driver_telemetry.accuracy_m) {
+            polylinesGroup.addLayer(L.circle([driverLat, driverLng], { radius: trip.driver_telemetry.accuracy_m, color: "#0284c7", weight: 1, fillOpacity: 0.08 }));
+          }
+          if (trail.length > 1) {
+            polylinesGroup.addLayer(L.polyline(trail.map((point) => [point.lat, point.lng]), { color: "#0284c7", weight: 4, opacity: 0.75 }));
+          }
+        }
+
         // If selected or active, render pickup, drop, and path
-        if (isSelected && trip.pickup_lat && trip.pickup_lng) {
+        if (isSelected && trip.driver_telemetry && trip.pickup_lat && trip.pickup_lng) {
           const pickupMarker = L.marker([trip.pickup_lat, trip.pickup_lng], {
             icon: createLocationIcon("pickup"),
           });
@@ -195,14 +233,14 @@ export default function LiveTripMapView({
       }
     });
 
-    if (bounds.length > 0 && !selectedTrip) {
+    if (bounds.length > 0 && !liveSelected) {
       try {
         map.fitBounds(bounds, { padding: [50, 50], maxZoom: 13 });
       } catch {
         // Safe fallback
       }
     }
-  }, [filteredTrips, selectedTrip]);
+  }, [filteredTrips, liveSelected, trail]);
 
   return (
     <div className={`relative w-full h-[750px] overflow-hidden rounded-3xl border border-stone-200 dark:border-stone-800 shadow-md ${className}`}>
@@ -234,7 +272,11 @@ export default function LiveTripMapView({
           ))}
         </div>
 
-        <div className="flex items-center gap-2 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg pointer-events-auto">
+        <div className="flex items-center gap-3 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg pointer-events-auto">
+          <span className="text-[11px] font-mono text-stone-600 dark:text-stone-300">
+            Live GPS {liveGpsCount}/{trips.length}
+            {unmappedCount > 0 && <span className="text-amber-700"> · {unmappedCount} without pickup location</span>}
+          </span>
           <button
             type="button"
             onClick={onRefresh}
@@ -247,7 +289,7 @@ export default function LiveTripMapView({
       </div>
 
       {/* Selected Trip Details Drawer (Bottom Right) */}
-      {selectedTrip && (
+      {liveSelected && (
         <div className="absolute bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-96 z-30 bg-white/95 dark:bg-stone-900/95 backdrop-blur-md rounded-3xl p-5 border border-stone-200 dark:border-stone-800 shadow-2xl animate-in slide-in-from-bottom-4 duration-200">
           <button
             type="button"
@@ -260,66 +302,83 @@ export default function LiveTripMapView({
           {/* Status Badge & Header */}
           <div className="flex items-center gap-2 mb-2">
             <span className="px-2.5 py-0.5 rounded-full font-mono font-black text-[10px] bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
-              {selectedTrip.assignment_status || "ASSIGNED"}
+              {liveSelected.assignment_status || "ASSIGNED"}
             </span>
             <span className="text-xs font-mono font-bold text-stone-500">
-              {selectedTrip.booking_reference || selectedTrip.ref}
+              {liveSelected.booking_reference || liveSelected.ref}
             </span>
           </div>
 
           <h4 className="font-serif font-bold text-sm text-stone-900 dark:text-stone-100 line-clamp-1">
-            {selectedTrip.product_title || "Experience Tour"}
+            {liveSelected.product_title || "Experience Tour"}
           </h4>
 
-          {/* Telemetry Metrics Bar */}
-          <div className="mt-3 grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700 text-center font-mono">
-            <div>
-              <span className="block text-[9px] text-stone-400 uppercase">Speed</span>
-              <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
-                <Gauge className="w-3 h-3 text-amber-600" />
-                {selectedTrip.driver_telemetry?.speed_kmh || 0} km/h
-              </strong>
+          {/* Telemetry: only what a driver or operator actually reported */}
+          {liveSelected.driver_telemetry ? (
+            <div className="mt-3 grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-stone-800/60 border border-stone-200 dark:border-stone-700 text-center font-mono">
+              <div>
+                <span className="block text-[9px] text-stone-400 uppercase">Speed</span>
+                <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
+                  <Gauge className="w-3 h-3 text-amber-600" />
+                  {liveSelected.driver_telemetry.speed_kmh || 0} km/h
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[9px] text-stone-400 uppercase">Heading</span>
+                <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
+                  <Compass className="w-3 h-3 text-sky-600" />
+                  {liveSelected.driver_telemetry.heading || 0}°
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[9px] text-stone-400 uppercase">Last fix</span>
+                <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
+                  <Clock className="w-3 h-3 text-emerald-600" />
+                  {minutesAgo(liveSelected.driver_telemetry.updated_at)}
+                </strong>
+              </div>
             </div>
-            <div>
-              <span className="block text-[9px] text-stone-400 uppercase">Battery</span>
-              <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
-                <BatteryCharging className="w-3 h-3 text-emerald-600" />
-                {selectedTrip.driver_telemetry?.battery_pct || 90}%
-              </strong>
-            </div>
-            <div>
-              <span className="block text-[9px] text-stone-400 uppercase">Heading</span>
-              <strong className="text-xs text-stone-900 dark:text-stone-100 flex items-center justify-center gap-0.5">
-                <Compass className="w-3 h-3 text-sky-600" />
-                {selectedTrip.driver_telemetry?.heading || 0}°
-              </strong>
-            </div>
-          </div>
+          ) : null}
+          {liveSelected.driver_telemetry && (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-stone-600">
+              <span className={`rounded-full border px-2 py-0.5 font-mono font-bold ${(FRESHNESS[liveSelected.driver_telemetry.freshness] || FRESHNESS.LOST).className}`}>
+                {(FRESHNESS[liveSelected.driver_telemetry.freshness] || FRESHNESS.LOST).label}
+              </span>
+              {liveSelected.driver_telemetry.accuracy_m ? <span>±{liveSelected.driver_telemetry.accuracy_m} m</span> : null}
+              {liveSelected.driver_telemetry.source === "OPS" && <span>Entered by operations</span>}
+              {liveSelected.driver_telemetry.freshness === "LOST" && <span className="font-semibold text-rose-700">Phone stopped sharing. Call the driver.</span>}
+            </p>
+          )}
+          {!liveSelected.driver_telemetry && (
+            <p className="mt-3 rounded-2xl border border-dashed border-stone-300 bg-[#FAF9F6] p-2.5 text-[11px] text-stone-600">
+              No live GPS from this driver yet. The pin shows the pickup point. Call the driver to confirm where they are.
+            </p>
+          )}
 
           {/* Driver & Traveler Details */}
           <div className="mt-3 space-y-2 text-xs">
             <div className="flex items-center justify-between text-stone-600 dark:text-stone-300">
               <span className="text-stone-400">Driver:</span>
               <span className="font-bold text-stone-900 dark:text-stone-100">
-                {selectedTrip.driver_name || "Pending"} ({selectedTrip.vehicle_number || "No Plate"})
+                {liveSelected.driver_name || "Pending"} ({liveSelected.vehicle_number || "No Plate"})
               </span>
             </div>
             <div className="flex items-center justify-between text-stone-600 dark:text-stone-300">
               <span className="text-stone-400">Vehicle:</span>
               <span className="font-medium text-stone-800 dark:text-stone-200 truncate max-w-[180px]">
-                {selectedTrip.vehicle_model || "Commercial Vehicle"}
+                {liveSelected.vehicle_model || "Commercial Vehicle"}
               </span>
             </div>
             <div className="flex items-center justify-between text-stone-600 dark:text-stone-300">
               <span className="text-stone-400">Traveler:</span>
               <span className="font-medium text-stone-800 dark:text-stone-200">
-                {selectedTrip.guest_name || selectedTrip.traveler_name} ({selectedTrip.guest_phone || selectedTrip.traveler_phone})
+                {liveSelected.guest_name || liveSelected.traveler_name} ({liveSelected.guest_phone || liveSelected.traveler_phone})
               </span>
             </div>
             <div className="flex items-center justify-between text-stone-600 dark:text-stone-300">
               <span className="text-stone-400">Pickup:</span>
-              <span className="font-medium text-stone-800 dark:text-stone-200 truncate max-w-[200px]" title={selectedTrip.pickup_location}>
-                {selectedTrip.pickup_location}
+              <span className="font-medium text-stone-800 dark:text-stone-200 truncate max-w-[200px]" title={liveSelected.pickup_location}>
+                {liveSelected.pickup_location}
               </span>
             </div>
           </div>
@@ -329,7 +388,7 @@ export default function LiveTripMapView({
             <button
               type="button"
               onClick={() => {
-                if (onOpenStatusModal) onOpenStatusModal(selectedTrip);
+                if (onOpenStatusModal) onOpenStatusModal(liveSelected);
               }}
               className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 font-bold text-stone-950 text-xs flex items-center justify-center gap-1.5 shadow-sm transition"
             >
@@ -339,7 +398,7 @@ export default function LiveTripMapView({
             <button
               type="button"
               onClick={() => {
-                if (onOpenReallocateModal) onOpenReallocateModal(selectedTrip);
+                if (onOpenReallocateModal) onOpenReallocateModal(liveSelected);
               }}
               className="py-2.5 px-3 rounded-xl bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 font-bold text-stone-800 dark:text-stone-200 text-xs flex items-center justify-center gap-1.5 transition"
             >

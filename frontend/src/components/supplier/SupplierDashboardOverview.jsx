@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import SupplierPublicProfileEditor from "./SupplierPublicProfileEditor.jsx";
+import EnquiryInbox from "../EnquiryInbox.jsx";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
@@ -28,6 +30,8 @@ import {
 import BlockDatesModal from "./BlockDatesModal.jsx";
 import ManageFleetModal from "./ManageFleetModal.jsx";
 import SupplierListingsPanel from "./SupplierListingsPanel.jsx";
+import SupplierSubscriptionPanel from "./SupplierSubscriptionPanel.jsx";
+import SupplierShareKitPanel from "./SupplierShareKitPanel.jsx";
 import SupplierRevenueCard from "./SupplierRevenueCard.jsx";
 import SupplierBookingSnapshot from "./SupplierBookingSnapshot.jsx";
 import SupplierPerformanceRing from "./SupplierPerformanceRing.jsx";
@@ -41,6 +45,12 @@ const productScore = (product) => {
   const checks = [product.title, product.short_desc, product.hero_image, Number(product.price_inr) > 0, product.inclusions, product.itinerary];
   return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 };
+
+const SupplierStaffPanel = lazy(() => import("./SupplierStaffPanel.jsx"));
+const SupplierAgentsPanel = lazy(() => import("./SupplierAgentsPanel.jsx"));
+const SupplierQuotationsPanel = lazy(() => import("./SupplierQuotationsPanel.jsx"));
+const SupplierResellerKeysPanel = lazy(() => import("./SupplierResellerKeysPanel.jsx"));
+const PanelLoading = () => <p className="p-8 text-center text-xs text-stone-500">Loading…</p>;
 
 export default function SupplierDashboardOverview({ supplierData, loading, onRefresh, initialPanel }) {
   const [blockOpen, setBlockOpen] = useState(false);
@@ -56,6 +66,23 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
   const payouts = supplierData?.payouts || [];
   const kybDocs = supplierData?.kybDocs || [];
 
+  // The cards read real numbers from the server (ADR 038); refetched whenever the page refreshes.
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
+  useEffect(() => {
+    if (!supplier.id) return;
+    let active = true;
+    const load = (path) => fetch(`/api/suppliers/${supplier.id}/${path}`, { headers: authHeaders() })
+      .then((response) => (response.ok ? response.json() : null))
+      .catch(() => null);
+    Promise.all([load("dashboard-stats"), load("analytics/overview")]).then(([stats, overview]) => {
+      if (!active) return;
+      setDashboardStats(stats);
+      setAnalytics(overview);
+    });
+    return () => { active = false; };
+  }, [supplier.id, supplierData]);
+
   useEffect(() => {
     if (initialPanel === "fleet") setFleetOpen(true);
     if (initialPanel === "listings") {
@@ -67,38 +94,32 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
   const activeBookings = bookings.filter((booking) => !["completed", "cancelled"].includes(booking.status));
   const pendingBookings = bookings.filter((booking) => booking.status === "pending_confirmation" || booking.supplier_response_status === "PENDING");
   const completed = bookings.filter((booking) => booking.status === "completed");
-  const revenue = payouts.filter((payout) => payout.payout_status !== "CANCELLED").reduce((sum, payout) => sum + Number(payout.net_payout || 0), 0);
   const paid = payouts.filter((payout) => payout.payout_status === "PROCESSED").reduce((sum, payout) => sum + Number(payout.net_payout || 0), 0);
   const scheduled = payouts.filter((payout) => ["SCHEDULED", "BATCHED"].includes(payout.payout_status)).reduce((sum, payout) => sum + Number(payout.net_payout || 0), 0);
   const averageOrder = bookings.length ? bookings.reduce((sum, booking) => sum + Number(booking.amount_inr || 0), 0) / bookings.length : 0;
-  const fulfillment = bookings.length ? Math.round((completed.length / (bookings.filter((booking) => booking.status !== "cancelled").length || 1)) * 100) : 100;
+  // Completed share of past trips, from the server; null until there are 5 (ADR 038).
+  const fulfillment = dashboardStats?.ratings?.completion_rate ?? null;
   const instantProducts = products.filter((product) => product.is_instant_booking !== 0).length;
   const listingAverage = products.length ? Math.round(products.reduce((sum, product) => sum + productScore(product), 0) / products.length) : 0;
+  // A partner without reviews is scored at a neutral assumption rather than
+  // penalised, and rather than shown a rating nobody gave. NEUTRAL_RATING is a
+  // scoring input only — every display below says "no reviews yet" instead.
+  const NEUTRAL_RATING = 4.5;
+  const NEUTRAL_FULFILLMENT = 95;
+  const ratingValue = Number(supplier.rating) || null;
   const performanceScore = Math.round(
-    (Number(supplier.rating || 4.8) / 5) * 35 +
-    Math.min(1, fulfillment / 95) * 25 +
+    ((ratingValue ?? NEUTRAL_RATING) / 5) * 35 +
+    Math.min(1, (fulfillment ?? NEUTRAL_FULFILLMENT) / 95) * 25 +
     (products.length ? instantProducts / products.length : 0) * 20 +
     (listingAverage / 100) * 20
   );
 
-  const monthlyRevenue = useMemo(() => {
-    const months = Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(2026, 7 - (5 - index), 1);
-      return {
-        key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`,
-        label: date.toLocaleString("en-IN", { month: "short" }),
-        value: 0
-      };
-    });
-    bookings.forEach((booking) => {
-      const payout = payouts.find((item) => item.booking_id === booking.id);
-      const month = months.find((item) => booking.activity_date?.startsWith(item.key));
-      if (month && payout?.payout_status !== "CANCELLED") {
-        month.value += Number(payout?.net_payout || booking.supplier_payout_amount || 0);
-      }
-    });
-    return months;
-  }, [bookings, payouts]);
+  // The last six months of earnings by trip month, from the server (ADR 038).
+  const monthlyRevenue = useMemo(() => (analytics?.revenueTrend || []).map((item) => ({
+    key: item.key,
+    label: item.month.split(" ")[0],
+    value: item.revenue_inr,
+  })), [analytics]);
 
   const chartMax = Math.max(...monthlyRevenue.map((item) => item.value), 1);
   const kybStatus = supplier.kyb_status || "PENDING";
@@ -119,6 +140,23 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
         : "Our admin team is reviewing your business documents. You'll be notified by email.",
       to: "?panel=compliance",
       cta: "View compliance"
+    },
+    // ADR 017: suppliers who signed up from 2026-09-14 need a subscription to take bookings.
+    isApproved && supplierData?.subscription?.required && !supplierData.subscription.covered && {
+      level: "urgent",
+      title: "Subscription needed — not receiving new bookings",
+      copy: "Your listings are not taking new bookings until you subscribe. Bookings already made are not affected.",
+      to: "?panel=subscription",
+      cta: "Subscribe"
+    },
+    isApproved && supplierData?.subscription?.covered && supplierData.subscription.cover?.source === "LAUNCH" && {
+      level: "growth",
+      title: supplierData.subscription.cover.endsAt
+        ? `Free launch offer until ${supplierData.subscription.cover.endsAt.slice(0, 10)}`
+        : "You're on the free launch offer",
+      copy: "New suppliers need a subscription to take bookings. Yours is free during the launch offer; we'll remind you before it ends.",
+      to: "?panel=subscription",
+      cta: "Details"
     },
     pendingBookings.length > 0 && {
       level: "urgent",
@@ -165,6 +203,47 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
     }
   };
 
+  if (initialPanel === "profile") {
+    return <SupplierPublicProfileEditor supplierId={supplier.id} products={products} />;
+  }
+
+  if (initialPanel === "enquiries") {
+    return (
+      <section className="space-y-4">
+        <div>
+          <h2 className="font-display text-xl font-bold text-stone-900">Enquiries</h2>
+          <p className="mt-1 text-sm text-stone-600">Questions travelers sent from your public profile. A quick, helpful reply is the best way to win the booking.</p>
+        </div>
+        <EnquiryInbox viewer="SUPPLIER" />
+      </section>
+    );
+  }
+
+  if (initialPanel === "share") {
+    return <SupplierShareKitPanel supplierId={supplier.id} />;
+  }
+
+  // Operator tools load only when opened, to keep the dashboard bundle small.
+  if (initialPanel === "packages") {
+    return <Suspense fallback={<PanelLoading />}><SupplierQuotationsPanel supplierId={supplier.id} products={products} /></Suspense>;
+  }
+
+  if (initialPanel === "api-keys") {
+    return <Suspense fallback={<PanelLoading />}><SupplierResellerKeysPanel supplierId={supplier.id} /></Suspense>;
+  }
+
+  if (initialPanel === "agents") {
+    return <Suspense fallback={<PanelLoading />}><SupplierAgentsPanel supplierId={supplier.id} products={products} /></Suspense>;
+  }
+
+  if (initialPanel === "staff") {
+    return <Suspense fallback={<PanelLoading />}><SupplierStaffPanel supplierId={supplier.id} /></Suspense>;
+  }
+
+  if (initialPanel === "subscription") {
+    return <SupplierSubscriptionPanel supplierId={supplier.id} onRefresh={onRefresh} />;
+  }
+
   if (initialPanel === "compliance") {
     return (
       <SupplierCompliancePanel
@@ -183,34 +262,6 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
       />
     );
   }
-
-  const dashboardStats = {
-    today: {
-      bookings: activeBookings.length,
-      revenue_inr: revenue / 30,
-      trips_in_progress: activeBookings.filter(b => b.status === "in_progress").length,
-      trips_upcoming: activeBookings.filter(b => b.status === "confirmed").length,
-      trips_completed: completed.length,
-    },
-    month: {
-      bookings: bookings.length,
-      revenue_inr: revenue,
-      growth_pct: 14.8,
-    },
-    week: {
-      trend: [4, 6, 8, 5, 9, 7, activeBookings.length || 5],
-    },
-    ratings: {
-      avg: Number(supplier.rating || 4.8),
-      completion_rate: fulfillment,
-      cancellation_rate: 100 - fulfillment,
-    },
-    alerts: pendingBookings.slice(0, 2).map(b => ({
-      type: "SLA_PENDING",
-      booking_id: b.id,
-      deadline: "Within 2h",
-    })),
-  };
 
   return (
     <div className="space-y-6">
@@ -349,10 +400,10 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
       {/* KPI Stats Cards */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          [CircleDollarSign, "Net revenue", money(revenue), `${money(paid)} paid out`, "text-emerald-600"],
+          [CircleDollarSign, "Earnings this month", money(dashboardStats?.month?.earnings_inr || 0), dashboardStats?.month?.direct_due_inr > 0 ? `${money(dashboardStats.month.direct_due_inr)} still to collect` : `${dashboardStats?.month?.bookings || 0} trips to date`, "text-emerald-600"],
           [CalendarCheck, "Active bookings", activeBookings.length, `${pendingBookings.length} awaiting confirmation`, "text-amber-600"],
-          [TrendingUp, "Fulfillment rate", `${fulfillment}%`, `${completed.length} completed trips`, "text-amber-800"],
-          [Star, "Partner score", performanceScore, `${supplier.rating || 4.9} traveler rating`, "text-amber-600"]
+          [TrendingUp, "Fulfillment rate", fulfillment === null ? "—" : `${fulfillment}%`, fulfillment === null ? "Not enough past trips yet" : `${completed.length} completed trips`, "text-amber-800"],
+          [Star, "Partner score", performanceScore, ratingValue ? `${ratingValue.toFixed(1)} traveler rating` : "No verified reviews yet", "text-amber-600"]
         ].map(([Icon, label, value, note, color]) => (
           <article key={label} className="group rounded-3xl border border-stone-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-400">
             <div className="flex items-center justify-between">
@@ -420,10 +471,12 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
           <span className="text-[10px] font-black uppercase tracking-[.16em] text-stone-900/70">Idea Holiday growth score</span>
           <div className="mt-4 flex items-end gap-3">
             <strong className="text-6xl font-black">{performanceScore}</strong>
-            <span className="mb-2 text-sm font-bold">/ 100<br />Excellent</span>
+            <span className="mb-2 text-sm font-bold">/ 100<br />{performanceScore >= 80 ? "Excellent" : performanceScore >= 60 ? "Good" : "Building"}</span>
           </div>
           <p className="mt-5 text-sm font-semibold leading-relaxed text-stone-900/80">
-            Your rating and fulfillment are strong. Keep your listings updated and maintain swift booking confirmation to earn priority placement.
+            {performanceScore >= 80
+              ? "Your rating and fulfillment are strong. Keep your listings updated and maintain swift booking confirmation to earn priority placement."
+              : "Complete your listings, turn on instant booking where you can, and confirm requests quickly to raise your score and placement."}
           </p>
           <Link to="/supplier/products/create" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-stone-950 px-5 py-3 text-xs font-bold text-white hover:bg-stone-800">
             Add more products <ArrowRight className="h-4 w-4" />
@@ -440,8 +493,8 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
               <h2 className="mt-1 font-display text-2xl font-bold text-stone-900">Revenue pulse</h2>
             </div>
             <div className="text-right">
-              <strong className="block text-xl font-bold text-stone-900 font-mono">{money(revenue)}</strong>
-              <span className="text-[10px] text-stone-500">Net after commission</span>
+              <strong className="block text-xl font-bold text-stone-900 font-mono">{money(monthlyRevenue.reduce((sum, month) => sum + month.value, 0))}</strong>
+              <span className="text-[10px] text-stone-500">Last 6 months by trip date, net of commission</span>
             </div>
           </div>
           <div className="mt-8 flex h-44 items-end gap-3">
@@ -463,7 +516,7 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
               <span className="text-[10px] text-stone-500">Next payout</span>
             </div>
             <div>
-              <strong className="block text-sm font-bold text-stone-900">{supplier.commission_rate || 18}%</strong>
+              <strong className="block text-sm font-bold text-stone-900">{supplier.commission_rate_effective ?? supplier.commission_rate}%</strong>
               <span className="text-[10px] text-stone-500">Commission</span>
             </div>
           </div>
@@ -651,15 +704,15 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
               <Star className="h-5 w-5 fill-amber-500 text-amber-500" />
             </span>
             <div>
-              <strong className="text-2xl font-bold text-stone-900">{supplier.rating || 4.9}</strong>
-              <span className="ml-2 text-xs text-stone-500">traveler rating</span>
+              <strong className="text-2xl font-bold text-stone-900">{ratingValue ? ratingValue.toFixed(1) : "—"}</strong>
+              <span className="ml-2 text-xs text-stone-500">{ratingValue ? "traveler rating" : "no verified reviews yet"}</span>
             </div>
           </div>
           <h2 className="mt-6 font-display text-2xl font-bold text-stone-900">Quality signals</h2>
           <p className="mt-2 text-xs text-stone-500">Calculated from your current bookings and published listings.</p>
           <div className="mt-5 space-y-4">
             {[
-              ["Traveler rating", Math.round((Number(supplier.rating || 4.9) / 5) * 100)],
+              ["Traveler rating", ratingValue ? Math.round((ratingValue / 5) * 100) : 0],
               ["Trip fulfillment", fulfillment],
               ["Listing completeness", listingAverage],
               ["Instant bookability", products.length ? Math.round((instantProducts / products.length) * 100) : 0]
@@ -667,10 +720,10 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
               <div key={label}>
                 <div className="flex justify-between text-xs">
                   <span className="text-stone-600">{label}</span>
-                  <strong className="text-stone-900">{value}%</strong>
+                  <strong className="text-stone-900">{value === null ? "Not enough data" : `${value}%`}</strong>
                 </div>
                 <div className="mt-2 h-1.5 rounded-full bg-stone-200">
-                  <div className="h-full rounded-full bg-amber-500" style={{ width: `${value}%` }} />
+                  <div className="h-full rounded-full bg-amber-500" style={{ width: `${value ?? 0}%` }} />
                 </div>
               </div>
             ))}

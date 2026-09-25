@@ -107,6 +107,8 @@ export function apiNotFound(req, res, next) {
 export function errorHandler(error, req, res, _next) {
   const status = Number(error?.status) >= 400 && Number(error?.status) < 600 ? Number(error.status) : 500;
   const code = error?.code || (status >= 500 ? "INTERNAL_ERROR" : "REQUEST_FAILED");
+  // Zod v4 stores a JSON-stringified issues array in error.message — never expose it directly.
+  const isZodError = Array.isArray(error?.issues);
   logger.error("Request failed", {
     event: "request_error",
     requestId: req.requestId,
@@ -118,8 +120,11 @@ export function errorHandler(error, req, res, _next) {
     error,
   });
   if (res.headersSent) return res.end();
+  const safeMessage = status >= 500
+    ? "An unexpected error occurred"
+    : isZodError ? "Invalid request" : error.message;
   return res.status(status).json({
-    error: status >= 500 ? "An unexpected error occurred" : error.message,
+    error: safeMessage,
     code,
     requestId: req.requestId,
   });

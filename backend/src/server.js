@@ -1,3 +1,8 @@
+import driverTripsRouter from "./routes/driverTrips.js";
+import trackingRouter from "./routes/tracking.js";
+import { processDispatchSchedule, processDispatchOutbox } from "./services/dispatchWorkflowService.js";
+import { deliverDispatchNotification } from "./services/dispatchNotificationService.js";
+import { processReservationOutbox } from "./services/reservationOutboxService.js";
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -22,16 +27,19 @@ import { runPendingMigrations } from "./services/migrationRunner.js";
 import { supabase } from "./supabaseClient.js";
 import { processExpiredSupplierAssignments } from "./services/assignmentSlaService.js";
 import { processExpiredCircuitReconfirmations } from "./services/circuitOrchestrationService.js";
-import { notifyCircuitReschedule, queueNotification } from "./services/notificationService.js";
-// import { syncGoaSupplierAndProducts } from "./scripts/seedGoaSupplierProducts.js";
-// ⬆️ Plan 14 (5-product system): demo data is now managed by scripts/seed-fresh.js.
-//    The old DAY_TOUR / TRANSFER / MULTI_DAY_PACKAGE auto-sync is disabled.
+import { notifyBookingConfirmed, notifyCircuitReschedule, queueNotification } from "./services/notificationService.js";
+import { syncGoaSupplierAndProducts } from "./scripts/seedGoaSupplierProducts.js";
 import { backfillProductLocationRules } from "./data/canonicalLocations.js";
 import { backfillProductOptions, expireBookingHolds } from "./services/logisticsService.js";
 import { configureSecurity } from "./middleware/security.js";
 import { apiNotFound, errorHandler, requestContext, requestLogger, stableErrorResponses } from "./middleware/observability.js";
 import { auditMutations } from "./services/auditService.js";
 import { requestBoundary } from "./middleware/validation.js";
+import { backfillSupplierSlugs } from "./services/supplierProfileService.js";
+import { backfillLegacyReferrals, findWalletDiscrepancies, processReferralLifecycle, sendReferralNotifications } from "./services/referralService.js";
+import { processSubscriptionLifecycle, sendSubscriptionReminders, syncLaunchWaivers } from "./services/supplierSubscriptionService.js";
+import { releaseCouponRedemptions } from "./services/promoService.js";
+import { collectVerificationReminders, sendVerificationReminders } from "./services/supplierPlanPaymentService.js";
 
 // Run pending migrations on startup
 try {
@@ -44,12 +52,53 @@ try {
   if (process.env.NODE_ENV === "production") throw err;
 }
 
+// Carry v1 referrals into the v3 tables and open the wallet ledger (idempotent).
+try {
+  const carried = backfillLegacyReferrals(db);
+  if (carried.relationships || carried.rewards || carried.adjustments) {
+    logger.info("Carried legacy referrals into Travel & Earn v3", carried);
+  }
+} catch (err) {
+  logger.warn("Referral backfill failed", { error: err.message });
+}
+
 // Backfill canonical location rules and product options on startup (safe, idempotent)
 try {
   backfillProductLocationRules(db);
   backfillProductOptions(db);
 } catch (err) {
   logger.warn("Startup backfill failed", { error: err });
+}
+
+
+// Tests and explicitly configured demo environments need a complete, bookable
+// marketplace without copying a developer database. This seed is idempotent
+// and never runs implicitly in production or normal development.
+if (process.env.SEED_DEMO_DATA === "true" && process.env.NODE_ENV !== "production") {
+  try {
+    syncGoaSupplierAndProducts(db);
+    backfillProductLocationRules(db);
+    backfillProductOptions(db);
+  } catch (err) {
+    logger.error("Demo marketplace initialization failed", { error: err });
+    throw err;
+  }
+}
+
+// New suppliers need a subscription; give the launch waiver to any without one (ADR 017, idempotent).
+try {
+  const waivers = syncLaunchWaivers(db);
+  if (waivers.created) logger.info("Gave launch waivers to new suppliers", waivers);
+} catch (err) {
+  logger.warn("Launch waiver sync failed", { error: err.message });
+}
+
+// Every supplier gets a public profile link (idempotent).
+try {
+  const slugged = backfillSupplierSlugs(db);
+  if (slugged) logger.info("Assigned supplier profile links", { count: slugged });
+} catch (err) {
+  logger.warn("Supplier profile link backfill failed", { error: err.message });
 }
 
 
@@ -62,11 +111,19 @@ import adminRouter from "./routes/admin.js";
 import opsRouter from "./routes/ops.js";
 import checkoutRouter from "./routes/checkout.js";
 import placesRouter from "./routes/places.js";
+import mapsRouter from "./routes/maps.js";
 import notificationWebhooksRouter from "./routes/notificationWebhooks.js";
 import supportRouter from "./routes/support.js";
 import reviewsRouter from "./routes/reviews.js";
 import analyticsRouter from "./routes/analytics.js";
-import seoRouter from "./routes/seo.js";
+import seoRouter, { indexTemplate, notFoundPage } from "./routes/seo.js";
+import { isKnownSpaPath } from "../../shared/spaRoutes.js";
+import { driverAppAssetLinks } from "./lib/androidAppLinks.js";
+import publicSuppliersRouter from "./routes/publicSuppliers.js";
+import blogRouter from "./routes/blog.js";
+import { goRouter, shareRouter } from "./routes/shareKit.js";
+import enquiriesRouter from "./routes/enquiries.js";
+import quotationsRouter from "./routes/quotations.js";
 import securityTxtRouter from "./routes/securityTxt.js";
 import metricsRouter from "./routes/metrics.js";
 import travelerRouter from "./routes/traveler.js";
@@ -76,13 +133,25 @@ import exportsRouter from "./routes/exports.js";
 import eventsRouter from "./routes/events.js";
 import currencyRouter from "./routes/currency.js";
 import promoRouter from "./routes/promo.js";
+import affiliateRouter from "./routes/affiliate.js";
+import referralRouter from "./routes/referral.js";
+import adminAffiliatesRouter from "./routes/adminAffiliates.js";
 import addonsRouter from "./routes/addons.js";
 import circuitOrdersRouter from "./routes/circuitOrders.js";
 import availabilityRouter from "./routes/availability.js";
+import octoRouter from "./routes/octo.js";
+import supplierChannelsRouter from "./routes/supplierChannels.js";
 import { swaggerSpec } from "./config/swagger.js";
+import { blockPublicKybUploads } from "./services/kybFileService.js";
 
 const app = express();
 app.use(requestContext);
+// www.ideaholiday.in (typed from an Instagram bio or a printed card) lands on the one canonical domain.
+app.use((req, res, next) => {
+  const host = String(req.headers.host || "").toLowerCase();
+  if (!host.startsWith("www.")) return next();
+  return res.redirect(308, `https://${host.slice(4).replace(/:\d+$/, "")}${req.originalUrl}`);
+});
 app.use(stableErrorResponses);
 configureSecurity(app);
 app.use(express.json({
@@ -100,6 +169,7 @@ app.use("/api/v1", metricsRouter);
 
 // Serve uploads directory
 const uploadsDir = path.join(__dirname, "..", "uploads");
+app.use(["/uploads", "/api/uploads/files"], blockPublicKybUploads(db));
 app.use("/uploads", express.static(uploadsDir));
 app.use("/api/uploads/files", express.static(uploadsDir));
 
@@ -137,15 +207,25 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/auth`, authRouter);
   app.use(`${prefix}/bookings`, bookingsRouter);
   app.use(`${prefix}/transfers`, transfersRouter);
+  app.use(`${prefix}/public/suppliers`, publicSuppliersRouter);
+  app.use(`${prefix}/blog`, blogRouter);
+  app.use(`${prefix}/share`, shareRouter);
+  app.use(`${prefix}/enquiries`, enquiriesRouter);
+  app.use(`${prefix}/quotations`, quotationsRouter);
   app.use(`${prefix}/suppliers`, suppliersRouter);
+  app.use(`${prefix}/supplier-channels`, supplierChannelsRouter);
+  app.use(`${prefix}/octo`, octoRouter);
   app.use(`${prefix}/admin`, adminRouter);
   app.use(`${prefix}/analytics`, analyticsRouter);
+  app.use(`${prefix}/driver-trips`, driverTripsRouter);
+  app.use(`${prefix}/tracking`, trackingRouter);
   app.use(`${prefix}/ops`, opsRouter);
   app.use(`${prefix}/checkout`, checkoutRouter);
   app.use(`${prefix}/support`, supportRouter);
   app.use(`${prefix}/reviews`, reviewsRouter);
   app.use(`${prefix}/webhooks`, notificationWebhooksRouter);
   app.use(prefix, placesRouter);
+  app.use(`${prefix}/maps`, mapsRouter);
   app.use(prefix, travelerRouter);
   app.use(prefix, uploadsRouter);
   app.use(prefix, searchRouter);
@@ -153,6 +233,9 @@ const mountApiRoutes = (prefix) => {
   app.use(prefix, eventsRouter);
   app.use(`${prefix}/currency`, currencyRouter);
   app.use(`${prefix}/promo`, promoRouter);
+  app.use(`${prefix}/affiliate`, affiliateRouter);
+  app.use(`${prefix}/referral`, referralRouter);
+  app.use(`${prefix}/admin/affiliates`, adminAffiliatesRouter);
   app.use(prefix, addonsRouter);
   app.use(`${prefix}/circuit-orders`, circuitOrdersRouter);
   app.use(`${prefix}/availability`, availabilityRouter);
@@ -160,26 +243,40 @@ const mountApiRoutes = (prefix) => {
 
 mountApiRoutes("/api");
 mountApiRoutes("/api/v1");
+app.use("/octo", octoRouter);
+
+// The supplier and admin portals serve the same app as the marketplace; only
+// ideaholiday.in itself belongs in search results.
+app.use((req, res, next) => {
+  if (/^(supply|admin)\./i.test(req.hostname || "")) res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  next();
+});
 
 app.use("/", securityTxtRouter);
 app.use("/", seoRouter);
+app.use("/", goRouter);
 
 app.get(["/api/health", "/api/v1/health"], (req, res) =>
   res.json({
     ok: true,
     service: "idea-holiday-api",
     timestamp: new Date().toISOString(),
-    supabaseUrl: process.env.SUPABASE_URL || "https://jidknptoyloucgldaool.supabase.co",
-    supabaseConnected: Boolean(process.env.SUPABASE_ANON_KEY),
+    // Public: say what deploy checks need, not where the database lives.
     database: {
       engine: databaseInfo.engine,
       persistent: databaseInfo.persistent,
-      journalMode: databaseInfo.journalMode,
-      schema: databaseInfo.schema || null,
     },
     features: ["transfers", "sightseeing", "multi_day_packages", "4_role_ecosystem"]
   })
 );
+
+// Android App Links: trip links open in the driver app once its certificate is configured.
+app.get("/.well-known/assetlinks.json", (_req, res) => {
+  const links = driverAppAssetLinks();
+  if (!links) return res.status(404).json({ error: "Not configured" });
+  res.set("Cache-Control", "public, max-age=3600");
+  return res.json(links);
+});
 
 // Serve production static frontend if dist exists
 const frontendDist = path.join(__dirname, "..", "..", "frontend", "dist");
@@ -187,6 +284,15 @@ app.use(express.static(frontendDist));
 
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/api")) return next();
+  // A path the React app has no page for still gets the app (it shows "not
+  // found"), but with a 404 status and noindex so Google drops it.
+  if (!isKnownSpaPath(req.path)) {
+    const template = indexTemplate();
+    if (template) {
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(404).type("html").send(notFoundPage(template, req.path).html);
+    }
+  }
   res.sendFile(path.join(frontendDist, "index.html"), (err) => {
     if (err) res.status(404).send("Idea Holiday API Backend running. Frontend dist not built yet.");
   });
@@ -196,7 +302,24 @@ app.use(apiNotFound);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 8080;
+let dispatchRunning = false;
+async function dispatchTick() {
+  if (dispatchRunning) return;
+  dispatchRunning = true;
+  try { processDispatchSchedule(db); await processDispatchOutbox(db, deliverDispatchNotification); }
+  catch (error) { logger.error("Driver dispatch worker failed", { error }); }
+  finally { dispatchRunning = false; }
+}
+const dispatchTimer = setInterval(dispatchTick, 30000);
+dispatchTimer.unref();
+const reservationDeliveryTimer = setInterval(() => {
+  queueNotification(processReservationOutbox(db, notifyBookingConfirmed), "Reservation confirmation outbox");
+}, 5000);
+reservationDeliveryTimer.unref();
 const assignmentSlaTimer = setInterval(() => {
+  try {
+    db.prepare("UPDATE native_reservations SET status = 'EXPIRED' WHERE status = 'ON_HOLD' AND utc_expires_at <= ?").run(new Date().toISOString());
+  } catch (error) { logger.error("Native reservation expiry failed", { error }); }
   try { expireBookingHolds(db); } catch (error) { logger.error("Booking hold expiry worker failed", { error }); }
   try { processExpiredSupplierAssignments(db); } catch (error) { logger.error("Supplier assignment SLA worker failed", { error }); }
   try {
@@ -205,6 +328,43 @@ const assignmentSlaTimer = setInterval(() => {
   } catch (error) { logger.error("Circuit reconfirmation SLA worker failed", { error }); }
 }, 30_000);
 assignmentSlaTimer.unref();
+// Travel & Earn: clear matured rewards, reverse refunded ones, return credit from
+// abandoned checkouts, expire lapsed credit, and check the ledger still adds up.
+let referralRunning = false;
+async function referralTick() {
+  if (referralRunning) return;
+  referralRunning = true;
+  try {
+    const result = processReferralLifecycle(db);
+    const { notifications, ...counts } = result;
+    if (Object.values(counts).some(Boolean)) logger.info("Referral lifecycle pass", counts);
+    const drift = findWalletDiscrepancies(db);
+    if (drift.length) logger.error("Wallet ledger does not match cached balances", { users: drift.slice(0, 20), count: drift.length });
+    await sendReferralNotifications(db, notifications);
+    // Coupon uses from checkouts that never went ahead are given back.
+    const coupons = releaseCouponRedemptions(db);
+    if (coupons.released) logger.info("Released coupon uses", coupons);
+  } catch (error) {
+    logger.error("Referral lifecycle worker failed", { error });
+  } finally {
+    referralRunning = false;
+  }
+}
+const referralTimer = setInterval(referralTick, 5 * 60_000);
+referralTimer.unref();
+// Supplier subscriptions: expire lapsed cover and remind 30, 7 and 1 days before it ends.
+async function subscriptionTick() {
+  try {
+    const { expired, reminders } = processSubscriptionLifecycle(db);
+    if (expired || reminders.length) logger.info("Supplier subscription lifecycle pass", { expired, reminders: reminders.length });
+    await sendSubscriptionReminders(db, reminders);
+    await sendVerificationReminders(db, collectVerificationReminders(db));
+  } catch (error) {
+    logger.error("Supplier subscription lifecycle failed", { error });
+  }
+}
+const subscriptionTimer = setInterval(subscriptionTick, 60 * 60_000);
+subscriptionTimer.unref();
 const server = app.listen(PORT, "0.0.0.0", () => {
   logger.info("Idea Holiday API started", { port: Number(PORT) });
   if (databaseInfo.engine === "postgres") {
@@ -216,6 +376,11 @@ const server = app.listen(PORT, "0.0.0.0", () => {
 
 const shutdown = (signal) => {
   logger.info("Shutdown signal received", { signal });
+  clearInterval(dispatchTimer);
+  clearInterval(reservationDeliveryTimer);
+  clearInterval(assignmentSlaTimer);
+  clearInterval(referralTimer);
+  clearInterval(subscriptionTimer);
   server.close(() => {
     try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (error) { logger.warn("SQLite checkpoint failed", { error }); }
     try { db.close(); } catch (error) { logger.warn("SQLite close failed", { error }); }

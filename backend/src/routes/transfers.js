@@ -11,6 +11,7 @@ import {
   calculateHaversineDistanceKm
 } from "../engine/transferEngine.js";
 import { assertBookingLocations } from "../services/locationValidationService.js";
+import { resolveCommissionRate } from "../services/financeService.js";
 
 const router = express.Router();
 
@@ -76,7 +77,7 @@ const handleTransferSearch = (req, res) => {
         passengers,
         luggage,
         vehicleCategory: veh.code,
-        commissionRatePercent: primaryMatch ? primaryMatch.commissionRate : 18.0
+        commissionRatePercent: primaryMatch ? primaryMatch.commissionRate : resolveCommissionRate(db, null)
       });
 
       return {

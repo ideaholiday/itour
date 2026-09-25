@@ -1,14 +1,29 @@
 import React, { useState } from "react";
+
+// Expiry dates of the driver's and vehicle's papers; an expired one blocks assigning the vehicle (ADR 024).
+const EXPIRY_FIELDS = [
+  ["licenseExpiry", "license_expiry", "Driving licence valid until"],
+  ["permitExpiry", "permit_expiry", "Permit valid until"],
+  ["insuranceExpiry", "insurance_expiry", "Insurance valid until"],
+  ["fitnessExpiry", "fitness_expiry", "Fitness certificate valid until"],
+];
+const NO_EXPIRIES = { licenseExpiry: "", permitExpiry: "", insuranceExpiry: "", fitnessExpiry: "" };
 import { Users, X, Plus, Phone, Car, Shield, Star, AlertTriangle, Check, Search } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
+import PhoneInput from "../PhoneInput.jsx";
 
 export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers = [], onRefresh }) {
   const [activeTab, setActiveTab] = useState("LIST"); // 'LIST' or 'ADD'
+  const [driverEmail, setDriverEmail] = useState("");
+  const [seatCapacity, setSeatCapacity] = useState(4);
+  const [editingContact, setEditingContact] = useState(null);
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
   const [vehicleModel, setVehicleModel] = useState("Swift Dzire VXI (Sedan)");
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [licenseNumber, setLicenseNumber] = useState("");
+  const [expiries, setExpiries] = useState(NO_EXPIRIES);
+  const [licenceDob, setLicenceDob] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
@@ -33,11 +48,14 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
+          driverEmail,
+          seatCapacity: Number(seatCapacity),
           driverName,
           driverPhone,
           vehicleModel,
           vehicleNumber,
-          licenseNumber
+          licenseNumber,
+          ...expiries
         })
       });
 
@@ -48,6 +66,7 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
         setDriverPhone("");
         setVehicleNumber("");
         setLicenseNumber("");
+        setExpiries(NO_EXPIRIES);
         setActiveTab("LIST");
         if (onRefresh) onRefresh();
       } else {
@@ -58,6 +77,16 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
     } finally {
       setLoading(false);
     }
+  };
+
+  const verifyFleetDocument = async (check, body) => {
+    setError(""); setSuccessMsg("");
+    try {
+      const r = await fetch(`/api/suppliers/${supplierId}/kyb/${check}`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Verification failed");
+      if (d.verification?.valid) { setSuccessMsg(d.message); setEditingContact(null); onRefresh?.(); } else setError(d.message);
+    } catch (e) { setError(e.message); }
   };
 
   const handleFleetStatus = async (driverId, status) => {
@@ -150,6 +179,27 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
         </div>
 
         {/* Modal Body */}
+        <div className="px-6 pt-4">
+          <label className="text-xs">Update dispatch contact and seats<select className="ml-2 rounded border p-2" value={editingContact?.id || ''} onChange={e => { const d = drivers.find(d => d.id === e.target.value); setEditingContact(d ? { ...d } : null); }}><option value="">Choose existing driver</option>{drivers.map(d => <option key={d.id} value={d.id}>{d.driver_name}</option>)}</select></label>
+          {editingContact && <form className="mt-3 flex flex-wrap gap-2" onSubmit={async e => {
+            e.preventDefault();
+            try {
+              const r = await fetch(`/api/suppliers/${supplierId}/drivers/${editingContact.id}/contact`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ driverEmail: editingContact.driver_email, seatCapacity: Number(editingContact.seat_capacity), dispatchPriority: Number(editingContact.dispatch_priority || 0) }) });
+              const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Could not update driver');
+              const papers = await fetch(`/api/suppliers/${supplierId}/drivers/${editingContact.id}/documents`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(Object.fromEntries(EXPIRY_FIELDS.map(([key, column]) => [key, editingContact[column] || null]))) });
+              if (!papers.ok) throw new Error((await papers.json()).error || 'Could not save document dates');
+              setSuccessMsg('Driver dispatch details saved'); setEditingContact(null); onRefresh?.();
+            } catch (e) { setError(e.message); }
+          }}><label className="text-xs">Email<input aria-label="Existing driver email" type="email" required value={editingContact.driver_email || ''} onChange={e => setEditingContact({ ...editingContact, driver_email: e.target.value })} className="block rounded border p-2" /></label><label className="text-xs">Seats<input aria-label="Existing vehicle seats" type="number" min="1" max="100" required value={editingContact.seat_capacity || ''} onChange={e => setEditingContact({ ...editingContact, seat_capacity: e.target.value })} className="block rounded border p-2" /></label>{EXPIRY_FIELDS.map(([key, column, label]) => <label key={key} className="text-xs">{label}<input aria-label={`Existing ${label}`} type="date" value={editingContact[column] || ''} onChange={e => setEditingContact({ ...editingContact, [column]: e.target.value })} className="block rounded border p-2" /></label>)}<button type="submit" className="rounded border px-3">Save dispatch details</button></form>}
+          {editingContact && (
+            <div className="mt-2 flex flex-wrap items-end gap-2 text-xs">
+              {/* Cashfree checks for Indian suppliers; a valid result fills the expiry dates (ADR 024). */}
+              <label className="text-xs">Driver's date of birth<input aria-label="Driver date of birth" type="date" value={licenceDob} onChange={e => setLicenceDob(e.target.value)} className="block rounded border p-2" /></label>
+              <button type="button" className="rounded border px-3 py-2" disabled={!licenceDob || !editingContact.license_number} title={editingContact.license_number ? "" : "Add the licence number first"} onClick={() => verifyFleetDocument("verify-dl", { licenseNumber: editingContact.license_number, dob: licenceDob, driverId: editingContact.id })}>Verify licence</button>
+              <button type="button" className="rounded border px-3 py-2" onClick={() => verifyFleetDocument("verify-rc", { registrationNumber: editingContact.vehicle_number, driverId: editingContact.id })}>Verify vehicle RC</button>
+            </div>
+          )}
+        </div>
         <div className="p-6 space-y-4 overflow-y-auto">
           {error && (
             <div className="bg-rose-50 border border-rose-300 text-rose-800 text-xs p-3 rounded-2xl flex items-center gap-2">
@@ -196,10 +246,14 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                           <div>
                             <h4 className="text-sm font-bold text-stone-900 flex items-center gap-2">
                               {d.driver_name}
-                              <span className="flex items-center gap-1 text-[11px] text-amber-700 font-bold">
-                                <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
-                                {d.rating || 4.9}
-                              </span>
+                              {d.rating ? (
+                                <span className="flex items-center gap-1 text-[11px] text-amber-700 font-bold">
+                                  <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                                  {Number(d.rating).toFixed(1)}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-bold text-stone-400">Unrated</span>
+                              )}
                             </h4>
                             <p className="text-xs text-stone-500 flex items-center gap-1">
                               <Phone className="w-3 h-3 text-amber-600" />
@@ -228,6 +282,12 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                           <span className="text-stone-500">Plate Number:</span>
                           <span className="font-mono font-bold text-stone-900">{d.vehicle_number}</span>
                         </div>
+                        {EXPIRY_FIELDS.filter(([, column]) => d[column]).map(([key, column, label]) => (
+                          <div key={key} className={`flex justify-between text-[11px] ${d[column] < new Date().toISOString().slice(0, 10) ? "font-bold text-red-700" : "text-stone-500"}`}>
+                            <span>{label}:</span>
+                            <span className="font-mono">{d[column]}</span>
+                          </div>
+                        ))}
                         {d.license_number && (
                           <div className="flex justify-between text-stone-500 text-[11px]">
                             <span>License No:</span>
@@ -270,17 +330,18 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">Driver WhatsApp Phone Number *</label>
-                  <input
-                    type="tel"
+                  <label htmlFor="fleet-driver-phone" className="block text-xs font-bold text-stone-700 mb-1">Driver WhatsApp Phone Number *</label>
+                  <PhoneInput
+                    id="fleet-driver-phone"
                     required
-                    placeholder="e.g. +919839033445"
                     value={driverPhone}
-                    onChange={(e) => setDriverPhone(e.target.value)}
-                    className="w-full bg-white border border-stone-300 text-stone-900 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500"
+                    onChange={setDriverPhone}
+                    inputClassName="w-full bg-white border border-stone-300 text-stone-900 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500"
                   />
                 </div>
 
+                <label className="block text-xs">Driver email<input type="email" required className="w-full rounded border p-2" value={driverEmail} onChange={e => setDriverEmail(e.target.value)} /></label>
+                <label className="block text-xs">Vehicle seats<input type="number" min="1" max="100" required className="w-full rounded border p-2" value={seatCapacity} onChange={e => setSeatCapacity(e.target.value)} /></label>
                 <div>
                   <label className="block text-xs font-bold text-stone-700 mb-1">Vehicle Category / Model *</label>
                   <select
@@ -319,6 +380,12 @@ export default function ManageFleetModal({ isOpen, onClose, supplierId, drivers 
                     className="w-full bg-white border border-stone-300 text-stone-900 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
+                {EXPIRY_FIELDS.map(([key, , label]) => (
+                  <label key={key} className="block text-xs font-bold text-stone-700">
+                    {label} (optional)
+                    <input type="date" value={expiries[key]} onChange={(e) => setExpiries((current) => ({ ...current, [key]: e.target.value }))} className="mt-1 w-full bg-white border border-stone-300 text-stone-900 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500" />
+                  </label>
+                ))}
               </div>
 
               <div className="flex justify-end gap-3 pt-2">

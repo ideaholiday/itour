@@ -1,0 +1,385 @@
+# API Contracts: Idea Holiday
+
+> **Summary:** Every HTTP endpoint: path, auth role, request and response shape.
+> **Read when:** adding or changing an endpoint, or calling one from the frontend. Large: `grep -n '^##' docs/API_CONTRACTS.md` and read one section.
+
+## Overview & Standards
+All API endpoints follow RESTful design principles and are served under the `/api` prefix.
+- **Request Format**: JSON (`Content-Type: application/json`).
+- **Response Format**: JSON with consistent top-level keys (`success: true/false`, payload or `error`, `code`, `requestId`).
+- **Validation**: Strict schema boundary validation via Zod; invalid requests return HTTP 400 with machine-readable error codes.
+- **Authentication**: `Authorization: Bearer <token>` where token is either an Idea Holiday JWT or a verified Supabase access token.
+- **Tracing**: Every response includes an `X-Request-Id` header for end-to-end tracing in logs.
+
+---
+
+## 1. Public Endpoints (No Authentication Required)
+
+### 1.1 Spatial Transfer Search
+- **Endpoint**: `POST /api/transfers/search` (or `GET /api/transfers/search`)
+- **Purpose**: Find compatible vehicle categories and estimated fares between pickup and drop coordinates.
+- **Request Body**:
+  ```json
+  {
+    "pickupLat": 15.3803,
+    "pickupLng": 73.8350,
+    "dropLat": 15.5186,
+    "dropLng": 73.7626,
+    "passengers": 3,
+    "luggage": 2,
+    "date": "2026-09-15",
+    "pickupTime": "10:30 AM"
+  }
+  ```
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "results": [
+      {
+        "vehicleCategory": "SEDAN",
+        "displayName": "Comfort Sedan (Dzire / Etios)",
+        "distanceKm": 38.5,
+        "estimatedMinutes": 55,
+        "pricing": {
+          "baseFare": 1200,
+          "distanceFare": 577.5,
+          "tollAllowance": 120,
+          "statePermit": 0,
+          "subtotal": 1897.5,
+          "gst": 94.88,
+          "totalPrice": 1992
+        },
+        "supplierId": "sup_goa_fleet"
+      }
+    ]
+  }
+  ```
+
+### 1.1a Marketplace Search
+- **`GET /api/search`**: Published, bookable products with `q`, `city`, `state`, `country`, `category`, `type`, price, duration, rating and feature filters; returns `{ products, pagination, facets }`. `city` takes a city name or a destination id (`city_th_bangkok`). `country` (`India`, `Thailand`) is the product city's country, and `q` also matches it. `facets.countries` counts products per country (ADR 023).
+
+### 1.2 Product Details, Pickup Suggestions & Live Availability
+- **`GET /api/activities/:id`**: Returns published tour/transfer listing with 5-product-type models (`product_type`, `product_sub_type`, ticket tiers, vehicle options, SIC hubs, hotel tiers, itinerary items) and location rules. `country` (the city's), `timeZone`, `timeLabel` (`IST`, `ICT`) and `gstFree` (`true` in Thailand) drive the traveler's time and tax labels (ADR 023).
+- **`GET /api/activities/:id/pickup-suggestions?q=Airport`**: Returns product-scoped anchor points matching `canonical_locations`.
+- **`POST /api/activities/:id/validate-pickup`**: Validates whether coordinates or address fall within the tour's pickup bounds. An invalid point returns `valid: false` with `code` `INVALID_PICKUP_POINT` or `INVALID_DROP_POINT` and `detail.allowed_area`, `detail.allowed_state`, `detail.suggestion` (`locationValidationService.js`).
+- **`GET /api/availability/native/:productId?date=YYYY-MM-DD&optionId=...`**:
+  - Uncached live departure availability for a product and option. `timeZone` and `timeLabel` follow the product's city (`Asia/Bangkok`, `ICT` in Thailand).
+  - **Response (200 OK)**:
+    ```json
+    {
+      "slots": [
+        {
+          "id": "opt_7f3a:2026-09-20:09:00",
+          "productId": "prd_4c19",
+          "optionId": "opt_7f3a",
+          "localDate": "2026-09-20",
+          "localTime": "09:00",
+          "localDateTimeStart": "2026-09-20T09:00:00+05:30",
+          "utcCutoffAt": "2026-09-20T01:30:00.000Z",
+          "timeZone": "Asia/Kolkata",
+          "timeLabel": "IST",
+          "capacity": 20,
+          "vacancies": 14,
+          "available": true,
+          "status": "AVAILABLE",
+          "adultPrice": 1200,
+          "childPrice": 600,
+          "unitPrices": { "ADULT": 1200, "CHILD": 600 },
+          "listAdultPrice": 1200,
+          "listUnitPrices": { "ADULT": 1200, "CHILD": 600 },
+          "promotion": null,
+          "priceScheduleId": null,
+          "priceScheduleLabel": null,
+          "minPartySize": 1,
+          "maxPartySize": 0,
+          "seatlessUnits": [],
+          "sharedResource": null,
+          "supplierNote": null,
+          "cancellationHours": 24
+        }
+      ]
+    }
+    ```
+  - `status` is one of `AVAILABLE`, `SOLD_OUT`, `CUTOFF` (past the booking
+    deadline) or `CLOSED` (non-operating day, blackout date, or a supplier
+    calendar override).
+  - `adultPrice`/`childPrice` are the rate resolved for that travel date. When a
+    seasonal schedule applied, `priceScheduleId` and `priceScheduleLabel` name it;
+    both are `null` when the option's base rate applied.
+  - `supplierNote` carries the supplier's reason when a calendar override closed
+    or resized the departure.
+  - `sharedResource` names the vehicle or guide capping this departure below its
+    own pool, or `null` when nothing is shared.
+  - `listAdultPrice`/`listUnitPrices` are the price **before** any promotion;
+    `adultPrice`/`unitPrices` are what the traveler pays. `promotion` describes
+    the one that applied, or `null`.
+  - Add `?promoCode=CODE` to see a coded promotion's price. Holding with a code
+    that does not apply returns `PROMO_NOT_APPLICABLE` rather than silently
+    charging full price.
+
+- **`GET /api/products/:id/price-calendar?month=YYYY-MM`**:
+  - One month of per-day prices for the traveler price calendar.
+  - When the product has native seat inventory, days resolve through the same
+    seasonal rates and calendar overrides the departure picker uses, and the
+    response carries `pricingSource: "NATIVE_INVENTORY"`. Each day reports
+    `priceInr`, `tier` (`PEAK`/`SAVER`/`STANDARD`) and `available`; a date the
+    supplier closed returns `available: false`.
+  - Products without seat inventory keep demand-rule pricing over `price_inr`
+    and omit `pricingSource`.
+
+### 1.3 Review Collection Links
+
+Unauthenticated by design: a single-use token, or a claimed share link, is the
+traveler's proof that the booking is theirs. Both routes produce an ordinary
+verified review — see BUSINESS_RULES §9.3.
+
+- **`GET /api/reviews/invite/:token`**: What the review form should show — booking reference, listing, operator, activity date, and whether a driver rating is expected. `404` unknown, `409` already used or already reviewed, `410` expired.
+- **`POST /api/reviews/invite/:token`**: Submits the review and spends the token. Body matches `POST /api/reviews`, minus the booking fields (the token carries them).
+- **`GET /api/reviews/share/:slug`**: Public view of a supplier's share link — operator name, and the listing when the link is scoped to one. Reveals nothing about any booking.
+- **`POST /api/reviews/share/:slug/claim`**: `{ bookingRef, phoneLast4 }` → `{ token, booking }`. Every mismatch returns the same `404` message. Rate-limited per IP (10 per 15 minutes).
+
+---
+
+## 2. Traveler Endpoints (Requires `TRAVELER`, `ADMIN`, or `STAFF`)
+
+### 2.1 Native Reservation Hold Creation
+- **Endpoint**: `POST /api/availability/native/hold`
+- **Purpose**: Creates a 10-minute temporary seat reservation hold (`native_reservations`) bound to the authenticated user to prevent double-booking.
+- **Request Body**:
+  ```json
+  {
+    "productId": "prd_taj_tour",
+    "optionId": "opt_morning_tour",
+    "localDate": "2026-09-20",
+    "localTime": "09:00",
+    "adults": 2,
+    "children": 1,
+    "unitItems": [
+      { "unitType": "SENIOR", "quantity": 2 },
+      { "unitType": "INFANT", "quantity": 1 }
+    ],
+    "requestKey": "req_8192a0d912"
+  }
+  ```
+- `unitItems` is optional. When present it is **authoritative** for the seat
+  counts and billing: `ADULT`/`SENIOR`/`YOUTH` roll up into `adults`,
+  `CHILD`/`INFANT` into `children`, and every unit occupies one seat. When
+  omitted, `adults`/`children` are used as before (`ADULT` and `CHILD` lines).
+- The hold freezes both the breakdown and its total, so a supplier repricing
+  mid-checkout cannot change the traveler's total. Reserving a unit type the
+  supplier has not priced returns `UNIT_TYPE_NOT_SOLD`.
+- **Response (201 Created)**:
+  ```json
+  {
+    "holdId": "res_8192a0d912",
+    "expiresAt": "2026-09-08T13:10:00.000Z",
+    "status": "ON_HOLD"
+  }
+  ```
+
+### 2.2 Create Booking Checkout Order
+- **Endpoint**: `POST /api/checkout/create-order`
+- **Request Body**:
+  ```json
+  {
+    "hold_id": "res_8192a0d912",
+    "product_id": "prd_taj_tour",
+    "activity_date": "2026-09-20",
+    "pickup_time": "09:00",
+    "traveler_name": "Rohan Gupta",
+    "traveler_email": "rohan@example.com",
+    "traveler_phone": "+919876543210",
+    "pickup_location": "Hotel Taj View, Agra",
+    "payment_gateway": "CASHFREE"
+  }
+  ```
+- **Response (200 OK)**: Returns payment session credentials (`payment_session_id` for Cashfree or `order_id` for Razorpay) with canonical price frozen on the server.
+
+### 2.3 Verify Payment & Confirm Booking
+- **Endpoint**: `POST /api/checkout/verify` (Razorpay) or `POST /api/checkout/cashfree/verify` (Cashfree)
+- **Request Body**: Contains payment IDs and gateway HMAC signature.
+- **Response (200 OK)**:
+  ```json
+  {
+    "success": true,
+    "bookingRef": "IH-7192AB",
+    "status": "confirmed",
+    "voucherUrl": "https://ideaholiday.in/voucher/signed?..."
+  }
+  ```
+
+### 2.3.1 Wallet payment and refund credit (ADR 019)
+- **`POST /api/checkout/wallet-payment`** `{ bookingId }`: confirms a booking whose `amount_inr` is 0 because wallet credit paid for all of it. `409` if anything is left to pay.
+- **`POST /api/bookings/:ref/supplier-reschedule/accept`** and **`.../decline`**: the traveler answers a supplier's move (ADR 037) while `supplier_reschedule_status` is `MOVED` and the trip hasn't started. `accept` → `{ status: "ACCEPTED" }`. `decline` cancels with a full wallet refund → `{ status: "DECLINED", walletCreditInr, cashRefundableUntil }` and sends the cancellation message. `404` for another traveler's booking, `409 NO_OPEN_RESCHEDULE` when nothing is waiting, `409 DEPARTURE_STARTED`.
+- **`POST /api/bookings/:id/refund-to-source`**: the traveler sends the unspent refund credit of a supplier-cancelled booking back to the original payment method, within 10 days. Returns `{ amountInr, refundStatus: "PROCESSED" | "FAILED" }`. `409` after the window, when nothing is unspent, or when already done; `404` for another traveler's booking.
+- **`GET /api/bookings`** also returns `refund_credit_inr`, `refund_credit_unspent_inr` and `cash_refundable_until` for supplier-cancelled bookings.
+- **`POST /api/suppliers/:id/bookings/:bookingId/cancel`** `{ reason }` (supplier): refunds a paid booking to the traveler's wallet and notifies them. Returns `{ walletCreditInr, cashRefundableUntil }` (`null` for an unpaid booking).
+
+### 2.4 Grouped Circuit Quotation & Orders
+- **`POST /api/itineraries/:id/quote`**: Reprices entire multi-stop itinerary and returns a 15-minute frozen quote (`quoteId`).
+- **`POST /api/circuit-orders`**: Consumes an active quote to create one parent circuit order and child bookings.
+- **`POST /api/circuit-orders/:id/payment-order`**: Generates a single payment order covering the parent circuit.
+- **`POST /api/circuit-orders/:id/verify-payment`**: Verifies parent payment and atomically confirms all child bookings.
+- **`POST /api/circuit-orders/:id/demo-payment`**: Demo charge through the same `confirmCircuitOrderPayment` path; returns `403 DEMO_PAYMENT_DISABLED` unless demo payments are enabled.
+
+---
+
+## 3. Supplier Endpoints
+Moved to [`API_CONTRACTS_SUPPLIER.md`](API_CONTRACTS_SUPPLIER.md): the supplier extranet, `/api/suppliers/:id/*`, including direct (walk-in, phone, manual) bookings.
+
+## 4. Operations Endpoints (Requires `STAFF` or `ADMIN`)
+
+### 4.1 Live Trip Board & Fallbacks
+- **`GET /api/ops/live-dispatch`**: Returns active trips, unassigned bookings, and telemetry status.
+- **`GET /api/ops/dispatch-queue`**: All open "assign manually" `tasks` across suppliers, most urgent pickup first, with supplier contact and driver state; `tripIssues` (`PICKUP_NOT_STARTED`, `TRIP_COMPLETION_OVERDUE`); and recent notification jobs. The supplier `GET /api/suppliers/:id/dispatch` returns the same `tripIssues` for its bookings.
+- **`GET /api/ops/bookings/:bookingId/dispatch-timeline`**: Timeline for any booking, with `timeZone` and `timeLabel`.
+- **`POST /api/ops/bookings/:bookingId/trip-override`** `{ "action": "START" | "COMPLETE", "note": "..." }`: Start an accepted trip without the pickup OTP, or complete a started trip. `409` for any other state.
+- **`GET /api/ops/bookings/:bookingId/fleet-availability`**: The booking supplier's fleet with availability reasons, available drivers first.
+- **`POST /api/ops/fallback-override`**: Operations take over assignment. Body: `bookingId`, `notes` (required reason), and either `supplierDriverId` or an outside driver (`fallbackDriverName`, `fallbackDriverPhone`, `fallbackDriverEmail`, `seatCapacity`, `fallbackVehicleModel`, `fallbackVehicleNumber`). With `confirmedByPhone: true` the driver is accepted immediately and `notes` is recorded as the phone confirmation.
+- **`POST /api/ops/bookings/:bookingId/confirm-driver`** `{ "note": "..." }`: Same as the supplier phone confirmation, for any supplier's booking.
+- **Scheduler endpoints** (`X-Scheduler-Token` or `ADMIN`/`STAFF`): `POST /api/ops/process-driver-dispatch`, `POST /api/ops/process-assignment-timeouts` (also deletes driver positions older than 30 days), `POST /api/ops/process-reservation-outbox`, `POST /api/ops/process-post-trip-invites`.
+- **`POST /api/ops/reset-pickup-otp`**: Resets an OTP lock for a stranded traveler after telephone verification.
+- **`GET /api/ops/live-tracking`**: active trips; `driver_telemetry` (`lat`, `lng`, `accuracy_m`, `speed_kmh`, `heading`, `source` `DRIVER`|`OPS`, `updated_at`, `freshness` `LIVE`|`DELAYED`|`LOST`) is `null` when nothing was reported. `GET …/:assignmentId/trail` → `{ location, trail }`. `POST /api/ops/driver-location` stores an `OPS` position.
+
+### 4.1.1 Driver trip link (`/api/driver-trips`, driver session)
+- **`POST /action`**: `EN_ROUTE`, `ARRIVED`, `START` → `409 LOCATION_SHARING_REQUIRED` without a phone position from the last 5 minutes.
+- **`POST /location`** `{ points: [{ lat, lng, accuracy?, speed? (m/s), heading?, recordedAt? }] }` (1–20) → `{ accepted, rejected, location }`. Accepted trips in `ASSIGNED`–`TRIP_STARTED` only; bad, >1,000 m, >250 km/h, future or >6 h old points are dropped (`422` if none left); 30 requests/min per session. `GET /` includes `trip.location`.
+- Supplier `GET /api/suppliers/:id` bookings carry `driver_last_lat`, `driver_last_lng`, `driver_last_accuracy_m`, `driver_last_location_at`.
+- **`GET /api/tracking/:ref`** (traveler): `X-Tracking-Token` from the signed link (`/track/<ref>#<token>`, 7 days) or the signed-in owner; else `404`. → `{ trip: { status, driver, location (EN_ROUTE–TRIP_STARTED only), eta { minutes, distanceM, source OLA|MAPPLS|ESTIMATE|NEARBY, to PICKUP|DROP }, pickup, drop, timeLabel } }`; `timeLabel` (`IST`, `ICT`) names the zone of `activityDate`/`pickupTime`. Driver `GET /` adds `pickup`, `distanceToPickupM`, `timeZone`, `timeLabel`.
+
+### 4.2 Circuit Management Queue
+- **`GET /api/ops/circuits`**: Lists pending multi-supplier circuit reschedule/cancellation requests.
+- **`POST /api/ops/circuits/:id/approve`**: Atomically approves a circuit modification across all suppliers and executes grouped refund.
+
+### 4.3 Notification Health & Testing
+- **`GET /api/ops/notification-health`**: Reports operational status of WhatsApp, SES, and SMS without leaking secrets.
+- **`POST /api/ops/notifications/test`**: Dispatches an authenticated provider test message.
+
+### 4.4 Support Cases (`/api/support`, requires authentication)
+Cancellations, complaints, safety concerns and refund disputes. Travelers see their own cases; `ADMIN`/`STAFF` decide refunds before the payment provider and finance ledger are updated.
+- **`GET /cases`**, **`POST /cases`**, **`GET /cases/:ref`**, **`PATCH /cases/:ref`**
+- **`POST /cases/:ref/messages`**, **`POST /cases/:ref/evidence`**
+- **`POST /cases/:ref/refund-decision`**
+
+### 4.5 Executive Analytics (`/api/analytics`, requires `ADMIN`)
+Backs `/admin/analytics`: **`GET /overview`**, **`/trends`**, **`/cohorts`**, **`/suppliers`**, **`/revenue`**, **`/funnel`**, **`/alerts`** (anomaly alerts).
+
+---
+
+## 5. Webhook Endpoints (Signature Verified)
+
+### 5.1 WhatsApp Delivery Status
+- **Endpoint**: `POST /api/webhooks/whatsapp`
+- **Security**: Verifies Meta HMAC-SHA256 signature in `X-Hub-Signature-256` using `WHATSAPP_APP_SECRET`.
+- **Purpose**: Updates `notification_deliveries` with `DELIVERED`, `READ`, or `FAILED` delivery statuses.
+- **Responses**: `200` after processing, `401` for an invalid signature, and `503` on a database processing failure so Meta can retry the event.
+
+### 5.2 Cashfree & Razorpay Payment Webhooks
+- **`POST /api/checkout/cashfree/webhook`**: Reconciles charges and refunds idempotently.
+- **`POST /api/checkout/webhook`**: Reconciles Razorpay captured charges and refunds.
+
+---
+
+## 6. Standard OCTo (Open Connectivity for Tourism) Endpoints (`/api/octo` and `/octo`)
+
+Compliant with OCTo specification v1. Used by external distributors, OTAs, and API partners to query Idea Holiday inventory and place instant bookings.
+
+**Auth:** the `bookings` endpoints need a partner key (SECURITY.md §1). The read endpoints take a key when one is sent (a wrong key is `401`); without one they show the IdeaHoliday-partner view.
+
+**Channels (ADR 041):** an IdeaHoliday partner (no `supplier_id`) sees and books only listings with `sell_ideaholiday_api` on; a supplier's own reseller only that supplier's listings with `sell_own_resellers` on. A listing off the caller's channel is left out of reads and refused on reservation and confirmation (`409 PRODUCT_NOT_BOOKABLE`). A confirmation by a supplier-issued key is the supplier's direct sale (`payment_status = OFFLINE`, no commission, `balance_due_inr` owed by the reseller), at the linked agent's net rate and within their credit (`409 AGENT_CREDIT_LIMIT`) when the key has one.
+
+- **`GET /api/octo/capabilities`**: Declares supported capabilities (`octo/core`, `octo/pricing`, `octo/content`).
+- **`GET /api/octo/suppliers`**: Lists verified suppliers with contact metadata.
+- **`GET /api/octo/products`**: Lists published products formatted into OCTo schemas with options, departure start times, and unit pricing (ADULT / CHILD in INR).
+- **`GET /api/octo/products/:id`**: Returns a single OCTo product with full unit definitions and cancellation terms.
+- **`POST /api/octo/availability`**: Checks availability slots and vacancies for given `productId`, `optionId`, and date range.
+- **`POST /api/octo/bookings/reservation`**: Creates an owner-scoped 10-minute temporary seat reservation (`native_reservations`).
+- **`POST /api/octo/bookings/confirmation`**: Confirms a reservation into a booking. Populates the same required booking shape as a native checkout (`ref`, `product_type`, `pickup_location`, `amount_inr` from the hold's frozen price) and materialises a guest traveler for the synthetic OCTo owner.
+- **`POST /api/octo/bookings/cancellation`**: Cancels reservation and releases seats back into availability.
+- **`GET /api/octo/bookings/:id`**: Fetches booking status and details.
+
+---
+
+## 7. Supplier Channel Manager Endpoints (`/api/supplier-channels`)
+
+Used on `supply.ideaholiday.in` for multi-channel ResTech integration (Bókun, FareHarbor, Bookingkit, Palisis/TourCMS, Activitar, Anchor, generic OCTo).
+
+- **`GET /api/supplier-channels`**: Lists all connected booking channels and sync health for authenticated supplier.
+- **`POST /api/supplier-channels`**: Connects a channel after running automated credential validation tests.
+  - **Body**: `{ "channelName": "BOKUN", "channelTitle": "...", "credentials": { ... }, "endpointUrl": "..." }`
+- **`DELETE /api/supplier-channels/:channelId`**: Disconnects a channel.
+- **`GET /api/supplier-channels/:channelId/fetch-products`**: Fetches remote product catalog from the external channel.
+- **`POST /api/supplier-channels/:channelId/import`**: Imports selected remote products into Idea Holiday catalog and maps identifiers in `reservation_external_references`.
+
+
+---
+
+## 8–9. Creator, Travel & Earn and program endpoints
+
+Moved to [`API_REWARDS.md`](API_REWARDS.md): affiliates, Travel & Earn, coupons and admin program settings.
+
+---
+
+## 10. Supplier Profile Endpoints
+
+Rules: BUSINESS_RULES §12. Public responses never include contact, tax or bank details.
+
+### 10.1 Public (`/api/public/suppliers`, no authentication, 120 requests/min)
+- **`GET /api/public/suppliers?q=&city=&verified=1&page=&limit=`**: Directory.
+  `{ suppliers: [{ slug, path, name, tagline, city, state, logoUrl, verified, rating: { average, count } }], pagination }`.
+  Verified first, then by counted reviews. `city` also matches service cities.
+- **`GET /api/public/suppliers/cities`**: `{ cities: [{ city, state, slug, path, supplierCount }] }`.
+- **`GET /api/public/suppliers/cities/:citySlug`**: `{ city: { …, indexable } }` or `404`.
+- **`GET /api/public/suppliers/:slug`**: `{ supplier, seo, reviews, pagination }`, or
+  `{ redirectTo }` for a renamed slug, or `404` when hidden, suspended or unknown.
+  `supplier`: `slug, path, name, tagline, about, logoUrl, coverUrl, city, state,
+  cityPath, businessType, yearsInOperation, memberSince, languages, serviceCities,
+  sameAs, badge: { status: "VERIFIED" | "NOT_VERIFIED", verifiedAt, validUntil, checks },
+  rating: { average, count }, indexable`. `seo` is the head the server renders.
+- **`GET /api/public/suppliers/:slug/reviews?page=`**: `{ reviews: [{ id, rating, title,
+  comment, travelerName, createdAt, countedInRating, supplierResponse, photos }], pagination }`.
+- **`POST /api/public/suppliers/:slug/enquiries`** (requires authentication, 10/hour):
+  `{ "message": "…", "travelDate": "YYYY-MM-DD", "travelers": 2 }` →
+  `201 { enquiry, reused: false }`, or `200 { enquiry, reused: true }` when it
+  continued an open thread. `400` for contact details, `403` for supplier accounts.
+
+### 10.2 Enquiries (`/api/enquiries`, requires authentication)
+Scoped to the caller: a traveler sees their own threads, a supplier the threads sent to it, `ADMIN`/`STAFF` all (read only).
+- **`GET /api/enquiries?status=OPEN|REPLIED|CLOSED`**: `{ enquiries: [{ ref, status, supplierName, supplierPath, travelerName, travelDate, travelers, lastMessage, lastMessageAt }] }`.
+- **`GET /api/enquiries/:ref`**: the thread with `messages: [{ id, authorRole, message, createdAt }]`.
+- **`POST /api/enquiries/:ref/messages`**: `{ "message": "…" }` → `201 { enquiry }`. `409` when closed.
+- **`POST /api/enquiries/:ref/close`**: `{ enquiry }`.
+
+### 10.3 Supplier (`/api/suppliers/:id`, the supplier or `ADMIN`/`STAFF`)
+- **`GET /api/suppliers/:id/public-profile`**: `{ profile, publicView, visible, indexable, kybStatus, completeness: { score, missing }, verification }`.
+- **`PATCH /api/suppliers/:id/public-profile`**: any of `slug, tagline (≤120), about (≤2000),
+  logoUrl, coverUrl (https or /uploads/…), languages (≤10), serviceCities (≤30),
+  socialLinks { website, instagram, facebook, youtube }, profileStatus: "PUBLISHED" | "HIDDEN"`.
+  Returns the same shape as GET. `400` with a reason, `409` for a taken slug or a suspended profile.
+
+- **`GET /api/suppliers/:id/share-kit`** → `{ shareKit: { slug, visible, profileUrl, reviewLinkUrl, links: { profile|review: { tracked, qrSvg, qrPng, standee, sticker } }, widgetUrl, embedCode, scans: [{ target, channel, total, last30Days }] } }`. Rules: [`SHARE_KIT.md`](SHARE_KIT.md).
+
+- **Profile plans** (ADR 008; rules SUPPLIER_PLANS.md §6): `GET /api/suppliers/:id/subscription` also returns `profilePlans` (prices), `verification: { badge, checkPendingSince, kybStatus }`, `spotlights`, `spotlightableProducts`. **`POST /:id/plans/quote`** and **`POST /:id/plans/checkout`** take `{ planCode: VERIFIED|SPOTLIGHT|VERIFIED_PLUS|MARKETPLACE, productId?, couponCode?, returnUrl? }` and answer like the subscription quote/checkout (`409 KYB_REQUIRED`, `CHECK_PENDING`, `ALREADY_SPOTLIGHTED`, `PRODUCT_NOT_PUBLISHED`; `400 PRODUCT_REQUIRED`). **`POST /:id/spotlights/:spotlightId/swap`** `{ productId }` → `{ spotlight }` (`409 SWAP_LIMIT`). Public profile views include `spotlights: [{ id, title, heroImage, priceInr, city, path }]`.
+- Admin: **`GET /api/admin/verification-queue`** → `{ queue: [{ verificationId, supplierId, supplierName, planCode, paidInr, refundableInr, requestedAt, … }], failedRefunds }`; **`POST /api/admin/verifications/:id/reject`** `{ reason }` → `{ status, refundStatus: PROCESSED|FAILED|NOT_NEEDED, refundAmountInr }`; **`POST /api/admin/plan-payments/:id/retry-refund`**. Passing a check is `POST /api/admin/suppliers/:id/profile-verification` `GRANT`, which uses the pending paid check.
+
+### 10.3.1 Share kit (public, 120 requests/min)
+- **`GET /go/s/:slug?t=profile|review&c=qr|standee|sticker|voucher|widget|link`** → `302` to the profile or review link, counting the visit; unknown or hidden → `302 /suppliers`.
+- **`GET /api/share/s/:slug/qr.svg`**, **`/qr.png`** (`t`, `c`, `download=1` for an attachment); **`/print?format=standee|sticker&t=`** (HTML); **`/widget`** (framable HTML). `404` for an unknown or hidden profile.
+
+### 10.4 Admin (`/api/admin/suppliers/:id`, requires `ADMIN`)
+- **`GET …/public-profile`**: the supplier view plus `checkCatalog` and `requiredChecks`.
+- **`POST …/profile-verification`**: `{ "action": "GRANT", "checks": ["BUSINESS_IDENTITY", "BANK_ACCOUNT", "BUSINESS_ADDRESS", "OWNER_CALL"], "reason": "…" }` → `201`,
+  or `{ "action": "REVOKE", "reason": "…" }`. `409` when KYB is not approved.
+- **`PATCH …/profile-status`**: `{ "suspended": true, "reason": "…" }` or `{ "suspended": false }`.
+- **KYB readiness** (ADR 009, ADR 023): supplier `GET /api/suppliers/:id` and admin `GET /api/admin/suppliers` return `kybReadiness: { country, cashfree, documentTypes, requiredDocuments, missingDocuments, identity, canApprove }`; `identity` (the Cashfree GSTIN/PAN status) is `null` outside India. For a supplier outside India, `POST /api/suppliers/:id/kyb/verify-gstin|verify-pan|verify-all` and `POST /api/admin/suppliers/:id/kyb/auto-verify` → `400 CASHFREE_INDIA_ONLY`. Publishing a transfer (`POST …/products`, `…/products/v2` unless `DRAFT`, `PATCH …/publication`, bulk `publish`) → `409 TRANSFER_DOCUMENT_REQUIRED` while a Thai supplier has no vehicle document uploaded.
+- **Individual owners and fleet checks** (ADR 024): supplier signup takes optional `supplierKind` (`BUSINESS` | `INDIVIDUAL_OWNER`, India only); `kybReadiness.supplierKind` echoes it. An owner may run `verify-pan` but gets `400 CASHFREE_INDIA_ONLY` on `verify-gstin`/`verify-all`. Indian suppliers: `POST /api/suppliers/:id/kyb/verify-dl` `{ licenseNumber, dob: YYYY-MM-DD, driverId? }` and `POST /api/suppliers/:id/kyb/verify-rc` `{ registrationNumber, driverId? }` → `{ verification: { valid, … }, message }`; a valid result with `driverId` fills that fleet row's licence, insurance and permit expiry. `PATCH /api/suppliers/:id/drivers/:driverId/documents` `{ licenseExpiry, permitExpiry, insuranceExpiry, fitnessExpiry }` sets them by hand. Assigning a vehicle whose papers expire before the trip → `409`. An `AADHAAR_MASKED` KYB document number must be 4 digits (`400`). `verify-dl`, `verify-rc` and `POST …/kyb` (for owners) return `kybAutoApproved`. Owners (ADR 033): `POST …/kyb` with `PAN` → `400` until the PAN is verified; `SELFIE` must be an image file (`400` for a PDF); `kybReadiness.ownerChecks` = `{ pan: { verified, number, name }, licence: { number }, vehicle: { number } }` (numbers from the latest valid Cashfree check, else null). Owners need `AADHAAR_BACK`; staff `POST /api/admin/suppliers/:id/kyb/:docId/reupload` `{ reason }` → doc `REJECTED`.
+
+### 10.4.1 Team (`/api/admin/team`, requires `ADMIN`)
+`ADMIN` and `STAFF` users; all receive booking and operations alerts.
+- **`GET /api/admin/team`** → `{ members: [{ id, name, email, phone, role }], currentUserId }`.
+- **`POST /api/admin/team`** `{ name, email, phone, role: STAFF|ADMIN }` → `201 { member, temporaryPassword, promotedExistingAccount }`. A traveler account is promoted (password kept, `temporaryPassword: null`); `409` if already on the team or a supplier; `400` if the phone isn't WhatsApp-deliverable (stored `+<cc><number>`).
+- **`PATCH …/:id`** `{ name?, phone?, role? }`; **`DELETE …/:id`** (role → `TRAVELER`); **`POST …/:id/reset-password`** → `{ temporaryPassword }`. `409` for yourself or the last `ADMIN`.
+
+### 10.5 Pages and sitemap
+Moved to [`API_PAGES.md`](API_PAGES.md): server-rendered pages, city pages, the blog and sitemaps.

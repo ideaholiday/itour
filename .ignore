@@ -1,0 +1,8 @@
+# Hidden from ripgrep-based search (Claude Code Grep, Codex, `rg`) to keep results
+# and tokens focused. These files still exist; open them directly if you need one.
+# Legacy schema sources (never executed; see docs/DATA_MODEL.md)
+backend/src/supabase_schema.sql
+supabase/migrations/
+# Generated or history files
+package-lock.json
+docs/CHANGELOG.md

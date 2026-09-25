@@ -1,3 +1,6 @@
+import DispatchQueue, { ConfirmByPhone } from "./DispatchQueue.jsx";
+import DispatchTimeline from "./DispatchTimeline.jsx";
+import RescheduleBookingPanel from "./RescheduleBookingPanel.jsx";
 import React, { useEffect, useState, useMemo } from "react";
 import {
   Search,
@@ -37,6 +40,23 @@ import {
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { api, authHeaders } from "../../lib/api.js";
 
+// Where a booking came from (ADR 034). Supplier-direct bookings are the
+// operator's own customers: paid to the operator, commission-free.
+const SOURCE_LABELS = { B2C: "IdeaHoliday", IH_B2B: "IdeaHoliday B2B", API: "Partner API", WALK_IN: "Walk-in", PHONE: "Phone", MANUAL: "Manual", AGENT: "Agent" };
+const DIRECT_SOURCES = ["WALK_IN", "PHONE", "MANUAL", "AGENT"];
+const sourceGroup = (source) => DIRECT_SOURCES.includes(source) ? "DIRECT" : source === "API" ? "API" : "IDEAHOLIDAY";
+function SourceBadge({ booking }) {
+  const source = booking.source || "B2C";
+  const direct = sourceGroup(source) === "DIRECT";
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${direct ? "border-sky-200 bg-sky-50 text-sky-800" : "border-stone-200 bg-stone-50 text-stone-600"}`}>
+      {SOURCE_LABELS[source] || source}{source === "AGENT" && booking.agent_name ? ` · ${booking.agent_name}` : ""}
+      {direct && Number(booking.balance_due_inr) > 0 && booking.status !== "cancelled" ? <span className="ml-1 text-amber-700">· ₹{Number(booking.balance_due_inr).toLocaleString("en-IN")} due</span> : null}
+    </span>
+  );
+}
+import PhoneInput from "../PhoneInput.jsx";
+
 const money = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 
 const CANCEL_REASONS = [
@@ -49,18 +69,44 @@ const CANCEL_REASONS = [
   "Other operational constraint"
 ];
 
-export default function SupplierBookingManager({ supplierData, loading, onRefresh }) {
+// The driver's last shared position (ADR 012): the supplier sees it for the whole trip.
+function DriverLocationLine({ booking, onRefresh }) {
+  if (!booking.driver_last_location_at || booking.driver_last_lat == null || booking.driver_last_lng == null) {
+    return ["EN_ROUTE", "ARRIVED", "TRIP_STARTED"].includes(booking.assignment_status)
+      ? <span className="block text-[10px] font-semibold text-amber-700">No live location from the driver yet</span>
+      : null;
+  }
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(booking.driver_last_location_at)) / 60000));
+  const stale = minutes > 5;
+  return (
+    <span className={`flex flex-wrap items-center gap-1.5 text-[10px] font-semibold ${stale ? "text-rose-700" : "text-emerald-800"}`}>
+      <span>{stale ? "Last location" : "● Live location"} {minutes < 1 ? "just now" : `${minutes} min ago`}{booking.driver_last_accuracy_m ? ` · ±${Math.round(booking.driver_last_accuracy_m)} m` : ""}</span>
+      <a className="underline" target="_blank" rel="noreferrer" href={`https://www.google.com/maps?q=${booking.driver_last_lat},${booking.driver_last_lng}`} onClick={(event) => event.stopPropagation()}>Open in Maps</a>
+      {onRefresh && <button type="button" className="underline" onClick={(event) => { event.stopPropagation(); onRefresh(); }}>Refresh</button>}
+    </span>
+  );
+}
+
+// canManage is false for front-desk staff (ADR 036): they see bookings but don't
+// respond, cancel or dispatch.
+export default function SupplierBookingManager({ supplierData, loading, onRefresh, canManage = true }) {
   const [activeFilter, setActiveFilter] = useState("ALL"); // ALL, PENDING, IN_PROGRESS, COMPLETED, CANCELLED
+  const [sourceFilter, setSourceFilter] = useState("ALL"); // ALL, DIRECT, IDEAHOLIDAY, API
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState("NEWEST");
   const [selectedBooking, setSelectedBooking] = useState(null);
 
+  const [customDriverEmail, setCustomDriverEmail] = useState("");
+  const [customSeatCapacity, setCustomSeatCapacity] = useState(4);
   // Driver Assignment State
   const [isAssigningDriver, setIsAssigningDriver] = useState(false);
   const [selectedDriverId, setSelectedDriverId] = useState("");
   const [customDriverName, setCustomDriverName] = useState("");
   const [customDriverPhone, setCustomDriverPhone] = useState("");
   const [customVehicleNum, setCustomVehicleNum] = useState("");
+  const [customVehicleModel, setCustomVehicleModel] = useState("");
+  const [assignConfirmedByPhone, setAssignConfirmedByPhone] = useState(false);
+  const [assignPhoneNote, setAssignPhoneNote] = useState("");
   const [assignSuccessMsg, setAssignSuccessMsg] = useState("");
   const [fleetOptions, setFleetOptions] = useState([]);
   const [dispatchMessage, setDispatchMessage] = useState("");
@@ -141,6 +187,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
       if (activeFilter === "IN_PROGRESS" && (!["in_progress", "driver_assigned", "confirmed"].includes(b.status) || b.supplier_response_status === "PENDING")) return false;
       if (activeFilter === "COMPLETED" && b.status !== "completed") return false;
       if (activeFilter === "CANCELLED" && b.status !== "cancelled") return false;
+      if (sourceFilter !== "ALL" && sourceGroup(b.source || "B2C") !== sourceFilter) return false;
 
       // Search filter
       if (searchTerm.trim()) {
@@ -162,7 +209,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
       if (sortBy === "AMOUNT_HIGH") return (b.amount_inr || 0) - (a.amount_inr || 0);
       return 0;
     });
-  }, [bookings, activeFilter, searchTerm, sortBy]);
+  }, [bookings, activeFilter, sourceFilter, searchTerm, sortBy]);
 
   const getStatusBadge = (b) => {
     const st = (b.status || "confirmed").toLowerCase();
@@ -226,18 +273,23 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
     try {
       let payload = { bookingId: selectedBooking.id };
       if (selectedDriverId === "CUSTOM") {
-        if (!customDriverName || !customDriverPhone || !customVehicleNum) {
-          throw new Error("Please complete the emergency manual assignment fields.");
+        if (!customDriverName || !customDriverPhone || !customVehicleNum || !customVehicleModel) {
+          throw new Error("Please complete the outside driver fields, including the vehicle model.");
         }
         payload = {
           ...payload,
           driverName: customDriverName,
           driverPhone: customDriverPhone,
+          driverEmail: customDriverEmail,
+          seatCapacity: Number(customSeatCapacity),
           vehicleNumber: customVehicleNum,
-          vehicleModel: selectedBooking.vehicle_category || "Standard Vehicle"
+          vehicleModel: customVehicleModel
         };
       } else {
         payload.supplierDriverId = selectedDriverId;
+      }
+      if (assignConfirmedByPhone) {
+        payload = { ...payload, confirmedByPhone: true, note: assignPhoneNote };
       }
 
       const res = await fetch(`/api/suppliers/${s.id}/assign-driver`, {
@@ -249,7 +301,9 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Driver could not be assigned");
       if (data.success) {
-        setAssignSuccessMsg("Driver assigned successfully.");
+        setAssignSuccessMsg(data.message || "Assignment sent. Waiting for driver acknowledgement.");
+        setAssignConfirmedByPhone(false);
+        setAssignPhoneNote("");
         setSelectedBooking({
           ...selectedBooking,
           ...data.assignment,
@@ -411,6 +465,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
 
   return (
     <div className="space-y-6">
+      {canManage && <DispatchQueue supplierId={s.id} onSelect={id => setSelectedBooking(bookings.find(b => b.id === id))} />}
       {/* Header and Filter Tabs */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -463,6 +518,20 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
             placeholder="Search by reference, traveler name, phone, pickup/drop location…"
             className="w-full rounded-xl border border-stone-200 bg-[#FAF9F6] py-2 pl-10 pr-4 text-xs text-stone-900 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white focus:outline-none"
           />
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[11px] font-bold text-stone-500">Source:</span>
+          <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            aria-label="Filter by booking source"
+            className="rounded-xl border border-stone-200 bg-[#FAF9F6] px-3 py-2 text-xs font-bold text-stone-700 focus:border-amber-500 focus:bg-white focus:outline-none"
+          >
+            <option value="ALL">All sources</option>
+            <option value="DIRECT">My direct bookings</option>
+            <option value="IDEAHOLIDAY">IdeaHoliday</option>
+            <option value="API">Partner API</option>
+          </select>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-[11px] font-bold text-stone-500">Sort:</span>
@@ -549,16 +618,19 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
 
                     {/* Status & Driver */}
                     <td className="px-5 py-4">
-                      <div>{getStatusBadge(b)}</div>
+                      <div className="flex flex-wrap items-center gap-1">{getStatusBadge(b)}<SourceBadge booking={b} /></div>
                       <div className="mt-1 text-[11px]">
                         {isCancelled ? (
                           <span className="text-rose-700 text-[10px] font-bold">
                             {b.cancellation_reason || "Refunded / Cancelled"}
                           </span>
                         ) : hasDriver ? (
-                          <span className="text-stone-700 font-medium flex items-center gap-1">
-                            <Car className="h-3 w-3 text-stone-400" /> {b.driver_name} ({b.vehicle_number || "Assigned"})
-                          </span>
+                          <>
+                            <span className="text-stone-700 font-medium flex items-center gap-1">
+                              <Car className="h-3 w-3 text-stone-400" /> {b.driver_name} ({b.vehicle_number || "Assigned"})
+                            </span>
+                            <DriverLocationLine booking={b} />
+                          </>
                         ) : (
                           <span className="text-amber-700 font-bold text-[10px]">⚠️ Driver unassigned</span>
                         )}
@@ -578,7 +650,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     {/* Actions */}
                     <td className="px-5 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-2">
-                        {isPendingResp && (
+                        {canManage && isPendingResp && (
                           <button
                             onClick={() => setSelectedBooking(b)}
                             className="rounded-xl bg-amber-500 hover:bg-amber-400 px-3 py-1.5 text-xs font-bold text-stone-950 shadow-sm"
@@ -586,7 +658,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                             Respond
                           </button>
                         )}
-                        {!isCancelled && (
+                        {canManage && !isCancelled && (
                           <button
                             onClick={() => handleOpenCancelModal(b)}
                             className="rounded-xl border border-stone-200 bg-white hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700 px-2.5 py-1.5 text-xs font-bold text-stone-600 transition shadow-sm"
@@ -666,7 +738,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
             </div>
 
             {/* Pending Response Alert with Countdown */}
-            {(selectedBooking.supplier_response_status === "PENDING" || selectedBooking.status === "pending_confirmation") && (
+            {canManage && (selectedBooking.supplier_response_status === "PENDING" || selectedBooking.status === "pending_confirmation") && (
               <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5">
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-amber-900">
@@ -748,7 +820,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     </>
                   )}
                 </div>
-                {selectedBooking.payment_status === "PAID" && selectedBooking.supplier_response_status === "ACCEPTED" && (
+                {["PAID", "OFFLINE"].includes(selectedBooking.payment_status) && selectedBooking.supplier_response_status === "ACCEPTED" && (
                   <div className="mt-3 border-t border-stone-200 pt-3">
                     <button
                       type="button"
@@ -844,7 +916,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
             )}
 
             {/* Driver Assignment & Dispatch Controls */}
-            {selectedBooking.status !== "cancelled" && (
+            {canManage && selectedBooking.status !== "cancelled" && (
               <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-4">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-wider text-stone-700">Driver & Fleet Dispatch</span>
@@ -854,6 +926,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     </span>
                   )}
                 </div>
+                {selectedBooking.driver_name && <div className="mt-2"><DriverLocationLine booking={selectedBooking} onRefresh={onRefresh} /></div>}
 
                 <form onSubmit={handleAssignDriverSubmit} className="mt-3 space-y-3">
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -865,12 +938,25 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                         className="mt-1 w-full rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs font-bold text-stone-800 focus:border-amber-500 focus:outline-none"
                       >
                         <option value="">-- Choose available driver --</option>
-                        {fleetOptions.map((dr) => (
-                          <option key={dr.id} value={dr.id}>
-                            {dr.driver_name} · {dr.vehicle_number} ({dr.vehicle_category || "Standard"})
-                          </option>
-                        ))}
-                        <option value="CUSTOM">⚡ Emergency Manual Assignment</option>
+                        {fleetOptions.some((dr) => dr.available) && (
+                          <optgroup label="Available for this trip">
+                            {fleetOptions.filter((dr) => dr.available).map((dr) => (
+                              <option key={dr.id} value={dr.id}>
+                                {dr.driver_name} · {dr.vehicle_model} · {dr.vehicle_number} · {dr.seat_capacity} seats
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {fleetOptions.some((dr) => !dr.available) && (
+                          <optgroup label="Not available">
+                            {fleetOptions.filter((dr) => !dr.available).map((dr) => (
+                              <option key={dr.id} value={dr.id} disabled>
+                                {dr.driver_name} · {dr.vehicle_number} · {dr.reason || (!dr.driver_email ? "Add driver email in fleet" : "Unavailable")}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <option value="CUSTOM">⚡ Outside driver (not in your fleet)</option>
                       </select>
                     </div>
 
@@ -884,11 +970,19 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                             onChange={(e) => setCustomDriverName(e.target.value)}
                             className="rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs text-stone-900"
                           />
+                          <PhoneInput
+                            aria-label="Driver phone"
+                            value={customDriverPhone}
+                            onChange={setCustomDriverPhone}
+                            inputClassName="rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs text-stone-900"
+                          />
+                          <label className="text-xs">Driver email<input type="email" required value={customDriverEmail} onChange={e => setCustomDriverEmail(e.target.value)} className="w-full rounded border p-2" /></label>
+                          <label className="text-xs">Vehicle seats<input type="number" min="1" max="100" required value={customSeatCapacity} onChange={e => setCustomSeatCapacity(e.target.value)} className="w-full rounded border p-2" /></label>
                           <input
                             type="text"
-                            placeholder="Driver Phone"
-                            value={customDriverPhone}
-                            onChange={(e) => setCustomDriverPhone(e.target.value)}
+                            placeholder={`Vehicle model (must suit ${selectedBooking.vehicle_category || "booked category"})`}
+                            value={customVehicleModel}
+                            onChange={(e) => setCustomVehicleModel(e.target.value)}
                             className="rounded-xl border border-stone-200 bg-[#FAF9F6] p-2 text-xs text-stone-900"
                           />
                           <input
@@ -903,6 +997,26 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                     )}
                   </div>
 
+                  {selectedDriverId && (
+                    <div className="space-y-2 rounded-xl border border-stone-100 bg-stone-50 p-2">
+                      <label className="flex items-start gap-2 text-xs text-stone-700">
+                        <input type="checkbox" checked={assignConfirmedByPhone} onChange={(e) => setAssignConfirmedByPhone(e.target.checked)} className="mt-0.5" />
+                        <span>I spoke to the driver and they accepted. Notify the traveler now instead of waiting for the driver to accept from the link.</span>
+                      </label>
+                      {assignConfirmedByPhone && (
+                        <input
+                          required
+                          minLength={3}
+                          maxLength={500}
+                          value={assignPhoneNote}
+                          onChange={(e) => setAssignPhoneNote(e.target.value)}
+                          placeholder="Who confirmed, and when? e.g. Called Ravi at 18:05"
+                          className="w-full rounded-xl border border-stone-200 bg-white p-2 text-xs text-stone-900"
+                        />
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between pt-1">
                     <button
                       type="submit"
@@ -913,7 +1027,7 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                       Confirm Driver Assignment
                     </button>
 
-                    {selectedBooking.driver_name && selectedBooking.status !== "completed" && (
+                    {selectedBooking.driver_name && selectedBooking.assignment_status === "TRIP_STARTED" && (
                       <button
                         type="button"
                         onClick={() => handleDispatchStatus("COMPLETED")}
@@ -927,13 +1041,36 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                 </form>
 
                 {dispatchMessage && <p className="mt-2 text-xs font-bold text-amber-900">{dispatchMessage}</p>}
+                <p className="text-xs">Driver acknowledgement: {selectedBooking.acknowledgement || "Not requested"}</p>
+                {selectedBooking.acknowledgement === "PENDING" && selectedBooking.assignment_status !== "CANCELLED" && (
+                  <div className="mt-2">
+                    <ConfirmByPhone
+                      url={`/api/suppliers/${s.id}/bookings/${encodeURIComponent(selectedBooking.id)}/confirm-driver`}
+                      onDone={(message) => {
+                        setAssignSuccessMsg(message);
+                        setSelectedBooking({ ...selectedBooking, acknowledgement: "ACCEPTED" });
+                        if (onRefresh) onRefresh();
+                      }}
+                    />
+                  </div>
+                )}
                 {assignSuccessMsg && <p className="mt-2 text-xs font-bold text-emerald-900">{assignSuccessMsg}</p>}
+                <details className="mt-3 border-t border-stone-100 pt-3">
+                  <summary className="cursor-pointer text-[10px] font-black uppercase tracking-wider text-stone-700">Driver & trip timeline</summary>
+                  <div className="mt-2">
+                    <DispatchTimeline key={`${selectedBooking.id}:${selectedBooking.acknowledgement}:${selectedBooking.assignment_status}`} url={`/api/suppliers/${s.id}/bookings/${encodeURIComponent(selectedBooking.id)}/dispatch-timeline`} />
+                  </div>
+                </details>
               </div>
+            )}
+
+            {canManage && !["cancelled", "completed", "in_progress", "pending_payment"].includes(String(selectedBooking.status || "").toLowerCase()) && (
+              <RescheduleBookingPanel key={selectedBooking.id} supplierId={s.id} booking={selectedBooking} onMoved={() => onRefresh?.()} />
             )}
 
             {/* Action Footer */}
             <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-stone-200 pt-4">
-              {selectedBooking.status !== "cancelled" ? (
+              {!canManage ? <span /> : selectedBooking.status !== "cancelled" ? (
                 <button
                   type="button"
                   onClick={() => handleOpenCancelModal(selectedBooking)}
@@ -988,7 +1125,9 @@ export default function SupplierBookingManager({ supplierData, loading, onRefres
                   <span className="font-bold">{cancelModalBooking.cancellation_policy || "FLEXIBLE_24H"}</span>
                 </div>
                 <p className="mt-2 text-[11px] leading-relaxed text-amber-900 border-t border-amber-200 pt-2">
-                  When cancelled by operator, a full refund of {money(cancelModalBooking.amount_inr)} will be credited back to the traveler's payment source.
+                  {cancelModalBooking.payment_status === "OFFLINE"
+                    ? "This is your own direct booking: the seats go back on sale, and any refund to the guest is yours to settle."
+                    : `When cancelled by operator, a full refund of ${money(cancelModalBooking.amount_inr)} will be credited back to the traveler's payment source.`}
                 </p>
               </div>
 

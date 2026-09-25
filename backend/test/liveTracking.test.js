@@ -37,20 +37,22 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
       VALUES (?, 'Taj Mahal Sunrise Experience', 'Agra', 'Uttar Pradesh', 'Heritage', 'DAY_TOUR', 4, 2500, ?, 'PUBLISHED')
     `).run(productId, supplierId);
 
-    // Insert test booking with OTP
+    // Insert test booking with OTP (future trip, unexpired pickup code)
     const testOtp = "7821";
     const otpHash = hashPickupOtp(bookingId, testOtp);
+    const activityDate = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+    const otpExpiresAt = new Date(Date.now() + 3 * 86400000).toISOString();
     db.prepare(`
       INSERT INTO bookings (
         id, ref, product_type, supplier_id, product_id, traveler_name, traveler_phone,
         status, payment_status, supplier_assignment_status, activity_date, pickup_time, pickup_location, pickup_lat, pickup_lng,
-        drop_location, drop_lat, drop_lng, adults, children, amount_inr, otp_hash, otp_code
+        drop_location, drop_lat, drop_lng, adults, children, amount_inr, otp_hash, otp_code, otp_expires_at
       ) VALUES (
         ?, 'IH-LIVE-7821', 'DAY_TOUR', ?, ?, 'Elena Rostova', '+12025550143',
-        'confirmed', 'PAID', 'SUPPLIER_ACCEPTED', '2026-09-01', '06:00', 'ITC Mughal, Agra', 27.1612, 78.0423,
-        'Taj Mahal East Gate', 27.1751, 78.0421, 2, 0, 2500, ?, ?
+        'confirmed', 'PAID', 'SUPPLIER_ACCEPTED', ?, '06:00', 'ITC Mughal, Agra', 27.1612, 78.0423,
+        'Taj Mahal East Gate', 27.1751, 78.0421, 2, 0, 2500, ?, ?, ?
       )
-    `).run(bookingId, supplierId, productId, otpHash, testOtp);
+    `).run(bookingId, supplierId, productId, activityDate, otpHash, testOtp, otpExpiresAt);
   });
 
   after(() => {
@@ -71,7 +73,9 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
         driverName: "Sanjay Verma",
         driverPhone: "+919811223344",
         vehicleModel: "Toyota Innova Crysta",
-        vehicleNumber: "UP-80-AB-1234"
+        vehicleNumber: "UP-80-AB-1234",
+        driverEmail: "sanjay.driver@example.com",
+        seatCapacity: 6
       },
       actorId: "OPS_TEST"
     });
@@ -86,9 +90,9 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
     assert.ok(item, "Test booking should appear in live dispatch telemetry");
     assert.equal(item.driver_name, "Sanjay Verma");
     assert.equal(item.vehicle_number, "UP-80-AB-1234");
-    assert.ok(item.driver_telemetry);
-    assert.ok(typeof item.driver_telemetry.lat === "number");
-    assert.ok(typeof item.driver_telemetry.lng === "number");
+    // No position has been reported yet, so none is invented.
+    assert.equal(item.driver_telemetry, null);
+    assert.equal(item.has_live_gps, false);
   });
 
   it("updates driver live GPS coordinates and retrieves telemetry", () => {
@@ -108,9 +112,13 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
     assert.equal(updateRes.telemetry.speed_kmh, 42);
     assert.equal(updateRes.telemetry.heading, 90);
 
-    const cached = getDriverCoordinates(assignment.id);
+    const cached = getDriverCoordinates(db, assignment.id);
     assert.ok(cached);
     assert.equal(cached.lat, 27.1650);
+
+    const live = getLiveDispatchTelemetry(db).find((t) => t.booking_id === bookingId);
+    assert.equal(live.has_live_gps, true);
+    assert.equal(live.driver_telemetry.lat, 27.1650);
   });
 
   it("verifies valid traveler pickup OTP and blocks incorrect OTP", () => {
@@ -126,6 +134,9 @@ describe("Operations Live Dispatch & Driver Tracking", () => {
   });
 
   it("advances trip status lifecycle: ASSIGNED -> EN_ROUTE -> ARRIVED -> TRIP_STARTED (via OTP) -> COMPLETED", () => {
+    // Driver must accept the assignment before dispatch status can move
+    db.prepare("UPDATE driver_assignments SET acknowledgement = 'ACCEPTED' WHERE booking_id = ?").run(bookingId);
+
     // EN_ROUTE
     const r1 = updateDispatchStatus(db, {
       supplierId,

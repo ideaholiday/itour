@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-const HOLD_MINUTES = 15;
+const HOLD_MINUTES = 10;
 const MODES = new Set(["AIR", "RAIL", "SEA", "OTHER"]);
 const PICKUP_TYPES = new Set(["AIRPORT", "HOTEL", "PORT", "LOCATION", "OTHER"]);
 
@@ -10,8 +10,19 @@ function json(value, fallback) {
   try { return JSON.parse(value); } catch { return fallback; }
 }
 
+const knownTables = new Set();
 function tableReady(db, table) {
-  try { return Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)); } catch { return true; }
+  if (knownTables.has(table)) return true;
+  try {
+    const isPostgres = Boolean(db?.connection?.schema || db?.transactionDepth !== undefined);
+    const exists = isPostgres
+      ? Boolean(db.prepare("SELECT table_name AS name FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA AND table_name = ?").get(table))
+      : Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
+    if (exists) knownTables.add(table);
+    return exists;
+  } catch {
+    return true;
+  }
 }
 
 export function optionView(row, locations = []) {
@@ -51,7 +62,7 @@ export function optionView(row, locations = []) {
 
 export function getProductOptions(db, productId) {
   if (!tableReady(db, "product_options")) return [];
-  const rows = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY name").all(productId);
+  const rows = db.prepare("SELECT * FROM product_options WHERE product_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY name, id").all(productId);
   return rows.map((row) => optionView(row, db.prepare("SELECT * FROM product_option_locations WHERE option_id = ? AND (is_active IS NULL OR CAST(is_active AS TEXT) NOT IN ('0', 'false')) ORDER BY sort_order, display_label").all(row.id)));
 }
 
@@ -88,7 +99,7 @@ export function ensureDefaultProductOption(db, product) {
   return getOption(db, product.id, option.id);
 }
 
-export function backfillProductOptions(db) {
+export function backfillProductOptions(db, productId = null) {
   if (!tableReady(db, "product_options")) return;
   const questionSeed = [
     ["TRANSFER_ARRIVAL_MODE", "How are you arriving?", "SELECT", "PER_BOOKING", false, null, ["AIR", "RAIL", "SEA", "OTHER"], {}],
@@ -106,7 +117,7 @@ export function backfillProductOptions(db) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code) DO NOTHING`);
     for (const [code, label, type, scope, required, unit, allowed, condition] of questionSeed) insertQuestion.run(`q_${code.toLowerCase()}`, code, label, type, scope, required ? 1 : 0, unit, JSON.stringify(allowed), JSON.stringify(condition));
   }
-  const products = db.prepare("SELECT * FROM products").all();
+  const products = productId ? db.prepare("SELECT * FROM products WHERE id = ?").all(productId) : db.prepare("SELECT * FROM products").all();
   for (const product of products) {
     const option = ensureDefaultProductOption(db, product);
     if (!option) continue;
@@ -168,6 +179,7 @@ export function validateQuestionAnswers(db, optionId, answers = {}, modes = {}) 
 
 export function validateOptionLogistics(db, productId, input = {}) {
   const option = input.product_option_id ? getOption(db, productId, input.product_option_id) : getProductOptions(db, productId)[0];
+  if (!option && input.product_option_id) throw Object.assign(new Error("The selected option is not available for this product"), { status: 400, code: "INVALID_OPTION" });
   if (!option) return null;
   const mode = String(input.pickup_mode || input.transfer_arrival_mode || input.transfer_departure_mode || "").toUpperCase();
   if (mode && !MODES.has(mode)) { const e = new Error("Unsupported pickup mode"); e.status = 400; throw e; }
@@ -225,10 +237,14 @@ export function persistBookingLogistics(db, bookingId, snapshot, answers = {}, a
       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(booking_id, question_code, traveler_num) DO UPDATE SET answer=excluded.answer`).run(`ans_${nanoid(12)}`, bookingId, code, value?.travelerNum ?? null, typeof value === "object" ? JSON.stringify(value.answer ?? value) : String(value), value?.unit || null);
   }
   db.prepare("INSERT INTO booking_logistics_events (id, booking_id, event_type, status, payload, actor_id) VALUES (?, ?, ?, ?, ?, ?)").run(`ble_${nanoid(12)}`, bookingId, "PICKUP_REQUESTED", "PICKUP_REQUESTED", JSON.stringify(snapshot), actorId);
+  // Optional stops table: a savepoint keeps a failure here from aborting the
+  // caller's booking transaction on PostgreSQL.
   try {
+    db.transaction(() => {
     const insertStop = db.prepare(`INSERT INTO booking_logistics_stops (id, booking_id, itinerary_day, city, location_ref, location, lat, lng, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(booking_id, itinerary_day) DO UPDATE SET city=excluded.city, location_ref=excluded.location_ref, location=excluded.location, lat=excluded.lat, lng=excluded.lng, status=excluded.status`);
     for (const hotel of snapshot.packageHotels || []) insertStop.run(`bls_${nanoid(12)}`, bookingId, hotel.day, hotel.city, hotel.locationRef, hotel.location, hotel.lat, hotel.lng, hotel.status);
+    })();
   } catch {}
 }
 

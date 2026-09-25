@@ -56,11 +56,20 @@ function database() {
   return db;
 }
 
-test("supplier commission override takes priority over the category default", () => {
+test("commission resolves product override, then supplier override, then the 30% platform default", () => {
   const db = database();
-  assert.equal(resolveCommissionRate(db, "supplier-1", "TRANSFER"), 15);
+  // Neither the category default (15) nor the legacy supplier rate (18) decides it any more.
+  assert.equal(resolveCommissionRate(db, "supplier-1", "product-1"), 30, "no products override column yet (before migration 038)");
+  assert.equal(resolveCommissionRate(db, null), 30);
+  db.exec("ALTER TABLE products ADD COLUMN commission_override_rate REAL");
+  assert.equal(resolveCommissionRate(db, "supplier-1", "product-1"), 30);
   db.prepare("UPDATE suppliers SET commission_override_rate = 12 WHERE id = 'supplier-1'").run();
-  assert.equal(resolveCommissionRate(db, "supplier-1", "TRANSFER"), 12);
+  assert.equal(resolveCommissionRate(db, "supplier-1", "product-1"), 12);
+  db.prepare("UPDATE products SET commission_override_rate = 25 WHERE id = 'product-1'").run();
+  assert.equal(resolveCommissionRate(db, "supplier-1", "product-1"), 25);
+  assert.equal(resolveCommissionRate(db, "supplier-1"), 12, "other products of the supplier keep the supplier rate");
+  db.prepare("UPDATE products SET commission_override_rate = 0 WHERE id = 'product-1'").run();
+  assert.equal(resolveCommissionRate(db, "supplier-1", "product-1"), 0, "a 0% override is a real rate, not a missing one");
   db.close();
 });
 
@@ -69,32 +78,32 @@ test("uses the product cancellation policy instead of a global refund rule", () 
   const booking = db.prepare("SELECT b.*, p.cancellation_policy FROM bookings b JOIN products p ON p.id = b.product_id").get();
   
   // Set created_at to 3 days ago so grace period does not trigger
-  booking.created_at = "2026-09-01T10:00:00";
+  booking.created_at = "2026-09-01T10:00:00+05:30";
 
   // MODERATE_48H test
-  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-08T08:00:00") }).refundPercentage, 100);
-  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-09T04:00:00") }).refundPercentage, 50);
-  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-09T12:00:00") }).refundPercentage, 0);
+  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-08T08:00:00+05:30") }).refundPercentage, 100);
+  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-09T04:00:00+05:30") }).refundPercentage, 50);
+  assert.equal(calculateRefundQuote(db, booking, { now: new Date("2026-09-09T12:00:00+05:30") }).refundPercentage, 0);
 
   // FLEXIBLE_24H test
   const flexBooking = { ...booking, cancellation_policy: "FLEXIBLE_24H" };
-  assert.equal(calculateRefundQuote(db, flexBooking, { now: new Date("2026-09-09T08:00:00") }).refundPercentage, 100);
-  assert.equal(calculateRefundQuote(db, flexBooking, { now: new Date("2026-09-09T12:00:00") }).refundPercentage, 0);
+  assert.equal(calculateRefundQuote(db, flexBooking, { now: new Date("2026-09-09T08:00:00+05:30") }).refundPercentage, 100);
+  assert.equal(calculateRefundQuote(db, flexBooking, { now: new Date("2026-09-09T12:00:00+05:30") }).refundPercentage, 0);
 
   // STRICT_7D test
   const strictBooking = { ...booking, cancellation_policy: "STRICT_7D" };
-  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-02T10:00:00") }).refundPercentage, 100);
-  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-05T10:00:00") }).refundPercentage, 50);
-  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-09T10:00:00") }).refundPercentage, 0);
+  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-02T10:00:00+05:30") }).refundPercentage, 100);
+  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-05T10:00:00+05:30") }).refundPercentage, 50);
+  assert.equal(calculateRefundQuote(db, strictBooking, { now: new Date("2026-09-09T10:00:00+05:30") }).refundPercentage, 0);
 
   // Booking Grace Window test (booked 2 hours ago, trip in 20 hours)
   const recentBooking = {
     ...booking,
     cancellation_policy: "FLEXIBLE_24H",
-    created_at: "2026-09-09T12:00:00",
+    created_at: "2026-09-09T12:00:00+05:30",
   };
   assert.equal(
-    calculateRefundQuote(db, recentBooking, { now: new Date("2026-09-09T14:00:00") }).refundPercentage,
+    calculateRefundQuote(db, recentBooking, { now: new Date("2026-09-09T14:00:00+05:30") }).refundPercentage,
     100
   );
 

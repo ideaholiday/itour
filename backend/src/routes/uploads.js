@@ -1,10 +1,14 @@
 import express from "express";
-import { UploadService } from "../services/uploadService.js";
+import { UploadService, detectImageType } from "../services/uploadService.js";
 import { authenticateBearer, optionalBearer } from "../middleware/auth.js";
 import { z } from "zod";
 import logger from "../config/logger.js";
+import { kybMimeType, saveKybFile } from "../services/kybFileService.js";
+import { createRateLimiter } from "../middleware/security.js";
+import { supplierMay } from "../services/supplierStaffService.js";
 
 const router = express.Router();
+const uploadLimiter = createRateLimiter({ windowMs: 60 * 60 * 1000, limit: 60, scope: "upload" });
 
 const Base64UploadSchema = z.object({
   data: z.string().min(10, "Base64 payload required"),
@@ -18,7 +22,7 @@ const Base64UploadSchema = z.object({
  * POST /api/uploads
  * Upload a file via base64 encoded data
  */
-router.post("/uploads", optionalBearer, async (req, res) => {
+router.post("/uploads", uploadLimiter, authenticateBearer, async (req, res) => {
   try {
     const parseResult = Base64UploadSchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -30,14 +34,6 @@ router.post("/uploads", optionalBearer, async (req, res) => {
     }
 
     const { data, filename, mimeType, entityType, entityId } = parseResult.data;
-
-    // Normalize mimeType
-    const mime = String(mimeType || "").toLowerCase();
-    const safeMime = mime.includes("png") ? "image/png" :
-                     mime.includes("webp") ? "image/webp" :
-                     mime.includes("gif") ? "image/gif" :
-                     (mime.includes("jpg") || mime.includes("jpeg")) ? "image/jpeg" :
-                     "application/pdf";
 
     // Strip base64 prefix if present (e.g. data:image/png;base64,...)
     const base64Data = data.includes(",") ? data.split(",")[1] : data;
@@ -51,10 +47,38 @@ router.post("/uploads", optionalBearer, async (req, res) => {
       });
     }
 
-    const upload = UploadService.saveFileBuffer({
+    if (entityType === "KYB") {
+      // Identity documents: only the supplier themselves (or an admin) may add
+      // one, and the file is stored privately rather than in public /uploads.
+      const role = String(req.user?.role || "").toUpperCase();
+      const ownsSupplier = role === "SUPPLIER" && req.user.supplier_id && req.user.supplier_id === entityId && supplierMay(req.user, "owner");
+      if (!entityId || !(ownsSupplier || ["ADMIN", "STAFF"].includes(role))) {
+        return res.status(403).json({ error: "KYB documents can only be uploaded for your own supplier account", code: "FORBIDDEN" });
+      }
+      const kybMime = kybMimeType(mimeType);
+      if (!kybMime) {
+        return res.status(400).json({ error: "KYB documents must be a PDF, PNG, JPG or WEBP file", code: "UNSUPPORTED_FILE_TYPE" });
+      }
+      const stored = await saveKybFile(buffer, kybMime);
+      const upload = UploadService.recordUpload({
+        userId: req.user.id || null,
+        filename: stored.filename,
+        originalName: filename,
+        mimeType: kybMime,
+        sizeBytes: buffer.length,
+        url: stored.url,
+        entityType,
+        entityId,
+      });
+      return res.status(201).json({ success: true, upload });
+    }
+
+    if (!detectImageType(buffer)) {
+      return res.status(400).json({ error: "UNSUPPORTED_FILE_TYPE", message: "Photos must be a PNG, JPG or WEBP image" });
+    }
+    const upload = await UploadService.saveFileBuffer({
       buffer,
       originalName: filename,
-      mimeType,
       userId: req.user?.id || null,
       entityType,
       entityId,
@@ -77,10 +101,17 @@ router.post("/uploads", optionalBearer, async (req, res) => {
  * GET /api/uploads/:id
  * Retrieve upload metadata
  */
-router.get("/uploads/:id", (req, res) => {
+router.get("/uploads/:id", optionalBearer, (req, res) => {
   const upload = UploadService.getUploadById(req.params.id);
   if (!upload) {
     return res.status(404).json({ error: "UPLOAD_NOT_FOUND" });
+  }
+  if (String(upload.entity_type || "").toUpperCase() === "KYB") {
+    const role = String(req.user?.role || "").toUpperCase();
+    const ownsSupplier = role === "SUPPLIER" && req.user?.supplier_id && req.user.supplier_id === upload.entity_id && supplierMay(req.user, "owner");
+    if (!(ownsSupplier || ["ADMIN", "STAFF"].includes(role))) {
+      return res.status(404).json({ error: "UPLOAD_NOT_FOUND" });
+    }
   }
   return res.json({ upload });
 });
