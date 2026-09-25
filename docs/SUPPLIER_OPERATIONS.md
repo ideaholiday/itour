@@ -24,6 +24,12 @@
 4. **Payments on account** are applied to the agent's open bookings, oldest trip first, and can't exceed what they owe. Cancelling an agent booking removes what was owed on it; any money already paid is settled between supplier and agent.
 5. **The guest is never asked to pay**: the guest list and board show no balance for agent bookings.
 
+## Sales channels and reseller keys (ADR 041)
+1. **Three switches per listing** (owner or manager): IdeaHoliday marketplace (website, search, SEO pages, IdeaHoliday B2B, circuits), IdeaHoliday's API partners, and the supplier's own resellers. The supplier's walk-in, phone, manual, agent and package sales always work. Off hides the listing on that channel and refuses new sales there (`409 CHANNEL_OFF` on the marketplace); existing bookings are untouched.
+2. **Reseller keys** are issued and revoked by the owner only. The key (`ihp_…`) is shown once; only its SHA-256 is stored. A revoked key stops working at once.
+3. **A reseller's booking is the supplier's direct sale**: `OFFLINE`, no IdeaHoliday commission or payout, owed by the reseller (`balance_due_inr`). A key linked to an agent books at that agent's net rate, within their credit, and shows on their statement.
+4. **The guest pays at the meeting point only for walk-in, phone and manual bookings**; agent and reseller balances are never shown on the guest list.
+
 ## Package quotations (ADR 040)
 1. **Hotel rate sheet.** Contracted net rates per hotel, room type and meal plan by season. Hotels are never live inventory; the rate sheet only prices quotations. A stay is priced night by night, so a stay across two seasons uses each night's rate; a night without a rate is refused (`RATE_MISSING`).
 2. **Lines, priced by the server**: hotel nights (cost), the supplier's own listings (pre-tax quote price) and custom items (cost). Markup % applies to the cost lines only. An Indian supplier adds 5% GST on the package; a supplier abroad quotes tax-inclusive.

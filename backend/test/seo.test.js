@@ -156,7 +156,7 @@ function catalogDatabase() {
     CREATE TABLE products (
       id TEXT PRIMARY KEY, supplier_id TEXT, title TEXT, city TEXT, category TEXT, product_type TEXT, short_desc TEXT,
       price_inr REAL, hero_image TEXT, images TEXT, status TEXT DEFAULT 'PUBLISHED', is_published INTEGER DEFAULT 1,
-      bestseller INTEGER DEFAULT 0
+      bestseller INTEGER DEFAULT 0, sell_marketplace INTEGER DEFAULT 1, sell_ideaholiday_api INTEGER DEFAULT 1, sell_own_resellers INTEGER DEFAULT 1
     );
     CREATE TABLE quality_scores (entity_type TEXT, entity_id TEXT, review_count INTEGER, average_rating REAL);
     INSERT INTO suppliers VALUES ('sup_ok', 'APPROVED', 1), ('sup_pending', 'PENDING', 1), ('sup_lapsed', 'APPROVED', 0);

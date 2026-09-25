@@ -4,6 +4,8 @@ import { onReferralBookingCancelled } from "./referralService.js";
 import { localDate, productTime } from "../lib/localTime.js";
 import { requireDepartureInScope } from "./departureBoardService.js";
 
+const GUEST_PAYS_SOURCES = ["WALK_IN", "PHONE", "MANUAL"];
+
 /**
  * Supplier day-of-operations (docs/SUPPLIER_OPERATIONS.md): check travelers in by
  * scanning the voucher QR, mark no-shows, print the guest list for a departure,
@@ -157,10 +159,10 @@ export function departureManifest(db, { supplierId, productId, date, time = null
       status: row.status,
       attendanceStatus: row.attendance_status || null,
       checkedInAt: row.checked_in_at || null,
-      // A direct booking's guest may still owe the operator at the meeting point;
-      // an agent booking's balance is the agent's to pay, not the guest's (ADR 039).
+      // Only a walk-in, phone or manual guest pays at the meeting point; an agent's
+      // or reseller's balance is theirs to pay (ADR 039, ADR 041).
       source: row.source || "B2C",
-      balanceDueInr: row.source === "AGENT" ? 0 : Number(row.balance_due_inr || 0),
+      balanceDueInr: GUEST_PAYS_SOURCES.includes(row.source) ? Number(row.balance_due_inr || 0) : 0,
     })),
   };
 }

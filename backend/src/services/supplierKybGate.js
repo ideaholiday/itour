@@ -25,8 +25,11 @@ export function isSupplierSubscriptionCovered(database, supplierId) {
 }
 
 // SQL condition for a products query: true when the product's supplier is
-// KYB-approved and covered by a subscription. Pass the alias (or table name)
-// the query uses for products.
-export function approvedSupplierSql(productAlias = "p") {
-  return `EXISTS (SELECT 1 FROM suppliers kyb_s WHERE kyb_s.id = ${productAlias}.supplier_id AND UPPER(COALESCE(kyb_s.kyb_status, '')) = 'APPROVED' AND ${subscriptionCoveredSql("kyb_s")})`;
+// KYB-approved and covered by a subscription, and (for the marketplace, the
+// default) the supplier sells the listing there (ADR 041). Pass the alias (or
+// table name) the query uses for products; OCTo passes { marketplace: false }
+// and checks its own channel.
+export function approvedSupplierSql(productAlias = "p", { marketplace = true } = {}) {
+  const channel = marketplace ? ` AND COALESCE(${productAlias}.sell_marketplace, 1) = 1` : "";
+  return `EXISTS (SELECT 1 FROM suppliers kyb_s WHERE kyb_s.id = ${productAlias}.supplier_id AND UPPER(COALESCE(kyb_s.kyb_status, '')) = 'APPROVED' AND ${subscriptionCoveredSql("kyb_s")})${channel}`;
 }

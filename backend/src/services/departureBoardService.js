@@ -92,7 +92,7 @@ export function departureBoard(db, supplierId, { from, days = 1, listAvailabilit
       SUM(COALESCE(b.adults, 0) + COALESCE(b.children, 0)) AS guests,
       SUM(CASE WHEN b.attendance_status = 'CHECKED_IN' THEN COALESCE(b.adults, 0) + COALESCE(b.children, 0) ELSE 0 END) AS checked_in,
       SUM(CASE WHEN b.attendance_status = 'NO_SHOW' THEN COALESCE(b.adults, 0) + COALESCE(b.children, 0) ELSE 0 END) AS no_show,
-      SUM(CASE WHEN b.source = 'AGENT' THEN 0 ELSE COALESCE(b.balance_due_inr, 0) END) AS balance_due
+      SUM(CASE WHEN b.source IN ('WALK_IN', 'PHONE', 'MANUAL') THEN COALESCE(b.balance_due_inr, 0) ELSE 0 END) AS balance_due
     FROM bookings b JOIN products p ON p.id = b.product_id
     WHERE b.supplier_id = ? AND b.activity_date BETWEEN ? AND ? AND LOWER(b.status) NOT IN ('cancelled', 'pending_payment')
     GROUP BY b.product_id, p.title, b.activity_date, b.pickup_time`).all(supplierId, from, to);

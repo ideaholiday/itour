@@ -262,6 +262,10 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       kybError.code = "SUPPLIER_NOT_APPROVED";
       throw kybError;
     }
+    // The supplier may have taken this listing off the marketplace (ADR 041).
+    if (Number(quote.product.sell_marketplace ?? 1) === 0) {
+      throw Object.assign(new Error("This listing is not sold on Idea Holiday right now."), { status: 409, code: "CHANNEL_OFF" });
+    }
     const assignment = findAutomaticSupplierAssignment(db, { quote, input: req.body });
     if (!assignment.selected) {
       const assignmentError = new Error("No approved supplier currently matches the pickup, vehicle, fare and travel date. Please change the option or contact support.");

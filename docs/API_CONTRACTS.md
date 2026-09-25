@@ -285,7 +285,9 @@ Backs `/admin/analytics`: **`GET /overview`**, **`/trends`**, **`/cohorts`**, **
 
 Compliant with OCTo specification v1. Used by external distributors, OTAs, and API partners to query Idea Holiday inventory and place instant bookings.
 
-**Auth:** the `bookings` endpoints need a partner key (SECURITY.md §1).
+**Auth:** the `bookings` endpoints need a partner key (SECURITY.md §1). The read endpoints take a key when one is sent (a wrong key is `401`); without one they show the IdeaHoliday-partner view.
+
+**Channels (ADR 041):** an IdeaHoliday partner (no `supplier_id`) sees and books only listings with `sell_ideaholiday_api` on; a supplier's own reseller only that supplier's listings with `sell_own_resellers` on. A listing off the caller's channel is left out of reads and refused on reservation and confirmation (`409 PRODUCT_NOT_BOOKABLE`). A confirmation by a supplier-issued key is the supplier's direct sale (`payment_status = OFFLINE`, no commission, `balance_due_inr` owed by the reseller), at the linked agent's net rate and within their credit (`409 AGENT_CREDIT_LIMIT`) when the key has one.
 
 - **`GET /api/octo/capabilities`**: Declares supported capabilities (`octo/core`, `octo/pricing`, `octo/content`).
 - **`GET /api/octo/suppliers`**: Lists verified suppliers with contact metadata.

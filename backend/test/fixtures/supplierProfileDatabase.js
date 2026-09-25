@@ -17,7 +17,7 @@ export function supplierProfileDatabase() {
       business_type TEXT, years_in_operation INTEGER, gstin_verified INTEGER DEFAULT 0, bank_verified INTEGER DEFAULT 0
     );
     CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, phone TEXT, role TEXT DEFAULT 'TRAVELER');
-    CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT, title TEXT);
+    CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT, title TEXT, sell_marketplace INTEGER DEFAULT 1, sell_ideaholiday_api INTEGER DEFAULT 1, sell_own_resellers INTEGER DEFAULT 1);
     CREATE TABLE bookings (id TEXT PRIMARY KEY, ref TEXT, user_id TEXT, product_id TEXT, supplier_id TEXT, traveler_name TEXT, status TEXT);
     CREATE TABLE reviews (
       id TEXT PRIMARY KEY, booking_id TEXT, user_id TEXT NOT NULL, product_id TEXT NOT NULL, supplier_id TEXT NOT NULL,

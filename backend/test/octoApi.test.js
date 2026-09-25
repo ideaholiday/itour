@@ -39,6 +39,7 @@ function setupOctoTestDb() {
 
     CREATE TABLE products (
       id TEXT PRIMARY KEY,
+      sell_marketplace INTEGER DEFAULT 1, sell_ideaholiday_api INTEGER DEFAULT 1, sell_own_resellers INTEGER DEFAULT 1,
       product_code TEXT,
       supplier_id TEXT,
       product_type TEXT DEFAULT 'EXPERIENCE',

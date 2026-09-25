@@ -30,3 +30,11 @@ export function requireApiPartner(database = db) {
     return next();
   };
 }
+
+// Browsing takes a key when one is sent, so a supplier's own reseller sees
+// that supplier's listings on its channel (ADR 041). No key is the public view;
+// a wrong key is refused rather than silently ignored.
+export function optionalApiPartner(database = db) {
+  const required = requireApiPartner(database);
+  return (req, res, next) => (String(req.headers.authorization || "").startsWith("Bearer ") ? required(req, res, next) : next());
+}

@@ -267,6 +267,7 @@ erDiagram
 - **`api_partners`** (OCTo reseller keys, migration 061):
   - `id` (`apip_...`), `name`, `supplier_id` (NULL = IdeaHoliday-wide; set = that supplier's products only).
   - `key_hash` (SHA-256, UNIQUE), `key_prefix` (first 12 chars, for recognising a key), `prepaid` (1 = confirmations are PAID), `status` (`ACTIVE`, `REVOKED`), `last_used_at`.
+  - `issuer` (migration 068, ADR 041): `IDEAHOLIDAY` (`scripts/create-api-partner.js`) or `SUPPLIER` (issued by the owner in the extranet; its bookings are the supplier's direct sales). `agent_id` links a supplier key to one of the supplier's agents; `created_by_user_id` who issued it.
   - `native_reservations.api_partner_id` records which partner made an OCTo hold.
 
 - **`supplier_channel_connections`** (External ResTech & OCTo Ingestion):
@@ -296,6 +297,7 @@ erDiagram
   - `checked_in_at`, `checked_in_by`: when attendance was recorded (ISO timestamp) and the user who recorded it.
   - `source` (migration 062): `B2C` (default), `IH_B2B`, `API` (OCTo partner), or supplier-direct `WALK_IN`, `PHONE`, `MANUAL`. A direct booking has `payment_status = OFFLINE`, commission 0 and no `payouts` row (ADR 034).
   - `created_by_user_id`, `direct_discount_inr`, `balance_due_inr` (migration 062): who entered a direct booking, the operator's discount, and what the guest still owes the operator.
+  - (products) `sell_marketplace`, `sell_ideaholiday_api`, `sell_own_resellers` (migration 068, ADR 041): the listing's three switchable sales channels, 1 = on. `approvedSupplierSql` hides a listing with `sell_marketplace = 0` from every marketplace query.
   - `quotation_id` (migration 067, ADR 040): the package a booking was made from. Such a booking's `amount_inr` is the listing's share of the package and `balance_due_inr` is 0 (`payment_method = 'PACKAGE'`); the customer's money is on the quotation.
   - `agent_id`, `agent_commission_inr` (migration 066, ADR 039): the supplier's agent an `AGENT` booking was made for, and the commission taken off the quote. `amount_inr` is then the net the agent pays and `balance_due_inr` what the agent still owes on it.
   - `supplier_reschedule_status` (migration 065, ADR 037): `NULL` (never moved by the supplier), `MOVED` (a paid booking the traveler hasn't answered), `ACCEPTED` or `DECLINED`. `supplier_reschedule_from_date`, `supplier_reschedule_from_time`, `supplier_reschedule_reason`, `supplier_rescheduled_at` record the move. Each move is also a `booking_modifications` row of type `SUPPLIER_RESCHEDULE`.

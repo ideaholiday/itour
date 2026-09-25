@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { BarChart3, Bell, Briefcase, FileSpreadsheet, CalendarCheck, ChevronDown, CreditCard, QrCode, ExternalLink, FileCheck, Globe, LayoutDashboard, LogOut, Map, MessageSquare, PlusCircle, RefreshCw, Store, UserCog, UserPlus, Users } from "lucide-react";
+import { BarChart3, Bell, Briefcase, FileSpreadsheet, KeyRound, CalendarCheck, ChevronDown, CreditCard, QrCode, ExternalLink, FileCheck, Globe, LayoutDashboard, LogOut, Map, MessageSquare, PlusCircle, RefreshCw, Store, UserCog, UserPlus, Users } from "lucide-react";
 import IdeaHolidayLogo from "../IdeaHolidayLogo.jsx";
 import { useAuth } from "../../lib/auth.jsx";
 import SupplierNotificationBell from "./SupplierNotificationBell.jsx";
@@ -30,6 +30,7 @@ export default function SupplierHeaderNav({ supplierData, activeTab, onBookingCr
     ["FLEET", "Fleet", "/supplier/dashboard?panel=fleet", Users, supplierData?.drivers?.length || null],
     ["AGENTS", "Agents", "/supplier/dashboard?panel=agents", Briefcase],
     ["PACKAGES", "Packages", "/supplier/dashboard?panel=packages", FileSpreadsheet],
+    ["API_KEYS", "API keys", "/supplier/dashboard?panel=api-keys", KeyRound],
     ["ANALYTICS", "Analytics", "/supplier/dashboard?panel=analytics", BarChart3],
     ["PROFILE", "Public profile", "/supplier/dashboard?panel=profile", Globe],
     ["SHARE", "Share kit", "/supplier/dashboard?panel=share", QrCode],
@@ -38,10 +39,10 @@ export default function SupplierHeaderNav({ supplierData, activeTab, onBookingCr
     // Only suppliers who joined from 14 September 2026 need a subscription (ADR 017).
     ["SUBSCRIPTION", "Plans", "/supplier/dashboard?panel=subscription", CreditCard, supplierData?.subscription?.required && !supplierData.subscription.covered ? "Action" : null],
     ["STAFF", "Staff", "/supplier/dashboard?panel=staff", UserCog],
-  ].filter(([id]) => (role === "OWNER" ? true : role === "MANAGER" ? !["KYB", "SUBSCRIPTION", "STAFF"].includes(id) : id === "BOOKINGS"));
+  ].filter(([id]) => (role === "OWNER" ? true : role === "MANAGER" ? !["KYB", "SUBSCRIPTION", "STAFF", "API_KEYS"].includes(id) : id === "BOOKINGS"));
 
   const isCurrent = (id, path) => {
-    if (["FLEET", "KYB", "BUILDER", "ANALYTICS", "PROFILE", "SHARE", "ENQUIRIES", "SUBSCRIPTION", "STAFF", "AGENTS", "PACKAGES"].includes(id)) return requestedPanel === (id === "BUILDER" ? "listings" : id === "KYB" ? "compliance" : id.toLowerCase());
+    if (["FLEET", "KYB", "BUILDER", "ANALYTICS", "PROFILE", "SHARE", "ENQUIRIES", "SUBSCRIPTION", "STAFF", "AGENTS", "PACKAGES", "API_KEYS"].includes(id)) return requestedPanel === (id === "BUILDER" ? "listings" : id === "KYB" ? "compliance" : id === "API_KEYS" ? "api-keys" : id.toLowerCase());
     if (id === "DASHBOARD") return location.pathname === "/supplier" || (location.pathname === "/supplier/dashboard" && !requestedPanel);
     return location.pathname === path;
   };

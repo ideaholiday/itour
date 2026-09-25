@@ -49,6 +49,7 @@ const productScore = (product) => {
 const SupplierStaffPanel = lazy(() => import("./SupplierStaffPanel.jsx"));
 const SupplierAgentsPanel = lazy(() => import("./SupplierAgentsPanel.jsx"));
 const SupplierQuotationsPanel = lazy(() => import("./SupplierQuotationsPanel.jsx"));
+const SupplierResellerKeysPanel = lazy(() => import("./SupplierResellerKeysPanel.jsx"));
 const PanelLoading = () => <p className="p-8 text-center text-xs text-stone-500">Loading…</p>;
 
 export default function SupplierDashboardOverview({ supplierData, loading, onRefresh, initialPanel }) {
@@ -225,6 +226,10 @@ export default function SupplierDashboardOverview({ supplierData, loading, onRef
   // Operator tools load only when opened, to keep the dashboard bundle small.
   if (initialPanel === "packages") {
     return <Suspense fallback={<PanelLoading />}><SupplierQuotationsPanel supplierId={supplier.id} products={products} /></Suspense>;
+  }
+
+  if (initialPanel === "api-keys") {
+    return <Suspense fallback={<PanelLoading />}><SupplierResellerKeysPanel supplierId={supplier.id} /></Suspense>;
   }
 
   if (initialPanel === "agents") {

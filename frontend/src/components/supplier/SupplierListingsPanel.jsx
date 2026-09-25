@@ -1,4 +1,5 @@
 import { activityPath } from "../../lib/activityUrl.js";
+import ListingChannels from "./ListingChannels.jsx";
 import SupplierInventoryEditor from "./SupplierInventoryEditor.jsx";
 import React, { useMemo, useState } from "react";
 import { authHeaders } from "../../lib/api.js";
@@ -537,6 +538,7 @@ export default function SupplierListingsPanel({ products = [], supplierId, onRef
                   {live ? "Unpublish" : "Publish Live"}
                 </button>
               </div>
+              <ListingChannels supplierId={supplierId} product={product} />
             </article>
           );
         })}

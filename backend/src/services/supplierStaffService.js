@@ -16,7 +16,8 @@ export const OWNER_ROLE = "OWNER";
 export const STAFF_ROLES = Object.freeze(["MANAGER", "FRONT_DESK", "GUIDE"]);
 
 // Areas only the owner may open: money, identity, billing and staff.
-const OWNER_ONLY_PATHS = [/^\/kyb(\/|$)/, /^\/payout/, /^\/subscription(\/|$)/, /^\/plans(\/|$)/, /^\/spotlights(\/|$)/, /^\/staff(\/|$)/];
+// Reseller keys are credentials that book the inventory (ADR 041).
+const OWNER_ONLY_PATHS = [/^\/kyb(\/|$)/, /^\/payout/, /^\/subscription(\/|$)/, /^\/plans(\/|$)/, /^\/spotlights(\/|$)/, /^\/staff(\/|$)/, /^\/api-keys(\/|$)/];
 
 // Front desk and guides are refused anything not listed here.
 const OPERATIONS = [

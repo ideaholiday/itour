@@ -79,6 +79,7 @@ import { agentStatement, listAgents, recordAgentPayment, saveAgent, setAgentRate
 import { addHotelRate, deleteHotelRate, listHotels, saveHotel } from "../services/supplierHotelService.js";
 import { bookQuotationLine, findQuotation, listQuotations, quotationShareUrl, quotationView, recordQuotationPayment, saveQuotation, setQuotationStatus } from "../services/quotationService.js";
 import { quotationPdf } from "../services/quotationPdfService.js";
+import { createResellerKey, listResellerKeys, revokeResellerKey, setProductChannels } from "../services/supplierChannelSettingsService.js";
 import { sendEmail } from "../services/emailService.js";
 import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
 
@@ -2355,6 +2356,23 @@ router.post("/:id/agents/:agentId/payments", (req, res) => {
   } catch (error) {
     directBookingFailure(res, req, error, "Could not record the payment");
   }
+});
+
+// Sales channels (ADR 041): three switches per listing; reseller keys are owner-only (role gate).
+router.patch("/:id/products/:productId/channels", (req, res) => {
+  try { res.json({ success: true, ...setProductChannels(db, req.params.id, req.params.productId, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the channels"); }
+});
+router.get("/:id/api-keys", (req, res) => {
+  try { res.json({ success: true, resellers: listResellerKeys(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load keys"); }
+});
+router.post("/:id/api-keys", (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store");
+    res.status(201).json({ success: true, ...createResellerKey(db, req.params.id, req.body, req.user) });
+  } catch (error) { directBookingFailure(res, req, error, "Could not create the key"); }
+});
+router.delete("/:id/api-keys/:partnerId", (req, res) => {
+  try { res.json({ success: true, ...revokeResellerKey(db, req.params.id, req.params.partnerId) }); } catch (error) { directBookingFailure(res, req, error, "Could not revoke the key"); }
 });
 
 // Hotel rate sheet (ADR 040): contracted net rates, used only to price quotations.

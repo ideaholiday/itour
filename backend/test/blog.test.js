@@ -17,7 +17,7 @@ function blogDatabase() {
     CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE suppliers (id TEXT PRIMARY KEY, kyb_status TEXT, subscription_exempt INTEGER DEFAULT 0);
     CREATE TABLE supplier_subscriptions (id TEXT PRIMARY KEY, supplier_id TEXT, status TEXT, starts_at TEXT, ends_at TEXT);
-    CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT, title TEXT, status TEXT DEFAULT 'PUBLISHED', is_published INTEGER DEFAULT 1);
+    CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT, title TEXT, status TEXT DEFAULT 'PUBLISHED', is_published INTEGER DEFAULT 1, sell_marketplace INTEGER DEFAULT 1, sell_ideaholiday_api INTEGER DEFAULT 1, sell_own_resellers INTEGER DEFAULT 1);
     INSERT INTO users VALUES ('usr_staff', 'Priya Nair');
     INSERT INTO suppliers VALUES ('sup_ok', 'APPROVED', 1), ('sup_pending', 'PENDING', 1);
     INSERT INTO products (id, supplier_id, title) VALUES ('p_live', 'sup_ok', 'Dudhsagar trip'), ('p_other', 'sup_ok', 'Spice farm'), ('p_pending', 'sup_pending', 'Pending tour');

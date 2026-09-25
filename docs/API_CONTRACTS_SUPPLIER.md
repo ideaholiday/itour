@@ -256,3 +256,10 @@ Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md). Owner or manager.
 - **`POST .../quotations/:quotationId/lines/:lineId/book`** → `201 { booking, quotation }`: books an accepted quotation's listing line as a `MANUAL` direct booking with `quotation_id`. Errors: `409 NOT_ACCEPTED`, `409 NOT_A_LISTING`, `409 ALREADY_BOOKED`, `409 PHONE_REQUIRED`, and the direct-booking seat errors.
 - **`POST .../quotations/:quotationId/payments`** `{ mode, amount_inr, reference? }` → `201 { quotation }`; `409 NOT_ACCEPTED`, `400 OVERPAYMENT`.
 - **Public**: **`GET /api/quotations/share/:token`** returns the PDF for a signed, 60-day token, no sign-in; `404` when forged or expired. Rate-limited per client (`scope: "quotation-share"`).
+
+### 3.11 Sales channels and reseller keys (ADR 041)
+Rules: [`SUPPLIER_OPERATIONS.md`](SUPPLIER_OPERATIONS.md).
+- **`PATCH /api/suppliers/:id/products/:productId/channels`** `{ marketplace?, ideaholidayApi?, ownResellers? }` (booleans; omitted ones stay) → `{ productId, channels: { marketplace, ideaholidayApi, ownResellers } }`. Owner or manager. The listing's `sell_*` columns come back on `GET /api/suppliers/:id` products.
+- **`GET /api/suppliers/:id/api-keys`** → `{ resellers: [{ id, name, keyPrefix, status, agentId, agentName, lastUsedAt, createdAt }] }`. Owner only; IdeaHoliday-issued keys are not listed.
+- **`POST .../api-keys`** `{ name, agentId? }` → `201 { key, reseller }`; the key is returned once (`Cache-Control: no-store`). `404 AGENT_NOT_FOUND`. Owner only.
+- **`DELETE .../api-keys/:partnerId`** → `{ id, status: "REVOKED" }`; `404 KEY_NOT_FOUND`. Owner only.

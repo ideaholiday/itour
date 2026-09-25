@@ -62,7 +62,8 @@ Do not rebuild these. Extend them if asked.
 - **Phase 4 — done:** real supplier dashboard numbers: earnings by trip date split marketplace/direct, growth against the same days last month, and service metrics that say "Not enough data" instead of inventing (ADR 038).
 - **Phase 5 — done:** the supplier's own agents booked by staff at a commission-based net rate, on credit up to a limit, with payments on account and statements (ADR 039).
 - **Phase 6 — done:** package quotations with a hotel rate sheet, one markup, 5% package GST for Indian suppliers, PDF by email and share link, listing lines booked in one click once accepted (ADR 040).
-- **Next, in order:** 7 per-channel on/off and reseller API keys in the extranet.
+- **Phase 7 — done:** three sales-channel switches per listing, and reseller API keys the owner issues, booked as the supplier's direct sales, optionally at an agent's net rate and credit (ADR 041).
+- The operator-platform plan (Phases 0–7) is complete. Production still needs migrations 064–068 (applied automatically on the next deploy).
 
 Standing obligations that apply to every change:
 

@@ -12,19 +12,29 @@ import { getProductOptions } from "./logisticsService.js";
 import { octoReservationView } from "./reservationProviders.js";
 import logger from "../config/logger.js";
 import { approvedSupplierSql } from "./supplierKybGate.js";
+import { agentPricing } from "./supplierAgentService.js";
 import { productTime } from "../lib/localTime.js";
 import { productGstPercent } from "../lib/productTax.js";
 
-// Channel partners see and book only what travelers can: published products
-// whose supplier is KYB-approved.
-const SELLABLE_PRODUCT_SQL = `(status = 'PUBLISHED' OR is_published = 1) AND ${approvedSupplierSql("products")}`;
+// Channel partners see and book only published products whose supplier is
+// KYB-approved, and only where the supplier sells on that partner's channel
+// (ADR 041): IdeaHoliday's partners need sell_ideaholiday_api, a supplier's
+// own reseller needs that supplier's product and sell_own_resellers.
+const SELLABLE_PRODUCT_SQL = `(status = 'PUBLISHED' OR is_published = 1) AND ${approvedSupplierSql("products", { marketplace: false })}`;
 
-function isSellableProduct(db, productId) {
-  return Boolean(db.prepare(`SELECT 1 FROM products WHERE id = ? AND ${SELLABLE_PRODUCT_SQL}`).get(productId));
+function channelSql(partner) {
+  return partner?.supplier_id
+    ? { sql: " AND supplier_id = ? AND COALESCE(sell_own_resellers, 1) = 1", params: [partner.supplier_id] }
+    : { sql: " AND COALESCE(sell_ideaholiday_api, 1) = 1", params: [] };
 }
 
-function assertSellableProduct(db, productId) {
-  if (!isSellableProduct(db, productId)) {
+function isSellableProduct(db, productId, partner = null) {
+  const channel = channelSql(partner);
+  return Boolean(db.prepare(`SELECT 1 FROM products WHERE id = ? AND ${SELLABLE_PRODUCT_SQL}${channel.sql}`).get(productId, ...channel.params));
+}
+
+function assertSellableProduct(db, productId, partner = null) {
+  if (!isSellableProduct(db, productId, partner)) {
     throw Object.assign(new Error("This product is not available for booking"), { status: 409, code: "PRODUCT_NOT_BOOKABLE" });
   }
 }
@@ -162,9 +172,10 @@ export function formatOctoProduct(db, product) {
   };
 }
 
-export function getOctoProducts(db, { supplierId } = {}) {
-  let query = `SELECT * FROM products WHERE ${SELLABLE_PRODUCT_SQL}`;
-  const params = [];
+export function getOctoProducts(db, { supplierId, partner = null } = {}) {
+  const channel = channelSql(partner);
+  let query = `SELECT * FROM products WHERE ${SELLABLE_PRODUCT_SQL}${channel.sql}`;
+  const params = [...channel.params];
   if (supplierId) {
     query += " AND supplier_id = ?";
     params.push(supplierId);
@@ -175,14 +186,15 @@ export function getOctoProducts(db, { supplierId } = {}) {
   return rows.map((product) => formatOctoProduct(db, product));
 }
 
-export function getOctoProduct(db, productId) {
-  const row = db.prepare(`SELECT * FROM products WHERE id = ? AND ${SELLABLE_PRODUCT_SQL}`).get(productId);
+export function getOctoProduct(db, productId, partner = null) {
+  const channel = channelSql(partner);
+  const row = db.prepare(`SELECT * FROM products WHERE id = ? AND ${SELLABLE_PRODUCT_SQL}${channel.sql}`).get(productId, ...channel.params);
   if (!row) return null;
   return formatOctoProduct(db, row);
 }
 
-export function getOctoAvailability(db, { productId, optionId, localDateStart, localDateEnd }) {
-  if (!isSellableProduct(db, productId)) return [];
+export function getOctoAvailability(db, { productId, optionId, localDateStart, localDateEnd, partner = null }) {
+  if (!isSellableProduct(db, productId, partner)) return [];
   const dates = [];
   const start = new Date(localDateStart);
   const end = localDateEnd ? new Date(localDateEnd) : start;
@@ -295,22 +307,13 @@ export function getOctoBooking(db, uuid, partner = null) {
   return findPartnerReservation(db, uuid, partner);
 }
 
-function assertPartnerMaySell(db, productId, partner) {
-  if (!partner?.supplier_id) return;
-  const product = db.prepare("SELECT supplier_id FROM products WHERE id = ?").get(productId);
-  if (product?.supplier_id !== partner.supplier_id) {
-    throw Object.assign(new Error("This product is not available for booking"), { status: 409, code: "PRODUCT_NOT_BOOKABLE" });
-  }
-}
-
 export function createOctoReservation(db, input, partner = null) {
   const { uuid = randomUUID(), productId, optionId, availabilityId, unitItems = [], contact } = input;
 
   if (!productId || !optionId || !availabilityId) {
     throw Object.assign(new Error("productId, optionId, and availabilityId are required"), { status: 400 });
   }
-  assertSellableProduct(db, productId);
-  assertPartnerMaySell(db, productId, partner);
+  assertSellableProduct(db, productId, partner);
 
   const parts = availabilityId.split(":");
   const localDate = parts[1];
@@ -353,8 +356,8 @@ export function confirmOctoReservation(db, input, partner = null) {
   const slot = db.prepare("SELECT product_id, option_id, local_date, local_time FROM native_availability_slots WHERE id = ?")
     .get(reservation.availability_slot);
   if (!slot) throw Object.assign(new Error("Reservation departure not found"), { status: 409 });
-  // The supplier may have been suspended while the hold was open.
-  assertSellableProduct(db, slot.product_id);
+  // The supplier may have been suspended, or closed this channel, while the hold was open.
+  assertSellableProduct(db, slot.product_id, partner);
 
   // Bill the price frozen on the hold rather than a placeholder.
   const snapshot = (() => {
@@ -373,7 +376,11 @@ export function confirmOctoReservation(db, input, partner = null) {
   // Nobody has paid us over OCTo. Only a prepaid partner, who collected the
   // money and settles on account, gets a PAID booking; any other confirmation
   // holds the seats with the payment still owed.
-  const paymentStatus = partner?.prepaid ? "PAID" : "PENDING";
+  // A key the supplier issued is the supplier's own direct sale (ADR 041): no
+  // IdeaHoliday commission, and the reseller (or the linked agent, at their net
+  // rate and within their credit) owes the supplier.
+  const supplierSale = partner?.issuer === "SUPPLIER";
+  const paymentStatus = supplierSale ? "OFFLINE" : partner?.prepaid ? "PAID" : "PENDING";
 
   db.transaction(() => {
     // bookings.user_id is a real foreign key, but an OCTo reservation's owner is
@@ -414,6 +421,14 @@ export function confirmOctoReservation(db, input, partner = null) {
       contact.email || "octo@ideaholiday.in",
       contact.phoneNumber || "+919999999999"
     );
+
+    if (supplierSale) {
+      const agent = partner.agent_id ? agentPricing(db, { supplierId: product.supplier_id, agentId: partner.agent_id, productId: slot.product_id, totalAmount: amountInr }) : null;
+      const owed = agent ? agent.netInr : amountInr;
+      db.prepare(`UPDATE bookings SET amount_inr = ?, supplier_payout_amount = ?, commission_amount = 0, balance_due_inr = ?, payment_method = 'PAY_LATER',
+          agent_id = ?, agent_commission_inr = ? WHERE id = ?`)
+        .run(owed, owed, owed, agent ? partner.agent_id : null, agent ? agent.commissionInr : 0, bookingId);
+    }
 
     db.prepare("UPDATE native_reservations SET status = 'CONFIRMED', booking_id = ? WHERE id = ?").run(bookingId, reservation.id);
   })();

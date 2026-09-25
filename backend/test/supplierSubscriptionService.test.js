@@ -22,13 +22,13 @@ function database() {
   db.exec(`
     CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE suppliers (id TEXT PRIMARY KEY, company_name TEXT, contact_name TEXT, email TEXT, phone TEXT, city TEXT, kyb_status TEXT, created_at TEXT);
-    CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT, status TEXT);
+    CREATE TABLE products (id TEXT PRIMARY KEY, supplier_id TEXT, status TEXT, sell_marketplace INTEGER DEFAULT 1, sell_ideaholiday_api INTEGER DEFAULT 1, sell_own_resellers INTEGER DEFAULT 1);
     INSERT INTO users VALUES ('usr_admin', 'Asha Admin');
     INSERT INTO suppliers VALUES
       ('sup_old', 'Old Goa Cabs', 'Ravi', 'ravi@example.test', '+919800000001', 'Goa', 'APPROVED', '2026-05-01 10:00:00'),
       ('sup_eve', 'Eve Tours', 'Esha', 'esha@example.test', '+919800000002', 'Goa', 'APPROVED', '2026-09-13 23:59:59'),
       ('sup_new', 'New Dolphin Trips', 'Nikhil', 'nikhil@example.test', '+919800000003', 'Goa', 'APPROVED', '2026-09-14 00:00:01');
-    INSERT INTO products VALUES ('prd_old', 'sup_old', 'PUBLISHED'), ('prd_new', 'sup_new', 'PUBLISHED');
+    INSERT INTO products (id, supplier_id, status) VALUES ('prd_old', 'sup_old', 'PUBLISHED'), ('prd_new', 'sup_new', 'PUBLISHED');
   `);
   executeMigrationSql(db, upSql("037_program_settings.sql"));
   executeMigrationSql(db, upSql("039_supplier_subscriptions.sql"));

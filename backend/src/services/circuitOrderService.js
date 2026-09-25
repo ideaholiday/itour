@@ -290,7 +290,7 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
       if (!product || product.status !== "PUBLISHED" || Number(product.is_published ?? 1) !== 1) {
         throw orderError(`${line.productTitle || "Circuit item"} is no longer published`, 409, "PRODUCT_UNAVAILABLE");
       }
-      if (product.kyb_status !== "APPROVED" || String(product.supplier_id) !== String(line.supplierId)
+      if (product.kyb_status !== "APPROVED" || Number(product.sell_marketplace ?? 1) === 0 || String(product.supplier_id) !== String(line.supplierId)
         || !isSupplierSubscriptionCovered(database, product.supplier_id)) {
         throw orderError(`${line.productTitle || product.title} is no longer available from the quoted supplier`, 409, "SUPPLIER_UNAVAILABLE");
       }
