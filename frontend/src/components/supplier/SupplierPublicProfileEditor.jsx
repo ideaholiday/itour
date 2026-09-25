@@ -214,8 +214,8 @@ export default function SupplierPublicProfileEditor({ supplierId, products = [] 
         </label>
 
         <div className="grid gap-5 sm:grid-cols-2">
-          <ImageField label="Logo" value={form.logoUrl} onChange={set("logoUrl")} supplierId={supplierId} hint="Square image works best" />
-          <ImageField label="Cover photo" value={form.coverUrl} onChange={set("coverUrl")} supplierId={supplierId} hint="Wide photo of your vehicles, team or tours. Also used when your link is shared." />
+          <ImageField label="Logo" value={form.logoUrl} onChange={set("logoUrl")} supplierId={supplierId} hint="Square image works best, at least 400 × 400 px" />
+          <ImageField label="Cover photo" value={form.coverUrl} onChange={set("coverUrl")} supplierId={supplierId} hint="Wide photo of your vehicles, team or tours, about 1500 × 500 px (3:1). Keep text away from the edges. Also used when your link is shared." />
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2">

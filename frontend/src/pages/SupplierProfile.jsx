@@ -227,18 +227,19 @@ export default function SupplierProfile() {
           {supplier.cityPath && <><span>›</span><Link to={supplier.cityPath} className="hover:text-amber-800">{supplier.city}</Link></>}
         </nav>
       </div>
-      <div className="relative h-40 bg-gradient-to-br from-amber-200 via-amber-100 to-stone-200 sm:h-64">
-        {supplier.coverUrl && <img src={supplier.coverUrl} alt="" className="h-full w-full object-cover" />}
-      </div>
-
       <div className="mx-auto max-w-5xl px-4 sm:px-6">
+        {/* Cover sits in the content column at a fixed 3:1 so uploads crop the same on every screen width. */}
+        <div className="aspect-[5/2] overflow-hidden rounded-3xl bg-gradient-to-br from-amber-200 via-amber-100 to-stone-200 sm:aspect-[3/1]">
+          {supplier.coverUrl && <img src={supplier.coverUrl} alt="" className="h-full w-full object-cover" />}
+        </div>
 
         <header className="mt-3 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex items-start gap-4">
+          <div className="flex items-start gap-4 sm:pl-6">
+            {/* relative z-10 keeps the overlapping logo above the cover. */}
             {supplier.logoUrl ? (
-              <img src={supplier.logoUrl} alt={`${supplier.name} logo`} className="-mt-14 h-24 w-24 shrink-0 rounded-3xl border-4 border-white bg-white object-cover shadow-md sm:-mt-20 sm:h-28 sm:w-28" />
+              <img src={supplier.logoUrl} alt={`${supplier.name} logo`} className="relative z-10 -mt-12 h-24 w-24 shrink-0 rounded-3xl border-4 border-white bg-white object-contain p-1 shadow-md sm:-mt-16 sm:h-32 sm:w-32" />
             ) : (
-              <div className="-mt-14 shrink-0 rounded-3xl border-4 border-white bg-white shadow-md sm:-mt-20"><Avatar name={supplier.name} size="xl" /></div>
+              <div className="relative z-10 -mt-12 shrink-0 rounded-3xl border-4 border-white bg-white shadow-md sm:-mt-16"><Avatar name={supplier.name} size="xl" /></div>
             )}
             <div className="min-w-0">
               <h1 className="font-display text-2xl font-bold text-stone-900 sm:text-3xl">{supplier.name}</h1>
