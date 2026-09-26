@@ -87,7 +87,7 @@ export function routeTitle(legs = []) {
  * longer start on a leg's check-in day are dropped. Other lines and written days are kept.
  * `auto` marks a day title the builder wrote, so a later car or activity may replace it.
  */
-export function planFromLegs(draft) {
+export function planFromLegs(draft, { cities = [] } = {}) {
   const stays = legStays(draft.legs).filter((stay) => stay.nights > 0);
   if (!stays.length) return { lines: draft.lines, days: draft.days };
   const lastDay = stays[stays.length - 1].checkInDay + stays[stays.length - 1].nights;
@@ -102,7 +102,12 @@ export function planFromLegs(draft) {
   const written = (draft.days || []).filter((day) => !day.auto && hasText(day));
   const autoDays = Array.from({ length: lastDay }, (_, index) => index + 1)
     .filter((dayNumber) => !written.some((day) => Number(day.dayNumber) === dayNumber))
-    .map((dayNumber) => ({ dayNumber, title: routeDayTitle(draft.legs, dayNumber, lastDay), description: "", auto: true }));
+    .map((dayNumber) => {
+      const title = routeDayTitle(draft.legs, dayNumber, lastDay);
+      // A day spent in a city takes the city library's day text (ADR 048); arrivals, moves and departures keep the route's.
+      const city = title === cityOfDay(draft.legs, dayNumber) ? cityInfo(cities, title) : null;
+      return { dayNumber, title: city?.dayTitle || title, description: city?.dayDescription || "", auto: true };
+    });
   return { lines: [...planned, ...others], days: [...written, ...autoDays] };
 }
 
@@ -121,6 +126,74 @@ export const nearestFirst = (items, city) => {
   const here = (item) => String(item.city || "").trim().toLowerCase() === key;
   return [...items.filter(here), ...items.filter((item) => !here(item))];
 };
+
+const cityInfo = (cities, name) => cities.find((city) => String(city.name).toLowerCase() === String(name || "").trim().toLowerCase()) || null;
+const TRANSPORT_KINDS = ["TRANSFER", "SIGHTSEEING"];
+
+// The cab for a car line: the smallest one with a price that seats everyone, else the biggest priced one.
+function cabFor(service, cabTypes, travelers) {
+  const priced = cabTypes.filter((cab) => (service.rates || []).some((rate) => rate.cabTypeId === cab.id)).sort((a, b) => a.seats - b.seats);
+  return priced.find((cab) => cab.seats >= travelers) || priced[priced.length - 1] || null;
+}
+
+/**
+ * A route's cars and activities as quotation lines (ADR 048): each library entry the
+ * supplier has on its rate sheet becomes a line on its day; entries it hasn't added
+ * come back as `missing`. An entry already on that day isn't added twice.
+ */
+export function routeItemLines(route, draft, { services = [], cabTypes = [] } = {}) {
+  const travelers = (Number(draft.adults) || 0) + (Number(draft.children) || 0);
+  const lines = [];
+  const missing = [];
+  for (const day of route.days || []) {
+    for (const itemId of day.itemIds || []) {
+      const service = services.find((item) => item.libraryItemId === itemId && item.status === "ACTIVE");
+      if (!service) { missing.push({ id: itemId, name: (day.items || []).find((item) => item.id === itemId)?.name || itemId }); continue; }
+      if ([...(draft.lines || []), ...lines].some((line) => line.serviceId === service.id && dayOfLine(line) === day.dayNumber)) continue;
+      const date = dayDate(draft.startDate, day.dayNumber);
+      const car = TRANSPORT_KINDS.includes(service.kind);
+      lines.push({ kind: car ? "TRANSPORT" : "ACTIVITY", dayNumber: day.dayNumber, date, checkIn: date, title: service.name, serviceId: service.id,
+        cabTypeId: car ? cabFor(service, cabTypes, travelers)?.id || "" : undefined, vehicles: "", adults: "", children: "" });
+    }
+  }
+  return { lines, missing };
+}
+
+/**
+ * Starts a quotation from a route (ADR 048): its cities and nights, its day text,
+ * inclusions and exclusions, one hotel stay per city, and its cars and activities
+ * from the supplier's rate sheet. The route's own cars and activities replace the
+ * draft's; hotels already picked on a city's check-in day, listings and extras stay.
+ */
+export function applyRoute(draft, route, { cities = [], services = [], cabTypes = [] } = {}) {
+  const legs = (route.legs || []).map((leg) => ({ city: leg.city, nights: Number(leg.nights) || 0 }));
+  const days = (route.days || []).filter((day) => day.title || day.description).map((day) => ({ dayNumber: day.dayNumber, title: day.title || "", description: day.description || "", auto: false }));
+  const kept = (draft.lines || []).filter((line) => line.kind !== "TRANSPORT" && line.kind !== "ACTIVITY");
+  const base = {
+    ...draft, legs, days, lines: kept,
+    title: String(draft.title || "").trim() ? draft.title : route.name,
+    destination: [...new Set(legs.map((leg) => leg.city))].join(", "),
+    inclusions: mergeItems(draft.inclusions, route.inclusions || []),
+    exclusions: mergeItems(draft.exclusions, route.exclusions || []),
+  };
+  const planned = { ...base, ...planFromLegs(base, { cities }) };
+  const { lines, missing } = routeItemLines(route, planned, { services, cabTypes });
+  return { draft: { ...planned, lines: [...planned.lines, ...lines] }, missing };
+}
+
+// The quotation as a route of the supplier's own, to reuse (ADR 048). Only library cars and activities carry over.
+export function routeFromDraft(draft, services = []) {
+  const days = dayRange(draft.lines, draft.days).map((dayNumber) => {
+    const text = (draft.days || []).find((day) => Number(day.dayNumber) === dayNumber) || {};
+    const itemIds = [...new Set((draft.lines || []).filter((line) => dayOfLine(line) === dayNumber && line.serviceId)
+      .map((line) => services.find((service) => service.id === line.serviceId)?.libraryItemId).filter(Boolean))];
+    return { dayNumber, title: text.title || null, description: text.description || null, itemIds };
+  }).filter((day) => day.title || day.description || day.itemIds.length);
+  return {
+    name: String(draft.title || "").trim(), legs: legStays(draft.legs).map((stay) => ({ city: stay.city, nights: stay.nights })),
+    days, inclusions: cleanItems(draft.inclusions), exclusions: cleanItems(draft.exclusions),
+  };
+}
 
 // Meal plans the chosen room has a rate for; the line's own plan stays listed so an old quotation still shows it.
 export function mealPlansFor(hotel, roomType, current, allPlans) {
@@ -166,9 +239,10 @@ export function builderSteps(draft, { saved = false } = {}) {
   const titled = new Set((draft.days || []).filter((day) => day.title).map((day) => Number(day.dayNumber)));
   const untitled = days.filter((dayNumber) => !titled.has(dayNumber));
   return [
-    { key: "trip", label: "Trip & customer", missing: [
+    { key: "trip", label: draft.forAgent === false ? "Customer & dates" : "Agent & dates", missing: [
+      draft.forAgent !== false && !draft.agentId && "the agent",
       !String(draft.title || "").trim() && "a trip title",
-      String(draft.customerName || "").trim().length < 2 && "the customer's name",
+      String(draft.customerName || "").trim().length < 2 && (draft.forAgent === false ? "the customer's name" : "the traveller's name"),
       !draft.startDate && "a start date",
     ].filter(Boolean) },
     { key: "route", label: "Route & hotels", missing: [

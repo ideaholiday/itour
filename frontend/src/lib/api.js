@@ -69,6 +69,9 @@ export const api = {
   adminListLibrary: () => fetch(`${BASE}/admin/package-library`, { headers: authHeaders() }).then(handle),
   adminCreateLibraryItem: (payload) => fetch(`${BASE}/admin/package-library`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   adminUpdateLibraryItem: (id, payload) => fetch(`${BASE}/admin/package-library/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  adminListRouteLibrary: () => fetch(`${BASE}/admin/route-library`, { headers: authHeaders() }).then(handle),
+  adminSaveRoute: (id, payload) => fetch(`${BASE}/admin/route-library/routes${id ? `/${encodeURIComponent(id)}` : ""}`, { method: id ? "PUT" : "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  adminSaveCity: (id, payload) => fetch(`${BASE}/admin/route-library/cities${id ? `/${encodeURIComponent(id)}` : ""}`, { method: id ? "PUT" : "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   getCities: () => cachedFetch(`${BASE}/cities`, {}, 300000),
   search: (params = {}) => {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))).toString();

@@ -301,6 +301,7 @@ export function quotationView(db, row) {
   const perPerson = (total) => (travelers ? Math.ceil(total / travelers) : total);
   const legs = db.prepare("SELECT city, nights FROM quotation_legs WHERE quotation_id = ? ORDER BY sort_order").all(row.id)
     .map((leg) => ({ city: leg.city, nights: Number(leg.nights) }));
+  const agent = row.agent_id ? db.prepare("SELECT name, markup_pct FROM supplier_agents WHERE id = ? AND supplier_id = ?").get(row.agent_id, row.supplier_id) : null;
   const optionRows = db.prepare("SELECT option_number, name FROM quotation_options WHERE quotation_id = ? ORDER BY option_number").all(row.id);
   const options = optionRows.length >= 2 ? optionRows.map((option) => {
     const totals = packageTotals(linesOfOption(lines, option.option_number).map((line) => ({ kind: line.kind, price: line.priceInr })), { markupPct: Number(row.markup_pct), gstPct: Number(row.gst_pct) });
@@ -320,6 +321,13 @@ export function quotationView(db, row) {
       perPersonInr: perPerson(row.total_inr),
     },
     options, selectedOption: row.selected_option ?? null,
+    agentName: agent?.name || null,
+    // For an agent: what the agent pays you and keeps, per option until one is chosen (ADR 048).
+    trade: agent ? {
+      markupPct: Number(agent.markup_pct || 0),
+      ...tradeTotals(linesOfOption(lines, row.selected_option || 1), { agentMarkupPct: agent.markup_pct, gstPct: row.gst_pct, retailTotalInr: row.total_inr }),
+      options: options.map((option) => ({ number: option.number, ...tradeTotals(linesOfOption(lines, option.number), { agentMarkupPct: agent.markup_pct, gstPct: row.gst_pct, retailTotalInr: option.totals.totalInr }) })),
+    } : null,
     trip: row.status === "ACCEPTED" ? tripSummary(db, row, lines, paid) : null,
     lines, days, legs, payments, warnings: quotationWarnings(db, row, lines, options, legs),
     sentAt: row.sent_at || null, acceptedAt: row.accepted_at || null, createdAt: row.created_at, updatedAt: row.updated_at,
@@ -327,9 +335,23 @@ export function quotationView(db, row) {
 }
 
 export function listQuotations(db, supplierId) {
-  return db.prepare(`SELECT id, ref, title, destination, customer_name, start_date, status, total_inr, created_at, updated_at FROM quotations
-    WHERE supplier_id = ? ORDER BY updated_at DESC, created_at DESC LIMIT 200`).all(supplierId)
-    .map((row) => ({ id: row.id, ref: row.ref, title: row.title, destination: row.destination || null, customerName: row.customer_name, startDate: row.start_date, status: row.status, totalInr: row.total_inr, updatedAt: row.updated_at }));
+  return db.prepare(`SELECT q.id, q.ref, q.title, q.destination, q.customer_name, q.agent_id, a.name AS agent_name, q.start_date, q.status, q.total_inr, q.created_at, q.updated_at
+    FROM quotations q LEFT JOIN supplier_agents a ON a.id = q.agent_id
+    WHERE q.supplier_id = ? ORDER BY q.updated_at DESC, q.created_at DESC LIMIT 200`).all(supplierId)
+    .map((row) => ({ id: row.id, ref: row.ref, title: row.title, destination: row.destination || null, customerName: row.customer_name, agentId: row.agent_id || null, agentName: row.agent_name || null, startDate: row.start_date, status: row.status, totalInr: row.total_inr, updatedAt: row.updated_at }));
+}
+
+/**
+ * The agent's side of a trade quotation (ADR 039, ADR 048): the same lines priced
+ * with the agent's own markup on the cost lines instead of the retail markup;
+ * listings keep their price and GST is unchanged. The net never exceeds retail,
+ * and retail − net is the agent's margin.
+ */
+export function tradeTotals(lines, { agentMarkupPct, gstPct, retailTotalInr }) {
+  const markupPct = Math.max(0, Math.min(200, Number(agentMarkupPct || 0)));
+  const totals = packageTotals(lines.map((line) => ({ kind: line.kind, price: Number(line.priceInr) })), { markupPct, gstPct: Number(gstPct) });
+  const netInr = Math.min(totals.total_inr, retailTotalInr);
+  return { markupPct, netInr, marginInr: Math.max(0, retailTotalInr - netInr) };
 }
 
 /**

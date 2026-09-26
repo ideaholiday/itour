@@ -46,6 +46,7 @@ import { listPrograms, listSettingsAudit, updateSettings } from "../services/pro
 import { createCoupon, listCouponRedemptions, listCoupons, updateCoupon } from "../services/couponService.js";
 import { createPost, deletePost, listAllPosts, updatePost } from "../services/blogService.js";
 import { listLibraryItems, saveLibraryItem } from "../services/packageLibraryService.js";
+import { listSharedLibrary, saveCity, saveSharedRoute } from "../services/routeLibraryService.js";
 import { listVerificationQueue, rejectPurchasedVerification, retryCheckRefund } from "../services/supplierPlanPaymentService.js";
 import {
   getSubscriptionStatus, grantSubscriptionWaiver, listSupplierSubscriptions, revokeSubscription, syncLaunchWaivers,
@@ -627,6 +628,23 @@ router.post("/package-library", (req, res) => {
 
 router.put("/package-library/:id", (req, res) => {
   try { res.json({ success: true, item: saveLibraryItem(db, req.body, req.params.id) }); } catch (error) { libraryFailure(res, req, error, "Could not save the entry"); }
+});
+
+// Route and city library (ADR 048). Hidden, never deleted.
+router.get("/route-library", (req, res) => {
+  try { res.json({ success: true, ...listSharedLibrary(db) }); } catch (error) { libraryFailure(res, req, error, "Could not load the route library"); }
+});
+router.post("/route-library/routes", (req, res) => {
+  try { res.status(201).json({ success: true, route: saveSharedRoute(db, req.body) }); } catch (error) { libraryFailure(res, req, error, "Could not add the route"); }
+});
+router.put("/route-library/routes/:id", (req, res) => {
+  try { res.json({ success: true, route: saveSharedRoute(db, req.body, req.params.id) }); } catch (error) { libraryFailure(res, req, error, "Could not save the route"); }
+});
+router.post("/route-library/cities", (req, res) => {
+  try { res.status(201).json({ success: true, city: saveCity(db, req.body) }); } catch (error) { libraryFailure(res, req, error, "Could not add the city"); }
+});
+router.put("/route-library/cities/:id", (req, res) => {
+  try { res.json({ success: true, city: saveCity(db, req.body, req.params.id) }); } catch (error) { libraryFailure(res, req, error, "Could not save the city"); }
 });
 
 // Staff blog (ADR 026). Drafts stay private until published.

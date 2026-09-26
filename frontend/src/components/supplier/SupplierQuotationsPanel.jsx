@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AlertCircle, ArrowLeft, ArrowRight, CalendarPlus, Car, CheckCircle2, Circle, Copy, Download, FileText, Hotel, MessageCircle, Package, Plus, Send, Ticket, Trash2, TriangleAlert, User, Users } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, BookmarkPlus, CalendarPlus, Car, CheckCircle2, Circle, Copy, Download, MapPin, FileText, Hotel, MessageCircle, Package, Plus, Send, Ticket, Trash2, TriangleAlert, User, Users } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
 import SupplierHotelRatesPanel, { MEAL_PLAN_LABELS } from "./SupplierHotelRatesPanel.jsx";
 import SupplierRateSheetPanel, { isTransport } from "./SupplierRateSheetPanel.jsx";
 import SupplierTripPanel from "./SupplierTripPanel.jsx";
 import Combobox from "../Combobox.jsx";
-import { addDays, builderSteps, cityOfDay, cleanItems, mergeItems, tripInclusions, dayAfterService, dayDate, dayRange, hotelRateGap, insertDayAfter, legStays, mealPlansFor, minTripLength, nearestFirst, planFromLegs, quotationPayload, removeDay, routeTitle, setTripLength, setupSteps } from "../../lib/quotationItinerary.js";
+import { addDays, applyRoute, routeFromDraft, routeItemLines, builderSteps, cityOfDay, cleanItems, mergeItems, tripInclusions, dayAfterService, dayDate, dayRange, hotelRateGap, insertDayAfter, legStays, mealPlansFor, minTripLength, nearestFirst, planFromLegs, quotationPayload, removeDay, routeTitle, setTripLength, setupSteps } from "../../lib/quotationItinerary.js";
 
 const inr = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const input = "rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm";
@@ -30,7 +30,12 @@ const costLabel = (line, hotels, cabTypes) => {
   const cab = line.kind === "TRANSPORT" ? cabTypes.find((item) => item.id === line.cabTypeId) : null;
   return [line.title, cab ? `${line.vehicles > 1 ? `${line.vehicles} × ` : ""}${cab.name}` : null].filter(Boolean).join(" · ");
 };
-const NEW = () => ({ title: "", destination: "", days: [], legs: [], options: [], inclusions: [], exclusions: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
+// Agent or direct: most operators quote B2B, so a new quotation is for an agent unless this browser last chose direct (ADR 048).
+const MODE_KEY = "idea.quotation.forAgent";
+const lastMode = () => { try { return window.localStorage.getItem(MODE_KEY) !== "direct"; } catch { return true; } };
+const rememberMode = (forAgent) => { try { window.localStorage.setItem(MODE_KEY, forAgent ? "agent" : "direct"); } catch { /* private mode */ } };
+const chain = (legs = []) => legs.map((leg) => `${leg.city} ${leg.nights}N`).join(" → ");
+const NEW = () => ({ forAgent: lastMode(), title: "", destination: "", days: [], legs: [], options: [], inclusions: [], exclusions: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
 
 async function request(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...authHeaders() } });
@@ -61,6 +66,12 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const [cities, setCities] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [terms, setTerms] = useState({ inclusions: [], exclusions: [] });
+  const [routeLib, setRouteLib] = useState({ routes: [], cities: [] });
+  const [routeId, setRouteId] = useState("");
+  const [appliedRoute, setAppliedRoute] = useState(null);
+  const [routeMissing, setRouteMissing] = useState([]);
+  const [newAgent, setNewAgent] = useState(null);
+  const [listFilter, setListFilter] = useState("all");
   const [draft, setDraft] = useState(null);
   const [step, setStep] = useState("trip");
   const [saved, setSaved] = useState(null);
@@ -75,6 +86,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     request(`${base}/hotels`).then((data) => setHotels(data.hotels || [])).catch(() => {});
     request(`${base}/cab-types`).then((data) => setCabTypes(data.cabTypes || [])).catch(() => {});
     request(`${base}/services`).then((data) => setServices(data.services || [])).catch(() => {});
+    request(`${base}/route-library`).then((data) => setRouteLib({ routes: data.routes || [], cities: data.cities || [] })).catch(() => {});
     request(`${base}/quotation-terms`).then((data) => setTerms(data.terms || { inclusions: [], exclusions: [] })).catch(() => {});
     request(`${base}/agents`).then((data) => setAgents((data.agents || []).filter((agent) => agent.status === "ACTIVE"))).catch(() => {});
     // Cities for the destination and leg pickers: the marketplace catalogue,
@@ -118,7 +130,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     setSaved(quotation); setShared(null); setNotice(""); setError("");
     const group = quotation.adults + quotation.children;
     setAcceptOption(quotation.selectedOption || 1);
-    setDraft({ ...quotation, inclusions: quotation.inclusions || [], exclusions: quotation.exclusions || [], destination: quotation.destination || "", days: quotation.days || [], legs: quotation.legs || [], options: (quotation.options || []).map((option) => ({ name: option.name })), customerEmail: quotation.customerEmail || "", customerPhone: quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
+    setDraft({ ...quotation, forAgent: Boolean(quotation.agentId), inclusions: quotation.inclusions || [], exclusions: quotation.exclusions || [], destination: quotation.destination || "", days: quotation.days || [], legs: quotation.legs || [], options: (quotation.options || []).map((option) => ({ name: option.name })), customerEmail: quotation.customerEmail || "", customerPhone: quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
       lines: quotation.lines.map((line) => {
         const next = { ...line, checkIn: line.kind === "HOTEL" ? line.date : undefined };
         if (line.kind !== "TRANSPORT" && line.kind !== "ACTIVITY") return next;
@@ -266,7 +278,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const layOut = () => {
     if (firstOptionStays.length && !routeMatches && !window.confirm("Set the hotel stays to the route: one per city, from its check-in day for its nights. Hotels already picked on those days are kept; other stays are removed. Continue?")) return;
     const cities = [...new Set(routeStays.map((stay) => stay.city))];
-    setDraft({ ...draft, ...planFromLegs(draft), title: draft.title || routeTitle(draft.legs), destination: draft.destination || cities.join(", ") });
+    setDraft({ ...draft, ...planFromLegs(draft, { cities: routeLib.cities }), title: draft.title || routeTitle(draft.legs), destination: draft.destination || cities.join(", ") });
   };
   // One item's fields. Hotels take their day from the check-in date; the rest pick a day.
   const lineEditor = (line, index) => {
@@ -331,6 +343,47 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   };
   const productOptionsList = products.map((product) => ({ value: product.id, label: product.title }));
   const agentOptionsList = agents.map((agent) => ({ value: agent.id, label: agent.name, hint: agent.contactName || "" }));
+  const isAgentMode = draft ? draft.forAgent !== false : true;
+  const pickedAgent = draft?.agentId ? agents.find((agent) => agent.id === draft.agentId) : null;
+  const setMode = (forAgent) => { rememberMode(forAgent); setDraft({ ...draft, forAgent, agentId: forAgent ? draft.agentId : "" }); };
+  // A new agent from inside the builder, picked at once (ADR 048).
+  const addAgent = () => run(async () => {
+    const body = { name: newAgent.name, contactName: newAgent.contactName || null, phone: newAgent.phone || null, email: newAgent.email || null, markupPct: Number(newAgent.markupPct) || 0 };
+    const { agent } = await request(`${base}/agents`, { method: "POST", body: JSON.stringify(body) });
+    setAgents([...agents, agent]);
+    setDraft({ ...draft, forAgent: true, agentId: agent.id });
+    setNewAgent(null);
+  }, "Agent added and picked.");
+
+  // Route library (ADR 048): the supplier's own routes first, then the shared ones.
+  const routeOptions = routeLib.routes.map((route) => ({ value: route.id, label: route.name, hint: [route.own ? "Your route" : route.region, route.legs.map((leg) => leg.city).join(" ")].filter(Boolean).join(" · ") }));
+  const pickedRoute = routeLib.routes.find((route) => route.id === routeId) || null;
+  const useRoute = () => {
+    const replacing = (draft.legs || []).length || draft.lines.some((line) => line.kind === "TRANSPORT" || line.kind === "ACTIVITY");
+    if (replacing && !window.confirm(`Use ${pickedRoute.name}? Its cities, days, cars and activities replace this quotation's. Hotels already picked on a city's check-in day stay.`)) return;
+    const { draft: next, missing } = applyRoute(draft, pickedRoute, { cities: routeLib.cities, services, cabTypes });
+    setDraft(next); setAppliedRoute(pickedRoute); setRouteMissing(missing); setError("");
+    setNotice(`${pickedRoute.name} laid out: ${next.legs.reduce((sum, leg) => sum + leg.nights, 0) + 1} days. Pick a hotel for each city below.`);
+  };
+  // Adds the route's missing library entries to the rate sheet (ADR 047), then puts them on their days.
+  const addMissing = () => run(async () => {
+    await request(`${base}/package-library/import`, { method: "POST", body: JSON.stringify({ itemIds: routeMissing.map((item) => item.id) }) });
+    const [fresh, cabs] = await Promise.all([request(`${base}/services`), request(`${base}/cab-types`)]);
+    setServices(fresh.services || []); setCabTypes(cabs.cabTypes || []);
+    const { lines, missing } = routeItemLines(appliedRoute, draft, { services: fresh.services || [], cabTypes: cabs.cabTypes || [] });
+    setDraft({ ...draft, lines: [...draft.lines, ...lines] });
+    setRouteMissing(missing);
+  }, "Added to your rate sheet at the library's example prices and put on their days. Check the prices under Cars & activities.");
+  const saveAsRoute = () => run(async () => {
+    const body = routeFromDraft(draft, services);
+    if (!body.legs.length) throw new Error("Add the cities and nights on Route & hotels first");
+    if (body.name.length < 2) throw new Error("Give the trip a title first; it names the route");
+    await request(`${base}/routes`, { method: "POST", body: JSON.stringify(body) });
+    const data = await request(`${base}/route-library`);
+    setRouteLib({ routes: data.routes || [], cities: data.cities || [] });
+  }, "Saved to your routes. It's at the top of the route list for your next quotation.");
+  const agentsInList = [...new Map(list.filter((row) => row.agentId).map((row) => [row.agentId, row.agentName || "Agent"])).entries()];
+  const shownList = list.filter((row) => listFilter === "all" || (listFilter === "direct" ? !row.agentId : row.agentId === listFilter));
 
   if (tab !== "quotations") {
     return (
@@ -352,17 +405,24 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
       {!draft ? (
         <>
           <SetupGuide steps={setupSteps({ hotels, cabTypes, services, quotationCount: list.length })} setTab={setTab} />
-          <button onClick={() => { setSaved(null); setDraft({ ...NEW(), inclusions: terms.inclusions, exclusions: terms.exclusions }); setStep("trip"); }} className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-bold text-stone-950"><Plus className="h-4 w-4" /> New quotation</button>
+          <button onClick={() => { setSaved(null); setDraft({ ...NEW(), inclusions: terms.inclusions, exclusions: terms.exclusions }); setStep("trip"); setRouteId(""); setAppliedRoute(null); setRouteMissing([]); }} className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-bold text-stone-950"><Plus className="h-4 w-4" /> New quotation</button>
+          {list.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 text-xs" role="group" aria-label="Show quotations for">
+              {[["all", "All"], ["direct", "Direct customers"], ...agentsInList].map(([value, label]) => (
+                <button key={value} type="button" onClick={() => setListFilter(value)} aria-pressed={listFilter === value} className={`rounded-full border px-3 py-1 font-bold ${listFilter === value ? "border-stone-900 bg-stone-900 text-white" : "border-stone-300 text-stone-600"}`}>{label}</button>
+              ))}
+            </div>
+          )}
           <ul className="divide-y divide-stone-100 rounded-2xl border border-stone-200">
-            {list.map((row) => (
+            {shownList.map((row) => (
               <li key={row.id}>
                 <button onClick={() => request(`${base}/quotations/${row.id}`).then((data) => { open(data.quotation); setStep(data.quotation.status === "DRAFT" ? "days" : "price"); }).catch((err) => setError(err.message))} className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-stone-50">
-                  <span className="min-w-0"><strong className="block truncate text-sm text-stone-900">{row.title}</strong><span className="text-xs text-stone-500">{row.ref} · {row.customerName}{row.destination ? ` · ${row.destination}` : ""} · from {row.startDate}</span></span>
+                  <span className="min-w-0"><strong className="block truncate text-sm text-stone-900">{row.title}</strong><span className="text-xs text-stone-500">{row.agentName && <span className="mr-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-black text-indigo-800">{row.agentName}</span>}{row.ref} · {row.customerName}{row.destination ? ` · ${row.destination}` : ""} · from {row.startDate}</span></span>
                   <span className="text-right"><span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${STATUS_STYLES[row.status]}`}>{row.status}</span><span className="mt-1 block font-mono text-sm font-bold">{inr(row.totalInr)}</span></span>
                 </button>
               </li>
             ))}
-            {!list.length && <li className="p-6 text-center text-xs text-stone-500">No quotations yet.</li>}
+            {!shownList.length && <li className="p-6 text-center text-xs text-stone-500">{list.length ? "None for this choice." : "No quotations yet."}</li>}
           </ul>
         </>
       ) : (
@@ -375,19 +435,35 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
           <Stepper steps={steps} step={stepIndex} onPick={goTo} />
 
           {step === "trip" && <>
-            {(() => {
-              const forAgentQuote = Boolean(draft.agentId);
-              const agent = forAgentQuote ? agents.find((row) => row.id === draft.agentId) : null;
-              return (
-                <div className={`flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs ${forAgentQuote ? "border-indigo-200 bg-indigo-50 text-indigo-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`} role="status">
-                  {forAgentQuote ? <Users className="h-4 w-4 shrink-0" /> : <User className="h-4 w-4 shrink-0" />}
-                  <span><strong>{forAgentQuote ? `Quotation for agent${agent ? `: ${agent.name}` : ""}` : "Quotation for a direct customer"}.</strong> {forAgentQuote ? " The trade PDF prices with the agent's markup and hides your brand." : " The PDF carries your brand and shows one retail price."}</span>
+            <div role="radiogroup" aria-label="Who the quotation is for" className="grid gap-2 sm:grid-cols-2">
+              {[[true, Users, "For a travel agent (B2B)", "Trade PDF with the agent's net price and margin; your brand stays off it."], [false, User, "Direct customer", "Your branded PDF with one retail price."]].map(([value, Icon, label, hint]) => (
+                <button key={label} type="button" role="radio" aria-checked={isAgentMode === value} disabled={!editable} onClick={() => setMode(value)}
+                  className={`flex items-start gap-2 rounded-2xl border p-3 text-left text-xs ${isAgentMode === value ? (value ? "border-indigo-400 bg-indigo-50 text-indigo-950" : "border-emerald-400 bg-emerald-50 text-emerald-950") : "border-stone-200 text-stone-500"}`}>
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0" /><span><strong className="block text-sm">{label}</strong>{hint}</span>
+                </button>
+              ))}
+            </div>
+            {isAgentMode && (
+              <fieldset disabled={!editable} className="space-y-2 rounded-2xl border border-indigo-200 p-3 text-xs">
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="min-w-56 flex-1 text-stone-500">Agent<Combobox value={draft.agentId || ""} onChange={(value) => setDraft({ ...draft, agentId: value })} options={agentOptionsList} placeholder="Search your agents…" ariaLabel="agent" className="mt-1" /></label>
+                  <button type="button" onClick={() => setNewAgent(newAgent ? null : { name: "", contactName: "", phone: "", email: "", markupPct: "" })} className="rounded-xl border border-indigo-300 px-3 py-2 font-bold text-indigo-800">{newAgent ? "Cancel" : "+ New agent"}</button>
                 </div>
-              );
-            })()}
+                {newAgent && (
+                  <div className="grid gap-2 rounded-xl bg-indigo-50 p-2 sm:grid-cols-5">
+                    <input placeholder="Agency name" value={newAgent.name} onChange={(event) => setNewAgent({ ...newAgent, name: event.target.value })} className={input} aria-label="New agent name" />
+                    <input placeholder="Contact person" value={newAgent.contactName} onChange={(event) => setNewAgent({ ...newAgent, contactName: event.target.value })} className={input} aria-label="New agent contact" />
+                    <input placeholder="Phone" value={newAgent.phone} onChange={(event) => setNewAgent({ ...newAgent, phone: event.target.value })} className={input} aria-label="New agent phone" />
+                    <input placeholder="Email" type="email" value={newAgent.email} onChange={(event) => setNewAgent({ ...newAgent, email: event.target.value })} className={input} aria-label="New agent email" />
+                    <span className="flex gap-2"><input type="number" min={0} max={200} placeholder="Markup %" value={newAgent.markupPct} onChange={(event) => setNewAgent({ ...newAgent, markupPct: event.target.value })} className={`w-full ${input}`} aria-label="New agent markup" />
+                      <button type="button" disabled={newAgent.name.trim().length < 2} onClick={addAgent} className="rounded-xl bg-indigo-600 px-3 font-bold text-white disabled:opacity-40">Add</button></span>
+                  </div>
+                )}
+                {pickedAgent && <p className="text-indigo-900">{pickedAgent.contactName ? `${pickedAgent.contactName} · ` : ""}the agent's markup is <strong>{Number(pickedAgent.markupPct || 0)}%</strong> on your costs. {pickedAgent.email ? `The trade PDF goes to ${pickedAgent.email}.` : "No email on file: download the agent PDF to share it."}</p>}
+              </fieldset>
+            )}
             <fieldset disabled={!editable} className="grid gap-3 sm:grid-cols-3">
-              <label className="text-xs text-stone-500">Who is it for?<Combobox value={draft.agentId || ""} onChange={(value) => setDraft({ ...draft, agentId: value })} options={agentOptionsList} placeholder="Direct customer" ariaLabel="agent" className="mt-1" /></label>
-              <label className="text-xs text-stone-500">{draft.agentId ? "Agent's customer" : "Customer"}<Combobox
+              <label className="text-xs text-stone-500">{isAgentMode ? "Traveller (the agent's client)" : "Customer"}<Combobox
                 freeText allowClear={false}
                 value={draft.customerName}
                 onChange={(next) => {
@@ -396,13 +472,13 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                   else setDraft({ ...draft, customerName: next });
                 }}
                 options={customerOptions.map((option) => ({ ...option, value: option.label }))}
-                placeholder="Name, or pick a saved customer"
+                placeholder={isAgentMode ? "Traveller's name, or pick one of this agent's" : "Name, or pick a saved customer"}
                 ariaLabel="customer-name"
                 className="mt-1"
               /></label>
-              <span className="grid grid-cols-2 gap-2 self-end">
-                <input placeholder="Customer email" type="email" value={draft.customerEmail} onChange={(event) => setDraft({ ...draft, customerEmail: event.target.value })} className={input} aria-label="Customer email" />
-                <input placeholder="Customer phone" value={draft.customerPhone} onChange={(event) => setDraft({ ...draft, customerPhone: event.target.value })} className={input} aria-label="Customer phone" />
+              <span className="grid grid-cols-2 gap-2 self-end sm:col-span-2">
+                <input placeholder={isAgentMode ? "Traveller's email (optional)" : "Customer email"} type="email" value={draft.customerEmail} onChange={(event) => setDraft({ ...draft, customerEmail: event.target.value })} className={input} aria-label="Customer email" />
+                <input placeholder={isAgentMode ? "Traveller's phone (optional)" : "Customer phone"} value={draft.customerPhone} onChange={(event) => setDraft({ ...draft, customerPhone: event.target.value })} className={input} aria-label="Customer phone" />
               </span>
               <label className="text-xs text-stone-500">Starts<input type="date" value={draft.startDate} onChange={(event) => setStart(event.target.value)} className={`mt-1 w-full ${input}`} /></label>
               <label className="text-xs text-stone-500">Adults / children<span className="mt-1 flex gap-2"><input type="number" min={1} value={draft.adults} onChange={(event) => setDraft({ ...draft, adults: event.target.value })} className={`w-full ${input}`} aria-label="Adults" /><input type="number" min={0} value={draft.children} onChange={(event) => setDraft({ ...draft, children: event.target.value })} className={`w-full ${input}`} aria-label="Children" /></span></label>
@@ -425,6 +501,28 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
           </>}
 
           {step === "route" && <>
+            {editable && routeLib.routes.length > 0 && (
+              <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs">
+                <p className="flex items-center gap-1 font-bold text-stone-800"><MapPin className="h-4 w-4 text-amber-700" /> Start from a ready route</p>
+                <div className="flex flex-wrap items-end gap-2">
+                  <Combobox value={routeId} onChange={setRouteId} options={routeOptions} placeholder="Search routes, e.g. Lucknow Ayodhya Varanasi" ariaLabel="route" className="min-w-64 flex-1" />
+                  <button type="button" disabled={!pickedRoute} onClick={useRoute} className="rounded-xl bg-amber-500 px-3 py-2 font-bold text-stone-950 disabled:opacity-40">Use this route</button>
+                </div>
+                {pickedRoute && (
+                  <div className="rounded-xl bg-white p-2 text-stone-600">
+                    <p><strong className="text-stone-900">{chain(pickedRoute.legs)}</strong>{pickedRoute.own && <span className="ml-1 rounded-full bg-amber-100 px-2 text-[10px] font-black text-amber-800">YOUR ROUTE</span>}</p>
+                    {pickedRoute.description && <p className="mt-0.5">{pickedRoute.description}</p>}
+                    <ol className="mt-1 space-y-0.5">{pickedRoute.days.filter((day) => day.title).map((day) => <li key={day.dayNumber}>Day {day.dayNumber}: {day.title}{day.items?.length ? <span className="text-stone-400"> · {day.items.map((item) => item.name).join(", ")}</span> : null}</li>)}</ol>
+                  </div>
+                )}
+                {routeMissing.length > 0 && (
+                  <p className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-2 text-amber-900">
+                    <span className="flex-1">{routeMissing.length} of the route's cars and activities aren't on your rate sheet yet: {routeMissing.map((item) => item.name).join(", ")}.</span>
+                    <button type="button" onClick={addMissing} className="rounded-lg bg-stone-900 px-3 py-1.5 font-bold text-white">Add them at example prices</button>
+                  </p>
+                )}
+              </div>
+            )}
             <fieldset disabled={!editable} className="flex flex-wrap items-center gap-2 rounded-2xl border border-stone-200 p-3 text-xs">
               <span className="font-bold text-stone-700">Destinations</span>
               {(draft.legs || []).length === 0 && <span className="text-stone-500">Add the cities in order with the nights in each, e.g. Lucknow 2N → Ayodhya 2N. The days and one hotel stay per city are laid out for you.</span>}
@@ -535,11 +633,12 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
           {saved && saved.options.length > 0 && !saved.selectedOption && (
             <div className="overflow-x-auto rounded-2xl border border-stone-200 p-3">
               <table className="w-full text-right text-xs">
-                <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1 text-left">Option</th><th>Your costs</th><th>Markup</th><th>Your listings</th><th>GST</th><th className="text-stone-600">Customer pays</th><th>Per person</th></tr></thead>
+                <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1 text-left">Option</th><th>Your costs</th><th>Markup</th><th>Your listings</th><th>GST</th>{saved.trade && <th className="text-indigo-700">Agent net</th>}<th className="text-stone-600">Customer pays</th><th>Per person</th></tr></thead>
                 <tbody className="divide-y divide-stone-100 font-mono">
                   {saved.options.map((option) => (
                     <tr key={option.number}>
                       <td className="py-1.5 text-left font-sans font-bold">{option.name}</td><td>{inr(option.totals.costInr)}</td><td>{inr(option.totals.markupInr)}</td><td>{inr(option.totals.listingsInr)}</td><td>{inr(option.totals.gstInr)}</td>
+                      {saved.trade && <td className="text-indigo-700">{inr(saved.trade.options.find((item) => item.number === option.number)?.netInr)}</td>}
                       <td className="text-sm font-black">{inr(option.totals.totalInr)}</td><td>{inr(option.totals.perPersonInr)}</td>
                     </tr>
                   ))}
@@ -575,6 +674,13 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             </div>
           )}
 
+          {saved?.trade && !(saved.options.length > 0 && !saved.selectedOption) && (
+            <div className="grid gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950 sm:grid-cols-3" role="group" aria-label="Agent's price">
+              <p className="text-xs">Guest pays (retail)<strong className="block font-mono text-lg">{inr(saved.totals.totalInr)}</strong></p>
+              <p className="text-xs">{saved.agentName || "The agent"} pays you, at {saved.trade.markupPct}% markup<strong className="block font-mono text-lg">{inr(saved.trade.netInr)}</strong></p>
+              <p className="text-xs">Agent's margin<strong className="block font-mono text-lg text-emerald-700">{inr(saved.trade.marginInr)}</strong></p>
+            </div>
+          )}
           {saved?.warnings?.length > 0 && (
             <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
               <p className="flex items-center gap-1 font-bold"><TriangleAlert className="h-4 w-4" /> Check before sending</p>
@@ -584,17 +690,18 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
 
           <div className="flex flex-wrap gap-2">
             {editable && <button onClick={save} className="rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-bold text-stone-950">Save and price</button>}
-            {saved && <button onClick={() => downloadPdf("BRAND")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Download className="h-4 w-4" /> PDF</button>}
-            {saved && saved.status !== "DECLINED" && <button onClick={send} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Send className="h-4 w-4" /> Send to customer</button>}
-            {saved?.agentId && <button onClick={() => downloadPdf("AGENT")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Download className="h-4 w-4" /> Agent PDF</button>}
-            {saved?.agentId && saved.status !== "DECLINED" && <button onClick={sendToAgent} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Send className="h-4 w-4" /> Send to agent</button>}
+            {saved?.agentId && saved.status !== "DECLINED" && <button onClick={sendToAgent} className="flex items-center gap-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white"><Send className="h-4 w-4" /> Send to agent</button>}
+            {saved?.agentId && <button onClick={() => downloadPdf("AGENT")} className="flex items-center gap-1 rounded-xl border border-indigo-300 px-4 py-2.5 text-xs font-bold text-indigo-800"><Download className="h-4 w-4" /> Agent PDF</button>}
+            {saved && <button onClick={() => downloadPdf("BRAND")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Download className="h-4 w-4" /> {saved.agentId ? "Branded PDF" : "PDF"}</button>}
+            {saved && saved.status !== "DECLINED" && (!saved.agentId || saved.customerEmail || saved.customerPhone) && <button onClick={send} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Send className="h-4 w-4" /> {saved.agentId ? "Send to traveller" : "Send to customer"}</button>}
+            {saved && <button type="button" onClick={saveAsRoute} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><BookmarkPlus className="h-4 w-4" /> Save as my route</button>}
             {saved && <span className="flex items-center gap-1">
               <input type="date" value={copyDate} onChange={(event) => setCopyDate(event.target.value)} className={`${input} py-2 text-xs`} aria-label="Start date for the copy" />
               <button onClick={() => copyFrom(saved.id, { startDate: copyDate }, "Copied as a new draft for the new dates. Change the customer and save.").then((data) => { if (data) setStep("trip"); })} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Copy className="h-4 w-4" /> Copy to this date</button>
             </span>}
             {saved?.status === "SENT" && <>
               {saved.options.length > 0 && <select value={acceptOption} onChange={(event) => setAcceptOption(Number(event.target.value))} className={`${input} py-2 text-xs`} aria-label="Option the customer chose">{saved.options.map((option) => <option key={option.number} value={option.number}>{option.name}</option>)}</select>}
-              <button onClick={() => act("/status", saved.options.length ? { status: "ACCEPTED", option: acceptOption } : { status: "ACCEPTED" }, "Accepted. Book the listings below and record payments.")} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white">Customer accepted</button>
+              <button onClick={() => act("/status", saved.options.length ? { status: "ACCEPTED", option: acceptOption } : { status: "ACCEPTED" }, "Accepted. Book the listings below and record payments.")} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white">{saved.agentId ? "Agent confirmed" : "Customer accepted"}</button>
               <button onClick={() => act("/status", { status: "DECLINED" }, "Marked declined.")} className="rounded-xl border border-rose-300 px-4 py-2.5 text-xs font-bold text-rose-700">Declined</button>
             </>}
           </div>

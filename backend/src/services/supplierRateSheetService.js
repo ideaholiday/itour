@@ -101,6 +101,7 @@ function serviceView(db, row) {
     startTime: row.start_time || null, durationHours: row.duration_hours ?? null, closedWeekdays: closedDays(row.closed_weekdays),
     pricing: row.pricing || "FIXED", distanceKm: row.distance_km ?? null,
     dayTitle: row.day_title || null, dayDescription: row.day_description || null, status: row.status, rates,
+    libraryItemId: row.library_item_id || null,
   };
 }
 

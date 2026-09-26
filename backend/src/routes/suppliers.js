@@ -83,6 +83,7 @@ import { carSchedule, recordVendorPayment, requestHotelBooking, sendItinerary, u
 import { itineraryPdf } from "../services/tripItineraryPdfService.js";
 import { addServiceRate, deleteServiceRate, listCabTypes, listServices, saveCabType, saveService } from "../services/supplierRateSheetService.js";
 import { importLibraryItems, supplierLibrary } from "../services/packageLibraryService.js";
+import { deleteSupplierRoute, saveSupplierRoute, supplierRouteLibrary } from "../services/routeLibraryService.js";
 import { quotationPdf } from "../services/quotationPdfService.js";
 import { createResellerKey, listResellerKeys, revokeResellerKey, setProductChannels } from "../services/supplierChannelSettingsService.js";
 import { sendEmail } from "../services/emailService.js";
@@ -2449,6 +2450,19 @@ router.get("/:id/package-library", (req, res) => {
 router.post("/:id/package-library/import", (req, res) => {
   try { res.status(201).json({ success: true, ...importLibraryItems(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add from the package library"); }
 });
+// Route and city library (ADR 048): shared routes and cities plus the supplier's own routes.
+router.get("/:id/route-library", (req, res) => {
+  try { res.json({ success: true, ...supplierRouteLibrary(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load the route library"); }
+});
+router.post("/:id/routes", (req, res) => {
+  try { res.status(201).json({ success: true, route: saveSupplierRoute(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the route"); }
+});
+router.put("/:id/routes/:routeId", (req, res) => {
+  try { res.json({ success: true, route: saveSupplierRoute(db, req.params.id, req.body, req.params.routeId) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the route"); }
+});
+router.delete("/:id/routes/:routeId", (req, res) => {
+  try { res.json({ success: true, ...deleteSupplierRoute(db, req.params.id, req.params.routeId) }); } catch (error) { directBookingFailure(res, req, error, "Could not delete the route"); }
+});
 
 // Package quotations (ADR 040): priced on the server, sent as a PDF, booked line by line once accepted.
 router.get("/:id/quotations", (req, res) => {
@@ -2565,13 +2579,11 @@ router.post("/:id/quotations/:quotationId/send-to-agent", async (req, res) => {
     const { buffer, filename, agent } = await quotationPdf(db, req.params.id, row.id, { variant: "AGENT" });
     if (!agent) return res.status(409).json({ error: "Agent not found", code: "AGENT_MISSING" });
     const view = quotationView(db, row);
-    const markupPct = Math.max(0, Math.min(200, Number(agent.markupPct || 0)));
-    const netInr = view.totals.costInr
-      ? Math.round(view.totals.costInr * (1 + markupPct / 100)) + view.totals.listingsInr + view.totals.gstInr
-      : view.totals.totalInr;
+    // The same net and margin as the trade PDF and the builder (tradeTotals, ADR 048).
+    const { markupPct, netInr } = view.trade || { markupPct: 0, netInr: view.totals.totalInr };
     const price = view.options.length && !view.selectedOption
       ? `${view.options.length} hotel options; retail from INR ${Math.min(...view.options.map((o) => o.totals.totalInr)).toLocaleString("en-IN")}.`
-      : `Retail INR ${view.totals.totalInr.toLocaleString("en-IN")} · Your net INR ${Math.min(netInr, view.totals.totalInr).toLocaleString("en-IN")} at ${markupPct}% markup.`;
+      : `Retail INR ${view.totals.totalInr.toLocaleString("en-IN")} · Your net INR ${netInr.toLocaleString("en-IN")} at ${markupPct}% markup.`;
     const to = (req.body?.email && String(req.body.email).trim()) || agent.email;
     let email = { status: "SKIPPED", error: "No agent email" };
     if (to) {

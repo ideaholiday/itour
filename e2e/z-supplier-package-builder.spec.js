@@ -9,7 +9,7 @@ const pick = async (page, name, text) => {
   await box.fill(text);
   await box.press("Enter");
 };
-// The builder's steps: Trip & customer, Route & hotels, Day by day, Price & send.
+// The builder's steps: Agent (or Customer) & dates, Route & hotels, Day by day, Price & send.
 const step = (page, name) => page.getByRole("button", { name: new RegExp(name) }).first().click();
 
 // ADR 042: an operator builds a package from its private rate sheet for cars and
@@ -259,7 +259,7 @@ test("supplier builds a two-city package step by step from its route", async ({ 
     await post(`/hotels/${hotel.id}/rates`, { roomType: "Deluxe", mealPlan: "CP", validFrom: isoDate(-2), validTo: isoDate(400), netPerNightInr: 2000 });
   }
   const cab = (await post("/cab-types", { name: `Sedan ${stamp}`, seats: 4 })).cabType;
-  const darshan = (await post("/services", { kind: "SIGHTSEEING", name: `Ayodhya darshan ${stamp}`, city: "Ayodhya", dayTitle: "Ayodhya: Ram Mandir darshan" })).service;
+  const darshan = (await post("/services", { kind: "SIGHTSEEING", name: `Ayodhya darshan ${stamp}`, city: "Ayodhya", dayTitle: "Ayodhya darshan with a guide" })).service;
   await post(`/services/${darshan.id}/rates`, { cabTypeId: cab.id, validFrom: isoDate(-2), validTo: isoDate(400), vehicleInr: 2500 });
 
   await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
@@ -284,10 +284,11 @@ test("supplier builds a two-city package step by step from its route", async ({ 
   await step(page, "Day by day");
   await expect(page.getByLabel("Day 3 title")).toHaveValue("Lucknow to Ayodhya");
   await expect(page.getByText(`Check in Saryu Stay ${stamp}`)).toBeVisible();
-  await expect(page.getByLabel("Day 4 title")).toHaveValue("Ayodhya");
+  // A day spent in a city takes the city library's text (ADR 048); a car picked for it replaces that.
+  await expect(page.getByLabel("Day 4 title")).toHaveValue("Ayodhya: Ram Mandir darshan");
   await page.getByRole("button", { name: "Add car to day 4" }).click();
   await pick(page, "car-2", `Ayodhya darshan ${stamp}`);
-  await expect(page.getByLabel("Day 4 title")).toHaveValue("Ayodhya: Ram Mandir darshan");
+  await expect(page.getByLabel("Day 4 title")).toHaveValue("Ayodhya darshan with a guide");
 
   await step(page, "Price & send");
   // Inclusions read off the trip; exclusions saved once as the standard list for every new quotation.
@@ -298,11 +299,103 @@ test("supplier builds a two-city package step by step from its route", async ({ 
   await expect(page.getByText("Saved as your standard lists.")).toBeVisible();
   await page.getByRole("button", { name: "Save and price" }).click();
   await expect(page.getByText("Saved and priced.")).toBeVisible();
-  await step(page, "Trip & customer");
+  await step(page, "Agent & dates|Customer & dates");
   await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Lucknow & Ayodhya 4N/5D");
 
   await page.getByRole("button", { name: "All quotations" }).click();
   await page.getByRole("button", { name: "New quotation" }).click();
   await step(page, "Price & send");
   await expect(page.getByLabel("Not included")).toHaveValue(`Airfare\nMonument entry tickets ${stamp}`);
+});
+
+// ADR 048: B2B first. The operator adds an agent from the builder, starts from the
+// Lucknow – Ayodhya – Varanasi route, picks a hotel per city, sees the agent's net and
+// margin, saves the trip as its own route and finds the quotation under the agent.
+test("supplier quotes an agent from the Lucknow – Ayodhya – Varanasi route", async ({ page, request }) => {
+  const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
+  const account = await login.json();
+  const base = `/api/suppliers/${account.user.supplier_id}`;
+  const headers = { Authorization: `Bearer ${account.token}` };
+  const post = async (path, data) => {
+    const response = await request.post(`${base}${path}`, { headers, data });
+    const body = await response.json();
+    expect(response.ok(), JSON.stringify(body)).toBeTruthy();
+    return body;
+  };
+  const stamp = Date.now().toString(36);
+  for (const city of ["Lucknow", "Ayodhya", "Varanasi"]) {
+    const hotel = (await post("/hotels", { name: `${city} Grand ${stamp}`, city })).hotel;
+    await post(`/hotels/${hotel.id}/rates`, { roomType: "Deluxe", mealPlan: "CP", validFrom: isoDate(-2), validTo: isoDate(400), netPerNightInr: 2500 });
+  }
+
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.goto("/supplier/dashboard?panel=packages");
+  await page.getByRole("button", { name: "New quotation" }).click();
+  await expect(page.getByRole("radio", { name: /For a travel agent/ })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("button", { name: "+ New agent" }).click();
+  await page.getByLabel("New agent name").fill(`Awadh Travels ${stamp}`);
+  await page.getByLabel("New agent markup").fill("5");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByText("Agent added and picked.")).toBeVisible();
+  await expect(page.getByText("the agent's markup is 5%")).toBeVisible();
+  await page.getByRole("combobox", { name: "customer-name" }).fill("Ajay Pal Singh");
+
+  await step(page, "Route & hotels");
+  await pick(page, "route", "Lucknow – Ayodhya – Varanasi 6N/7D");
+  await expect(page.getByText("Lucknow 2N → Ayodhya 2N → Varanasi 2N")).toBeVisible();
+  await page.getByRole("button", { name: "Use this route" }).click();
+  await expect(page.getByText("Lucknow – Ayodhya – Varanasi 6N/7D laid out: 7 days.")).toBeVisible();
+  const addMissing = page.getByRole("button", { name: "Add them at example prices" });
+  if (await addMissing.isVisible()) {
+    await addMissing.click();
+    await expect(page.getByText("Added to your rate sheet at the library's example prices")).toBeVisible();
+  }
+  for (const [index, city] of ["Lucknow", "Ayodhya", "Varanasi"].entries()) {
+    await pick(page, `hotel-${index}`, `${city} Grand ${stamp}`);
+    await page.getByRole("combobox", { name: /^Room/ }).nth(index).selectOption("Deluxe");
+  }
+
+  await step(page, "Day by day");
+  await expect(page.getByLabel("Day 4 title")).toHaveValue("Ayodhya: Ram Mandir darshan");
+  await expect(page.getByLabel("Day 7 title")).toHaveValue("Depart from Varanasi");
+  await expect(page.getByRole("combobox", { name: /^car-/ }).first()).toBeVisible();
+
+  await step(page, "Price & send");
+  await expect(page.getByLabel("What's included")).toHaveValue(/Ganga Aarti boat ride in Varanasi/);
+  await page.getByRole("button", { name: "Save and price" }).click();
+  await expect(page.getByText("Saved and priced.")).toBeVisible();
+  const agentPrice = page.getByRole("group", { name: "Agent's price" });
+  await expect(agentPrice).toContainText(`Awadh Travels ${stamp} pays you, at 5% markup`);
+  await expect(agentPrice).toContainText("Agent's margin");
+  await expect(page.getByRole("button", { name: "Send to agent" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Save as my route" }).click();
+  await expect(page.getByText("Saved to your routes.")).toBeVisible();
+
+  await page.getByRole("button", { name: "All quotations" }).click();
+  await page.getByRole("button", { name: `Awadh Travels ${stamp}`, exact: true }).click();
+  await expect(page.getByRole("button", { name: /Lucknow – Ayodhya – Varanasi 6N\/7D/ }).first()).toBeVisible();
+});
+
+// ADR 048: the admin writes a shared route with day text and a library car; suppliers see it.
+test("admin adds a shared route that suppliers can start quotations from", async ({ page, request }) => {
+  const stamp = Date.now().toString(36);
+  await loginThroughUi(page, E2E_ACCOUNTS.admin, "/admin/package-library");
+  await page.getByRole("tab", { name: "Routes & cities" }).click();
+  await expect(page.getByText("Lucknow – Ayodhya – Varanasi 6N/7D")).toBeVisible();
+  await page.getByRole("button", { name: "New route" }).click();
+  await page.getByLabel("Route name").fill(`Kashi and Sangam ${stamp}`);
+  await page.getByLabel("Cities and nights").fill("Varanasi 2, Prayagraj 1");
+  await page.getByLabel("Route day 1 title").fill("Arrive in Varanasi");
+  await page.getByLabel("Add a car or activity to day 1").selectOption({ label: "Varanasi Airport to Hotel (Varanasi)" });
+  await expect(page.getByRole("button", { name: "Remove Varanasi Airport to Hotel" })).toBeVisible();
+  await page.getByRole("button", { name: "Save route" }).click();
+  await expect(page.getByText(`Kashi and Sangam ${stamp} saved.`)).toBeVisible();
+
+  const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
+  const account = await login.json();
+  const library = await (await request.get(`/api/suppliers/${account.user.supplier_id}/route-library`, { headers: { Authorization: `Bearer ${account.token}` } })).json();
+  const route = library.routes.find((row) => row.name === `Kashi and Sangam ${stamp}`);
+  expect(route.legs).toEqual([{ city: "Varanasi", nights: 2 }, { city: "Prayagraj", nights: 1 }]);
+  expect(route.days[0]).toMatchObject({ dayNumber: 1, title: "Arrive in Varanasi", itemIds: ["plib_up_06"] });
 });

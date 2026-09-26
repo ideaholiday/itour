@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { builderSteps, cleanItems, mergeItems, tripInclusions, cityOfDay, dayAfterService, dayRange, hotelRateGap, nearestFirst, planFromLegs, routeDayTitle, routeTitle, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "./quotationItinerary.js";
+import { applyRoute, routeFromDraft, routeItemLines, builderSteps, cleanItems, mergeItems, tripInclusions, cityOfDay, dayAfterService, dayRange, hotelRateGap, nearestFirst, planFromLegs, routeDayTitle, routeTitle, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "./quotationItinerary.js";
 
 const trip = {
   lines: [
@@ -125,7 +125,7 @@ test("a car or activity's day text replaces the builder's text, never the suppli
 });
 
 test("the builder says what each step still needs", () => {
-  const steps = builderSteps({ title: "", customerName: "Ajay", startDate: "2026-09-26", legs: [], lines: [{ kind: "HOTEL", dayNumber: 1 }], days: [{ dayNumber: 2, title: "Agra" }] });
+  const steps = builderSteps({ forAgent: false, title: "", customerName: "Ajay", startDate: "2026-09-26", legs: [], lines: [{ kind: "HOTEL", dayNumber: 1 }], days: [{ dayNumber: 2, title: "Agra" }] });
   assert.deepEqual(steps.map((step) => step.missing), [["a trip title"], ["the cities and nights", "a hotel and room for every stay"], ["a title for day 1"], ["save to price it"]]);
 });
 
@@ -144,4 +144,56 @@ test("inclusions are read off the trip: nights and cities, meals, cars and activ
 test("items typed one per line drop blanks and repeats, and merging keeps what's there", () => {
   assert.deepEqual(cleanItems(["Airfare", " ", "airfare", " Tips "]), ["Airfare", "Tips"]);
   assert.deepEqual(mergeItems(["Airfare"], ["Tips", "AIRFARE"]), ["Airfare", "Tips"]);
+});
+
+const circuit = {
+  name: "Lucknow – Ayodhya 4N/5D", legs: [{ city: "Lucknow", nights: 2 }, { city: "Ayodhya", nights: 2 }],
+  days: [
+    { dayNumber: 1, title: "Arrive in Lucknow", description: "Pickup at the airport.", itemIds: ["plib_up_01"], items: [{ id: "plib_up_01", name: "Lucknow Airport to Hotel" }] },
+    { dayNumber: 4, title: "", description: "", itemIds: ["plib_up_04", "plib_up_08"], items: [{ id: "plib_up_04", name: "Ayodhya temple darshan" }, { id: "plib_up_08", name: "Ganga Aarti boat ride" }] },
+  ],
+  inclusions: ["Daily breakfast"], exclusions: ["Airfare"],
+};
+const cabTypes = [{ id: "sedan", name: "Sedan", seats: 4 }, { id: "innova", name: "Innova", seats: 6 }];
+const services = [
+  { id: "s1", kind: "TRANSFER", name: "Lucknow Airport to Hotel", status: "ACTIVE", libraryItemId: "plib_up_01", rates: [{ cabTypeId: "sedan" }, { cabTypeId: "innova" }] },
+  { id: "s2", kind: "SIGHTSEEING", name: "Ayodhya temple darshan", status: "ACTIVE", libraryItemId: "plib_up_04", rates: [{ cabTypeId: "sedan" }, { cabTypeId: "innova" }] },
+];
+const cities = [{ name: "Lucknow", dayTitle: "Lucknow: City of Nawabs", dayDescription: "Bara Imambara." }];
+
+test("a route fills the trip: cities, day text, hotels per city, its cars on their days, and inclusions", () => {
+  const draft = { startDate: "2026-09-26", adults: 5, children: 0, title: "", options: [], legs: [], days: [], inclusions: ["Tea"], exclusions: [],
+    lines: [{ kind: "TRANSPORT", dayNumber: 2, serviceId: "old" }, { kind: "CUSTOM", dayNumber: 1, title: "Permit", amountInr: 100 }] };
+  const { draft: next, missing } = applyRoute(draft, circuit, { cities, services, cabTypes });
+  assert.equal(next.title, "Lucknow – Ayodhya 4N/5D");
+  assert.equal(next.destination, "Lucknow, Ayodhya");
+  assert.deepEqual(next.lines.map((line) => [line.kind, line.dayNumber, line.serviceId || line.title, line.cabTypeId]), [
+    ["HOTEL", 1, "Stay", undefined], ["HOTEL", 3, "Stay", undefined], ["CUSTOM", 1, "Permit", undefined],
+    ["TRANSPORT", 1, "s1", "innova"], ["TRANSPORT", 4, "s2", "innova"],
+  ]);
+  const titles = Object.fromEntries(next.days.map((day) => [day.dayNumber, day.title]));
+  assert.deepEqual(titles, { 1: "Arrive in Lucknow", 2: "Lucknow: City of Nawabs", 3: "Lucknow to Ayodhya", 4: "Ayodhya", 5: "Depart from Ayodhya" });
+  assert.deepEqual(missing, [{ id: "plib_up_08", name: "Ganga Aarti boat ride" }]);
+  assert.deepEqual([next.inclusions, next.exclusions], [["Tea", "Daily breakfast"], ["Airfare"]]);
+});
+
+test("route cars already on their day aren't added twice", () => {
+  const draft = { startDate: "2026-09-26", adults: 2, children: 0, lines: [{ kind: "TRANSPORT", dayNumber: 1, serviceId: "s1" }] };
+  const { lines } = routeItemLines(circuit, draft, { services, cabTypes });
+  assert.deepEqual(lines.map((line) => [line.serviceId, line.cabTypeId]), [["s2", "sedan"]]);
+});
+
+test("a quotation saves as a route with its days, text and library cars", () => {
+  const draft = { title: "Our Lucknow 2N", legs: [{ city: "Lucknow", nights: 2 }], inclusions: ["Breakfast", ""], exclusions: [],
+    days: [{ dayNumber: 1, title: "Arrive" }], lines: [{ kind: "TRANSPORT", dayNumber: 1, serviceId: "s1" }, { kind: "TRANSPORT", dayNumber: 2, serviceId: "own" }] };
+  assert.deepEqual(routeFromDraft(draft, services), {
+    name: "Our Lucknow 2N", legs: [{ city: "Lucknow", nights: 2 }], inclusions: ["Breakfast"], exclusions: [],
+    days: [{ dayNumber: 1, title: "Arrive", description: null, itemIds: ["plib_up_01"] }],
+  });
+});
+
+test("an agent quotation needs the agent and the traveller's name", () => {
+  const [trip] = builderSteps({ title: "Tour", customerName: "", startDate: "2026-09-26", lines: [], days: [] });
+  assert.equal(trip.label, "Agent & dates");
+  assert.deepEqual(trip.missing, ["the agent", "the traveller's name"]);
 });

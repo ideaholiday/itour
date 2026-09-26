@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit";
-import { findQuotation, packageTotals, quotationView } from "./quotationService.js";
+import { findQuotation, quotationView, tradeTotals } from "./quotationService.js";
 import { listHotels } from "./supplierHotelService.js";
 import { listCabTypes } from "./supplierRateSheetService.js";
 import { findAgent } from "./supplierAgentService.js";
@@ -237,13 +237,7 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes 
       if (doc.y > doc.page.height - 200) doc.addPage();
       doc.moveDown(0.4);
       const boxTop = doc.y;
-      const markupPct = Math.max(0, Math.min(200, Number(agent?.markupPct || 0)));
-      const agentTotals = packageTotals(
-        lines.map((line) => ({ kind: line.kind, price: Number(line.priceInr) })),
-        { markupPct, gstPct: Number(quotation.totals.gstPct) },
-      );
-      const netInr = Math.min(agentTotals.total_inr, totals.totalInr);
-      const marginInr = Math.max(0, totals.totalInr - netInr);
+      const { markupPct, netInr, marginInr } = tradeTotals(lines, { agentMarkupPct: agent?.markupPct, gstPct: quotation.totals.gstPct, retailTotalInr: totals.totalInr });
       const rows = [
         ["Retail price (what the guest pays)", inr(totals.totalInr), INK],
         [`Your net at ${markupPct}% markup`, inr(netInr), INK],

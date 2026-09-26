@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, CheckCircle2, Eye, EyeOff, Pencil, Plus, X } from "lucide-react";
 import { api } from "../../lib/api.js";
+import RouteLibraryAdmin from "./RouteLibraryAdmin.jsx";
 
 const inputClass = "w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500";
 const inr = (value) => `₹${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
@@ -25,6 +26,7 @@ function priceText(item) {
  * Entries are hidden, never deleted.
  */
 export default function PackageLibraryView() {
+  const [section, setSection] = useState("items");
   const [library, setLibrary] = useState({ regions: [], items: [] });
   const [region, setRegion] = useState("");
   const [editing, setEditing] = useState(null); // { id | null, form }
@@ -76,8 +78,25 @@ export default function PackageLibraryView() {
   };
 
   const form = editing?.form;
+  const sections = (
+    <div className="flex gap-1 rounded-xl bg-stone-100 p-1 text-sm font-bold" role="tablist" aria-label="Library">
+      {[["items", "Cars & activities"], ["routes", "Routes & cities"]].map(([value, label]) => (
+        <button key={value} type="button" role="tab" aria-selected={section === value} onClick={() => setSection(value)} className={`rounded-lg px-3 py-1.5 ${section === value ? "bg-white shadow-sm" : "text-stone-500"}`}>{label}</button>
+      ))}
+    </div>
+  );
+  if (section === "routes") {
+    return (
+      <div className="space-y-5">
+        <h1 className="text-2xl font-black text-stone-900">Package library</h1>
+        {sections}
+        <RouteLibraryAdmin items={library.items} />
+      </div>
+    );
+  }
   return (
     <div className="space-y-5">
+      {sections}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-black text-stone-900">Package library</h1>
