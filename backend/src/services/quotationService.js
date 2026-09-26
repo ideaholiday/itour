@@ -7,6 +7,7 @@ import { activityCost, transportCost } from "./supplierRateSheetService.js";
 import { createSupplierBooking } from "./supplierBookingService.js";
 import { supplierCountry } from "./supplierVerificationService.js";
 import { DIRECT_PAYMENT_MODES } from "../lib/bookingSources.js";
+import { rememberCustomer } from "./supplierCustomerService.js";
 
 /**
  * Package quotations (ADR 040, docs/SUPPLIER_OPERATIONS.md).
@@ -67,6 +68,14 @@ const daySchema = z.object({
   description: z.string().trim().max(4000).optional().nullable(),
 }).strict();
 
+// Inclusions and exclusions (migration 077): short items, one per line on the PDF.
+const termItems = z.array(z.string().trim().min(1).max(300)).max(40).default([]);
+
+const legSchema = z.object({
+  city: z.string().trim().min(1).max(120),
+  nights: z.number().int().min(0).max(60),
+}).strict();
+
 export const quotationSchema = z.object({
   title: z.string().trim().min(2).max(160),
   destination: z.string().trim().max(120).optional().nullable(),
@@ -79,9 +88,13 @@ export const quotationSchema = z.object({
   children: z.number().int().min(0).max(100).default(0),
   markupPct: z.number().min(0).max(200).default(0),
   notes: z.string().trim().max(4000).optional().nullable(),
+  inclusions: termItems,
+  exclusions: termItems,
   validUntil: isoDate.optional().nullable(),
   lines: z.array(lineSchema).max(120).default([]),
   days: z.array(daySchema).max(60).default([]),
+  // Legs make the destination chain explicit: 2N Lucknow → 2N Ayodhya → 2N Varanasi.
+  legs: z.array(legSchema).max(20).default([]),
   // Hotel options (ADR 043): none or one means a single package; 2–6 named options, hotels chosen per option.
   options: z.array(z.object({ name: z.string().trim().min(1).max(60) }).strict()).max(MAX_OPTIONS).default([]),
 }).strict();
@@ -219,7 +232,7 @@ function tripSummary(db, row, lines, customerPaid) {
  * the group (ADR 044), and a night of the trip with no hotel when the package
  * includes hotels.
  */
-function quotationWarnings(db, row, lines, options = []) {
+function quotationWarnings(db, row, lines, options = [], legs = []) {
   const warnings = [];
   for (const line of lines) {
     if (line.date && line.kind !== "HOTEL" && line.date !== addDays(row.start_date, line.dayNumber - 1)) {
@@ -251,6 +264,29 @@ function quotationWarnings(db, row, lines, options = []) {
     for (let day = 1; day < lastDay; day += 1) if (!covered.has(day)) missing.push(day);
     if (missing.length) warnings.push(`${option.name ? `${option.name}: n` : "N"}o hotel for the night of day ${missing.join(", ")}.`);
   }
+  // Per-leg checks: legs are ordered destinations with night counts, mapped
+  // onto the trip in order. A leg with no hotel line in that city, or hotel
+  // nights not matching the leg's, is a warning (never blocking).
+  if (legs.length) {
+    const legNights = legs.reduce((sum, leg) => sum + Number(leg.nights || 0), 0);
+    const tripNights = Math.max(0, lastDay - 1);
+    if (tripNights && legNights !== tripNights) {
+      warnings.push(`Legs total ${legNights} night${legNights === 1 ? "" : "s"}, but the trip is ${tripNights} night${tripNights === 1 ? "" : "s"}.`);
+    }
+    for (const option of options.length ? options : [{ number: 1, name: null }]) {
+      const stays = lines.filter((line) => line.kind === "HOTEL" && line.option === option.number);
+      if (!stays.length) continue;
+      const hotelCityById = new Map(db.prepare("SELECT id, LOWER(city) AS city FROM supplier_hotels WHERE supplier_id = ?").all(row.supplier_id).map((hotel) => [hotel.id, hotel.city || null]));
+      for (const leg of legs) {
+        if (!leg.nights) continue;
+        const legCity = leg.city.trim().toLowerCase();
+        const nightsInLeg = stays.filter((line) => hotelCityById.get(line.hotelId) === legCity).reduce((sum, line) => sum + Number(line.nights || 0), 0);
+        const prefix = option.name ? `${option.name}: ` : "";
+        if (!nightsInLeg) warnings.push(`${prefix}No hotel in ${leg.city} for its ${leg.nights} night${leg.nights === 1 ? "" : "s"}.`);
+        else if (nightsInLeg !== leg.nights) warnings.push(`${prefix}${leg.city} has ${nightsInLeg} hotel night${nightsInLeg === 1 ? "" : "s"} but the leg is ${leg.nights}.`);
+      }
+    }
+  }
   return warnings;
 }
 
@@ -263,6 +299,8 @@ export function quotationView(db, row) {
     .map((day) => ({ dayNumber: day.day_number, title: day.title || null, description: day.description || null }));
   const travelers = Number(row.adults) + Number(row.children);
   const perPerson = (total) => (travelers ? Math.ceil(total / travelers) : total);
+  const legs = db.prepare("SELECT city, nights FROM quotation_legs WHERE quotation_id = ? ORDER BY sort_order").all(row.id)
+    .map((leg) => ({ city: leg.city, nights: Number(leg.nights) }));
   const optionRows = db.prepare("SELECT option_number, name FROM quotation_options WHERE quotation_id = ? ORDER BY option_number").all(row.id);
   const options = optionRows.length >= 2 ? optionRows.map((option) => {
     const totals = packageTotals(linesOfOption(lines, option.option_number).map((line) => ({ kind: line.kind, price: line.priceInr })), { markupPct: Number(row.markup_pct), gstPct: Number(row.gst_pct) });
@@ -275,6 +313,7 @@ export function quotationView(db, row) {
     id: row.id, ref: row.ref, title: row.title, destination: row.destination || null, status: row.status,
     customerName: row.customer_name, customerEmail: row.customer_email || null, customerPhone: row.customer_phone || null, agentId: row.agent_id || null,
     startDate: row.start_date, adults: row.adults, children: row.children, markupPct: Number(row.markup_pct), notes: row.notes || null, validUntil: row.valid_until || null,
+    inclusions: parseItems(row.inclusions), exclusions: parseItems(row.exclusions),
     totals: {
       costInr: row.cost_inr, listingsInr: row.listings_inr, markupInr: row.markup_inr, subtotalInr: row.subtotal_inr,
       gstPct: Number(row.gst_pct), gstInr: row.gst_inr, totalInr: row.total_inr, paidInr: paid, dueInr: Math.max(0, row.total_inr - paid),
@@ -282,7 +321,7 @@ export function quotationView(db, row) {
     },
     options, selectedOption: row.selected_option ?? null,
     trip: row.status === "ACCEPTED" ? tripSummary(db, row, lines, paid) : null,
-    lines, days, payments, warnings: quotationWarnings(db, row, lines, options),
+    lines, days, legs, payments, warnings: quotationWarnings(db, row, lines, options, legs),
     sentAt: row.sent_at || null, acceptedAt: row.accepted_at || null, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
@@ -326,22 +365,24 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
     let id = quotationId;
     const header = [data.title, data.destination || null, data.customerName, data.customerEmail ? data.customerEmail.toLowerCase() : null, data.customerPhone || null, data.agentId || null,
       data.startDate, data.adults, data.children, data.markupPct, data.notes || null, data.validUntil || null,
+      JSON.stringify(data.inclusions), JSON.stringify(data.exclusions),
       totals.cost_inr, totals.listings_inr, totals.markup_inr, totals.subtotal_inr, totals.gst_pct, totals.gst_inr, totals.total_inr];
     if (id) {
       const existing = findQuotation(db, supplierId, id);
       if (["ACCEPTED", "DECLINED"].includes(existing.status)) throw quotationError(`An ${existing.status.toLowerCase()} quotation can't be changed. Copy it instead.`, 409, "QUOTATION_FINAL");
       id = existing.id;
       db.prepare(`UPDATE quotations SET title = ?, destination = ?, customer_name = ?, customer_email = ?, customer_phone = ?, agent_id = ?, start_date = ?, adults = ?, children = ?,
-          markup_pct = ?, notes = ?, valid_until = ?, cost_inr = ?, listings_inr = ?, markup_inr = ?, subtotal_inr = ?, gst_pct = ?, gst_inr = ?, total_inr = ?, updated_at = CURRENT_TIMESTAMP
+          markup_pct = ?, notes = ?, valid_until = ?, inclusions = ?, exclusions = ?, cost_inr = ?, listings_inr = ?, markup_inr = ?, subtotal_inr = ?, gst_pct = ?, gst_inr = ?, total_inr = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`).run(...header, id);
       db.prepare("DELETE FROM quotation_lines WHERE quotation_id = ?").run(id);
       db.prepare("DELETE FROM quotation_days WHERE quotation_id = ?").run(id);
       db.prepare("DELETE FROM quotation_options WHERE quotation_id = ?").run(id);
+      db.prepare("DELETE FROM quotation_legs WHERE quotation_id = ?").run(id);
     } else {
       id = `qtn_${nanoid(12)}`;
       db.prepare(`INSERT INTO quotations (id, supplier_id, ref, title, destination, customer_name, customer_email, customer_phone, agent_id, start_date, adults, children,
-          markup_pct, notes, valid_until, cost_inr, listings_inr, markup_inr, subtotal_inr, gst_pct, gst_inr, total_inr, created_by_user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, supplierId, `Q-${quoteRef()}`, ...header, actor?.id || null);
+          markup_pct, notes, valid_until, inclusions, exclusions, cost_inr, listings_inr, markup_inr, subtotal_inr, gst_pct, gst_inr, total_inr, created_by_user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, supplierId, `Q-${quoteRef()}`, ...header, actor?.id || null);
     }
     const insert = db.prepare(`INSERT INTO quotation_lines (id, quotation_id, day_number, sort_order, kind, title, description, line_date, hotel_id, room_type, meal_plan,
         nights, rooms, extra_adults, product_id, product_option_id, pickup_time, adults, children, amount_inr, service_id, cab_type_id, vehicles, option_number, km, car_days, price_inr)
@@ -365,6 +406,16 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
     }
     const insertDay = db.prepare("INSERT INTO quotation_days (quotation_id, day_number, title, description) VALUES (?, ?, ?, ?)");
     for (const [dayNumber, day] of dayText) insertDay.run(id, dayNumber, day.title || null, day.description || null);
+    if (data.legs.length) {
+      const insertLeg = db.prepare("INSERT INTO quotation_legs (id, quotation_id, sort_order, city, nights) VALUES (?, ?, ?, ?, ?)");
+      data.legs.forEach((leg, index) => insertLeg.run(`qlg_${nanoid(12)}`, id, index, leg.city, leg.nights));
+    }
+    // Remember the customer for autocomplete next time (migration 076).
+    // Scope is by agent: an agent's customer stays on that agent's list.
+    rememberCustomer(db, supplierId, {
+      agentId: data.agentId || null, name: data.customerName,
+      email: data.customerEmail || null, phone: data.customerPhone || null,
+    });
     return quotationView(db, findQuotation(db, supplierId, id));
   })();
 }
@@ -401,9 +452,31 @@ export function copyQuotation(db, supplierId, quotationId, input, { actor = null
     customerEmail: options.customerName ? options.customerEmail || null : source.customerEmail,
     customerPhone: options.customerName ? options.customerPhone || null : source.customerPhone,
     agentId: source.agentId, startDate: options.startDate, adults: source.adults, children: source.children, markupPct: source.markupPct,
-    notes: source.notes, validUntil: null, lines: source.lines.map((line) => lineInput(line, shift)),
-    days: source.days, options: source.options.map((option) => ({ name: option.name })),
+    notes: source.notes, inclusions: source.inclusions, exclusions: source.exclusions, validUntil: null, lines: source.lines.map((line) => lineInput(line, shift)),
+    days: source.days, legs: source.legs, options: source.options.map((option) => ({ name: option.name })),
   }, { actor });
+}
+
+// A stored JSON list of items; anything unreadable reads as no items.
+function parseItems(value) {
+  try { const items = JSON.parse(value || "[]"); return Array.isArray(items) ? items.filter((item) => typeof item === "string" && item.trim()) : []; } catch { return []; }
+}
+
+export const quotationTermsSchema = z.object({ inclusions: termItems, exclusions: termItems }).strict();
+
+/** The supplier's standard inclusions and exclusions, to fill into a quotation in one click (migration 077). */
+export function quotationTerms(db, supplierId) {
+  const row = db.prepare("SELECT inclusions, exclusions FROM supplier_quotation_terms WHERE supplier_id = ?").get(supplierId);
+  return { inclusions: parseItems(row?.inclusions), exclusions: parseItems(row?.exclusions) };
+}
+
+/** Replaces the supplier's standard lists. Saved quotations keep their own copy. */
+export function saveQuotationTerms(db, supplierId, input) {
+  const data = quotationTermsSchema.parse(input);
+  db.prepare(`INSERT INTO supplier_quotation_terms (supplier_id, inclusions, exclusions, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT (supplier_id) DO UPDATE SET inclusions = excluded.inclusions, exclusions = excluded.exclusions, updated_at = CURRENT_TIMESTAMP`)
+    .run(supplierId, JSON.stringify(data.inclusions), JSON.stringify(data.exclusions));
+  return quotationTerms(db, supplierId);
 }
 
 /** DRAFT → SENT → ACCEPTED or DECLINED; a sent quotation may go back to draft for changes by saving it. */

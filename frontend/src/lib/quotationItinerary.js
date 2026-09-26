@@ -39,6 +39,89 @@ export function removeDay({ lines = [], days = [] }, dayNumber) {
   return shiftAfter({ lines: lines.filter((line) => dayOfLine(line) !== dayNumber), days: days.filter((day) => Number(day.dayNumber) !== dayNumber) }, dayNumber, -1);
 }
 
+// The route (legs) as stays: each city's check-in day, counting from day 1.
+// Lucknow 2N → Ayodhya 2N gives Lucknow days 1–2 (check-in day 1) and Ayodhya days 3–4 (check-in day 3).
+export function legStays(legs = []) {
+  let day = 1;
+  return legs.filter((leg) => leg.city && String(leg.city).trim()).map((leg, index) => {
+    const nights = Math.max(0, Number(leg.nights) || 0);
+    const stay = { index, city: String(leg.city).trim(), nights, checkInDay: day };
+    day += nights;
+    return stay;
+  });
+}
+
+// The city a day is spent in, from the route: the leg whose nights cover it, or the last city on the day you leave.
+export function cityOfDay(legs = [], dayNumber) {
+  const stays = legStays(legs);
+  const stay = stays.find((item) => dayNumber >= item.checkInDay && dayNumber < item.checkInDay + item.nights) || stays[stays.length - 1];
+  return stay?.city || "";
+}
+
+// A day title from the route, for days the supplier hasn't written one: arrival, moving on, the city, departure.
+export function routeDayTitle(legs = [], dayNumber, lastDay) {
+  const stays = legStays(legs).filter((stay) => stay.nights > 0);
+  if (!stays.length) return "";
+  if (dayNumber === 1) return `Arrive in ${stays[0].city}`;
+  const moving = stays.find((stay, index) => index > 0 && stay.checkInDay === dayNumber);
+  if (moving) return `${stays[stays.indexOf(moving) - 1].city} to ${moving.city}`;
+  if (dayNumber === lastDay) return `Depart from ${stays[stays.length - 1].city}`;
+  return cityOfDay(legs, dayNumber);
+}
+
+// "Lucknow & Ayodhya 4N/5D" from the route.
+export function routeTitle(legs = []) {
+  const stays = legStays(legs);
+  const nights = stays.reduce((sum, stay) => sum + stay.nights, 0);
+  const cities = [...new Set(stays.map((stay) => stay.city))];
+  if (!cities.length) return "";
+  const names = cities.length > 1 ? `${cities.slice(0, -1).join(", ")} & ${cities[cities.length - 1]}` : cities[0];
+  return nights ? `${names} ${nights}N/${nights + 1}D` : names;
+}
+
+/**
+ * Lays the trip out from its route (ADR 042, legs from migration 075): the trip runs
+ * nights + 1 days, each city with nights gets one hotel stay per hotel option on its
+ * check-in day for exactly its nights, and days with no text get a title from the route.
+ * A stay already on that check-in day keeps its hotel, room and meals; stays that no
+ * longer start on a leg's check-in day are dropped. Other lines and written days are kept.
+ * `auto` marks a day title the builder wrote, so a later car or activity may replace it.
+ */
+export function planFromLegs(draft) {
+  const stays = legStays(draft.legs).filter((stay) => stay.nights > 0);
+  if (!stays.length) return { lines: draft.lines, days: draft.days };
+  const lastDay = stays[stays.length - 1].checkInDay + stays[stays.length - 1].nights;
+  const optionNumbers = (draft.options || []).length >= 2 ? draft.options.map((_, index) => index + 1) : [1];
+  const others = (draft.lines || []).filter((line) => line.kind !== "HOTEL");
+  const hotels = (draft.lines || []).filter((line) => line.kind === "HOTEL");
+  const planned = optionNumbers.flatMap((option) => stays.map((stay) => {
+    const date = dayDate(draft.startDate, stay.checkInDay);
+    const kept = hotels.find((line) => (Number(line.option) || 1) === option && dayOfLine(line) === stay.checkInDay);
+    return { ...(kept || { kind: "HOTEL", title: "Stay", mealPlan: "CP", rooms: 1, adults: draft.adults, children: draft.children }), option, dayNumber: stay.checkInDay, nights: stay.nights, date, checkIn: date, city: stay.city };
+  }));
+  const written = (draft.days || []).filter((day) => !day.auto && hasText(day));
+  const autoDays = Array.from({ length: lastDay }, (_, index) => index + 1)
+    .filter((dayNumber) => !written.some((day) => Number(day.dayNumber) === dayNumber))
+    .map((dayNumber) => ({ dayNumber, title: routeDayTitle(draft.legs, dayNumber, lastDay), description: "", auto: true }));
+  return { lines: [...planned, ...others], days: [...written, ...autoDays] };
+}
+
+// The day's text after picking a car or activity: the service's day text replaces an empty
+// day or one the builder wrote (route titles, an earlier service), never the supplier's own.
+export function dayAfterService(day, service) {
+  if (!service || !(service.dayTitle || service.dayDescription)) return day;
+  if (hasText(day) && !day.auto) return day;
+  return { ...day, title: service.dayTitle || day.title || "", description: service.dayDescription || "", auto: true };
+}
+
+// Hotels, cars and activities in the day's city first, so the right one is at the top of the list.
+export const nearestFirst = (items, city) => {
+  const key = String(city || "").trim().toLowerCase();
+  if (!key) return items;
+  const here = (item) => String(item.city || "").trim().toLowerCase() === key;
+  return [...items.filter(here), ...items.filter((item) => !here(item))];
+};
+
 // Meal plans the chosen room has a rate for; the line's own plan stays listed so an old quotation still shows it.
 export function mealPlansFor(hotel, roomType, current, allPlans) {
   if (!hotel || !roomType) return allPlans;
@@ -76,6 +159,55 @@ export function setupSteps({ hotels = [], cabTypes = [], services = [], quotatio
   ];
 }
 
+// The builder's steps, in order, each with what's still missing (empty when done).
+export function builderSteps(draft, { saved = false } = {}) {
+  const hotels = (draft.lines || []).filter((line) => line.kind === "HOTEL");
+  const days = dayRange(draft.lines, draft.days);
+  const titled = new Set((draft.days || []).filter((day) => day.title).map((day) => Number(day.dayNumber)));
+  const untitled = days.filter((dayNumber) => !titled.has(dayNumber));
+  return [
+    { key: "trip", label: "Trip & customer", missing: [
+      !String(draft.title || "").trim() && "a trip title",
+      String(draft.customerName || "").trim().length < 2 && "the customer's name",
+      !draft.startDate && "a start date",
+    ].filter(Boolean) },
+    { key: "route", label: "Route & hotels", missing: [
+      !legStays(draft.legs).some((stay) => stay.nights > 0) && "the cities and nights",
+      hotels.some((line) => !line.hotelId || !line.roomType) && "a hotel and room for every stay",
+    ].filter(Boolean) },
+    { key: "days", label: "Day by day", missing: untitled.length ? [`a title for day ${untitled.join(", ")}`] : [] },
+    { key: "price", label: "Price & send", missing: saved ? [] : ["save to price it"] },
+  ];
+}
+
+// Inclusions and exclusions (migration 077) are typed one per line; blank lines and repeats drop out.
+export function cleanItems(items = []) {
+  const seen = new Set();
+  return items.map((item) => String(item || "").trim()).filter((item) => item && !seen.has(item.toLowerCase()) && seen.add(item.toLowerCase()));
+}
+export const mergeItems = (current = [], added = []) => cleanItems([...cleanItems(current), ...added]);
+
+const MEALS_INCLUDED = { CP: "Daily breakfast", MAP: "Daily breakfast and dinner", AP: "All meals" };
+
+// What the trip itself includes, read off its items: the stays and meals, the cars, the activities and listings.
+export function tripInclusions(draft, { hotels = [], cabTypes = [] } = {}) {
+  const lines = (draft.lines || []).filter((line) => line.kind !== "HOTEL" || (Number(line.option) || 1) === 1);
+  const stays = lines.filter((line) => line.kind === "HOTEL" && line.hotelId);
+  const items = [];
+  if (stays.length) {
+    const nights = stays.reduce((sum, line) => sum + (Number(line.nights) || 1), 0);
+    const cities = [...new Set(stays.map((line) => hotels.find((hotel) => hotel.id === line.hotelId)?.city).filter(Boolean))];
+    const multiple = (draft.options || []).length >= 2 ? " in the hotel option you choose" : "";
+    items.push(`${nights} night${nights === 1 ? "" : "s"}' stay${cities.length ? ` in ${cities.join(", ")}` : ""}${multiple}`);
+    const meals = [...new Set(stays.map((line) => line.mealPlan))];
+    if (meals.length === 1 && MEALS_INCLUDED[meals[0]]) items.push(MEALS_INCLUDED[meals[0]]);
+  }
+  const cabs = [...new Set(lines.filter((line) => line.kind === "TRANSPORT").map((line) => cabTypes.find((cab) => cab.id === line.cabTypeId)?.name).filter(Boolean))];
+  if (cabs.length) items.push(`Private ${cabs.join(" / ")} for transfers and sightseeing as per the itinerary`);
+  for (const line of lines.filter((item) => (item.kind === "ACTIVITY" || item.kind === "LISTING") && item.title)) items.push(line.title);
+  return cleanItems(items);
+}
+
 const count = (value) => (value === "" || value == null ? null : Number(value));
 
 // What the server needs for each line; prices are always worked out on the server.
@@ -97,7 +229,9 @@ export function quotationPayload(draft) {
     customerEmail: draft.customerEmail || null, customerPhone: draft.customerPhone || null, agentId: draft.agentId || null,
     startDate: draft.startDate, adults: Number(draft.adults), children: Number(draft.children), markupPct: Number(draft.markupPct),
     notes: draft.notes || null, validUntil: draft.validUntil || null, lines: (draft.lines || []).map(linePayload),
+    inclusions: cleanItems(draft.inclusions), exclusions: cleanItems(draft.exclusions),
     days: (draft.days || []).filter((day) => day.title || day.description).map((day) => ({ dayNumber: Number(day.dayNumber), title: day.title || null, description: day.description || null })),
+    legs: (draft.legs || []).filter((leg) => leg.city && leg.city.trim()).map((leg) => ({ city: leg.city.trim(), nights: Math.max(0, Number(leg.nights || 0)) })),
     options: (draft.options || []).length >= 2 ? draft.options.map((option, index) => ({ name: option.name.trim() || `Option ${index + 1}` })) : [],
   };
 }

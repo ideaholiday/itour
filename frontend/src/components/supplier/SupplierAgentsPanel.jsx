@@ -4,7 +4,7 @@ import { authHeaders } from "../../lib/api.js";
 
 const inr = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const inputClass = "w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500";
-const EMPTY = { name: "", contactName: "", phone: "", email: "", commissionPct: 10, creditLimitInr: 0, status: "ACTIVE" };
+const EMPTY = { name: "", contactName: "", phone: "", email: "", commissionPct: 10, markupPct: 10, creditLimitInr: 0, status: "ACTIVE" };
 const MODES = [["BANK", "Bank transfer"], ["UPI", "UPI"], ["CASH", "Cash"], ["CARD", "Card"]];
 
 async function request(url, options = {}) {
@@ -56,7 +56,7 @@ export default function SupplierAgentsPanel({ supplierId, products = [] }) {
 
   const save = (event) => {
     event.preventDefault();
-    const body = { ...editing, commissionPct: Number(editing.commissionPct), creditLimitInr: Number(editing.creditLimitInr), phone: editing.phone || null, email: editing.email || null, contactName: editing.contactName || null };
+    const body = { ...editing, commissionPct: Number(editing.commissionPct), markupPct: Number(editing.markupPct || 0), creditLimitInr: Number(editing.creditLimitInr), phone: editing.phone || null, email: editing.email || null, contactName: editing.contactName || null };
     delete body.id;
     run(async () => {
       await request(editing.id ? `${base}/${editing.id}` : base, { method: editing.id ? "PUT" : "POST", body: JSON.stringify(body) });
@@ -99,7 +99,8 @@ export default function SupplierAgentsPanel({ supplierId, products = [] }) {
           <label className="text-xs font-bold text-stone-700">Contact person<input value={editing.contactName || ""} onChange={(event) => setEditing({ ...editing, contactName: event.target.value })} className={`mt-1 ${inputClass}`} /></label>
           <label className="text-xs font-bold text-stone-700">Phone<input value={editing.phone || ""} placeholder="+91 98765 43210" onChange={(event) => setEditing({ ...editing, phone: event.target.value })} className={`mt-1 ${inputClass}`} /></label>
           <label className="text-xs font-bold text-stone-700">Email<input type="email" value={editing.email || ""} onChange={(event) => setEditing({ ...editing, email: event.target.value })} className={`mt-1 ${inputClass}`} /></label>
-          <label className="text-xs font-bold text-stone-700">Commission %<input type="number" min={0} max={90} step="0.5" required value={editing.commissionPct} onChange={(event) => setEditing({ ...editing, commissionPct: event.target.value })} className={`mt-1 ${inputClass}`} /><span className="mt-1 block font-normal text-stone-500">They pay the normal price minus this.</span></label>
+          <label className="text-xs font-bold text-stone-700">Commission %<input type="number" min={0} max={90} step="0.5" required value={editing.commissionPct} onChange={(event) => setEditing({ ...editing, commissionPct: event.target.value })} className={`mt-1 ${inputClass}`} /><span className="mt-1 block font-normal text-stone-500">Direct bookings: they pay the price minus this.</span></label>
+          <label className="text-xs font-bold text-stone-700">Package markup %<input type="number" min={0} max={200} step="0.5" value={editing.markupPct || 0} onChange={(event) => setEditing({ ...editing, markupPct: event.target.value })} className={`mt-1 ${inputClass}`} /><span className="mt-1 block font-normal text-stone-500">Quotation trade PDF: their net = your costs + this markup + GST.</span></label>
           <label className="text-xs font-bold text-stone-700">Credit limit (₹)<input type="number" min={0} step="100" required value={editing.creditLimitInr} onChange={(event) => setEditing({ ...editing, creditLimitInr: event.target.value })} className={`mt-1 ${inputClass}`} /><span className="mt-1 block font-normal text-stone-500">0 means they pay at booking.</span></label>
           {editing.id && <label className="text-xs font-bold text-stone-700">Status<select value={editing.status} onChange={(event) => setEditing({ ...editing, status: event.target.value })} className={`mt-1 ${inputClass}`}><option value="ACTIVE">Active</option><option value="INACTIVE">Inactive (can't book)</option></select></label>}
           <div className="flex gap-2 sm:col-span-2">

@@ -104,7 +104,7 @@ test("quotations and the rate sheet are manager work", async t => {
   const ctx = setup(db);
   const staff = await call(api, ctx, "/staff", { body: { name: "Counter", email: "desk@example.com", role: "FRONT_DESK" } });
   const desk = (await requestJson(api.baseUrl, "/api/auth/login", { body: { email: "desk@example.com", password: staff.data.temporaryPassword, portal: "supplier" } })).data.token;
-  for (const path of ["/quotations", "/hotels", "/cab-types", "/services"]) {
+  for (const path of ["/quotations", "/quotation-terms", "/hotels", "/cab-types", "/services"]) {
     assert.equal((await requestJson(api.baseUrl, `/api/suppliers/${ctx.supplier.id}${path}`, { token: desk })).response.status, 403);
   }
 });
@@ -308,4 +308,29 @@ test("per-km cars charge the greater of km driven and the daily minimum plus dri
 
   const pdf = await fetch(`${api.baseUrl}/api/suppliers/${ctx.supplier.id}/quotations/${created.data.quotation.id}/pdf`, { headers: { authorization: `Bearer ${ctx.ownerToken}` } });
   assert.equal(pdf.status, 200);
+});
+
+test("standard inclusions and exclusions are saved once, filled into a quotation, and copied with it", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+  const ctx = setup(db);
+
+  assert.deepEqual((await call(api, ctx, "/quotation-terms")).data.terms, { inclusions: [], exclusions: [] });
+  const standard = { inclusions: ["Daily breakfast", "Private sedan for all transfers"], exclusions: ["Airfare", "Monument entry tickets"] };
+  const saved = await call(api, ctx, "/quotation-terms", { method: "PUT", body: standard });
+  assert.equal(saved.response.status, 200, JSON.stringify(saved.data));
+  assert.deepEqual(saved.data.terms, standard);
+  assert.equal((await call(api, ctx, "/quotation-terms", { method: "PUT", body: { inclusions: [""] } })).response.status, 400);
+
+  const created = await call(api, ctx, "/quotations", { body: {
+    title: "Lucknow Tour", customerName: "Ajay Pal Singh", startDate: day(20), adults: 2, markupPct: 10, ...standard,
+    lines: [{ kind: "CUSTOM", dayNumber: 1, title: "Airport cab", amountInr: 1500 }],
+  } });
+  assert.equal(created.response.status, 201, JSON.stringify(created.data));
+  assert.deepEqual([created.data.quotation.inclusions, created.data.quotation.exclusions], [standard.inclusions, standard.exclusions]);
+
+  // Changing the standard lists never changes a saved quotation; a copy keeps the quotation's own.
+  await call(api, ctx, "/quotation-terms", { method: "PUT", body: { inclusions: ["Something else"], exclusions: [] } });
+  const copy = await call(api, ctx, `/quotations/${created.data.quotation.id}/copy`, { body: { startDate: day(40) } });
+  assert.deepEqual([copy.data.quotation.inclusions, copy.data.quotation.exclusions], [standard.inclusions, standard.exclusions]);
 });

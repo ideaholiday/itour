@@ -12,6 +12,7 @@ import {
 import { toE164 } from "../lib/phone.js";
 import { DIRECT_SOURCES, DIRECT_PAYMENT_MODES, OFFLINE_PAYMENT_STATUS } from "../lib/bookingSources.js";
 import { agentPricing } from "./supplierAgentService.js";
+import { rememberCustomer } from "./supplierCustomerService.js";
 
 // Supplier-direct bookings (ADR 034): a walk-in at the counter, a phone call or
 // a manual entry. They take seats from the same native inventory as every
@@ -176,6 +177,12 @@ export function createSupplierBooking(db, { supplierId, actor, input, packageLin
     db.prepare("UPDATE bookings SET otp_hash = ?, otp_encrypted = ?, otp_expires_at = ?, otp_attempts = 0 WHERE id = ?")
       .run(otp.otpHash, otp.otpEncrypted, otp.otpExpiresAt, bookingId);
     insertPayments(db, { bookingId, supplierId, actorId: actor?.id, payments: data.payments });
+    // Remember the guest for autocomplete on the next booking or quotation.
+    // Scope: an AGENT booking is that agent's customer; the rest are direct.
+    rememberCustomer(db, supplierId, {
+      agentId: forAgent ? data.agent_id : null,
+      name: data.traveler_name, email, phone,
+    });
   })();
 
   return { booking: db.prepare("SELECT * FROM bookings WHERE id = ?").get(bookingId), idempotent: false };

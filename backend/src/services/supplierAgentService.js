@@ -18,12 +18,16 @@ const LIVE = "LOWER(status) NOT IN ('cancelled', 'pending_payment')";
 const agentError = (message, status = 400, code = "INVALID_AGENT") => Object.assign(new Error(message), { status, code });
 
 const pctField = z.number().min(0).max(90);
+const markupField = z.number().min(0).max(200);
 export const agentSchema = z.object({
   name: z.string().trim().min(2).max(160),
   contactName: z.string().trim().max(120).optional().nullable(),
   phone: z.string().trim().max(24).optional().nullable(),
   email: z.string().trim().email().max(200).optional().nullable().or(z.literal("")),
   commissionPct: pctField.default(0),
+  // The agent's own markup on your costs, read only by the quotation trade PDF.
+  // Direct bookings for this agent still use commissionPct (ADR 039).
+  markupPct: markupField.default(0),
   creditLimitInr: z.number().int().min(0).max(100_000_000).default(0),
   status: z.enum(["ACTIVE", "INACTIVE"]).default("ACTIVE"),
 }).strict();
@@ -62,6 +66,7 @@ function agentView(db, row) {
     phone: row.phone || null,
     email: row.email || null,
     commissionPct: Number(row.commission_pct),
+    markupPct: Number(row.markup_pct || 0),
     creditLimitInr: Number(row.credit_limit_inr),
     status: row.status,
     owedInr: owed,
@@ -83,15 +88,15 @@ export function listAgents(db, supplierId) {
 
 export function saveAgent(db, supplierId, input, agentId = null) {
   const agent = agentSchema.parse(input);
-  const values = [agent.name, agent.contactName || null, cleanPhone(agent.phone), agent.email ? agent.email.toLowerCase() : null, agent.commissionPct, agent.creditLimitInr, agent.status];
+  const values = [agent.name, agent.contactName || null, cleanPhone(agent.phone), agent.email ? agent.email.toLowerCase() : null, agent.commissionPct, agent.markupPct, agent.creditLimitInr, agent.status];
   if (agentId) {
     findAgent(db, supplierId, agentId);
-    db.prepare(`UPDATE supplier_agents SET name = ?, contact_name = ?, phone = ?, email = ?, commission_pct = ?, credit_limit_inr = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+    db.prepare(`UPDATE supplier_agents SET name = ?, contact_name = ?, phone = ?, email = ?, commission_pct = ?, markup_pct = ?, credit_limit_inr = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND supplier_id = ?`).run(...values, agentId, supplierId);
   } else {
     agentId = `agt_${nanoid(12)}`;
-    db.prepare(`INSERT INTO supplier_agents (id, supplier_id, name, contact_name, phone, email, commission_pct, credit_limit_inr, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(agentId, supplierId, ...values);
+    db.prepare(`INSERT INTO supplier_agents (id, supplier_id, name, contact_name, phone, email, commission_pct, markup_pct, credit_limit_inr, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(agentId, supplierId, ...values);
   }
   return agentView(db, findAgent(db, supplierId, agentId));
 }

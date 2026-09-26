@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { CheckCircle2, Loader2, Mail, MessageCircle, Minus, Plus, Printer, X } from "lucide-react";
+import { CheckCircle2, Loader2, Mail, MessageCircle, Minus, Plus, Printer, User, Users, X } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
+import Combobox from "../Combobox.jsx";
 
 // Supplier-direct booking (ADR 034): a guest at the counter, a phone call or a
 // manual entry. Seats come from the same inventory the marketplace sells; the
@@ -71,6 +72,26 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
       .catch((err) => { setAgents([]); setError(err.message); });
   }, [forAgent, agents, supplierId]);
 
+  // Saved customers, scoped by whether this booking is for an agent (that
+  // agent's list) or direct (the supplier's own). Reloaded on scope change.
+  const [customers, setCustomers] = useState([]);
+  const customerScope = forAgent ? (agentId || "") : "direct";
+  useEffect(() => {
+    if (forAgent && !agentId) { setCustomers([]); return; }
+    call(`/api/suppliers/${supplierId}/customers?agentId=${encodeURIComponent(customerScope)}`)
+      .then((data) => setCustomers(data.customers || []))
+      .catch(() => setCustomers([]));
+  }, [supplierId, customerScope, forAgent, agentId]);
+  const customerOptions = customers.map((row) => ({ value: row.name, label: row.name, hint: [row.phone, row.email].filter(Boolean).join(" · ") }));
+  const pickGuestName = (next) => {
+    const picked = customers.find((row) => row.name === next);
+    setGuest(picked ? { name: picked.name, phone: picked.phone || "", email: picked.email || "" } : { ...guest, name: next });
+  };
+  const agentOptions = (agents || []).map((agent) => ({
+    value: agent.id, label: agent.name,
+    hint: `${agent.commissionPct}% · ${inr(agent.availableCreditInr)} credit left${agent.contactName ? ` · ${agent.contactName}` : ""}`,
+  }));
+
   useEffect(() => {
     let cancelled = false;
     setLoadingSlots(true);
@@ -116,6 +137,7 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
   const confirm = async (event) => {
     event.preventDefault();
     if (!slot || !quote) return;
+    if (!guest.name || guest.name.trim().length < 2) { setError(forAgent ? "Enter the traveller's name" : "Enter the guest's name"); return; }
     setSaving(true);
     setError("");
     try {
@@ -171,7 +193,7 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
         <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
           <div>
             <h2 id="walkin-title" className="text-lg font-black text-stone-900">New direct booking</h2>
-            <p className="text-xs text-stone-500">Your own customer · no commission · seats come from your live inventory</p>
+            <p className="text-xs text-stone-500">{forAgent ? "For one of your agents · seats come from your live inventory" : "Your own customer · no commission · seats come from your live inventory"}</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-stone-500 hover:bg-stone-100"><X className="h-5 w-5" /></button>
         </div>
@@ -206,13 +228,23 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
                 ))}
               </div>
 
+              <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${forAgent ? "border-indigo-200 bg-indigo-50 text-indigo-900" : "border-emerald-200 bg-emerald-50 text-emerald-900"}`} role="status">
+                {forAgent ? <Users className="h-4 w-4 shrink-0" /> : <User className="h-4 w-4 shrink-0" />}
+                <span><strong>{forAgent ? "Booking for an agent" : "Booking for a direct customer"}.</strong> {forAgent ? "Agent net rate applies; the guest is never asked to pay." : "You collect the money; the guest is billed at retail."}</span>
+              </div>
+
               {forAgent && (
                 <label className="block">
                   <span className="text-xs font-bold uppercase tracking-wide text-stone-500">Agent</span>
-                  <select required value={agentId} onChange={(event) => { setAgentId(event.target.value); setPaid(null); }} className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5">
-                    <option value="">{agents === null ? "Loading agents…" : agents.length ? "Choose the agent" : "No agents yet: add them under Agents"}</option>
-                    {(agents || []).map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.commissionPct}% · {inr(agent.availableCreditInr)} credit left</option>)}
-                  </select>
+                  <Combobox
+                    value={agentId}
+                    onChange={(value) => { setAgentId(value); setPaid(null); setGuest({ name: "", phone: "", email: "" }); }}
+                    options={agentOptions}
+                    placeholder={agents === null ? "Loading agents…" : agents.length ? "Choose the agent" : "No agents yet — add them under Agents"}
+                    ariaLabel="agent"
+                    className="mt-1"
+                    disabled={!(agents && agents.length)}
+                  />
                 </label>
               )}
 
@@ -250,7 +282,18 @@ export default function WalkInBookingDrawer({ supplierId, onClose, onCreated }) 
                 </div>
 
                 <div className="grid gap-3">
-                  <input value={guest.name} onChange={(event) => setGuest({ ...guest, name: event.target.value })} placeholder="Guest name" autoComplete="off" className="rounded-xl border border-stone-200 px-3 py-2.5" required minLength={2} />
+                  <div>
+                    <span className="mb-1 block text-xs font-bold uppercase tracking-wide text-stone-500">{forAgent ? "Traveller (this agent's customer)" : "Guest (your direct customer)"}</span>
+                    <Combobox
+                      freeText allowClear={false}
+                      value={guest.name}
+                      onChange={pickGuestName}
+                      options={customerOptions}
+                      placeholder={forAgent ? "Traveller name" : "Guest name"}
+                      ariaLabel="guest-name"
+                    />
+                    {customers.length > 0 && <p className="mt-1 text-[11px] text-stone-500">Pick a saved {forAgent ? "traveller from this agent" : "customer"} to autofill phone and email, or type a new name.</p>}
+                  </div>
                   <input value={guest.phone} onChange={(event) => setGuest({ ...guest, phone: event.target.value })} placeholder="Mobile number, e.g. +91 98123 45678" inputMode="tel" autoComplete="off" className="rounded-xl border border-stone-200 px-3 py-2.5" required />
                   <input value={guest.email} onChange={(event) => setGuest({ ...guest, email: event.target.value })} placeholder="Email (optional)" type="email" autoComplete="off" className="rounded-xl border border-stone-200 px-3 py-2.5" />
                 </div>

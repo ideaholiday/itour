@@ -76,8 +76,9 @@ import { assignResource, bookingCalendar, departureBoard, guideDepartureScope, u
 import { rescheduleBySupplier } from "../services/supplierRescheduleService.js";
 import { supplierAnalytics, supplierDashboardStats } from "../services/supplierDashboardService.js";
 import { agentStatement, listAgents, recordAgentPayment, saveAgent, setAgentRates } from "../services/supplierAgentService.js";
+import { deleteCustomer, listCustomers } from "../services/supplierCustomerService.js";
 import { addHotelRate, deleteHotelRate, listHotels, saveHotel } from "../services/supplierHotelService.js";
-import { bookQuotationLine, copyQuotation, findQuotation, listQuotations, quotationShareUrl, quotationView, recordQuotationPayment, saveQuotation, setQuotationStatus, suggestQuotations } from "../services/quotationService.js";
+import { bookQuotationLine, copyQuotation, findQuotation, listQuotations, quotationShareUrl, quotationTerms, quotationView, recordQuotationPayment, saveQuotation, saveQuotationTerms, setQuotationStatus, suggestQuotations } from "../services/quotationService.js";
 import { carSchedule, recordVendorPayment, requestHotelBooking, sendItinerary, updateArrangement } from "../services/tripService.js";
 import { itineraryPdf } from "../services/tripItineraryPdfService.js";
 import { addServiceRate, deleteServiceRate, listCabTypes, listServices, saveCabType, saveService } from "../services/supplierRateSheetService.js";
@@ -2345,6 +2346,24 @@ router.put("/:id/agents/:agentId/rates", (req, res) => {
   }
 });
 
+// Saved customers (migration 076). Direct scope is agentId=direct or absent;
+// an agent id scopes to that agent's own list. The customer is remembered on
+// quotation save; deleting one here never touches past quotations.
+router.get("/:id/customers", (req, res) => {
+  try {
+    const rawAgent = String(req.query.agentId || "").trim();
+    const agentId = rawAgent && rawAgent !== "direct" ? rawAgent : null;
+    res.set("Cache-Control", "no-store");
+    res.json({ success: true, customers: listCustomers(db, req.params.id, { agentId, query: req.query.query, limit: req.query.limit }) });
+  } catch (error) { directBookingFailure(res, req, error, "Could not load customers"); }
+});
+router.delete("/:id/customers/:customerId", (req, res) => {
+  try {
+    if (!deleteCustomer(db, req.params.id, req.params.customerId)) return res.status(404).json({ error: "Customer not found" });
+    res.json({ success: true });
+  } catch (error) { directBookingFailure(res, req, error, "Could not remove the customer"); }
+});
+
 router.get("/:id/agents/:agentId/statement", (req, res) => {
   try {
     const dateOrNull = (value) => (/^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : null);
@@ -2438,6 +2457,13 @@ router.get("/:id/quotations", (req, res) => {
 router.post("/:id/quotations", (req, res) => {
   try { res.status(201).json({ success: true, quotation: saveQuotation(db, req.params.id, req.body, { actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the quotation"); }
 });
+// Standard inclusions and exclusions, filled into a quotation in one click (migration 077).
+router.get("/:id/quotation-terms", (req, res) => {
+  try { res.json({ success: true, terms: quotationTerms(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load your standard lists"); }
+});
+router.put("/:id/quotation-terms", (req, res) => {
+  try { res.json({ success: true, terms: saveQuotationTerms(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not save your standard lists"); }
+});
 // Past quotations for the same destination and length, to start a new one from (ADR 042).
 router.get("/:id/quotations/suggestions", (req, res) => {
   try { res.json({ success: true, quotations: suggestQuotations(db, req.params.id, { destination: req.query.destination, days: req.query.days }) }); } catch (error) { directBookingFailure(res, req, error, "Could not load past quotations"); }
@@ -2462,7 +2488,8 @@ router.post("/:id/quotations/:quotationId/lines/:lineId/book", (req, res) => {
 });
 router.get("/:id/quotations/:quotationId/pdf", async (req, res) => {
   try {
-    const { buffer, filename } = await quotationPdf(db, req.params.id, req.params.quotationId);
+    const variant = req.query.variant === "AGENT" ? "AGENT" : "BRAND";
+    const { buffer, filename } = await quotationPdf(db, req.params.id, req.params.quotationId, { variant });
     res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${filename}"`, "Cache-Control": "no-store" });
     res.send(buffer);
   } catch (error) { directBookingFailure(res, req, error, "Could not make the PDF"); }
@@ -2524,6 +2551,40 @@ router.post("/:id/quotations/:quotationId/send", async (req, res) => {
     if (row.status === "DRAFT") row = findQuotation(db, req.params.id, setQuotationStatus(db, req.params.id, row.id, "SENT").id);
     res.json({ success: true, shareUrl, whatsappText: message, email: { status: email.status, error: email.error || null }, quotation: quotationView(db, row) });
   } catch (error) { directBookingFailure(res, req, error, "Could not send the quotation"); }
+});
+
+// Sends the AGENT variant PDF to the quotation's agent (ADR 039). The customer
+// email path (/send) stays untouched; this is a separate action so the two
+// audiences never see each other's price.
+router.post("/:id/quotations/:quotationId/send-to-agent", async (req, res) => {
+  try {
+    let row = findQuotation(db, req.params.id, req.params.quotationId);
+    if (row.status === "DECLINED") return res.status(409).json({ error: "This quotation was declined", code: "QUOTATION_FINAL" });
+    if (!row.agent_id) return res.status(409).json({ error: "This quotation has no agent set", code: "AGENT_MISSING" });
+    const supplier = db.prepare("SELECT company_name FROM suppliers WHERE id = ?").get(req.params.id);
+    const { buffer, filename, agent } = await quotationPdf(db, req.params.id, row.id, { variant: "AGENT" });
+    if (!agent) return res.status(409).json({ error: "Agent not found", code: "AGENT_MISSING" });
+    const view = quotationView(db, row);
+    const markupPct = Math.max(0, Math.min(200, Number(agent.markupPct || 0)));
+    const netInr = view.totals.costInr
+      ? Math.round(view.totals.costInr * (1 + markupPct / 100)) + view.totals.listingsInr + view.totals.gstInr
+      : view.totals.totalInr;
+    const price = view.options.length && !view.selectedOption
+      ? `${view.options.length} hotel options; retail from INR ${Math.min(...view.options.map((o) => o.totals.totalInr)).toLocaleString("en-IN")}.`
+      : `Retail INR ${view.totals.totalInr.toLocaleString("en-IN")} · Your net INR ${Math.min(netInr, view.totals.totalInr).toLocaleString("en-IN")} at ${markupPct}% markup.`;
+    const to = (req.body?.email && String(req.body.email).trim()) || agent.email;
+    let email = { status: "SKIPPED", error: "No agent email" };
+    if (to) {
+      const message = `Hello ${agent.contactName || agent.name},\n\nTrade quotation ${row.ref} for ${row.title}:\n${price}\n\nPDF attached. This trade copy carries net rates for ${agent.name} only — please do not forward.\n\n${supplier?.company_name || ""}`.trim();
+      email = await sendEmail({
+        to, recipientName: agent.contactName || agent.name, recipientRole: "SUPPLIER", eventType: "QUOTATION_SENT_AGENT",
+        eventKey: `quotation:${row.id}:agent:${Date.now()}`, subject: `Trade quotation ${row.ref}: ${row.title}`, text: message,
+        metadata: { quotationId: row.id, ref: row.ref, agentId: agent.id }, attachments: [{ name: filename, contentBase64: buffer.toString("base64") }],
+      });
+    }
+    if (row.status === "DRAFT") row = findQuotation(db, req.params.id, setQuotationStatus(db, req.params.id, row.id, "SENT").id);
+    res.json({ success: true, agent: { id: agent.id, name: agent.name, email: to || null }, email: { status: email.status, error: email.error || null }, quotation: quotationView(db, row) });
+  } catch (error) { directBookingFailure(res, req, error, "Could not send the trade quotation"); }
 });
 
 // Booking calendar (ADR 037): bookings and guests per day for one month.
