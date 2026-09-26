@@ -81,6 +81,7 @@ import { bookQuotationLine, copyQuotation, findQuotation, listQuotations, quotat
 import { carSchedule, recordVendorPayment, requestHotelBooking, sendItinerary, updateArrangement } from "../services/tripService.js";
 import { itineraryPdf } from "../services/tripItineraryPdfService.js";
 import { addServiceRate, deleteServiceRate, listCabTypes, listServices, saveCabType, saveService } from "../services/supplierRateSheetService.js";
+import { importLibraryItems, supplierLibrary } from "../services/packageLibraryService.js";
 import { quotationPdf } from "../services/quotationPdfService.js";
 import { createResellerKey, listResellerKeys, revokeResellerKey, setProductChannels } from "../services/supplierChannelSettingsService.js";
 import { sendEmail } from "../services/emailService.js";
@@ -2420,6 +2421,14 @@ router.post("/:id/services/:serviceId/rates", (req, res) => {
 });
 router.delete("/:id/services/:serviceId/rates/:rateId", (req, res) => {
   try { res.json({ success: true, service: deleteServiceRate(db, req.params.id, req.params.serviceId, req.params.rateId) }); } catch (error) { directBookingFailure(res, req, error, "Could not remove the rate"); }
+});
+
+// Package library (ADR 047): ready-made services the supplier adds to its rate sheet at example prices.
+router.get("/:id/package-library", (req, res) => {
+  try { res.json({ success: true, ...supplierLibrary(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load the package library"); }
+});
+router.post("/:id/package-library/import", (req, res) => {
+  try { res.status(201).json({ success: true, ...importLibraryItems(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add from the package library"); }
 });
 
 // Package quotations (ADR 040): priced on the server, sent as a PDF, booked line by line once accepted.

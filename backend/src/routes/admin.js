@@ -45,6 +45,7 @@ import { addTeamMember, listTeam, removeTeamMember, resetTeamMemberPassword, upd
 import { listPrograms, listSettingsAudit, updateSettings } from "../services/programSettingsService.js";
 import { createCoupon, listCouponRedemptions, listCoupons, updateCoupon } from "../services/couponService.js";
 import { createPost, deletePost, listAllPosts, updatePost } from "../services/blogService.js";
+import { listLibraryItems, saveLibraryItem } from "../services/packageLibraryService.js";
 import { listVerificationQueue, rejectPurchasedVerification, retryCheckRefund } from "../services/supplierPlanPaymentService.js";
 import {
   getSubscriptionStatus, grantSubscriptionWaiver, listSupplierSubscriptions, revokeSubscription, syncLaunchWaivers,
@@ -605,6 +606,27 @@ router.get("/coupons/:id/redemptions", (req, res) => {
   } catch (error) {
     commissionFailure(res, req, error, "Could not load the coupon's uses");
   }
+});
+
+// Package library (ADR 047): entries suppliers add to their rate sheets. Hidden, never deleted.
+function libraryFailure(res, req, error, fallback) {
+  if (error.name === "ZodError") {
+    const issue = error.issues?.[0];
+    return res.status(400).json({ error: issue ? `${issue.path.join(".") || "request"}: ${issue.message}` : "Check the entry", code: "VALIDATION_ERROR" });
+  }
+  return commissionFailure(res, req, error, fallback);
+}
+
+router.get("/package-library", (req, res) => {
+  try { res.json({ success: true, ...listLibraryItems(db) }); } catch (error) { libraryFailure(res, req, error, "Could not load the package library"); }
+});
+
+router.post("/package-library", (req, res) => {
+  try { res.status(201).json({ success: true, item: saveLibraryItem(db, req.body) }); } catch (error) { libraryFailure(res, req, error, "Could not add the entry"); }
+});
+
+router.put("/package-library/:id", (req, res) => {
+  try { res.json({ success: true, item: saveLibraryItem(db, req.body, req.params.id) }); } catch (error) { libraryFailure(res, req, error, "Could not save the entry"); }
 });
 
 // Staff blog (ADR 026). Drafts stay private until published.

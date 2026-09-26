@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { AlertCircle, Car, Plus, Ticket, Trash2 } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
+import SupplierPackageLibrary from "./SupplierPackageLibrary.jsx";
 
 export const SERVICE_KIND_LABELS = { TRANSFER: "Transfer", SIGHTSEEING: "Sightseeing by car", ACTIVITY: "Activity / ticket" };
 export const isTransport = (kind) => kind === "TRANSFER" || kind === "SIGHTSEEING";
@@ -29,10 +30,11 @@ export default function SupplierRateSheetPanel({ supplierId, onChange }) {
   const [cabDraft, setCabDraft] = useState({ name: "", seats: "" });
   const [serviceDraft, setServiceDraft] = useState(NEW_SERVICE);
   const [rateDrafts, setRateDrafts] = useState({});
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(() => Promise.all([request(`${base}/cab-types`), request(`${base}/services`)])
     .then(([cabs, list]) => {
-      setCabTypes(cabs.cabTypes || []); setServices(list.services || []);
+      setCabTypes(cabs.cabTypes || []); setServices(list.services || []); setLoaded(true);
       onChange?.({ cabTypes: cabs.cabTypes || [], services: list.services || [] });
     })
     .catch((err) => setError(err.message)), [base, onChange]);
@@ -88,6 +90,7 @@ export default function SupplierRateSheetPanel({ supplierId, onChange }) {
     <div className="space-y-6">
       <p className="text-sm text-stone-600">Your own prices for transfers, sightseeing and tickets. Only you see them; quotations use them and add your markup. Nothing here is listed or sold online.</p>
       {error && <p role="alert" className="flex items-center gap-2 rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-700"><AlertCircle className="h-4 w-4" />{error}</p>}
+      <SupplierPackageLibrary supplierId={supplierId} startOpen={loaded && !services.length} onAdded={load} />
 
       <div className="space-y-2">
         <h3 className="flex items-center gap-1.5 text-sm font-bold text-stone-900"><Car className="h-4 w-4" /> Cab types</h3>

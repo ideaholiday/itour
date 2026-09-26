@@ -26,6 +26,7 @@ import {
   UserCog,
   SlidersHorizontal,
   TicketPercent,
+  Library,
   BadgeCheck,
   Newspaper
 } from "lucide-react";
@@ -124,6 +125,13 @@ export default function AdminLayout({ children }) {
       path: "/admin/coupons",
       label: "Coupons",
       icon: TicketPercent,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/package-library",
+      label: "Package library",
+      icon: Library,
       badge: null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     },

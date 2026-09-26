@@ -142,3 +142,15 @@
 - **Context**: Roadmap NEXT 2 (provider adapters). The Bókun adapter reported "connected" without calling Bókun and imported built-in sample products. Bókun publishes an OCTo API with a test environment. Our own OCTo client and `/octo` server speak a dialect of OCTo (different booking paths, `unitType` instead of `unitId`), so the generic client can't talk to Bókun as is.
 - **Decision Made** (owner, 2026-09-25): Build Bókun on its OCTo API following the published standard (`POST /availability`, `POST /bookings` with unit ids and availability id, `POST /bookings/{uuid}/confirm`, `POST /bookings/{uuid}/cancel`), authenticated with the operator's OCTo API key. Import only what Bókun sends. Leave our OCTo dialect and the other five placeholder adapters as they are for now (the owner chose Bókun alone, not the clean-up of the placeholders).
 - **Consequences**: Verified against a mock OCTo server only; it must be run against Bókun's test environment with a real key before a supplier relies on it. Existing Bókun connections saved with an access key and secret no longer connect; the supplier reconnects with an OCTo key.
+
+---
+
+## ADR 047: A Package Library of Ready-Made Cars and Activities
+- **Date**: 2026-09-26
+- **Context**: Every supplier typed the same transfers, sightseeing tours and tickets into its rate sheet (ADR 042) by hand, with day text, before it could build a quotation.
+- **Decision Made** (owner, 2026-09-26):
+  1. **The Idea Holiday admin keeps the library** in the app (`package_library_items`), by destination: Golden Triangle, Uttar Pradesh, Goa, Kerala, Himachal Pradesh, Jammu & Kashmir, Leh Ladakh, Rajasthan and Uttarakhand to start.
+  2. **Prices are rough examples**, marked as such: per vehicle for Sedan (4 seats), Innova (6) and Tempo Traveller (12), or per adult and child. The supplier must check them.
+  3. **Adding copies, it doesn't link.** Each entry becomes an ordinary service on the supplier's own rate sheet with one season from today for a year, which the supplier edits; library changes later reach only suppliers who add the entry afterwards. The library cabs are matched by name to the supplier's cab types, and added when missing. An entry is added once per supplier.
+- **Consequences**: Quotations still price only from the supplier's rate sheet, never the library. The example prices in migration 074 are placeholders, not market research; the admin should replace them. Entries are hidden, never deleted. Entry fees are for Indian nationals.
+

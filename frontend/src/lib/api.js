@@ -66,6 +66,9 @@ export const api = {
   adminCreateBlogPost: (payload) => fetch(`${BASE}/admin/blog`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   adminUpdateBlogPost: (id, payload) => fetch(`${BASE}/admin/blog/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   adminDeleteBlogPost: (id) => fetch(`${BASE}/admin/blog/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() }).then(handle),
+  adminListLibrary: () => fetch(`${BASE}/admin/package-library`, { headers: authHeaders() }).then(handle),
+  adminCreateLibraryItem: (payload) => fetch(`${BASE}/admin/package-library`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  adminUpdateLibraryItem: (id, payload) => fetch(`${BASE}/admin/package-library/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   getCities: () => cachedFetch(`${BASE}/cities`, {}, 300000),
   search: (params = {}) => {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))).toString();

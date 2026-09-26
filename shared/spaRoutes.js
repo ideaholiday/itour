@@ -11,7 +11,7 @@ export const SPA_ROUTES = [
   "/supplier/products/create", "/supplier/products/new", "/supplier/transfers/create", "/supplier/tours/create",
   "/admin/login", "/admin", "/admin/analytics", "/admin/suppliers", "/admin/products", "/admin/finance",
   "/admin/quality", "/admin/creators", "/admin/referrals", "/admin/team", "/admin/programs",
-  "/admin/coupons", "/admin/blog", "/admin/verifications",
+  "/admin/coupons", "/admin/blog", "/admin/verifications", "/admin/package-library",
   "/ops", "/ops/live", "/ops/notifications", "/ops/support", "/ops/tasks", "/ops/circuits", "/ops/referrals",
   "/activity/:id", "/activity/:slug/:id", "/checkout/:id", "/booking-confirmed/:ref",
   "/bookings", "/my-bookings", "/my-reviews", "/reviews", "/trip-summary/:id", "/trip/:id",
