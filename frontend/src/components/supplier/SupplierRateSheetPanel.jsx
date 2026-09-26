@@ -76,7 +76,8 @@ export default function SupplierRateSheetPanel({ supplierId, onChange }) {
       : { validFrom: draft.validFrom, validTo: draft.validTo, adultInr: Number(draft.adultInr), childInr: Number(draft.childInr || 0) };
     run(async () => {
       await request(`${base}/services/${service.id}/rates`, { method: "POST", body: JSON.stringify(body) });
-      setRateDrafts({ ...rateDrafts, [service.id]: { cabTypeId: draft.cabTypeId } });
+      // Keep the season, so the next cab type for it is one price away.
+      setRateDrafts({ ...rateDrafts, [service.id]: { cabTypeId: draft.cabTypeId, validFrom: draft.validFrom, validTo: draft.validTo } });
     });
   };
   const setRate = (serviceId, field, value) => setRateDrafts({ ...rateDrafts, [serviceId]: { ...(rateDrafts[serviceId] || {}), [field]: value } });

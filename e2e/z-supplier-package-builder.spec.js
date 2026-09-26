@@ -33,16 +33,19 @@ test("supplier builds a package from cars and activities on the private rate she
 
   await page.getByRole("button", { name: "Quotations" }).click();
   await page.getByRole("button", { name: "New quotation" }).click();
-  await page.getByLabel("Title").fill(`Agra day trip ${stamp}`);
+  await page.getByLabel("Title", { exact: true }).fill(`Agra day trip ${stamp}`);
   await page.getByLabel("Destination").fill(`Agra ${stamp}`);
   await page.getByLabel("Customer name").fill("Rahul Verma");
   await page.getByLabel("Markup on your costs (%)").fill("10");
 
-  await page.getByRole("button", { name: "Transfer / sightseeing" }).click();
+  await page.getByRole("button", { name: "Add car to day 1" }).click();
   await page.getByLabel("Car service").selectOption(sightseeing.id);
   await expect(page.getByLabel("Day 1 title")).toHaveValue("Agra: Taj Mahal and Agra Fort");
-  await page.getByRole("button", { name: "Activity / ticket" }).click();
-  await page.getByLabel("Activity").selectOption(ticket.id);
+  await page.getByRole("button", { name: "Add activity to day 1" }).click();
+  await page.getByRole("combobox", { name: /^Activity/ }).selectOption(ticket.id);
+  // A second, still-empty day shows at once and is dropped on save, so the price below is unchanged.
+  await page.getByLabel("Trip length in days").selectOption("2");
+  await expect(page.getByLabel("Day 2 title")).toBeVisible();
 
   await page.getByRole("button", { name: "Save and price" }).click();
   await expect(page.getByText("Saved and priced.")).toBeVisible();
@@ -75,10 +78,10 @@ test("supplier offers 3 Star and 4 Star hotel options and records the customer's
   await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
   await page.goto("/supplier/dashboard?panel=packages");
   await page.getByRole("button", { name: "New quotation" }).click();
-  await page.getByLabel("Title").fill(`Jaipur options ${stamp}`);
+  await page.getByLabel("Title", { exact: true }).fill(`Jaipur options ${stamp}`);
   await page.getByLabel("Customer name").fill("Kavya Rao");
   await page.getByLabel("Markup on your costs (%)").fill("10");
-  await page.getByRole("button", { name: "Hotel nights" }).click();
+  await page.getByRole("button", { name: "Add hotel to day 1" }).click();
   await page.getByRole("combobox", { name: /^Hotel/ }).selectOption(three.id);
   await page.getByRole("combobox", { name: /^Room/ }).selectOption("Deluxe");
 
@@ -135,15 +138,15 @@ test("supplier prices an outstation car per km and is warned when rooms sleep to
 
   await page.getByRole("button", { name: "Quotations" }).click();
   await page.getByRole("button", { name: "New quotation" }).click();
-  await page.getByLabel("Title").fill(`Rajasthan drive ${stamp}`);
+  await page.getByLabel("Title", { exact: true }).fill(`Rajasthan drive ${stamp}`);
   await page.getByLabel("Customer name").fill("Arjun Mehta");
   await page.getByLabel("Markup on your costs (%)").fill("0");
-  await page.getByRole("button", { name: "Transfer / sightseeing" }).click();
+  await page.getByRole("button", { name: "Add car to day 1" }).click();
   await page.getByLabel("Car service").selectOption({ label: name });
   await page.getByRole("combobox", { name: /^Cab/ }).selectOption(cab.id);
   await page.getByLabel("Km", { exact: true }).fill("600");
   await page.getByLabel("Car days").fill("3");
-  await page.getByRole("button", { name: "Hotel nights" }).click();
+  await page.getByRole("button", { name: "Add hotel to day 1" }).click();
   await page.getByRole("combobox", { name: /^Hotel/ }).selectOption(hotel.id);
   await page.getByRole("combobox", { name: /^Room/ }).selectOption("Single");
 

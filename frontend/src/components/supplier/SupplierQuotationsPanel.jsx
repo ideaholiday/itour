@@ -1,18 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CalendarPlus, Car, CheckCircle2, Copy, Download, FileText, Hotel, MessageCircle, Package, Plus, Send, Ticket, Trash2, TriangleAlert } from "lucide-react";
+import { AlertCircle, CalendarPlus, Car, CheckCircle2, Circle, Copy, Download, FileText, Hotel, MessageCircle, Package, Plus, Send, Ticket, Trash2, TriangleAlert } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
 import SupplierHotelRatesPanel, { MEAL_PLAN_LABELS } from "./SupplierHotelRatesPanel.jsx";
 import SupplierRateSheetPanel, { isTransport } from "./SupplierRateSheetPanel.jsx";
 import SupplierTripPanel from "./SupplierTripPanel.jsx";
+import { addDays, dayDate, dayRange, insertDayAfter, mealPlansFor, minTripLength, removeDay, setTripLength, setupSteps } from "../../lib/quotationItinerary.js";
 
 const inr = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const input = "rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm";
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const STATUS_STYLES = { DRAFT: "bg-stone-100 text-stone-700", SENT: "bg-sky-100 text-sky-800", ACCEPTED: "bg-emerald-100 text-emerald-800", DECLINED: "bg-rose-100 text-rose-800" };
-const addDays = (date, days) => { const next = new Date(`${date}T00:00:00Z`); next.setUTCDate(next.getUTCDate() + days); return next.toISOString().slice(0, 10); };
-const dayDate = (startDate, dayNumber) => addDays(startDate, (Number(dayNumber) || 1) - 1);
 const daysBetween = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
 const count = (value) => (value === "" || value == null ? null : Number(value));
+const hotelLabel = (hotel) => `${hotel.name}${hotel.city ? ` · ${hotel.city}` : ""}${hotel.starRating ? ` · ${hotel.starRating}★` : ""}`;
 const NEW = () => ({ title: "", destination: "", days: [], options: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
 
 async function request(url, options = {}) {
@@ -156,15 +156,38 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     const move = (date) => (date && shift ? addDays(date, shift) : date);
     setDraft({ ...draft, startDate, lines: draft.lines.map((line) => ({ ...line, date: move(line.date), checkIn: move(line.checkIn) })) });
   };
-  const dayNumbers = draft ? [...new Set([...draft.lines.map((line) => Number(line.dayNumber) || 1), ...(draft.days || []).map((day) => Number(day.dayNumber))])].sort((a, b) => a - b) : [];
+  const dayNumbers = draft ? dayRange(draft.lines, draft.days) : [];
   const lastDay = dayNumbers.length ? dayNumbers[dayNumbers.length - 1] : 1;
+  const shortestTrip = draft ? minTripLength(draft.lines, draft.days) : 1;
   const dayOf = (dayNumber) => (draft.days || []).find((day) => Number(day.dayNumber) === dayNumber) || { dayNumber, title: "", description: "" };
   const setDay = (dayNumber, patch) => setDraft({ ...draft, days: [...(draft.days || []).filter((day) => Number(day.dayNumber) !== dayNumber), { ...dayOf(dayNumber), ...patch }] });
-  const addLine = (kind) => {
-    const date = dayDate(draft.startDate, lastDay);
+  const addLine = (kind, dayNumber = lastDay) => {
+    const date = dayDate(draft.startDate, dayNumber);
     const followsGroup = kind === "TRANSPORT" || kind === "ACTIVITY";
-    setDraft({ ...draft, lines: [...draft.lines, { kind, dayNumber: lastDay, title: kind === "HOTEL" ? "Stay" : "", mealPlan: "CP", nights: 1, rooms: 1, adults: followsGroup ? "" : draft.adults, children: followsGroup ? "" : draft.children, vehicles: "", date, checkIn: date }] });
+    setDraft({ ...draft, lines: [...draft.lines, { kind, dayNumber, title: kind === "HOTEL" ? "Stay" : "", mealPlan: "CP", nights: 1, rooms: 1, adults: followsGroup ? "" : draft.adults, children: followsGroup ? "" : draft.children, vehicles: "", date, checkIn: date }] });
   };
+  const dropDay = (dayNumber) => {
+    const items = draft.lines.filter((line) => (Number(line.dayNumber) || 1) === dayNumber).length;
+    if (items && !window.confirm(`Remove day ${dayNumber} and its ${items} item${items === 1 ? "" : "s"}? Later days move one day earlier.`)) return;
+    setDraft({ ...draft, ...removeDay(draft, dayNumber) });
+  };
+  // With nothing set up for a kind of item, the button opens the rate sheet instead; the draft is kept.
+  const hasHotels = hotels.some((hotel) => hotel.rates?.length);
+  const hasTransport = services.some((service) => isTransport(service.kind) && service.status === "ACTIVE");
+  const hasActivities = services.some((service) => service.kind === "ACTIVITY" && service.status === "ACTIVE");
+  const setUp = (sheet, message) => { setNotice(message); setError(""); setTab(sheet); };
+  const itemButtons = (dayNumber) => [
+    ["HOTEL", Hotel, "Hotel", hasHotels, "hotels", "Add a hotel and its room rates, then go back to your quotation."],
+    ["TRANSPORT", Car, "Car", hasTransport, "services", "Add a cab type and a transfer or sightseeing with prices, then go back to your quotation."],
+    ["ACTIVITY", Ticket, "Activity", hasActivities, "services", "Add an activity or ticket with prices, then go back to your quotation."],
+    ["LISTING", Package, "Your listing", true, null, ""],
+    ["CUSTOM", Plus, "Custom", true, null, ""],
+  ].filter(([kind]) => kind !== "LISTING" || products.length > 0)
+    .map(([kind, Icon, label, ready, sheet, message]) => (
+      <button key={kind} type="button" onClick={() => (ready ? addLine(kind, dayNumber) : setUp(sheet, message))} aria-label={ready ? `Add ${label.toLowerCase()} to day ${dayNumber}` : `Set up ${label.toLowerCase()} prices`} title={ready ? `Add to day ${dayNumber}` : "Set this up first"} className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${ready ? "border-stone-300 bg-white" : "border-dashed border-stone-300 text-stone-400"}`}>
+        <Icon className="h-3.5 w-3.5" /> {label}{!ready && " · set up"}
+      </button>
+    ));
   const cabsFor = (service) => cabTypes.filter((cab) => service?.rates.some((rate) => rate.cabTypeId === cab.id));
   // Choosing a service names the line, picks a cab that has a price, and fills an empty day's title and text.
   const pickService = (index, serviceId) => {
@@ -198,6 +221,8 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     return (
       <section className="space-y-4 rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">
         <Tabs tab={tab} setTab={setTab} />
+        {notice && <p className="flex items-center gap-2 rounded-2xl bg-sky-50 p-3 text-xs font-semibold text-sky-900"><CheckCircle2 className="h-4 w-4 shrink-0" />{notice}</p>}
+        {draft && editable && <button type="button" onClick={() => { setNotice(""); setTab("quotations"); }} className="text-xs font-bold text-amber-700 underline">← Back to your quotation{draft.title ? `: ${draft.title}` : ""} (kept as you left it)</button>}
         {tab === "hotels" ? <SupplierHotelRatesPanel supplierId={supplierId} onChange={setHotels} /> : <SupplierRateSheetPanel supplierId={supplierId} onChange={onRateSheet} />}
       </section>
     );
@@ -211,6 +236,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
 
       {!draft ? (
         <>
+          <SetupGuide steps={setupSteps({ hotels, cabTypes, services, quotationCount: list.length })} setTab={setTab} />
           <button onClick={() => { setSaved(null); setDraft(NEW()); }} className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-bold text-stone-950"><Plus className="h-4 w-4" /> New quotation</button>
           <ul className="divide-y divide-stone-100 rounded-2xl border border-stone-200">
             {list.map((row) => (
@@ -276,7 +302,9 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             {dayNumbers.map((dayNumber) => (
               <div key={dayNumber} className="space-y-2 rounded-2xl border border-stone-200 p-3">
                 <fieldset disabled={!editable} className="grid gap-2 text-xs sm:grid-cols-[10rem_1fr]">
-                  <span className="self-center font-black text-amber-700">Day {dayNumber} · {dayDate(draft.startDate, dayNumber)}</span>
+                  <span className="flex items-center gap-1 self-center font-black text-amber-700">Day {dayNumber} · {dayDate(draft.startDate, dayNumber)}
+                    {editable && dayNumbers.length > 1 && <button type="button" onClick={() => dropDay(dayNumber)} aria-label={`Remove day ${dayNumber}`} title="Remove this day" className="rounded p-1 text-stone-400 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>}
+                  </span>
                   <input placeholder="Day title, e.g. Agra: Taj Mahal and Agra Fort" value={dayOf(dayNumber).title || ""} onChange={(event) => setDay(dayNumber, { title: event.target.value })} className={input} aria-label={`Day ${dayNumber} title`} />
                   <textarea rows={2} placeholder="What happens this day (on the PDF)" value={dayOf(dayNumber).description || ""} onChange={(event) => setDay(dayNumber, { description: event.target.value })} className={`${input} sm:col-span-2`} aria-label={`Day ${dayNumber} description`} />
                 </fieldset>
@@ -289,11 +317,11 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                       <label>Day<input type="number" min={1} value={line.dayNumber} onChange={(event) => setLine(index, { dayNumber: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
                       {line.kind === "HOTEL" && <>
                         {draft.options.length >= 2 && <label>Option<select value={Number(line.option) || 1} onChange={(event) => setLine(index, { option: Number(event.target.value) })} className={`mt-1 block ${input}`}>{draft.options.map((option, i) => <option key={i} value={i + 1}>{option.name || `Option ${i + 1}`}</option>)}</select></label>}
-                        <label>Hotel<select value={line.hotelId || ""} onChange={(event) => setLine(index, { hotelId: event.target.value, roomType: "" })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{hotels.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                        <label>Room<select value={line.roomType || ""} onChange={(event) => setLine(index, { roomType: event.target.value })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{rooms.map((room) => <option key={room}>{room}</option>)}</select></label>
-                        <label>Meals<select value={line.mealPlan} onChange={(event) => setLine(index, { mealPlan: event.target.value })} className={`mt-1 block ${input}`}>{Object.entries(MEAL_PLAN_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                        <label>Hotel<select value={line.hotelId || ""} onChange={(event) => setLine(index, { hotelId: event.target.value, roomType: "" })} className={`mt-1 block ${input}`}><option value="">Choose…</option>{hotels.map((item) => <option key={item.id} value={item.id}>{hotelLabel(item)}</option>)}</select></label>
+                        <label>Room<select value={line.roomType || ""} onChange={(event) => { const plans = mealPlansFor(hotel, event.target.value, null, Object.keys(MEAL_PLAN_LABELS)); setLine(index, { roomType: event.target.value, ...(plans.includes(line.mealPlan) ? {} : { mealPlan: plans[0] }) }); }} className={`mt-1 block ${input}`}><option value="">Choose…</option>{rooms.map((room) => <option key={room}>{room}</option>)}</select></label>
+                        <label>Meals<select value={line.mealPlan} onChange={(event) => setLine(index, { mealPlan: event.target.value })} className={`mt-1 block ${input}`}>{mealPlansFor(hotel, line.roomType, line.mealPlan, Object.keys(MEAL_PLAN_LABELS)).map((value) => <option key={value} value={value}>{MEAL_PLAN_LABELS[value]}</option>)}</select></label>
                         <label>Check-in<input type="date" value={line.checkIn || ""} onChange={(event) => setLine(index, { checkIn: event.target.value })} className={`mt-1 block ${input}`} /></label>
-                        <label>Nights<input type="number" min={1} value={line.nights} onChange={(event) => setLine(index, { nights: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        <label>Nights<input type="number" min={1} value={line.nights} onChange={(event) => setLine(index, { nights: event.target.value })} className={`mt-1 block w-16 ${input}`} />{/^\d{4}-\d{2}-\d{2}$/.test(line.checkIn || "") && Number(line.nights) >= 1 && <span className="mt-0.5 block text-[10px] text-stone-400">out {addDays(line.checkIn, Number(line.nights))}</span>}</label>
                         <label>Rooms<input type="number" min={1} value={line.rooms} onChange={(event) => setLine(index, { rooms: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
                         <label>Extra adults<input type="number" min={0} value={line.extraAdults || 0} onChange={(event) => setLine(index, { extraAdults: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
                       </>}
@@ -333,15 +361,20 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                     </fieldset>
                   );
                 })}
+                {editable && <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-stone-500">Add to day {dayNumber}:</span>
+                  {itemButtons(dayNumber)}
+                  {dayNumber < lastDay && <button type="button" onClick={() => setDraft({ ...draft, ...insertDayAfter(draft, dayNumber) })} title="Later days move one day later" className="ml-auto flex items-center gap-1 rounded-lg border border-dashed border-stone-300 px-2.5 py-1.5 text-[11px] font-bold text-stone-500"><CalendarPlus className="h-3.5 w-3.5" /> Insert a day after</button>}
+                </div>}
               </div>
             ))}
-            {editable && <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => addLine("HOTEL")} disabled={!hotels.length} title={hotels.length ? "" : "Add hotels under Hotel rate sheet first"} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold disabled:opacity-40"><Hotel className="h-4 w-4" /> Hotel nights</button>
-              <button type="button" onClick={() => addLine("LISTING")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold"><Package className="h-4 w-4" /> Your listing</button>
-              <button type="button" onClick={() => addLine("TRANSPORT")} disabled={!services.some((service) => isTransport(service.kind))} title={services.some((service) => isTransport(service.kind)) ? "" : "Add transfers or sightseeing under Cars & activities first"} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold disabled:opacity-40"><Car className="h-4 w-4" /> Transfer / sightseeing</button>
-              <button type="button" onClick={() => addLine("ACTIVITY")} disabled={!services.some((service) => service.kind === "ACTIVITY")} title={services.some((service) => service.kind === "ACTIVITY") ? "" : "Add activities under Cars & activities first"} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold disabled:opacity-40"><Ticket className="h-4 w-4" /> Activity / ticket</button>
-              <button type="button" onClick={() => addLine("CUSTOM")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold"><Plus className="h-4 w-4" /> Custom item</button>
-              <button type="button" onClick={() => setDay(lastDay + (draft.lines.length || (draft.days || []).length ? 1 : 0), {})} className="flex items-center gap-1 rounded-xl border border-dashed border-stone-300 px-3 py-2 text-xs font-bold"><CalendarPlus className="h-4 w-4" /> Next day</button>
+            {editable && <div className="flex flex-wrap items-center gap-2 text-xs">
+              <button type="button" onClick={() => setDay(lastDay + 1, {})} className="flex items-center gap-1 rounded-xl border border-dashed border-stone-300 px-3 py-2 font-bold"><CalendarPlus className="h-4 w-4" /> Add day {lastDay + 1}</button>
+              <label className="flex items-center gap-1 text-stone-500">or trip length
+                <select value={lastDay} onChange={(event) => setDraft({ ...draft, days: setTripLength(draft.days || [], Number(event.target.value)) })} className={`${input} py-1.5 text-xs`} aria-label="Trip length in days">
+                  {Array.from({ length: Math.max(0, 30 - shortestTrip + 1) }, (_, i) => shortestTrip + i).map((days) => <option key={days} value={days}>{days} day{days === 1 ? "" : "s"} / {days - 1} night{days === 2 ? "" : "s"}</option>)}
+                </select>
+              </label>
             </div>}
           </div>
 
@@ -426,6 +459,29 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
         </div>
       )}
     </section>
+  );
+}
+
+// A checklist until the rate sheets and a first quotation exist, so a new supplier knows where to start.
+function SetupGuide({ steps, setTab }) {
+  if (steps.every((step) => step.done)) return null;
+  const next = steps.find((step) => !step.done);
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs">
+      <p className="font-bold text-amber-900">Get set up to quote in minutes ({steps.filter((step) => step.done).length} of {steps.length} done)</p>
+      <p className="mt-0.5 text-amber-800">Add your prices once. Every quotation then prices itself: pick a hotel, car or ticket for each day.</p>
+      <ol className="mt-3 space-y-1.5">
+        {steps.map((step, index) => (
+          <li key={step.key}>
+            <button type="button" onClick={() => setTab(step.tab)} disabled={step.tab === "quotations"} className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left ${step === next ? "bg-white font-bold text-stone-900 shadow-sm" : "text-stone-600"}`}>
+              {step.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> : <Circle className="h-4 w-4 shrink-0 text-amber-400" />}
+              <span className={step.done ? "line-through" : ""}>{index + 1}. {step.label}</span>
+              {step === next && step.tab !== "quotations" && <span className="ml-auto text-amber-700">Open →</span>}
+            </button>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

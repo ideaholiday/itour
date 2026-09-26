@@ -52,7 +52,8 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
         netPerNightInr: Number(draft.netPerNightInr), extraAdultInr: Number(draft.extraAdultInr || 0), childInr: Number(draft.childInr || 0),
         maxGuests: draft.maxGuests ? Number(draft.maxGuests) : null,
       }) });
-      setRateDrafts({ ...rateDrafts, [hotelId]: { roomType: draft.roomType, mealPlan: draft.mealPlan } });
+      // Keep the room and season, so the next meal plan for it is one price away.
+      setRateDrafts({ ...rateDrafts, [hotelId]: { roomType: draft.roomType, mealPlan: draft.mealPlan, validFrom: draft.validFrom, validTo: draft.validTo, maxGuests: draft.maxGuests } });
     });
   };
   // Where booking requests go (ADR 045).
