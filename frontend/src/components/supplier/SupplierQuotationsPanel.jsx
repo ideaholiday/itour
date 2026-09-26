@@ -4,7 +4,7 @@ import { authHeaders } from "../../lib/api.js";
 import SupplierHotelRatesPanel, { MEAL_PLAN_LABELS } from "./SupplierHotelRatesPanel.jsx";
 import SupplierRateSheetPanel, { isTransport } from "./SupplierRateSheetPanel.jsx";
 import SupplierTripPanel from "./SupplierTripPanel.jsx";
-import { addDays, dayDate, dayRange, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "../../lib/quotationItinerary.js";
+import { addDays, dayDate, dayRange, hotelRateGap, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "../../lib/quotationItinerary.js";
 
 const inr = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const input = "rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm";
@@ -326,6 +326,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                         <label>Nights<input type="number" min={1} value={line.nights} onChange={(event) => setLine(index, { nights: event.target.value })} className={`mt-1 block w-16 ${input}`} />{/^\d{4}-\d{2}-\d{2}$/.test(line.checkIn || "") && Number(line.nights) >= 1 && <span className="mt-0.5 block text-[10px] text-stone-400">out {addDays(line.checkIn, Number(line.nights))}</span>}</label>
                         <label>Rooms<input type="number" min={1} value={line.rooms} onChange={(event) => setLine(index, { rooms: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
                         <label>Extra adults<input type="number" min={0} value={line.extraAdults || 0} onChange={(event) => setLine(index, { extraAdults: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+                        {(() => { const gap = hotelRateGap(hotel, line); return gap ? <p className="basis-full text-[11px] font-semibold text-rose-600">No {line.roomType} {MEAL_PLAN_LABELS[line.mealPlan] || line.mealPlan} rate for {gap} — add it in the hotel rate sheet, or this hotel stays at ₹0 and out of the total.</p> : null; })()}
                       </>}
                       {line.kind === "LISTING" && <>
                         <label>Listing<select value={line.productId || ""} onChange={(event) => setLine(index, { productId: event.target.value, title: products.find((item) => item.id === event.target.value)?.title || "" })} className={`mt-1 block max-w-56 ${input}`}><option value="">Choose…</option>{products.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>

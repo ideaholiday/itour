@@ -47,6 +47,25 @@ export function mealPlansFor(hotel, roomType, current, allPlans) {
   return allPlans.filter((plan) => rated.has(plan));
 }
 
+// The first night of the stay with no contracted rate, or null when every night is covered.
+// The server prices a hotel line night by night and refuses the whole quotation if any night
+// has no matching room + meal-plan rate for its date, so a hotel with a gap silently stays at
+// ₹0 and out of the total until it is fixed. This flags the gap on the line before saving.
+export function hotelRateGap(hotel, line) {
+  if (!hotel || !line?.hotelId || !line.roomType || !line.mealPlan) return null;
+  const checkIn = line.checkIn || line.date;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn || "")) return null;
+  const nights = Number(line.nights) || 1;
+  const covers = (date) => (hotel.rates || []).some((rate) =>
+    String(rate.roomType).toLowerCase() === String(line.roomType).toLowerCase()
+    && rate.mealPlan === line.mealPlan && rate.validFrom <= date && rate.validTo >= date);
+  for (let night = 0; night < nights; night += 1) {
+    const date = addDays(checkIn, night);
+    if (!covers(date)) return date;
+  }
+  return null;
+}
+
 // What a supplier sets up once before quoting: rate sheets first, then the first quotation.
 export function setupSteps({ hotels = [], cabTypes = [], services = [], quotationCount = 0 }) {
   return [

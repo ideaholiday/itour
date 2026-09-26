@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dayRange, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "./quotationItinerary.js";
+import { dayRange, hotelRateGap, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "./quotationItinerary.js";
 
 const trip = {
   lines: [
@@ -64,4 +64,23 @@ test("saving a loaded quotation sends only what the server takes", () => {
   assert.deepEqual([body.adults, body.markupPct, body.customerEmail, body.destination], [1, 15, null, null]);
   assert.deepEqual(body.days, [{ dayNumber: 1, title: "Arrive", description: null }]);
   assert.deepEqual(body.lines[0], { kind: "HOTEL", dayNumber: 1, title: "Stay", description: null, option: 1, hotelId: "h1", roomType: "Deluxe", mealPlan: "CP", checkIn: "2026-09-26", nights: 1, rooms: 1, extraAdults: 0, children: 0 });
+});
+
+test("hotelRateGap flags the first night with no matching rate, and passes when every night is covered", () => {
+  const hotel = { rates: [
+    { roomType: "Deluxe", mealPlan: "CP", validFrom: "2026-10-01", validTo: "2026-10-05" },
+    { roomType: "Deluxe", mealPlan: "CP", validFrom: "2026-10-06", validTo: "2026-10-31" },
+  ] };
+  const line = (patch) => ({ kind: "HOTEL", hotelId: "h1", roomType: "Deluxe", mealPlan: "CP", checkIn: "2026-10-04", nights: 2, ...patch });
+  // Two seasons back to back cover both nights.
+  assert.equal(hotelRateGap(hotel, line()), null);
+  // A stay that runs off the end of the last season is flagged on the first uncovered night.
+  assert.equal(hotelRateGap(hotel, line({ checkIn: "2026-10-31", nights: 2 })), "2026-11-01");
+  // No rate for the chosen meal plan at all.
+  assert.equal(hotelRateGap(hotel, line({ mealPlan: "MAP" })), "2026-10-04");
+  // Room type match is case-insensitive, like the server's lookup.
+  assert.equal(hotelRateGap(hotel, line({ roomType: "deluxe" })), null);
+  // Nothing to check until the line is complete.
+  assert.equal(hotelRateGap(hotel, line({ roomType: "" })), null);
+  assert.equal(hotelRateGap(null, line()), null);
 });
