@@ -4,15 +4,32 @@ import { authHeaders } from "../../lib/api.js";
 import SupplierHotelRatesPanel, { MEAL_PLAN_LABELS } from "./SupplierHotelRatesPanel.jsx";
 import SupplierRateSheetPanel, { isTransport } from "./SupplierRateSheetPanel.jsx";
 import SupplierTripPanel from "./SupplierTripPanel.jsx";
-import { addDays, dayDate, dayRange, insertDayAfter, mealPlansFor, minTripLength, removeDay, setTripLength, setupSteps } from "../../lib/quotationItinerary.js";
+import { addDays, dayDate, dayRange, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "../../lib/quotationItinerary.js";
 
 const inr = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const input = "rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm";
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const STATUS_STYLES = { DRAFT: "bg-stone-100 text-stone-700", SENT: "bg-sky-100 text-sky-800", ACCEPTED: "bg-emerald-100 text-emerald-800", DECLINED: "bg-rose-100 text-rose-800" };
 const daysBetween = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
-const count = (value) => (value === "" || value == null ? null : Number(value));
 const hotelLabel = (hotel) => `${hotel.name}${hotel.city ? ` · ${hotel.city}` : ""}${hotel.starRating ? ` · ${hotel.starRating}★` : ""}`;
+const COST_GROUPS = [["HOTEL", "Hotels"], ["TRANSPORT", "Cars"], ["ACTIVITY", "Activities"], ["CUSTOM", "Extras"]];
+// The cost lines of the quotation's package (option 1 until the customer picks), grouped by kind; listings are shown separately.
+const costGroups = (quotation) => {
+  const option = quotation.selectedOption || 1;
+  const lines = quotation.lines.filter((line) => line.kind !== "HOTEL" || (line.option || 1) === option);
+  return COST_GROUPS.map(([kind, label]) => {
+    const items = lines.filter((line) => line.kind === kind);
+    return { label, lines: items, totalInr: items.reduce((sum, line) => sum + Number(line.priceInr || 0), 0) };
+  }).filter((group) => group.lines.length);
+};
+const costLabel = (line, hotels, cabTypes) => {
+  if (line.kind === "HOTEL") {
+    const hotel = hotels.find((item) => item.id === line.hotelId);
+    return [hotel?.name || line.title, line.roomType, `${line.nights} night${line.nights === 1 ? "" : "s"}`, line.rooms > 1 ? `${line.rooms} rooms` : null].filter(Boolean).join(" · ");
+  }
+  const cab = line.kind === "TRANSPORT" ? cabTypes.find((item) => item.id === line.cabTypeId) : null;
+  return [line.title, cab ? `${line.vehicles > 1 ? `${line.vehicles} × ` : ""}${cab.name}` : null].filter(Boolean).join(" · ");
+};
 const NEW = () => ({ title: "", destination: "", days: [], options: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
 
 async function request(url, options = {}) {
@@ -20,17 +37,6 @@ async function request(url, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || "That didn't work");
   return data;
-}
-
-// What the server needs for each line; prices are always worked out on the server.
-function linePayload(line) {
-  const base = { kind: line.kind, dayNumber: Number(line.dayNumber) || 1, title: line.title || (line.kind === "HOTEL" ? "Stay" : "Item"), description: line.description || null };
-  if (line.kind === "HOTEL") return { ...base, option: Number(line.option) || 1, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: line.checkIn || line.date, nights: Number(line.nights) || 1, rooms: Number(line.rooms) || 1, extraAdults: Number(line.extraAdults) || 0, children: Number(line.children) || 0 };
-  if (line.kind === "LISTING") return { ...base, productId: line.productId, productOptionId: line.productOptionId || null, date: line.date, pickupTime: line.pickupTime || null, adults: Number(line.adults) || 1, children: Number(line.children) || 0 };
-  // Rate-sheet lines: an empty count follows the quotation's travelers, and an empty cab count means enough cabs for everyone.
-  if (line.kind === "TRANSPORT") return { ...base, title: line.title || null, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: line.date, vehicles: count(line.vehicles), km: count(line.km), carDays: count(line.carDays), adults: count(line.adults), children: count(line.children) };
-  if (line.kind === "ACTIVITY") return { ...base, title: line.title || null, serviceId: line.serviceId, date: line.date, adults: count(line.adults), children: count(line.children) };
-  return { ...base, date: line.date || null, amountInr: Number(line.amountInr) || 0 };
 }
 
 /**
@@ -100,11 +106,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   };
 
   const save = () => run(async () => {
-    const body = { ...draft, customerEmail: draft.customerEmail || null, customerPhone: draft.customerPhone || null, agentId: draft.agentId || null, notes: draft.notes || null, validUntil: draft.validUntil || null,
-      adults: Number(draft.adults), children: Number(draft.children), markupPct: Number(draft.markupPct), lines: draft.lines.map(linePayload), destination: draft.destination || null,
-      days: (draft.days || []).filter((day) => day.title || day.description).map((day) => ({ dayNumber: Number(day.dayNumber), title: day.title || null, description: day.description || null })),
-      options: draft.options.length >= 2 ? draft.options.map((option, index) => ({ name: option.name.trim() || `Option ${index + 1}` })) : [] };
-    for (const key of ["id", "ref", "status", "totals", "payments", "warnings", "selectedOption", "sentAt", "acceptedAt", "createdAt", "updatedAt"]) delete body[key];
+    const body = quotationPayload(draft);
     const data = await request(saved ? `${base}/quotations/${saved.id}` : `${base}/quotations`, { method: saved ? "PUT" : "POST", body: JSON.stringify(body) });
     open(data.quotation);
     return data;
@@ -397,7 +399,15 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             <div className="grid gap-2 rounded-2xl border border-stone-200 p-4 text-sm sm:grid-cols-2">
               <div className="space-y-1 text-xs text-stone-600">
                 <p className="text-[10px] font-black uppercase text-stone-400">Only you see this</p>
-                <p>Your costs: hotels, cars, activities, extras <span className="float-right font-mono">{inr(saved.totals.costInr)}</span></p>
+                {costGroups(saved).map((group) => (
+                  <details key={group.label} className="group">
+                    <summary className="cursor-pointer list-none">{group.label} <span className="text-stone-400">({group.lines.length})</span><span className="float-right font-mono">{inr(group.totalInr)}</span></summary>
+                    <ul className="mb-1 ml-3 space-y-0.5 border-l border-stone-200 pl-2 text-[11px] text-stone-500">
+                      {group.lines.map((line) => <li key={line.id}>Day {line.dayNumber} · {costLabel(line, hotels, cabTypes)}<span className="float-right font-mono">{inr(line.priceInr)}</span></li>)}
+                    </ul>
+                  </details>
+                ))}
+                <p className="border-t border-stone-100 pt-1 font-bold">Your costs <span className="float-right font-mono">{inr(saved.totals.costInr)}</span></p>
                 <p>Markup {saved.markupPct}% <span className="float-right font-mono">{inr(saved.totals.markupInr)}</span></p>
                 <p>Your listings <span className="float-right font-mono">{inr(saved.totals.listingsInr)}</span></p>
               </div>

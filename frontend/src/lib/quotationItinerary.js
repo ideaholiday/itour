@@ -56,3 +56,29 @@ export function setupSteps({ hotels = [], cabTypes = [], services = [], quotatio
     { key: "quote", tab: "quotations", label: "Build your first quotation, day by day", done: quotationCount > 0 },
   ];
 }
+
+const count = (value) => (value === "" || value == null ? null : Number(value));
+
+// What the server needs for each line; prices are always worked out on the server.
+export function linePayload(line) {
+  const base = { kind: line.kind, dayNumber: Number(line.dayNumber) || 1, title: line.title || (line.kind === "HOTEL" ? "Stay" : "Item"), description: line.description || null };
+  if (line.kind === "HOTEL") return { ...base, option: Number(line.option) || 1, hotelId: line.hotelId, roomType: line.roomType, mealPlan: line.mealPlan, checkIn: line.checkIn || line.date, nights: Number(line.nights) || 1, rooms: Number(line.rooms) || 1, extraAdults: Number(line.extraAdults) || 0, children: Number(line.children) || 0 };
+  if (line.kind === "LISTING") return { ...base, productId: line.productId, productOptionId: line.productOptionId || null, date: line.date, pickupTime: line.pickupTime || null, adults: Number(line.adults) || 1, children: Number(line.children) || 0 };
+  // Rate-sheet lines: an empty count follows the quotation's travelers, and an empty cab count means enough cabs for everyone.
+  if (line.kind === "TRANSPORT") return { ...base, title: line.title || null, serviceId: line.serviceId, cabTypeId: line.cabTypeId, date: line.date, vehicles: count(line.vehicles), km: count(line.km), carDays: count(line.carDays), adults: count(line.adults), children: count(line.children) };
+  if (line.kind === "ACTIVITY") return { ...base, title: line.title || null, serviceId: line.serviceId, date: line.date, adults: count(line.adults), children: count(line.children) };
+  return { ...base, date: line.date || null, amountInr: Number(line.amountInr) || 0 };
+}
+
+// The quotation as the server takes it. Named fields only: a loaded quotation also carries
+// read-only ones (totals, trip, warnings, ...) that the server's strict schema rejects.
+export function quotationPayload(draft) {
+  return {
+    title: draft.title, destination: draft.destination || null, customerName: draft.customerName,
+    customerEmail: draft.customerEmail || null, customerPhone: draft.customerPhone || null, agentId: draft.agentId || null,
+    startDate: draft.startDate, adults: Number(draft.adults), children: Number(draft.children), markupPct: Number(draft.markupPct),
+    notes: draft.notes || null, validUntil: draft.validUntil || null, lines: (draft.lines || []).map(linePayload),
+    days: (draft.days || []).filter((day) => day.title || day.description).map((day) => ({ dayNumber: Number(day.dayNumber), title: day.title || null, description: day.description || null })),
+    options: (draft.options || []).length >= 2 ? draft.options.map((option, index) => ({ name: option.name.trim() || `Option ${index + 1}` })) : [],
+  };
+}

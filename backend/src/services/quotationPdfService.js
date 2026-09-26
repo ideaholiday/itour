@@ -38,6 +38,28 @@ function lineSummary(line, hotels, cabs) {
   return line.title;
 }
 
+const shortDate = (date) => new Date(`${date}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+function addDays(date, days) {
+  const next = new Date(`${date}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next.toISOString().slice(0, 10);
+}
+
+/** Hotel lines as stays: back-to-back nights in the same hotel, room, meals and room count read as one stay. */
+export function hotelStays(lines) {
+  const stays = [];
+  for (const line of [...lines].filter((item) => item.kind === "HOTEL" && item.date).sort((a, b) => a.date.localeCompare(b.date))) {
+    const last = stays[stays.length - 1];
+    if (last && last.hotelId === line.hotelId && last.roomType === line.roomType && last.mealPlan === line.mealPlan && last.rooms === line.rooms && last.checkOut === line.date) {
+      last.nights += line.nights;
+      last.checkOut = addDays(line.date, line.nights);
+    } else {
+      stays.push({ hotelId: line.hotelId, title: line.title, roomType: line.roomType, mealPlan: line.mealPlan, rooms: line.rooms || 1, extraAdults: line.extraAdults || 0, nights: line.nights, checkIn: line.date, checkOut: addDays(line.date, line.nights) });
+    }
+  }
+  return stays;
+}
+
 /** Renders the quotation to a PDF Buffer. */
 export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes = [] }) {
   const hotelsById = new Map(hotels.map((hotel) => [hotel.id, hotel]));
@@ -72,7 +94,45 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes 
     // Trip and customer.
     doc.font("Helvetica-Bold").fontSize(16).fillColor(INK).text(quotation.title, 48, doc.y, { width });
     const travelers = `${quotation.adults} adult${quotation.adults === 1 ? "" : "s"}${quotation.children ? `, ${quotation.children} child${quotation.children === 1 ? "" : "ren"}` : ""}`;
-    doc.font("Helvetica").fontSize(10).fillColor(MUTED).text(`Prepared for ${quotation.customerName} · ${travelers} · from ${quotation.startDate}`, { width });
+    doc.font("Helvetica").fontSize(10).fillColor(MUTED).text(`Prepared for ${quotation.customerName}`, { width });
+    doc.moveDown(0.8);
+
+    // Trip details at a glance: dates, travellers, hotels and room types, cars.
+    const chosenLines = quotation.lines.filter((line) => line.kind !== "HOTEL" || (line.option || 1) === chosen);
+    const stays = openOptions.length ? [] : hotelStays(chosenLines);
+    const lastDay = Math.max(1, ...chosenLines.map((line) => line.dayNumber), ...dayText.keys(),
+      ...stays.map((stay) => Math.round((Date.parse(`${stay.checkOut}T00:00:00Z`) - Date.parse(`${quotation.startDate}T00:00:00Z`)) / 86400000) + 1));
+    const endDate = addDays(quotation.startDate, lastDay - 1);
+    const details = [
+      ["Travel dates", lastDay > 1 ? `${shortDate(quotation.startDate)} to ${shortDate(endDate)} · ${lastDay} days / ${lastDay - 1} night${lastDay === 2 ? "" : "s"}` : shortDate(quotation.startDate)],
+      ["Travellers", travelers],
+    ];
+    if (openOptions.length) details.push(["Hotels", `${openOptions.length} hotel options, listed after the itinerary`]);
+    stays.forEach((stay, index) => {
+      const hotel = hotelsById.get(stay.hotelId);
+      const name = [hotel?.name || stay.title, hotel?.city].filter(Boolean).join(", ") + (hotel?.starRating ? ` (${hotel.starRating} star)` : "");
+      const room = `${stay.roomType}${stay.rooms > 1 ? ` × ${stay.rooms} rooms` : ", 1 room"}${stay.extraAdults ? ` + ${stay.extraAdults} extra adult${stay.extraAdults === 1 ? "" : "s"}` : ""}`;
+      details.push(
+        [stays.length > 1 ? `Hotel ${index + 1}` : "Hotel", name],
+        ["Room type", room],
+        ["Meals", MEAL_PLANS[stay.mealPlan] || stay.mealPlan],
+        ["Stay", `Check-in ${shortDate(stay.checkIn)} · check-out ${shortDate(stay.checkOut)} · ${stay.nights} night${stay.nights === 1 ? "" : "s"}`],
+      );
+    });
+    const cars = [...new Set(chosenLines.filter((line) => line.kind === "TRANSPORT").map((line) => cabsById.get(line.cabTypeId)?.name).filter(Boolean))];
+    if (cars.length) details.push(["Car", cars.join(", ")]);
+    const labelWidth = 96;
+    const detailsTop = doc.y;
+    const detailsHeight = details.reduce((sum, [, value]) => sum + doc.font("Helvetica").fontSize(9.5).heightOfString(value, { width: width - labelWidth - 32 }) + 5, 0) + 20;
+    doc.roundedRect(48, detailsTop, width, detailsHeight, 8).fillColor("#FAF9F6").fill();
+    let detailY = detailsTop + 10;
+    for (const [label, value] of details) {
+      doc.font("Helvetica-Bold").fontSize(9.5).fillColor(MUTED).text(label, 64, detailY, { width: labelWidth });
+      doc.font("Helvetica").fontSize(9.5).fillColor(INK).text(value, 64 + labelWidth, detailY, { width: width - labelWidth - 32 });
+      detailY = doc.y + 5;
+    }
+    doc.x = 48;
+    doc.y = detailsTop + detailsHeight;
     doc.moveDown(1.2);
 
     // Itinerary, day by day, without prices.

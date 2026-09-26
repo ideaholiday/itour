@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dayRange, insertDayAfter, mealPlansFor, minTripLength, removeDay, setTripLength, setupSteps } from "./quotationItinerary.js";
+import { dayRange, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "./quotationItinerary.js";
 
 const trip = {
   lines: [
@@ -49,4 +49,19 @@ test("setup steps are done once each rate sheet has a price", () => {
   const ready = setupSteps({ hotels: [{ rates: [{}] }], cabTypes: [{}], services: [{ rates: [{}] }], quotationCount: 1 });
   assert.deepEqual(ready.map((step) => step.done), [true, true, true, true]);
   assert.equal(setupSteps({ hotels: [{ rates: [] }] })[0].done, false);
+});
+
+test("saving a loaded quotation sends only what the server takes", () => {
+  // A quotation as the server returns it, with read-only fields such as trip and totals.
+  const loaded = {
+    id: "qtn_1", ref: "Q-1", status: "DRAFT", trip: null, totals: { totalInr: 1 }, warnings: [], payments: [], selectedOption: null, sentAt: null,
+    title: "Lucknow Tour", destination: "", customerName: "Ajay", customerEmail: "", customerPhone: "9336757106", agentId: "", startDate: "2026-09-26",
+    adults: "1", children: "0", markupPct: "15", notes: "", validUntil: "2026-09-30", options: [], days: [{ dayNumber: 1, title: "Arrive", description: "" }, { dayNumber: 2, title: "", description: "" }],
+    lines: [{ id: "qln_1", priceInr: 900, arrangementStatus: null, kind: "HOTEL", dayNumber: 1, title: "Stay", hotelId: "h1", roomType: "Deluxe", mealPlan: "CP", checkIn: "2026-09-26", nights: 1, rooms: 1 }],
+  };
+  const body = quotationPayload(loaded);
+  assert.deepEqual(Object.keys(body).sort(), ["adults", "agentId", "children", "customerEmail", "customerName", "customerPhone", "days", "destination", "lines", "markupPct", "notes", "options", "startDate", "title", "validUntil"]);
+  assert.deepEqual([body.adults, body.markupPct, body.customerEmail, body.destination], [1, 15, null, null]);
+  assert.deepEqual(body.days, [{ dayNumber: 1, title: "Arrive", description: null }]);
+  assert.deepEqual(body.lines[0], { kind: "HOTEL", dayNumber: 1, title: "Stay", description: null, option: 1, hotelId: "h1", roomType: "Deluxe", mealPlan: "CP", checkIn: "2026-09-26", nights: 1, rooms: 1, extraAdults: 0, children: 0 });
 });
