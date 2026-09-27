@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyRoute, routeFromDraft, routeItemLines, builderSteps, cleanItems, mergeItems, tripInclusions, cityOfDay, dayAfterService, dayRange, hotelRateGap, nearestFirst, planFromLegs, routeDayTitle, routeTitle, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps } from "./quotationItinerary.js";
+import { applyRoute, routeFromDraft, routeItemLines, builderSteps, cleanItems, mergeItems, tripInclusions, cityOfDay, dayAfterService, dayRange, hotelRateGap, nearestFirst, planFromLegs, routeDayTitle, routeTitle, insertDayAfter, mealPlansFor, minTripLength, quotationPayload, removeDay, setTripLength, setupSteps, roomPlan, roomPlanLabel, roomSleeps, cabsNeeded, markupForTarget, tripTypeOf, moveLeg, travelDays, transferBetween, transferForPoint, withPoints } from "./quotationItinerary.js";
 
 const trip = {
   lines: [
@@ -60,7 +60,7 @@ test("saving a loaded quotation sends only what the server takes", () => {
     lines: [{ id: "qln_1", priceInr: 900, arrangementStatus: null, kind: "HOTEL", dayNumber: 1, title: "Stay", hotelId: "h1", roomType: "Deluxe", mealPlan: "CP", checkIn: "2026-09-26", nights: 1, rooms: 1 }],
   };
   const body = quotationPayload(loaded);
-  assert.deepEqual(Object.keys(body).sort(), ["adults", "agentId", "children", "customerEmail", "customerName", "customerPhone", "days", "destination", "exclusions", "inclusions", "legs", "lines", "markupPct", "notes", "options", "startDate", "title", "validUntil"]);
+  assert.deepEqual(Object.keys(body).sort(), ["adults", "agentId", "arrivalPoint", "children", "customerEmail", "customerName", "customerPhone", "days", "departurePoint", "destination", "exclusions", "inclusions", "legs", "lines", "markupPct", "notes", "options", "startDate", "theme", "title", "validUntil"]);
   assert.deepEqual([body.adults, body.markupPct, body.customerEmail, body.destination], [1, 15, null, null]);
   assert.deepEqual(body.days, [{ dayNumber: 1, title: "Arrive", description: null }]);
   assert.deepEqual(body.lines[0], { kind: "HOTEL", dayNumber: 1, title: "Stay", description: null, option: 1, hotelId: "h1", roomType: "Deluxe", mealPlan: "CP", checkIn: "2026-09-26", nights: 1, rooms: 1, extraAdults: 0, children: 0 });
@@ -201,4 +201,53 @@ test("an agent quotation needs only the agent, not the agent's client", () => {
   // The server fills an agent quotation's customer from the agent, so none is sent.
   const body = quotationPayload({ title: "Tour", agentId: "agt_1", customerName: "Old traveller", startDate: "2026-09-26", lines: [], days: [] });
   assert.equal("customerName" in body || "customerEmail" in body || "customerPhone" in body, false);
+});
+
+test("the room calculator puts two adults a room, an odd adult on an extra bed, and adds rooms the group won't fit in", () => {
+  assert.deepEqual(roomPlan({ adults: 2 }, 3), { rooms: 1, extraAdults: 0, children: 0 });
+  assert.deepEqual(roomPlan({ adults: 3 }, 3), { rooms: 1, extraAdults: 1, children: 0 });
+  assert.deepEqual(roomPlan({ adults: 3 }, 2), { rooms: 2, extraAdults: 0, children: 0 });
+  assert.deepEqual(roomPlan({ adults: 3 }), { rooms: 2, extraAdults: 0, children: 0 });
+  assert.deepEqual(roomPlan({ adults: 5, children: 2 }, 3), { rooms: 3, extraAdults: 0, children: 2 });
+  assert.deepEqual(roomPlan({ adults: 1 }), { rooms: 1, extraAdults: 0, children: 0 });
+  assert.equal(roomPlanLabel({ rooms: 2, extraAdults: 1 }), "2 rooms + 1 extra bed");
+  assert.equal(roomSleeps({ rates: [{ roomType: "Deluxe", maxGuests: 3 }, { roomType: "Suite", maxGuests: 4 }] }, "deluxe"), 3);
+  assert.equal(roomSleeps({ rates: [{ roomType: "Deluxe" }] }, "Deluxe"), null);
+  assert.equal(cabsNeeded(7, 6), 2);
+});
+
+test("price from a target works the markup back through GST and listings", () => {
+  // 7000 cost, 5% GST: 8085 needs 10% markup.
+  assert.equal(markupForTarget({ costInr: 7000, listingsInr: 0, gstPct: 5 }, 8085), 10);
+  assert.equal(markupForTarget({ costInr: 10000, listingsInr: 2000, gstPct: 0 }, 13500), 15);
+  assert.equal(markupForTarget({ costInr: 10000, gstPct: 0 }, 5000), 0);
+  assert.equal(markupForTarget({ costInr: 0 }, 5000), null);
+});
+
+test("multi-city: cities reorder, travel days fall on each new city's check-in day, and the transfer between them is found", () => {
+  const legs = [{ city: "Lucknow", nights: 2 }, { city: "Ayodhya", nights: 1 }, { city: "Varanasi", nights: 2 }];
+  assert.equal(tripTypeOf(legs), "MULTI");
+  assert.equal(tripTypeOf([{ city: "Varanasi", nights: 3 }]), "SINGLE");
+  assert.deepEqual(moveLeg(legs, 2, -1).map((leg) => leg.city), ["Lucknow", "Varanasi", "Ayodhya"]);
+  assert.equal(moveLeg(legs, 0, -1), legs);
+  assert.deepEqual(travelDays(legs), [{ dayNumber: 3, from: "Lucknow", to: "Ayodhya" }, { dayNumber: 4, from: "Ayodhya", to: "Varanasi" }]);
+  const services = [
+    { id: "a", kind: "TRANSFER", status: "ACTIVE", name: "Lucknow Airport pickup", city: "Lucknow" },
+    { id: "b", kind: "TRANSFER", status: "ACTIVE", name: "Lucknow to Ayodhya drop", city: "Lucknow" },
+    { id: "c", kind: "TRANSFER", status: "ACTIVE", name: "Intercity", fromPlace: "Ayodhya", toPlace: "Varanasi" },
+    { id: "d", kind: "TRANSFER", status: "INACTIVE", name: "Varanasi railway station drop", city: "Varanasi" },
+    { id: "e", kind: "TRANSFER", status: "ACTIVE", name: "Varanasi Junction station drop", city: "Varanasi" },
+  ];
+  assert.equal(transferBetween(services, "Lucknow", "Ayodhya").id, "b");
+  assert.equal(transferBetween(services, "Ayodhya", "Varanasi").id, "c");
+  assert.equal(transferBetween(services, "Varanasi", "Prayagraj"), null);
+  assert.equal(transferForPoint(services, "Lucknow", "Lucknow Airport (LKO)").id, "a");
+  assert.equal(transferForPoint(services, "Varanasi", "Varanasi Junction").id, "e");
+  assert.equal(transferForPoint(services, "Varanasi", "Varanasi"), null);
+});
+
+test("the arrival and departure points go into the builder's day titles, never the supplier's own", () => {
+  const days = [{ dayNumber: 1, title: "Arrive in Lucknow", auto: true }, { dayNumber: 2, title: "My own title", auto: false }, { dayNumber: 3, title: "Depart from Lucknow", auto: true }];
+  assert.deepEqual(withPoints(days, { arrivalPoint: "Lucknow Airport", departurePoint: "Charbagh station", lastDay: 3 }).map((day) => day.title),
+    ["Arrive in Lucknow: pickup at Lucknow Airport", "My own title", "Depart from Lucknow: drop at Charbagh station"]);
 });

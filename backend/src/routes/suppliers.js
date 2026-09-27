@@ -78,13 +78,14 @@ import { supplierAnalytics, supplierDashboardStats } from "../services/supplierD
 import { agentStatement, listAgents, recordAgentPayment, saveAgent, setAgentRates } from "../services/supplierAgentService.js";
 import { deleteCustomer, listCustomers } from "../services/supplierCustomerService.js";
 import { addHotelRate, deleteHotelRate, listHotels, saveHotel } from "../services/supplierHotelService.js";
-import { bookQuotationLine, copyQuotation, findQuotation, listQuotations, quotationShareUrl, quotationTerms, quotationView, recordQuotationPayment, saveQuotation, saveQuotationTerms, setQuotationStatus, suggestQuotations } from "../services/quotationService.js";
+import { bookQuotationLine, copyQuotation, findQuotation, listQuotations, previewQuotation, quotationPdfUrl, quotationShareUrl, quotationTerms, quotationView, recordQuotationPayment, saveQuotation, saveQuotationTerms, setQuotationStatus, suggestQuotations } from "../services/quotationService.js";
 import { carSchedule, recordVendorPayment, requestHotelBooking, sendItinerary, updateArrangement } from "../services/tripService.js";
 import { itineraryPdf } from "../services/tripItineraryPdfService.js";
 import { addServiceRate, deleteServiceRate, listCabTypes, listServices, removeService, saveCabType, saveService } from "../services/supplierRateSheetService.js";
 import { importLibraryItems, supplierLibrary } from "../services/packageLibraryService.js";
 import { deleteSupplierRoute, saveSupplierRoute, supplierRouteLibrary } from "../services/routeLibraryService.js";
 import { quotationPdf, quotationText } from "../services/quotationPdfService.js";
+import { quotationEmail } from "../services/quotationEmailService.js";
 import { createResellerKey, listResellerKeys, revokeResellerKey, setProductChannels } from "../services/supplierChannelSettingsService.js";
 import { sendEmail } from "../services/emailService.js";
 import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
@@ -2474,6 +2475,10 @@ router.get("/:id/quotations", (req, res) => {
 router.post("/:id/quotations", (req, res) => {
   try { res.status(201).json({ success: true, quotation: saveQuotation(db, req.params.id, req.body, { actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the quotation"); }
 });
+// The builder's live total (ADR 051): prices a draft without saving it.
+router.post("/:id/quotations/preview", (req, res) => {
+  try { res.json({ success: true, ...previewQuotation(db, req.params.id, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not price the quotation"); }
+});
 // Standard inclusions and exclusions, filled into a quotation in one click (migration 077).
 router.get("/:id/quotation-terms", (req, res) => {
   try { res.json({ success: true, terms: quotationTerms(db, req.params.id) }); } catch (error) { directBookingFailure(res, req, error, "Could not load your standard lists"); }
@@ -2548,6 +2553,15 @@ router.get("/:id/car-schedule", (req, res) => {
 
 // Sends the PDF by email (attached where the provider allows, with the link in the body)
 // and returns the link and a WhatsApp message for the same quotation. A draft becomes sent.
+// The email as it will go out (ADR 051), to check before sending: recipient, subject and the themed HTML.
+router.get("/:id/quotations/:quotationId/email", (req, res) => {
+  try {
+    const audience = String(req.query.audience || "").toUpperCase() === "AGENT" ? "AGENT" : "CUSTOMER";
+    const { to, subject, html, text } = quotationEmail(db, req.params.id, req.params.quotationId, { audience, message: String(req.query.message || "").slice(0, 2000) });
+    res.json({ success: true, email: { audience, to, subject, html, text } });
+  } catch (error) { directBookingFailure(res, req, error, "Could not build the email"); }
+});
+
 router.post("/:id/quotations/:quotationId/send", async (req, res) => {
   try {
     let row = findQuotation(db, req.params.id, req.params.quotationId);
@@ -2560,17 +2574,19 @@ router.post("/:id/quotations/:quotationId/send", async (req, res) => {
       ? `${view.options.length} hotel options:\n${view.options.map((option) => `- ${option.name}: INR ${option.totals.totalInr.toLocaleString("en-IN")}`).join("\n")}\nfor the whole group.`
       : `INR ${view.totals.totalInr.toLocaleString("en-IN")} for the whole group.`;
     const message = `Hello ${row.customer_name},\n\nHere is your quotation ${row.ref} for ${row.title}: ${price}\n\nView or download it: ${shareUrl}\n\n${supplier?.company_name || ""}`.trim();
+    // The themed HTML email (ADR 051), to the address and with the note the supplier checked in the preview.
+    const mail = quotationEmail(db, req.params.id, row.id, { audience: "CUSTOMER", to: req.body?.to, message: req.body?.message });
     let email = { status: "SKIPPED", error: "No customer email on the quotation" };
-    if (req.body?.email !== false && row.customer_email) {
+    if (req.body?.email !== false && mail.to) {
       const { buffer, filename } = await quotationPdf(db, req.params.id, row.id);
       email = await sendEmail({
-        to: row.customer_email, recipientName: row.customer_name, recipientRole: "TRAVELER", eventType: "QUOTATION_SENT",
-        eventKey: `quotation:${row.id}:${Date.now()}`, subject: `Your quotation ${row.ref}: ${row.title}`, text: message,
+        to: mail.to, recipientName: mail.recipientName, recipientRole: "TRAVELER", eventType: "QUOTATION_SENT",
+        eventKey: `quotation:${row.id}:${Date.now()}`, subject: mail.subject, text: mail.text, html: mail.html,
         metadata: { quotationId: row.id, ref: row.ref }, attachments: [{ name: filename, contentBase64: buffer.toString("base64") }],
       });
     }
     if (row.status === "DRAFT") row = findQuotation(db, req.params.id, setQuotationStatus(db, req.params.id, row.id, "SENT").id);
-    res.json({ success: true, shareUrl, whatsappText: message, email: { status: email.status, error: email.error || null }, quotation: quotationView(db, row) });
+    res.json({ success: true, shareUrl, pdfUrl: quotationPdfUrl(row), whatsappText: message, email: { status: email.status, error: email.error || null, to: mail.to }, quotation: quotationView(db, row) });
   } catch (error) { directBookingFailure(res, req, error, "Could not send the quotation"); }
 });
 
@@ -2582,21 +2598,16 @@ router.post("/:id/quotations/:quotationId/send-to-agent", async (req, res) => {
     let row = findQuotation(db, req.params.id, req.params.quotationId);
     if (row.status === "DECLINED") return res.status(409).json({ error: "This quotation was declined", code: "QUOTATION_FINAL" });
     if (!row.agent_id) return res.status(409).json({ error: "This quotation has no agent set", code: "AGENT_MISSING" });
-    const supplier = db.prepare("SELECT company_name FROM suppliers WHERE id = ?").get(req.params.id);
     const { buffer, filename, agent } = await quotationPdf(db, req.params.id, row.id, { variant: "AGENT" });
     if (!agent) return res.status(409).json({ error: "Agent not found", code: "AGENT_MISSING" });
-    const view = quotationView(db, row);
     // The agent's net is the quotation's own total: no agent markup (ADR 050).
-    const price = view.options.length && !view.selectedOption
-      ? `${view.options.length} hotel options; net from INR ${Math.min(...view.options.map((o) => o.totals.totalInr)).toLocaleString("en-IN")}.`
-      : `Net INR ${view.totals.totalInr.toLocaleString("en-IN")}.`;
-    const to = (req.body?.email && String(req.body.email).trim()) || agent.email;
+    const mail = quotationEmail(db, req.params.id, row.id, { audience: "AGENT", to: req.body?.to || req.body?.email, message: req.body?.message });
+    const to = mail.to;
     let email = { status: "SKIPPED", error: "No agent email" };
     if (to) {
-      const message = `Hello ${agent.contactName || agent.name},\n\nTrade quotation ${row.ref} for ${row.title}:\n${price}\n\nPDF attached. This trade copy carries net rates for ${agent.name} only — please do not forward.\n\n${supplier?.company_name || ""}`.trim();
       email = await sendEmail({
-        to, recipientName: agent.contactName || agent.name, recipientRole: "SUPPLIER", eventType: "QUOTATION_SENT_AGENT",
-        eventKey: `quotation:${row.id}:agent:${Date.now()}`, subject: `Trade quotation ${row.ref}: ${row.title}`, text: message,
+        to, recipientName: mail.recipientName, recipientRole: "SUPPLIER", eventType: "QUOTATION_SENT_AGENT",
+        eventKey: `quotation:${row.id}:agent:${Date.now()}`, subject: mail.subject, text: mail.text, html: mail.html,
         metadata: { quotationId: row.id, ref: row.ref, agentId: agent.id }, attachments: [{ name: filename, contentBase64: buffer.toString("base64") }],
       });
     }

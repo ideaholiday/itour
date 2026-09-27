@@ -308,5 +308,103 @@ export function quotationPayload(draft) {
     days: (draft.days || []).filter((day) => day.title || day.description).map((day) => ({ dayNumber: Number(day.dayNumber), title: day.title || null, description: day.description || null })),
     legs: (draft.legs || []).filter((leg) => leg.city && leg.city.trim()).map((leg) => ({ city: leg.city.trim(), nights: Math.max(0, Number(leg.nights || 0)) })),
     options: (draft.options || []).length >= 2 ? draft.options.map((option, index) => ({ name: option.name.trim() || `Option ${index + 1}` })) : [],
+    arrivalPoint: String(draft.arrivalPoint || "").trim() || null, departurePoint: String(draft.departurePoint || "").trim() || null, theme: draft.theme || null,
   };
+}
+
+// Trip calculator (ADR 051). Rooms for the group: two adults a room, an odd adult on an
+// extra bed when the room sleeps three, children sharing; more rooms when the room is too small.
+export function roomPlan({ adults = 2, children = 0 } = {}, maxGuests = null) {
+  const grown = Math.max(1, Number(adults) || 1);
+  const kids = Math.max(0, Number(children) || 0);
+  const sleeps = Number(maxGuests) || null;
+  let rooms = Math.max(1, Math.floor(grown / 2));
+  let extraAdults = 0;
+  if (grown % 2 === 1 && grown > 1) {
+    if (sleeps && sleeps >= 3) extraAdults = 1;
+    else rooms += 1;
+  }
+  if (sleeps) while (rooms * sleeps < grown + kids) rooms += 1;
+  // Rooms added for the children may leave space for the odd adult without an extra bed.
+  if (extraAdults && rooms * 2 >= grown) extraAdults = 0;
+  return { rooms, extraAdults, children: kids };
+}
+
+// "2 rooms + 1 extra bed" for the hotel card.
+export const roomPlanLabel = ({ rooms, extraAdults }) => `${rooms} room${rooms === 1 ? "" : "s"}${extraAdults ? ` + ${extraAdults} extra bed${extraAdults === 1 ? "" : "s"}` : ""}`;
+
+// The biggest guest count any of the room's rates allows, or null when the rate sheet doesn't say.
+export function roomSleeps(hotel, roomType) {
+  const counts = (hotel?.rates || []).filter((rate) => !roomType || String(rate.roomType).toLowerCase() === String(roomType).toLowerCase()).map((rate) => Number(rate.maxGuests) || 0).filter(Boolean);
+  return counts.length ? Math.max(...counts) : null;
+}
+
+// Cabs for the group in a cab of `seats`.
+export const cabsNeeded = (travelers, seats) => Math.max(1, Math.ceil((Number(travelers) || 1) / Math.max(1, Number(seats) || 1)));
+
+/**
+ * The markup % that brings the package to `targetInr` for the customer, from a priced
+ * preview: total = (cost × (1 + markup) + listings) × (1 + GST). Rounded to 0.1% and
+ * kept within 0–200%; null when there are no costs to mark up. The server then prices
+ * the quotation again, so the total it shows is the one that counts.
+ */
+export function markupForTarget(totals, targetInr) {
+  const cost = Number(totals?.costInr) || 0;
+  const target = Number(targetInr) || 0;
+  if (!cost || !target) return null;
+  const beforeGst = target / (1 + (Number(totals.gstPct) || 0) / 100);
+  const pct = ((beforeGst - (Number(totals.listingsInr) || 0)) / cost - 1) * 100;
+  return Math.min(200, Math.max(0, Math.round(pct * 10) / 10));
+}
+
+// Single and multi-city trips (ADR 051). A route with more than one city is multi-city.
+export const tripTypeOf = (legs = []) => (legStays(legs).length > 1 ? "MULTI" : "SINGLE");
+
+// Moves the city at `index` one place earlier (by = -1) or later (by = 1).
+export function moveLeg(legs = [], index, by) {
+  const to = index + by;
+  if (to < 0 || to >= legs.length) return legs;
+  const next = [...legs];
+  [next[index], next[to]] = [next[to], next[index]];
+  return next;
+}
+
+// The days the group moves from one city to the next: the next city's check-in day.
+export function travelDays(legs = []) {
+  const stays = legStays(legs).filter((stay) => stay.nights > 0);
+  return stays.slice(1).map((stay, index) => ({ dayNumber: stay.checkInDay, from: stays[index].city, to: stay.city }));
+}
+
+const has = (text, word) => Boolean(word) && String(text || "").toLowerCase().includes(String(word).trim().toLowerCase());
+
+// A transfer on the rate sheet that drives from one city to the other: its from/to places first, else its name.
+export function transferBetween(services = [], from, to) {
+  const cars = services.filter((service) => service.kind === "TRANSFER" && service.status === "ACTIVE");
+  return cars.find((service) => has(service.fromPlace, from) && has(service.toPlace, to))
+    || cars.find((service) => (has(service.city, from) || has(service.fromPlace, from) || has(service.name, from)) && (has(service.toPlace, to) || has(service.name, to)))
+    || null;
+}
+
+// The words of a point that name it, "Lucknow Airport (LKO)" → ["lucknow", "airport", "lko"].
+const pointWords = (point) => String(point || "").toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3);
+
+// The transfer to pick up at (or drop at) a point: a transfer in the city whose name or places share the point's words.
+export function transferForPoint(services = [], city, point) {
+  const words = pointWords(point).filter((word) => !has(city, word));
+  if (!words.length) return null;
+  const cars = services.filter((service) => service.kind === "TRANSFER" && service.status === "ACTIVE");
+  const score = (service) => words.filter((word) => has(`${service.name} ${service.fromPlace || ""} ${service.toPlace || ""}`, word)).length;
+  const ranked = cars.map((service) => ({ service, score: score(service), local: !city || has(service.city, city) || has(service.fromPlace, city) || has(service.toPlace, city) }))
+    .filter((item) => item.score > 0).sort((a, b) => Number(b.local) - Number(a.local) || b.score - a.score);
+  return ranked[0]?.service || null;
+}
+
+// Day 1 and the last day's titles with the arrival and departure points, when the builder wrote the title.
+export function withPoints(days = [], { arrivalPoint, departurePoint, lastDay }) {
+  return days.map((day) => {
+    if (!day.auto) return day;
+    if (Number(day.dayNumber) === 1 && arrivalPoint && /^Arrive in /.test(day.title || "")) return { ...day, title: `${day.title}: pickup at ${arrivalPoint}` };
+    if (Number(day.dayNumber) === lastDay && lastDay > 1 && departurePoint && /^Depart from /.test(day.title || "")) return { ...day, title: `${day.title}: drop at ${departurePoint}` };
+    return day;
+  });
 }

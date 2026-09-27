@@ -1,17 +1,21 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { AlertCircle, ArrowLeft, ArrowRight, BookmarkPlus, CalendarPlus, Car, CheckCircle2, Circle, Copy, Download, MapPin, FileText, Hotel, MessageCircle, Package, Plus, Send, Ticket, Trash2, TriangleAlert, User, Users } from "lucide-react";
+import { AlertCircle, ArrowLeft, ArrowRight, BookmarkPlus, CalendarPlus, Car, CheckCircle2, ChevronDown, ChevronUp, Circle, Copy, Download, Ellipsis, MapPin, FileText, Hotel, MessageCircle, Package, Palette, PlaneLanding, PlaneTakeoff, Plus, Send, Ticket, Trash2, TriangleAlert, User, Users } from "lucide-react";
 import { authHeaders } from "../../lib/api.js";
 import SupplierHotelRatesPanel, { MEAL_PLAN_LABELS } from "./SupplierHotelRatesPanel.jsx";
 import SupplierRateSheetPanel, { isTransport } from "./SupplierRateSheetPanel.jsx";
 import SupplierTripPanel from "./SupplierTripPanel.jsx";
 import Combobox from "../Combobox.jsx";
-import { addDays, applyRoute, routeFromDraft, routeItemLines, builderSteps, cityOfDay, cleanItems, mergeItems, tripInclusions, dayAfterService, dayDate, dayRange, hotelRateGap, insertDayAfter, legStays, mealPlansFor, minTripLength, nearestFirst, planFromLegs, quotationPayload, removeDay, routeTitle, setTripLength, setupSteps } from "../../lib/quotationItinerary.js";
+import QuotationSummary, { QuotationPriceBar } from "./QuotationSummary.jsx";
+import QuotationStart from "./QuotationStart.jsx";
+import { addDays, applyRoute, routeFromDraft, routeItemLines, builderSteps, cityOfDay, cleanItems, mergeItems, tripInclusions, dayAfterService, dayDate, dayRange, hotelRateGap, insertDayAfter, legStays, mealPlansFor, minTripLength, nearestFirst, planFromLegs, quotationPayload, removeDay, routeTitle, setTripLength, setupSteps, roomPlan, roomPlanLabel, roomSleeps, cabsNeeded, tripTypeOf, moveLeg, travelDays, transferBetween, transferForPoint, withPoints } from "../../lib/quotationItinerary.js";
 
 const inr = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 const input = "rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm";
 const today = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 const STATUS_STYLES = { DRAFT: "bg-stone-100 text-stone-700", SENT: "bg-sky-100 text-sky-800", ACCEPTED: "bg-emerald-100 text-emerald-800", DECLINED: "bg-rose-100 text-rose-800" };
 const daysBetween = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);
+const KIND_ICONS = { HOTEL: Hotel, TRANSPORT: Car, ACTIVITY: Ticket, LISTING: Package, CUSTOM: Plus };
+const KIND_NAMES = { HOTEL: "Hotel stay", TRANSPORT: "Car", ACTIVITY: "Activity", LISTING: "Your listing", CUSTOM: "Extra" };
 const COST_GROUPS = [["HOTEL", "Hotels"], ["TRANSPORT", "Cars"], ["ACTIVITY", "Activities"], ["CUSTOM", "Extras"]];
 // The cost lines of the quotation's package (option 1 until the customer picks), grouped by kind; listings are shown separately.
 const costGroups = (quotation) => {
@@ -35,7 +39,14 @@ const MODE_KEY = "idea.quotation.forAgent";
 const lastMode = () => { try { return window.localStorage.getItem(MODE_KEY) !== "direct"; } catch { return true; } };
 const rememberMode = (forAgent) => { try { window.localStorage.setItem(MODE_KEY, forAgent ? "agent" : "direct"); } catch { /* private mode */ } };
 const chain = (legs = []) => legs.map((leg) => `${leg.city} ${leg.nights}N`).join(" → ");
-const NEW = () => ({ forAgent: lastMode(), title: "", destination: "", days: [], legs: [], options: [], inclusions: [], exclusions: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
+const NEW = () => ({ forAgent: lastMode(), tripType: "SINGLE", arrivalPoint: "", departurePoint: "", theme: "", title: "", destination: "", days: [], legs: [], options: [], inclusions: [], exclusions: [], customerName: "", customerEmail: "", customerPhone: "", agentId: "", startDate: today(), adults: 2, children: 0, markupPct: 15, notes: "", validUntil: "", lines: [] });
+
+// Itinerary themes (ADR 051); the server draws each one on the PDF, web page and email.
+export const THEMES = [["HERITAGE", "Heritage", "Saffron and maroon, for temple and heritage trips", "#9a3412"], ["CLASSIC", "Classic", "Navy and gold, for any trip", "#1e3a5f"], ["MINIMAL", "Minimal", "White and clean, with one accent colour", "#0f766e"]];
+// A new quotation not saved yet is kept in this browser, so a closed tab doesn't lose it (ADR 051).
+const unsavedKey = (supplierId) => `idea.quotation.unsaved.${supplierId}`;
+const readUnsaved = (supplierId) => { try { return JSON.parse(window.localStorage.getItem(unsavedKey(supplierId)) || "null"); } catch { return null; } };
+const writeUnsaved = (supplierId, draft) => { try { if (draft) window.localStorage.setItem(unsavedKey(supplierId), JSON.stringify(draft)); else window.localStorage.removeItem(unsavedKey(supplierId)); } catch { /* private mode */ } };
 
 async function request(url, options = {}) {
   const response = await fetch(url, { ...options, headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...authHeaders() } });
@@ -65,7 +76,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const [agents, setAgents] = useState([]);
   const [cities, setCities] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [terms, setTerms] = useState({ inclusions: [], exclusions: [] });
+  const [terms, setTerms] = useState({ inclusions: [], exclusions: [], points: [], theme: "HERITAGE" });
   const [routeLib, setRouteLib] = useState({ routes: [], cities: [] });
   const [routeId, setRouteId] = useState("");
   const [appliedRoute, setAppliedRoute] = useState(null);
@@ -79,6 +90,26 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const [notice, setNotice] = useState("");
   const [shared, setShared] = useState(null);
   const [payment, setPayment] = useState({ mode: "UPI", amount_inr: "", reference: "" });
+  const [starting, setStarting] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
+  const [unsaved, setUnsaved] = useState(() => readUnsaved(supplierId));
+
+  // Trip calculator (ADR 051): the server prices the draft as it's built, half a second after each change.
+  const editableNow = draft && (!saved || ["DRAFT", "SENT"].includes(saved.status));
+  const previewBody = editableNow ? JSON.stringify(quotationPayload({ ...draft, adults: Math.max(1, Number(draft.adults) || 1), children: Math.max(0, Number(draft.children) || 0), markupPct: Math.min(200, Math.max(0, Number(draft.markupPct) || 0)) })) : null;
+  useEffect(() => {
+    if (!previewBody) { setPreview(null); setPreviewing(false); return undefined; }
+    let live = true;
+    setPreviewing(true);
+    const timer = setTimeout(() => request(`${base}/quotations/preview`, { method: "POST", body: previewBody })
+      .then((data) => { if (live) setPreview(data); }).catch(() => {}).finally(() => { if (live) setPreviewing(false); }), 500);
+    return () => { live = false; clearTimeout(timer); };
+  }, [base, previewBody]);
+  // A new quotation with something in it is kept in this browser until it's saved.
+  useEffect(() => {
+    if (draft && !saved && (String(draft.title || "").trim() || (draft.legs || []).some((leg) => leg.city) || (draft.lines || []).length)) writeUnsaved(supplierId, draft);
+  }, [supplierId, draft, saved]);
 
   const loadList = useCallback(() => request(`${base}/quotations`).then((data) => setList(data.quotations || [])).catch((err) => setError(err.message)), [base]);
   useEffect(() => {
@@ -87,7 +118,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     request(`${base}/cab-types`).then((data) => setCabTypes(data.cabTypes || [])).catch(() => {});
     request(`${base}/services`).then((data) => setServices(data.services || [])).catch(() => {});
     request(`${base}/route-library`).then((data) => setRouteLib({ routes: data.routes || [], cities: data.cities || [] })).catch(() => {});
-    request(`${base}/quotation-terms`).then((data) => setTerms(data.terms || { inclusions: [], exclusions: [] })).catch(() => {});
+    request(`${base}/quotation-terms`).then((data) => setTerms({ points: [], theme: "HERITAGE", ...(data.terms || {}) })).catch(() => {});
     request(`${base}/agents`).then((data) => setAgents((data.agents || []).filter((agent) => agent.status === "ACTIVE"))).catch(() => {});
     // Cities for the destination and leg pickers: the marketplace catalogue,
     // merged with cities the supplier's own hotels sit in, so a hotel city
@@ -127,10 +158,10 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   }, [base, destination]);
 
   const open = (quotation) => {
-    setSaved(quotation); setShared(null); setNotice(""); setError("");
+    setSaved(quotation); setShared(null); setNotice(""); setError(""); setMailDraft(null);
     const group = quotation.adults + quotation.children;
     setAcceptOption(quotation.selectedOption || 1);
-    setDraft({ ...quotation, forAgent: Boolean(quotation.agentId), inclusions: quotation.inclusions || [], exclusions: quotation.exclusions || [], destination: quotation.destination || "", days: quotation.days || [], legs: quotation.legs || [], options: (quotation.options || []).map((option) => ({ name: option.name })), customerName: quotation.agentId ? "" : quotation.customerName, customerEmail: quotation.agentId ? "" : quotation.customerEmail || "", customerPhone: quotation.agentId ? "" : quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
+    setDraft({ ...quotation, forAgent: Boolean(quotation.agentId), tripType: tripTypeOf(quotation.legs || []), arrivalPoint: quotation.arrivalPoint || "", departurePoint: quotation.departurePoint || "", theme: quotation.theme || "", inclusions: quotation.inclusions || [], exclusions: quotation.exclusions || [], destination: quotation.destination || "", days: quotation.days || [], legs: quotation.legs || [], options: (quotation.options || []).map((option) => ({ name: option.name })), customerName: quotation.agentId ? "" : quotation.customerName, customerEmail: quotation.agentId ? "" : quotation.customerEmail || "", customerPhone: quotation.agentId ? "" : quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
       lines: quotation.lines.map((line) => {
         const next = { ...line, checkIn: line.kind === "HOTEL" ? line.date : undefined };
         if (line.kind !== "TRANSPORT" && line.kind !== "ACTIVITY") return next;
@@ -150,6 +181,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const save = () => run(async () => {
     const body = quotationPayload(draft);
     const data = await request(saved ? `${base}/quotations/${saved.id}` : `${base}/quotations`, { method: saved ? "PUT" : "POST", body: JSON.stringify(body) });
+    if (!saved) { writeUnsaved(supplierId, null); setUnsaved(null); }
     open(data.quotation);
     return data;
   }, "Saved and priced.");
@@ -160,12 +192,18 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     return data;
   }, message);
 
-  const send = async () => {
-    const data = await act("/send", {}, null);
+  const send = async (body = {}) => {
+    const data = await act("/send", body, null);
     if (!data) return;
-    setShared(data);
-    setNotice(data.email.status === "SENT" ? `Emailed to ${saved.customerEmail} with the PDF attached.` : "Link ready. Email wasn't sent" + (data.email.error ? `: ${data.email.error}` : "."));
+    setShared(data); setMailDraft(null);
+    setNotice(data.email.status === "SENT" ? `Emailed to ${data.email.to || saved.customerEmail} with the PDF attached.` : "Link ready. Email wasn't sent" + (data.email.error ? `: ${data.email.error}` : "."));
   };
+  // The email preview (ADR 051): recipient, a personal note and the themed email, checked before it goes.
+  const [mailDraft, setMailDraft] = useState(null);
+  const openMail = (audience, message = "") => run(async () => {
+    const data = await request(`${base}/quotations/${saved.id}/email?audience=${audience}&message=${encodeURIComponent(message)}`);
+    setMailDraft((current) => ({ audience, to: current?.audience === audience ? current.to : data.email.to || "", message, subject: data.email.subject, html: data.email.html }));
+  });
 
   const downloadPdf = async (variant = "BRAND") => {
     try {
@@ -184,9 +222,10 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     await navigator.clipboard.writeText(text);
   }, "Quotation copied. Paste it into your email or chat.");
 
-  const sendToAgent = async () => {
-    const data = await act("/send-to-agent", {}, null);
+  const sendToAgent = async (body = {}) => {
+    const data = await act("/send-to-agent", body, null);
     if (!data) return;
+    setMailDraft(null);
     setNotice(data.email.status === "SENT" ? `Trade quotation emailed to ${data.agent?.email || "the agent"}.` : "Agent email wasn't sent" + (data.email.error ? `: ${data.email.error}` : "."));
   };
 
@@ -284,7 +323,9 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const layOut = () => {
     if (firstOptionStays.length && !routeMatches && !window.confirm("Set the hotel stays to the route: one per city, from its check-in day for its nights. Hotels already picked on those days are kept; other stays are removed. Continue?")) return;
     const cities = [...new Set(routeStays.map((stay) => stay.city))];
-    setDraft({ ...draft, ...planFromLegs(draft, { cities: routeLib.cities }), title: draft.title || routeTitle(draft.legs), destination: draft.destination || cities.join(", ") });
+    const planned = planFromLegs(draft, { cities: routeLib.cities });
+    const tripDays = routeStays.reduce((sum, stay) => sum + stay.nights, 0) + 1;
+    setDraft({ ...draft, ...planned, days: withPoints(planned.days, { arrivalPoint: draft.arrivalPoint, departurePoint: draft.departurePoint, lastDay: tripDays }), title: draft.title || routeTitle(draft.legs), destination: draft.destination || cities.join(", ") });
   };
   // One item's fields. Hotels take their day from the check-in date; the rest pick a day.
   const lineEditor = (line, index) => {
@@ -292,6 +333,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     const rooms = hotel ? [...new Set(hotel.rates.map((rate) => rate.roomType))] : [];
     return (
       <fieldset key={index} disabled={!editable} className="flex flex-wrap items-end gap-2 rounded-2xl border border-stone-200 bg-[#FAF9F6] p-3 text-xs">
+        <span className="flex basis-full items-center gap-2 text-sm font-bold text-stone-800">{React.createElement(KIND_ICONS[line.kind] || Plus, { className: "h-4 w-4 text-amber-700" })}{KIND_NAMES[line.kind]}{line.kind !== "HOTEL" && line.title ? <span className="truncate font-semibold text-stone-500">· {line.title}</span> : null}</span>
         {line.kind !== "HOTEL" && <label>Day<input type="number" min={1} value={line.dayNumber} onChange={(event) => setLine(index, { dayNumber: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>}
         {line.kind === "HOTEL" && <>
           {draft.options.length >= 2 && <label>Option<select value={Number(line.option) || 1} onChange={(event) => setLine(index, { option: Number(event.target.value) })} className={`mt-1 block ${input}`}>{draft.options.map((option, i) => <option key={i} value={i + 1}>{option.name || `Option ${i + 1}`}</option>)}</select></label>}
@@ -302,6 +344,11 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
           <label>Nights<input type="number" min={1} value={line.nights} onChange={(event) => setLine(index, { nights: event.target.value })} className={`mt-1 block w-16 ${input}`} />{/^\d{4}-\d{2}-\d{2}$/.test(line.checkIn || "") && Number(line.nights) >= 1 && <span className="mt-0.5 block text-[10px] text-stone-400">out {addDays(line.checkIn, Number(line.nights))}</span>}</label>
           <label>Rooms<input type="number" min={1} value={line.rooms} onChange={(event) => setLine(index, { rooms: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
           <label>Extra adults<input type="number" min={0} value={line.extraAdults || 0} onChange={(event) => setLine(index, { extraAdults: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+          {(() => {
+            const plan = roomPlan(draft, roomSleeps(hotel, line.roomType));
+            if (plan.rooms === (Number(line.rooms) || 1) && plan.extraAdults === (Number(line.extraAdults) || 0)) return null;
+            return <button type="button" onClick={() => setLine(index, { rooms: plan.rooms, extraAdults: plan.extraAdults })} className="self-center rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] font-bold text-amber-900">{people} travelling: use {roomPlanLabel(plan)}</button>;
+          })()}
           {(() => { const gap = hotelRateGap(hotel, line); return gap ? <p className="basis-full text-[11px] font-semibold text-rose-600">No {line.roomType} {MEAL_PLAN_LABELS[line.mealPlan] || line.mealPlan} rate for {gap} — add it in the hotel rate sheet, or this hotel stays at ₹0 and out of the total.</p> : null; })()}
         </>}
         {line.kind === "LISTING" && <>
@@ -314,7 +361,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
         {line.kind === "TRANSPORT" && <>
           <label className="block w-56">Car service<Combobox value={line.serviceId || ""} onChange={(value) => pickService(index, value)} options={serviceOptionsList(["TRANSFER", "SIGHTSEEING"], lineCity(line))} placeholder="Search car services…" ariaLabel={`car-${index}`} className="mt-1" /></label>
           <label className="block w-40">Cab<Combobox value={line.cabTypeId || ""} onChange={(value) => setLine(index, { cabTypeId: value })} options={cabsFor(services.find((item) => item.id === line.serviceId)).map((cab) => ({ value: cab.id, label: cab.name, hint: `${cab.seats} seats` }))} placeholder="Choose cab…" ariaLabel={`cab-${index}`} className="mt-1" /></label>
-          <label>Cabs<input type="number" min={1} placeholder="Auto" value={line.vehicles ?? ""} onChange={(event) => setLine(index, { vehicles: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
+          <label>Cabs<input type="number" min={1} placeholder="Auto" value={line.vehicles ?? ""} onChange={(event) => setLine(index, { vehicles: event.target.value })} className={`mt-1 block w-16 ${input}`} />{(() => { const cab = cabTypes.find((item) => item.id === line.cabTypeId); return cab && !line.vehicles ? <span className="mt-0.5 block text-[10px] text-stone-400">auto: {cabsNeeded(people, cab.seats)} × {cab.seats} seats</span> : null; })()}</label>
           {services.find((item) => item.id === line.serviceId)?.pricing === "PER_KM" && <>
             <label>Km<input type="number" min={1} placeholder={String(services.find((item) => item.id === line.serviceId)?.distanceKm || "")} value={line.km ?? ""} onChange={(event) => setLine(index, { km: event.target.value })} className={`mt-1 block w-20 ${input}`} /></label>
             <label>Car days<input type="number" min={1} placeholder="1" value={line.carDays ?? ""} onChange={(event) => setLine(index, { carDays: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>
@@ -332,7 +379,16 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
           <label>Your cost (₹)<input type="number" min={0} value={line.amountInr ?? ""} onChange={(event) => setLine(index, { amountInr: event.target.value })} className={`mt-1 block w-28 ${input}`} /></label>
         </>}
         <label className="min-w-40 flex-1">Description on the PDF<input value={line.description || ""} onChange={(event) => setLine(index, { description: event.target.value })} className={`mt-1 block w-full ${input}`} /></label>
-        <span className="ml-auto text-right"><span className="block text-[10px] uppercase text-stone-400">{line.kind === "LISTING" ? "Price, pre-tax" : "Your cost"}</span><strong className="font-mono">{line.priceInr != null ? inr(line.priceInr) : "Save to price"}</strong></span>
+        {(() => {
+          // The live price from the trip calculator while editing; the saved price otherwise.
+          const live = livePrice(index);
+          const price = live ? live.priceInr : line.priceInr;
+          return (
+            <span className="ml-auto max-w-56 text-right"><span className="block text-[10px] uppercase text-stone-400">{line.kind === "LISTING" ? "Price, pre-tax" : "Your cost"}</span>
+              {price != null ? <strong className="font-mono text-sm">{inr(price)}</strong> : <span className="block text-[11px] font-semibold text-amber-700">{live?.error || (previewing ? "Pricing…" : "Not priced yet")}</span>}
+            </span>
+          );
+        })()}
         {saved?.status === "ACCEPTED" && line.kind === "LISTING" && (line.bookingId
           ? <span className="rounded-lg bg-emerald-100 px-2 py-1 font-bold text-emerald-800">Booked</span>
           : <button type="button" onClick={() => act(`/lines/${line.id}/book`, {}, `${line.title} booked; seats are held.`)} className="rounded-lg bg-stone-900 px-3 py-2 font-bold text-white disabled:opacity-50" disabled={false}>Book now</button>)}
@@ -388,6 +444,60 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     const data = await request(`${base}/route-library`);
     setRouteLib({ routes: data.routes || [], cities: data.cities || [] });
   }, "Saved to your routes. It's at the top of the route list for your next quotation.");
+  // Starting a quotation (ADR 051): one city, several cities, a ready route, or a copy of a past one.
+  const begin = (kind) => {
+    setStarting(false); setSaved(null); setShared(null); setPreview(null); setNotice(""); setError("");
+    setRouteId(""); setAppliedRoute(null); setRouteMissing([]);
+    const legs = kind === "SINGLE" ? [{ city: "", nights: 2 }] : kind === "MULTI" ? [{ city: "", nights: 2 }, { city: "", nights: 1 }] : [];
+    setDraft({ ...NEW(), tripType: kind === "SINGLE" ? "SINGLE" : "MULTI", legs, inclusions: terms.inclusions, exclusions: terms.exclusions });
+    setStep(kind === "ROUTE" ? "route" : "trip");
+  };
+  const resume = () => {
+    setStarting(false); setSaved(null); setShared(null); setNotice("Picked up where you left off. Save it to keep it."); setError("");
+    setDraft({ ...NEW(), ...unsaved }); setStep("trip");
+  };
+  const discardUnsaved = () => { writeUnsaved(supplierId, null); setUnsaved(null); };
+  const tripType = draft?.tripType || tripTypeOf(draft?.legs || []);
+  const setTripType = (type) => {
+    if (type === tripType) return;
+    const filled = (draft.legs || []).filter((leg) => String(leg.city || "").trim());
+    if (type === "SINGLE" && filled.length > 1 && !window.confirm(`Keep only ${filled[0].city}? The other cities are removed from the route.`)) return;
+    const legs = type === "SINGLE" ? [filled[0] || { city: "", nights: 2 }] : [...(draft.legs || []), { city: "", nights: 1 }];
+    setDraft({ ...draft, tripType: type, legs });
+  };
+  const setSingleCity = (patch) => setDraft({ ...draft, legs: [{ ...((draft.legs || [])[0] || { city: "", nights: 2 }), ...patch }] });
+  // A car line for a rate-sheet transfer: the smallest priced cab that seats the group.
+  const people = draft ? (Number(draft.adults) || 0) + (Number(draft.children) || 0) : 0;
+  const addServiceLine = (dayNumber, service) => {
+    const cabs = cabsFor(service).sort((a, b) => a.seats - b.seats);
+    const cab = cabs.find((item) => item.seats >= people) || cabs[cabs.length - 1];
+    const date = dayDate(draft.startDate, dayNumber);
+    setDraft({ ...draft, lines: [...draft.lines, { kind: "TRANSPORT", dayNumber, date, checkIn: date, title: service.name, serviceId: service.id, cabTypeId: cab?.id || "", vehicles: "", adults: "", children: "" }] });
+  };
+  // Arrival and departure points: picked from the supplier's list or typed; a typed one can join the list.
+  const pointOptions = (terms.points || []).map((point) => ({ value: point, label: point }));
+  const savePoint = (point) => run(async () => {
+    const data = await request(`${base}/quotation-terms`, { method: "PUT", body: JSON.stringify({ points: [...(terms.points || []), point] }) });
+    setTerms({ ...terms, ...data.terms });
+  }, `${point} saved to your list of arrival and departure points.`);
+  const saveDefaultTheme = (theme) => run(async () => {
+    const data = await request(`${base}/quotation-terms`, { method: "PUT", body: JSON.stringify({ theme }) });
+    setTerms({ ...terms, ...data.terms });
+  }, "Saved as your default look. New quotations use it.");
+  const carsOnDay = (dayNumber) => draft.lines.filter((line) => line.kind === "TRANSPORT" && (Number(line.dayNumber) || 1) === dayNumber).length;
+  // What a travel, arrival or departure day still needs: a car, from the rate sheet when there is one.
+  const dayCarHints = (dayNumber) => {
+    if (!draft || carsOnDay(dayNumber)) return [];
+    const hints = [];
+    const move = travelDays(draft.legs).find((item) => item.dayNumber === dayNumber);
+    if (move) hints.push({ key: "move", label: `Travel day: ${move.from} → ${move.to}`, service: transferBetween(services, move.from, move.to), missing: `No car from ${move.from} to ${move.to} on your rate sheet.` });
+    if (dayNumber === 1 && draft.arrivalPoint) hints.push({ key: "in", label: `Pickup at ${draft.arrivalPoint}`, service: transferForPoint(services, cityOfDay(draft.legs, 1), draft.arrivalPoint), missing: "No matching pickup on your rate sheet." });
+    if (dayNumber === lastDay && lastDay > 1 && draft.departurePoint) hints.push({ key: "out", label: `Drop at ${draft.departurePoint}`, service: transferForPoint(services, cityOfDay(draft.legs, lastDay), draft.departurePoint), missing: "No matching drop on your rate sheet." });
+    return hints;
+  };
+  const livePrice = (index) => (preview && editable ? preview.lines?.[index] || null : null);
+  const summaryPreview = editable ? preview : saved ? { totals: saved.totals, options: saved.selectedOption ? [] : saved.options, unpriced: 0 } : null;
+
   const agentsInList = [...new Map(list.filter((row) => row.agentId).map((row) => [row.agentId, row.agentName || "Agent"])).entries()];
   const shownList = list.filter((row) => listFilter === "all" || (listFilter === "direct" ? !row.agentId : row.agentId === listFilter));
 
@@ -408,10 +518,20 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
       {notice && <p className="flex items-center gap-2 rounded-2xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800"><CheckCircle2 className="h-4 w-4 shrink-0" />{notice}</p>}
       {error && <p role="alert" className="flex items-center gap-2 rounded-2xl bg-rose-50 p-3 text-xs font-semibold text-rose-700"><AlertCircle className="h-4 w-4 shrink-0" />{error}</p>}
 
-      {!draft ? (
+      {!draft && starting ? (
+        <QuotationStart recent={list.slice(0, 6)} hasRoutes={routeLib.routes.length > 0} onPick={begin} onCancel={() => setStarting(false)}
+          onCopy={(id) => copyFrom(id, { startDate: today() }, "Copied as a new draft. Change the dates, agent or customer, then save.").then((data) => { if (data) { setStarting(false); setStep("trip"); } })} />
+      ) : !draft ? (
         <>
           <SetupGuide steps={setupSteps({ hotels, cabTypes, services, quotationCount: list.length })} setTab={setTab} />
-          <button onClick={() => { setSaved(null); setDraft({ ...NEW(), inclusions: terms.inclusions, exclusions: terms.exclusions }); setStep("trip"); setRouteId(""); setAppliedRoute(null); setRouteMissing([]); }} className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-bold text-stone-950"><Plus className="h-4 w-4" /> New quotation</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => { setError(""); setNotice(""); setStarting(true); }} className="flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-3 text-sm font-bold text-stone-950"><Plus className="h-4 w-4" /> New quotation</button>
+            {unsaved && <span className="flex flex-wrap items-center gap-2 rounded-xl bg-sky-50 px-3 py-2 text-xs text-sky-900">
+              Unsaved: <strong>{unsaved.title || (unsaved.legs || []).map((leg) => leg.city).filter(Boolean).join(" → ") || "new quotation"}</strong>
+              <button type="button" onClick={resume} className="font-bold underline">Continue</button>
+              <button type="button" onClick={discardUnsaved} className="text-sky-700 underline">Discard</button>
+            </span>}
+          </div>
           {list.length > 0 && (
             <div className="flex flex-wrap gap-1.5 text-xs" role="group" aria-label="Show quotations for">
               {[["all", "All"], ["direct", "Direct customers"], ...agentsInList].map(([value, label]) => (
@@ -434,11 +554,14 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
       ) : (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <button onClick={() => { setDraft(null); setSaved(null); setShared(null); }} className="text-xs font-bold text-stone-600 underline">← All quotations</button>
+            <button onClick={() => { setDraft(null); setSaved(null); setShared(null); setUnsaved(readUnsaved(supplierId)); }} className="text-sm font-bold text-stone-600 underline">← All quotations</button>
             {saved && <span className="text-xs text-stone-500">{saved.ref} · <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${STATUS_STYLES[saved.status]}`}>{saved.status}</span></span>}
           </div>
 
           <Stepper steps={steps} step={stepIndex} onPick={goTo} />
+
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_19rem]">
+          <div className="min-w-0 space-y-5">
 
           {step === "trip" && <>
             <div role="radiogroup" aria-label="Who the quotation is for" className="grid gap-2 sm:grid-cols-2">
@@ -530,19 +653,58 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                 )}
               </div>
             )}
-            <fieldset disabled={!editable} className="flex flex-wrap items-center gap-2 rounded-2xl border border-stone-200 p-3 text-xs">
-              <span className="font-bold text-stone-700">Destinations</span>
-              {(draft.legs || []).length === 0 && <span className="text-stone-500">Add the cities in order with the nights in each, e.g. Lucknow 2N → Ayodhya 2N. The days and one hotel stay per city are laid out for you.</span>}
-              {(draft.legs || []).map((leg, index) => (
-                <span key={index} className="flex items-center gap-1">
-                  <Combobox freeText allowClear={false} value={leg.city} onChange={(value) => setDraft({ ...draft, legs: draft.legs.map((item, i) => (i === index ? { ...item, city: value } : item)) })} options={cityOptions.map((city) => ({ value: city.name, label: city.name, hint: city.hint }))} placeholder="City" ariaLabel={`leg-${index}-city`} className="w-40" />
-                  <input type="number" min={0} max={60} value={leg.nights} onChange={(event) => setDraft({ ...draft, legs: draft.legs.map((item, i) => (i === index ? { ...item, nights: Number(event.target.value) } : item)) })} className={`${input} w-16 py-1.5`} aria-label={`Leg ${index + 1} nights`} />
-                  <span className="text-stone-500">N</span>
-                  <button type="button" onClick={() => setDraft({ ...draft, legs: draft.legs.filter((_, i) => i !== index) })} aria-label={`Remove leg ${index + 1}`} className="rounded p-1 text-stone-400 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /></button>
-                  {index < draft.legs.length - 1 && <span className="text-amber-700">→</span>}
-                </span>
-              ))}
-              {(draft.legs || []).length < 20 && <button type="button" onClick={() => setDraft({ ...draft, legs: [...(draft.legs || []), { city: "", nights: 1 }] })} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-1.5 font-bold"><Plus className="h-3.5 w-3.5" /> {(draft.legs || []).length ? "Add city" : "Add first city"}</button>}
+            <fieldset disabled={!editable} className="space-y-3 rounded-2xl border border-stone-200 p-4 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold text-stone-800">Where the trip goes</span>
+                <div role="radiogroup" aria-label="Single or multi-city" className="flex gap-1 rounded-xl bg-stone-100 p-1 text-xs font-bold">
+                  {[["SINGLE", "Single city"], ["MULTI", "Multi-city"]].map(([value, label]) => (
+                    <button key={value} type="button" role="radio" aria-checked={tripType === value} onClick={() => setTripType(value)} className={`rounded-lg px-3 py-1.5 ${tripType === value ? "bg-white shadow-sm" : "text-stone-500"}`}>{label}</button>
+                  ))}
+                </div>
+              </div>
+              {tripType === "SINGLE" ? (
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="min-w-56 flex-1 text-xs text-stone-500">City<Combobox freeText allowClear={false} value={(draft.legs || [])[0]?.city || ""} onChange={(value) => setSingleCity({ city: value })} options={cityOptions.map((city) => ({ value: city.name, label: city.name, hint: city.hint }))} placeholder="e.g. Varanasi" ariaLabel="leg-0-city" className="mt-1" /></label>
+                  <label className="text-xs text-stone-500">Nights<input type="number" min={1} max={60} value={(draft.legs || [])[0]?.nights ?? 2} onChange={(event) => setSingleCity({ nights: Number(event.target.value) })} className={`mt-1 block w-24 ${input}`} aria-label="Leg 1 nights" /></label>
+                  <p className="basis-full text-xs text-stone-500">One hotel for the whole stay; each day gets the city's sightseeing text, which you can change on Day by day.</p>
+                </div>
+              ) : (
+                <>
+                  {(draft.legs || []).length === 0 && <p className="text-xs text-stone-500">Add the cities in order with the nights in each, e.g. Lucknow 2N → Ayodhya 1N. The days, one hotel stay per city and the travel days are laid out for you.</p>}
+                  <ol className="space-y-2">
+                    {(draft.legs || []).map((leg, index) => (
+                      <li key={index} className="flex flex-wrap items-center gap-2">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-100 text-xs font-black text-amber-800">{index + 1}</span>
+                        <Combobox freeText allowClear={false} value={leg.city} onChange={(value) => setDraft({ ...draft, legs: draft.legs.map((item, i) => (i === index ? { ...item, city: value } : item)) })} options={cityOptions.map((city) => ({ value: city.name, label: city.name, hint: city.hint }))} placeholder="City" ariaLabel={`leg-${index}-city`} className="min-w-44 flex-1" />
+                        <input type="number" min={0} max={60} value={leg.nights} onChange={(event) => setDraft({ ...draft, legs: draft.legs.map((item, i) => (i === index ? { ...item, nights: Number(event.target.value) } : item)) })} className={`${input} w-20`} aria-label={`Leg ${index + 1} nights`} />
+                        <span className="text-xs text-stone-500">nights</span>
+                        <span className="flex">
+                          <button type="button" disabled={index === 0} onClick={() => setDraft({ ...draft, legs: moveLeg(draft.legs, index, -1) })} aria-label={`Move ${leg.city || `city ${index + 1}`} earlier`} className="rounded p-1.5 text-stone-500 hover:bg-stone-100 disabled:opacity-30"><ChevronUp className="h-4 w-4" /></button>
+                          <button type="button" disabled={index === draft.legs.length - 1} onClick={() => setDraft({ ...draft, legs: moveLeg(draft.legs, index, 1) })} aria-label={`Move ${leg.city || `city ${index + 1}`} later`} className="rounded p-1.5 text-stone-500 hover:bg-stone-100 disabled:opacity-30"><ChevronDown className="h-4 w-4" /></button>
+                          <button type="button" onClick={() => setDraft({ ...draft, legs: draft.legs.filter((_, i) => i !== index) })} aria-label={`Remove leg ${index + 1}`} className="rounded p-1.5 text-stone-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                  {(draft.legs || []).length < 20 && <button type="button" onClick={() => setDraft({ ...draft, legs: [...(draft.legs || []), { city: "", nights: 1 }] })} className="flex items-center gap-1 rounded-xl border border-stone-300 px-3 py-2 text-xs font-bold"><Plus className="h-3.5 w-3.5" /> {(draft.legs || []).length ? "Add city" : "Add first city"}</button>}
+                  {travelDays(draft.legs).length > 0 && <p className="text-xs text-stone-500">Travel days: {travelDays(draft.legs).map((move) => `day ${move.dayNumber} ${move.from} → ${move.to}`).join(" · ")}</p>}
+                </>
+              )}
+              <div className="grid gap-3 border-t border-stone-100 pt-3 sm:grid-cols-2">
+                {[["arrivalPoint", PlaneLanding, "Arrives at", "e.g. Lucknow Airport (LKO)"], ["departurePoint", PlaneTakeoff, "Leaves from", "e.g. Varanasi Junction"]].map(([field, Icon, label, placeholder]) => {
+                  const value = String(draft[field] || "").trim();
+                  const listed = (terms.points || []).some((point) => point.toLowerCase() === value.toLowerCase());
+                  return (
+                    <div key={field} className="text-xs text-stone-500">
+                      {/* The save button sits by the label, where the picker's list can't cover it. */}
+                      <span className="flex items-center gap-1"><Icon className="h-3.5 w-3.5" /> {label} <span className="text-stone-400">(optional)</span>
+                        {value && !listed && editable && <button type="button" onClick={() => savePoint(value)} className="ml-auto font-bold text-amber-700 underline">Save to my list</button>}
+                      </span>
+                      <Combobox freeText value={draft[field] || ""} onChange={(next) => setDraft({ ...draft, [field]: next || "" })} options={pointOptions} placeholder={placeholder} ariaLabel={field} className="mt-1" />
+                    </div>
+                  );
+                })}
+              </div>
             </fieldset>
             {editable && routeStays.length > 0 && (
               <div className={`flex flex-wrap items-center gap-2 rounded-2xl border p-3 text-xs ${routeMatches ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
@@ -602,6 +764,14 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                       </p>
                     );
                   })}
+                  {editable && dayCarHints(dayNumber).map((hint) => (
+                    <p key={hint.key} className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      <Car className="h-3.5 w-3.5" /><strong>{hint.label}</strong>
+                      {hint.service
+                        ? <button type="button" onClick={() => addServiceLine(dayNumber, hint.service)} className="ml-auto rounded-lg bg-stone-900 px-3 py-1.5 font-bold text-white">Add {hint.service.name}</button>
+                        : <><span>{hint.missing}</span><button type="button" onClick={() => (hasTransport ? addLine("TRANSPORT", dayNumber) : setUp("services", "Add a transfer with its price, then go back to your quotation."))} className="ml-auto rounded-lg border border-amber-400 px-3 py-1.5 font-bold">{hasTransport ? "Pick a car" : "Set up a car"}</button></>}
+                    </p>
+                  ))}
                   {draft.lines.map((line, index) => (line.kind !== "HOTEL" && (Number(line.dayNumber) || 1) === dayNumber ? <React.Fragment key={index}>{lineEditor(line, index)}</React.Fragment> : null))}
                   {editable && <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[11px] font-bold text-stone-500">Add to day {dayNumber}:</span>
@@ -687,31 +857,78 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             </div>
           )}
 
-          <div className="flex flex-wrap gap-2">
-            {editable && <button onClick={save} className="rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-bold text-stone-950">Save and price</button>}
-            {saved?.agentId && saved.status !== "DECLINED" && <button onClick={sendToAgent} className="flex items-center gap-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white"><Send className="h-4 w-4" /> Send to agent</button>}
-            {saved?.agentId && <button onClick={() => downloadPdf("AGENT")} className="flex items-center gap-1 rounded-xl border border-indigo-300 px-4 py-2.5 text-xs font-bold text-indigo-800"><Download className="h-4 w-4" /> Agent PDF</button>}
-            {saved && <button onClick={() => downloadPdf("BRAND")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Download className="h-4 w-4" /> {saved.agentId ? "Branded PDF" : "PDF"}</button>}
-            {saved && saved.status !== "DECLINED" && !saved.agentId && <button onClick={send} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Send className="h-4 w-4" /> Send to customer</button>}
-            {saved && <button type="button" onClick={copyQuote} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Copy className="h-4 w-4" /> Copy quote (no branding)</button>}
-            {saved && <button type="button" onClick={saveAsRoute} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><BookmarkPlus className="h-4 w-4" /> Save as my route</button>}
-            {saved && <span className="flex items-center gap-1">
-              <input type="date" value={copyDate} onChange={(event) => setCopyDate(event.target.value)} className={`${input} py-2 text-xs`} aria-label="Start date for the copy" />
-              <button onClick={() => copyFrom(saved.id, { startDate: copyDate }, "Copied as a new draft for the new dates. Change the customer and save.").then((data) => { if (data) setStep("trip"); })} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Copy className="h-4 w-4" /> Copy to this date</button>
-            </span>}
-            {saved?.status === "SENT" && <>
+          <fieldset disabled={!editable} className="rounded-2xl border border-stone-200 p-4 text-sm">
+            <legend className="flex items-center gap-1 px-1 font-bold text-stone-800"><Palette className="h-4 w-4 text-amber-700" /> Look of the PDF, web page and email</legend>
+            <div role="radiogroup" aria-label="Itinerary theme" className="grid gap-2 sm:grid-cols-3">
+              {THEMES.map(([value, label, hint, colour]) => {
+                const current = (draft.theme || terms.theme || "HERITAGE") === value;
+                return (
+                  <button key={value} type="button" role="radio" aria-checked={current} onClick={() => setDraft({ ...draft, theme: value })} className={`flex items-start gap-2 rounded-xl border p-3 text-left text-xs ${current ? "border-stone-900 bg-stone-50" : "border-stone-200"}`}>
+                    <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full border border-white shadow" style={{ background: colour }} aria-hidden="true" />
+                    <span><strong className="block text-sm text-stone-900">{label}{terms.theme === value && <span className="ml-1 text-[10px] font-bold text-stone-400">default</span>}</strong>{hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {draft.theme && draft.theme !== terms.theme && editable && <button type="button" onClick={() => saveDefaultTheme(draft.theme)} className="mt-2 text-xs font-bold text-amber-700 underline">Make {THEMES.find(([value]) => value === draft.theme)?.[1]} my default</button>}
+          </fieldset>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {editable && <button onClick={save} className="rounded-xl bg-amber-500 px-5 py-3 text-sm font-bold text-stone-950">Save and price</button>}
+            {saved?.agentId && saved.status !== "DECLINED" && <button onClick={() => openMail("agent")} className="flex items-center gap-1 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white"><Send className="h-4 w-4" /> Send to agent</button>}
+            {saved && saved.status !== "DECLINED" && !saved.agentId && <button onClick={() => openMail("customer")} className="flex items-center gap-1 rounded-xl bg-stone-900 px-5 py-3 text-sm font-bold text-white"><Send className="h-4 w-4" /> Send to customer</button>}
+            {saved && <button onClick={() => downloadPdf(saved.agentId ? "AGENT" : "BRAND")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-3 text-sm font-bold"><Download className="h-4 w-4" /> {saved.agentId ? "Agent PDF" : "PDF"}</button>}
+            {saved && (
+              <details className="relative">
+                <summary className="flex cursor-pointer list-none items-center gap-1 rounded-xl border border-stone-300 px-4 py-3 text-sm font-bold"><Ellipsis className="h-4 w-4" /> More</summary>
+                <div className="absolute left-0 z-20 mt-1 w-72 space-y-1 rounded-2xl border border-stone-200 bg-white p-2 text-xs shadow-lg">
+                  {saved.agentId && <button onClick={() => downloadPdf("BRAND")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold hover:bg-stone-50"><Download className="h-4 w-4" /> Branded PDF</button>}
+                  <button type="button" onClick={copyQuote} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold hover:bg-stone-50"><Copy className="h-4 w-4" /> Copy quote as text (no branding)</button>
+                  <button type="button" onClick={saveAsRoute} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left font-bold hover:bg-stone-50"><BookmarkPlus className="h-4 w-4" /> Save as my route</button>
+                  <div className="rounded-lg px-3 py-2">
+                    <p className="font-bold">Copy to a new date</p>
+                    <span className="mt-1 flex gap-1">
+                      <input type="date" value={copyDate} onChange={(event) => setCopyDate(event.target.value)} className={`${input} w-full py-1.5 text-xs`} aria-label="Start date for the copy" />
+                      <button onClick={() => copyFrom(saved.id, { startDate: copyDate }, "Copied as a new draft for the new dates. Change the customer and save.").then((data) => { if (data) setStep("trip"); })} className="rounded-lg bg-stone-900 px-3 font-bold text-white">Copy</button>
+                    </span>
+                  </div>
+                </div>
+              </details>
+            )}
+          </div>
+          {mailDraft && saved && (
+            <div className="space-y-3 rounded-2xl border border-stone-300 bg-stone-50 p-4 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-bold text-stone-900">Check the email before it goes</p>
+                <button type="button" onClick={() => setMailDraft(null)} className="text-xs font-bold text-stone-500 underline">Cancel</button>
+              </div>
+              <label className="block text-xs text-stone-500">To<input type="email" value={mailDraft.to} onChange={(event) => setMailDraft({ ...mailDraft, to: event.target.value })} placeholder={mailDraft.audience === "agent" ? "Agent's email" : "Customer's email"} className={`mt-1 w-full ${input}`} aria-label="Send to" /></label>
+              <label className="block text-xs text-stone-500">A note from you (optional)<textarea rows={2} value={mailDraft.message} onChange={(event) => setMailDraft({ ...mailDraft, message: event.target.value })} placeholder="e.g. Lovely speaking to you today. The Ganga-view rooms are held until Friday." className={`mt-1 w-full ${input}`} aria-label="Note" /></label>
+              <p className="text-xs text-stone-500">Subject: <strong className="text-stone-800">{mailDraft.subject}</strong> · the PDF is attached</p>
+              <iframe title="Email preview" sandbox="" srcDoc={mailDraft.html} className="h-[28rem] w-full rounded-xl border border-stone-200 bg-white" />
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={!/^\S+@\S+\.\S+$/.test(mailDraft.to.trim())} onClick={() => (mailDraft.audience === "agent" ? sendToAgent : send)({ to: mailDraft.to.trim(), message: mailDraft.message.trim() || undefined })} className="flex items-center gap-1 rounded-xl bg-stone-900 px-5 py-3 text-sm font-bold text-white disabled:opacity-40"><Send className="h-4 w-4" /> Send email</button>
+                <button type="button" onClick={() => openMail(mailDraft.audience, mailDraft.message)} className="rounded-xl border border-stone-300 px-4 py-3 text-sm font-bold">Update preview</button>
+                {mailDraft.audience === "customer" && <button type="button" onClick={() => send({ email: false })} className="rounded-xl border border-stone-300 px-4 py-3 text-sm font-bold">Just get the link</button>}
+              </div>
+            </div>
+          )}
+          {saved?.status === "SENT" && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-stone-200 p-3 text-xs">
+              <span className="font-bold text-stone-700">{saved.agentId ? "Did the agent confirm?" : "Did the customer accept?"}</span>
               {saved.options.length > 0 && <select value={acceptOption} onChange={(event) => setAcceptOption(Number(event.target.value))} className={`${input} py-2 text-xs`} aria-label="Option the customer chose">{saved.options.map((option) => <option key={option.number} value={option.number}>{option.name}</option>)}</select>}
               <button onClick={() => act("/status", saved.options.length ? { status: "ACCEPTED", option: acceptOption } : { status: "ACCEPTED" }, "Accepted. Book the listings below and record payments.")} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white">{saved.agentId ? "Agent confirmed" : "Customer accepted"}</button>
               <button onClick={() => act("/status", { status: "DECLINED" }, "Marked declined.")} className="rounded-xl border border-rose-300 px-4 py-2.5 text-xs font-bold text-rose-700">Declined</button>
-            </>}
-          </div>
+            </div>
+          )}
 
           {shared && (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4 text-xs">
-              <p className="font-bold text-sky-900"><FileText className="mr-1 inline h-4 w-4" />Share link (valid 60 days)</p>
+              <p className="font-bold text-sky-900"><FileText className="mr-1 inline h-4 w-4" />Itinerary link (valid 60 days): a web page with the PDF to download</p>
               <p className="mt-1 break-all font-mono text-sky-900">{shared.shareUrl}</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <button onClick={() => navigator.clipboard?.writeText(shared.shareUrl).then(() => setNotice("Link copied."))} className="rounded-lg border border-sky-300 bg-white px-3 py-1.5 font-bold">Copy link</button>
+                <a href={shared.shareUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-sky-300 bg-white px-3 py-1.5 font-bold">Open page</a>
                 <a href={`https://wa.me/${String(saved.customerPhone || "").replace(/\D/g, "")}?text=${encodeURIComponent(shared.whatsappText)}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white"><MessageCircle className="h-3.5 w-3.5" /> WhatsApp</a>
               </div>
             </div>
@@ -732,8 +949,14 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
           <div className="flex items-center gap-2 border-t border-stone-100 pt-4">
             {stepIndex > 0 && <button type="button" onClick={() => goTo(steps[stepIndex - 1].key)} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><ArrowLeft className="h-4 w-4" /> {steps[stepIndex - 1].label}</button>}
             {editable && step !== "price" && <button type="button" onClick={save} className="rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold">Save draft</button>}
-            {stepIndex < steps.length - 1 && <button type="button" onClick={() => goTo(steps[stepIndex + 1].key)} className="ml-auto flex items-center gap-1 rounded-xl bg-stone-900 px-4 py-2.5 text-xs font-bold text-white">{steps[stepIndex + 1].label} <ArrowRight className="h-4 w-4" /></button>}
+            {stepIndex < steps.length - 1 && <button type="button" onClick={() => goTo(steps[stepIndex + 1].key)} className="ml-auto flex items-center gap-1 rounded-xl bg-stone-900 px-5 py-3 text-sm font-bold text-white">{steps[stepIndex + 1].label} <ArrowRight className="h-4 w-4" /></button>}
           </div>
+          </div>
+          <aside className="hidden lg:block"><div className="sticky top-4">
+            <QuotationSummary draft={draft} preview={summaryPreview} previewing={previewing} steps={steps} lastDay={lastDay} isAgentMode={isAgentMode} editable={editable} onMarkup={(markupPct) => setDraft({ ...draft, markupPct })} />
+          </div></aside>
+          </div>
+          <QuotationPriceBar preview={summaryPreview} previewing={previewing} isAgentMode={isAgentMode} />
         </div>
       )}
     </section>

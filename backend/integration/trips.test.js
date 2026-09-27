@@ -158,7 +158,7 @@ test("an accepted trip is arranged line by line, cars get drivers without clashe
   assert.equal(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString(), "%PDF-");
   // An itinerary token doesn't open the quotation link, nor the other way round.
   assert.equal((await fetch(`${api.baseUrl}${link.replace("/itinerary/", "/share/")}`)).status, 404);
-  const quotationLink = new URL((await call(api, ctx, `/quotations/${quotation.id}/send`, { body: { email: false } })).data.shareUrl).pathname;
+  const quotationLink = new URL((await call(api, ctx, `/quotations/${quotation.id}/send`, { body: { email: false } })).data.pdfUrl).pathname;
   assert.equal((await fetch(`${api.baseUrl}${quotationLink.replace("/share/", "/itinerary/")}`)).status, 404);
   assert.equal((await fetch(`${api.baseUrl}/api/suppliers/${ctx.supplier.id}/quotations/${quotation.id}/itinerary`, { headers: { authorization: `Bearer ${ctx.ownerToken}` } })).status, 200);
 });

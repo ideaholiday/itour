@@ -11,6 +11,13 @@ const pick = async (page, name, text) => {
 };
 // The builder's steps: Agent (or Customer) & dates, Route & hotels, Day by day, Price & send.
 const step = (page, name) => page.getByRole("button", { name: new RegExp(name) }).first().click();
+// New quotation opens the start screen (ADR 051): single city, multi-city, a ready route or a copy.
+// A quotation starts for an agent (ADR 048); `direct` switches it to a direct customer.
+const newQuotation = async (page, start = "Single city", { direct = true } = {}) => {
+  await page.getByRole("button", { name: "New quotation" }).click();
+  await page.getByRole("button", { name: new RegExp(`^${start}`) }).click();
+  if (direct) await page.getByRole("radio", { name: /Direct customer/ }).click();
+};
 
 // ADR 042: an operator builds a package from its private rate sheet for cars and
 // activities: choosing a service fills the day's title, the server prices it with
@@ -41,7 +48,7 @@ test("supplier builds a package from cars and activities on the private rate she
   await expect(page.getByText(`Agra sightseeing ${stamp}`)).toBeVisible();
 
   await page.getByRole("button", { name: "Quotations" }).click();
-  await page.getByRole("button", { name: "New quotation" }).click();
+  await newQuotation(page);
   await page.getByLabel("Title", { exact: true }).fill(`Agra day trip ${stamp}`);
   await page.getByRole("combobox", { name: "destination" }).fill(`Agra ${stamp}`);
   await page.getByRole("combobox", { name: "customer-name" }).fill("Rahul Verma");
@@ -61,11 +68,12 @@ test("supplier builds a package from cars and activities on the private rate she
   await page.getByRole("button", { name: "Save and price" }).click();
   await expect(page.getByText("Saved and priced.")).toBeVisible();
   // 2 adults: one Innova ₹3,500 + 2 × ₹1,300 tickets = ₹6,100 cost, +10% = ₹6,710, +5% GST = ₹7,046.
-  await expect(page.getByText("₹7,046")).toBeVisible();
+  await expect(page.getByText("₹7,046").first()).toBeVisible();
   await expect(page.getByText("About ₹3,523 per person")).toBeVisible();
 
+  await page.getByText("More", { exact: true }).click();
   await page.getByLabel("Start date for the copy").fill(isoDate(30));
-  await page.getByRole("button", { name: "Copy to this date" }).click();
+  await page.getByRole("button", { name: "Copy", exact: true }).click();
   await expect(page.getByText("Copied as a new draft")).toBeVisible();
   await step(page, "Day by day");
   await expect(page.getByLabel("Day 1 title")).toHaveValue("Agra: Taj Mahal and Agra Fort");
@@ -89,7 +97,7 @@ test("supplier offers 3 Star and 4 Star hotel options and records the customer's
 
   await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
   await page.goto("/supplier/dashboard?panel=packages");
-  await page.getByRole("button", { name: "New quotation" }).click();
+  await newQuotation(page);
   await page.getByLabel("Title", { exact: true }).fill(`Jaipur options ${stamp}`);
   await page.getByRole("combobox", { name: "customer-name" }).fill("Kavya Rao");
   await step(page, "Route & hotels");
@@ -112,6 +120,7 @@ test("supplier offers 3 Star and 4 Star hotel options and records the customer's
   await expect(page.getByRole("row", { name: /4 Star/ })).toContainText("₹5,775");
 
   await page.getByRole("button", { name: "Send to customer" }).click();
+  await page.getByRole("button", { name: "Just get the link" }).click();
   await page.getByLabel("Option the customer chose").selectOption({ label: "4 Star" });
   await page.getByRole("button", { name: "Customer accepted" }).click();
   await expect(page.getByText("Customer chose 4 Star")).toBeVisible();
@@ -151,7 +160,7 @@ test("supplier prices an outstation car per km and is warned when rooms sleep to
   await expect(card).toContainText("₹14/km · 250 km · ₹300");
 
   await page.getByRole("button", { name: "Quotations" }).click();
-  await page.getByRole("button", { name: "New quotation" }).click();
+  await newQuotation(page);
   await page.getByLabel("Title", { exact: true }).fill(`Rajasthan drive ${stamp}`);
   await page.getByRole("combobox", { name: "customer-name" }).fill("Arjun Mehta");
   await step(page, "Route & hotels");
@@ -171,7 +180,7 @@ test("supplier prices an outstation car per km and is warned when rooms sleep to
   await expect(page.getByText("Saved and priced.")).toBeVisible();
   // Car: max(600, 3 × 250) × ₹14 + 3 × ₹300 = ₹11,400. Hotel ₹2,000. +5% GST = ₹14,070.
   await expect(page.getByText("₹11,400").first()).toBeVisible();
-  await expect(page.getByText("₹14,070")).toBeVisible();
+  await expect(page.getByText("₹14,070").first()).toBeVisible();
   await expect(page.getByText(`Tiny Inn ${stamp}: 1 Single room sleeps 1, but 2 are travelling.`)).toBeVisible();
 });
 
@@ -264,14 +273,12 @@ test("supplier builds a two-city package step by step from its route", async ({ 
 
   await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
   await page.goto("/supplier/dashboard?panel=packages");
-  await page.getByRole("button", { name: "New quotation" }).click();
+  await newQuotation(page, "Multi-city");
   await page.getByRole("combobox", { name: "customer-name" }).fill("Ajay Pal Singh");
 
   await step(page, "Route & hotels");
-  await page.getByRole("button", { name: "Add first city" }).click();
   await page.getByRole("combobox", { name: "leg-0-city" }).fill("Lucknow");
   await page.getByLabel("Leg 1 nights").fill("2");
-  await page.getByRole("button", { name: "Add city" }).click();
   await page.getByRole("combobox", { name: "leg-1-city" }).fill("Ayodhya");
   await page.getByLabel("Leg 2 nights").fill("2");
   await page.getByRole("button", { name: "Lay out days and hotels from the route" }).click();
@@ -303,7 +310,7 @@ test("supplier builds a two-city package step by step from its route", async ({ 
   await expect(page.getByLabel("Title", { exact: true })).toHaveValue("Lucknow & Ayodhya 4N/5D");
 
   await page.getByRole("button", { name: "All quotations" }).click();
-  await page.getByRole("button", { name: "New quotation" }).click();
+  await newQuotation(page);
   await step(page, "Price & send");
   await expect(page.getByLabel("Not included")).toHaveValue(`Airfare\nMonument entry tickets ${stamp}`);
 });
@@ -331,14 +338,13 @@ test("supplier quotes an agent from the Lucknow – Ayodhya – Varanasi route",
   await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
   await page.goto("/supplier/dashboard?panel=packages");
   await page.getByRole("button", { name: "New quotation" }).click();
+  await page.getByRole("button", { name: /^Ready route/ }).click();
+  await step(page, "Agent & dates");
   await expect(page.getByRole("radio", { name: /For a travel agent/ })).toHaveAttribute("aria-checked", "true");
   await page.getByRole("button", { name: "+ New agent" }).click();
   await page.getByLabel("New agent name").fill(`Awadh Travels ${stamp}`);
-  await page.getByLabel("New agent markup").fill("5");
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText("Agent added and picked.")).toBeVisible();
-  await expect(page.getByText("the agent's markup is 5%")).toBeVisible();
-  await page.getByRole("combobox", { name: "customer-name" }).fill("Ajay Pal Singh");
 
   await step(page, "Route & hotels");
   await pick(page, "route", "Lucknow – Ayodhya – Varanasi 6N/7D");
@@ -364,11 +370,11 @@ test("supplier quotes an agent from the Lucknow – Ayodhya – Varanasi route",
   await expect(page.getByLabel("What's included")).toHaveValue(/Ganga Aarti boat ride in Varanasi/);
   await page.getByRole("button", { name: "Save and price" }).click();
   await expect(page.getByText("Saved and priced.")).toBeVisible();
-  const agentPrice = page.getByRole("group", { name: "Agent's price" });
-  await expect(agentPrice).toContainText(`Awadh Travels ${stamp} pays you, at 5% markup`);
-  await expect(agentPrice).toContainText("Agent's margin");
+  // The agent's net is the quotation's own total (ADR 050).
+  await expect(page.getByText(`Awadh Travels ${stamp} pays you (net)`)).toBeVisible();
   await expect(page.getByRole("button", { name: "Send to agent" })).toBeVisible();
 
+  await page.getByText("More", { exact: true }).click();
   await page.getByRole("button", { name: "Save as my route" }).click();
   await expect(page.getByText("Saved to your routes.")).toBeVisible();
 
@@ -398,4 +404,65 @@ test("admin adds a shared route that suppliers can start quotations from", async
   const route = library.routes.find((row) => row.name === `Kashi and Sangam ${stamp}`);
   expect(route.legs).toEqual([{ city: "Varanasi", nights: 2 }, { city: "Prayagraj", nights: 1 }]);
   expect(route.days[0]).toMatchObject({ dayNumber: 1, title: "Arrive in Varanasi", itemIds: ["plib_up_06"] });
+});
+
+// ADR 051: a single-city trip priced live while it's built, with arrival and departure
+// points, sent after checking the themed email, and opened by the customer as a web page.
+test("supplier quotes a single-city trip with a live price, checks the email and the customer opens the web itinerary", async ({ page, request }) => {
+  const login = await request.post("/api/auth/login", { data: E2E_ACCOUNTS.supplier });
+  const account = await login.json();
+  const base = `/api/suppliers/${account.user.supplier_id}`;
+  const headers = { Authorization: `Bearer ${account.token}` };
+  const stamp = Date.now().toString(36);
+  const hotel = (await (await request.post(`${base}/hotels`, { headers, data: { name: `Ganga View ${stamp}`, city: "Varanasi", starRating: 4 } })).json()).hotel;
+  const rate = await request.post(`${base}/hotels/${hotel.id}/rates`, { headers, data: { roomType: "Deluxe", mealPlan: "CP", validFrom: isoDate(-2), validTo: isoDate(400), netPerNightInr: 3000, maxGuests: 3 } });
+  expect(rate.status()).toBe(201);
+
+  await loginThroughUi(page, E2E_ACCOUNTS.supplier, "/supplier/dashboard");
+  await page.goto("/supplier/dashboard?panel=packages");
+  await newQuotation(page, "Single city");
+  await page.getByLabel("Title", { exact: true }).fill(`Kashi ${stamp}`);
+  await page.getByRole("combobox", { name: "customer-name" }).fill("Meera Iyer");
+  await page.getByLabel("Customer email").fill("meera@example.com");
+  await page.getByRole("spinbutton", { name: "Adults" }).fill("3");
+
+  await step(page, "Route & hotels");
+  await page.getByRole("combobox", { name: "leg-0-city" }).fill("Varanasi");
+  await page.getByLabel("Leg 1 nights").fill("2");
+  await page.getByRole("combobox", { name: "arrivalPoint" }).fill("Varanasi Airport (VNS)");
+  await page.getByRole("button", { name: "Save to my list" }).first().click();
+  await expect(page.getByText("saved to your list of arrival and departure points")).toBeVisible();
+  await page.getByRole("button", { name: "Lay out days and hotels from the route" }).click();
+  await pick(page, "hotel-0", `Ganga View ${stamp}`);
+  await page.getByRole("combobox", { name: /^Room/ }).selectOption("Deluxe");
+  // The room calculator: 3 adults in a room that sleeps 3 is 1 room + 1 extra bed.
+  await page.getByRole("button", { name: "3 travelling: use 1 room + 1 extra bed" }).click();
+
+  // The live price before saving: 2 nights × ₹3,000, no extra-bed rate, 15% markup, 5% GST = ₹7,245.
+  const summary = page.getByRole("complementary");
+  await expect(summary).toContainText("₹7,245");
+  await expect(summary).toContainText("Varanasi 2N");
+  await expect(summary).toContainText("In: Varanasi Airport (VNS)");
+
+  await step(page, "Day by day");
+  await expect(page.getByLabel("Day 1 title")).toHaveValue("Arrive in Varanasi: pickup at Varanasi Airport (VNS)");
+  await expect(page.getByText("Pickup at Varanasi Airport (VNS)")).toBeVisible();
+
+  await step(page, "Price & send");
+  await page.getByRole("radio", { name: /Classic/ }).click();
+  await page.getByRole("button", { name: "Save and price" }).click();
+  await expect(page.getByText("Saved and priced.")).toBeVisible();
+  await page.getByRole("button", { name: "Send to customer" }).click();
+  await expect(page.getByLabel("Send to")).toHaveValue("meera@example.com");
+  await expect(page.frameLocator("iframe[title='Email preview']").getByText("Hello Meera Iyer,")).toBeVisible();
+  await expect(page.frameLocator("iframe[title='Email preview']").getByRole("link", { name: "View your itinerary" })).toBeVisible();
+  await page.getByRole("button", { name: "Send email" }).click();
+  const link = await page.locator("p.font-mono").filter({ hasText: "/q/" }).textContent();
+
+  await page.goto(new URL(link).pathname);
+  await expect(page.getByRole("heading", { level: 1, name: `Kashi ${stamp}` })).toBeVisible();
+  await expect(page.getByText(`Ganga View ${stamp}`).first()).toBeVisible();
+  await expect(page.getByText("Arrive at Varanasi Airport (VNS)")).toBeVisible();
+  await expect(page.getByText("₹7,245").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /PDF/ }).first()).toHaveAttribute("href", /\/api\/quotations\/share\//);
 });

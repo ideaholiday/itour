@@ -68,6 +68,7 @@ Do not rebuild these. Extend them if asked.
 - **Phase 9 — done:** hotel options in one quotation (3 Star, 4 Star…), each priced on its own; the customer's choice sets the price (ADR 043). Deployed 2026-09-25 (owner).
 - **Phase 10 — done:** per-km car pricing (rate per km, minimum km per day, driver allowance per day) and a warning when hotel rooms sleep too few (ADR 044). Deployed 2026-09-25 (owner).
 - **Phase 11 — done:** running an accepted trip: a trip file with each line's status, confirmation and vendor cost; hotel booking requests by email; drivers for cars with clash checks and a weekly car schedule; vendor payments and margin; the final itinerary by email and WhatsApp (ADR 045). `DATA_MODEL.md` split: operator tables in `DATA_MODEL_OPERATOR.md`. Needs migration 072 (applied automatically on the next deploy).
+- **Phase 12 — done:** quotation builder replan (ADR 051): a start screen for single-city, multi-city, a ready route or a copy; a live trip calculator with room and cab suggestions and price from a target; travel days with the transfer between cities; arrival and departure points; three itinerary themes on a redesigned PDF, a web itinerary page (`/q/:token`) and a themed HTML email with a preview. Needs migration 079 (applied automatically on the next deploy).
 
 Standing obligations that apply to every change:
 

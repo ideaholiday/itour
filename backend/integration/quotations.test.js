@@ -66,7 +66,17 @@ test("a package is priced on the server, sent as a PDF link, accepted, booked li
   assert.equal(sent.response.status, 200, JSON.stringify(sent.data));
   assert.equal(sent.data.quotation.status, "SENT");
   assert.match(sent.data.whatsappText, /INR 25,200/);
-  const path = new URL(sent.data.shareUrl).pathname;
+  // The link opens the web itinerary page; its data holds the package price but never costs or markup (ADR 051).
+  const token = new URL(sent.data.shareUrl).pathname.match(/^\/q\/(.+)$/)[1];
+  const page = await fetch(`${api.baseUrl}/api/quotations/share/${token}/view`);
+  assert.equal(page.status, 200);
+  const pageText = await page.text();
+  const { itinerary } = JSON.parse(pageText);
+  assert.deepEqual([itinerary.ref, itinerary.title, itinerary.totals.totalInr, itinerary.brand.name], [quotation.ref, "Goa Beach Escape", 25200, ctx.supplier.company_name]);
+  assert.equal(itinerary.stays[0].name, "Sea Breeze Resort");
+  assert.doesNotMatch(pageText, /costInr|markupInr|priceInr|markup_pct|18000/);
+  assert.equal((await fetch(`${api.baseUrl}/api/quotations/share/${token.replace(/.$/, (last) => (last === "A" ? "B" : "A"))}/view`)).status, 404);
+  const path = new URL(sent.data.pdfUrl).pathname;
   const pdf = await fetch(`${api.baseUrl}${path}`);
   assert.equal(pdf.status, 200);
   assert.equal(pdf.headers.get("content-type"), "application/pdf");
@@ -315,15 +325,20 @@ test("standard inclusions and exclusions are saved once, filled into a quotation
   const db = new Database(api.databasePath); t.after(() => db.close());
   const ctx = setup(db);
 
-  assert.deepEqual((await call(api, ctx, "/quotation-terms")).data.terms, { inclusions: [], exclusions: [] });
+  assert.deepEqual((await call(api, ctx, "/quotation-terms")).data.terms, { inclusions: [], exclusions: [], points: [], theme: "HERITAGE" });
   const standard = { inclusions: ["Daily breakfast", "Private sedan for all transfers"], exclusions: ["Airfare", "Monument entry tickets"] };
   const saved = await call(api, ctx, "/quotation-terms", { method: "PUT", body: standard });
   assert.equal(saved.response.status, 200, JSON.stringify(saved.data));
-  assert.deepEqual(saved.data.terms, standard);
+  assert.deepEqual(saved.data.terms, { ...standard, points: [], theme: "HERITAGE" });
+  // Arrival/departure points and the default theme save on their own, leaving the lists alone (ADR 051).
+  const points = await call(api, ctx, "/quotation-terms", { method: "PUT", body: { points: ["Lucknow Airport (LKO)", " lucknow airport (lko) ", "Varanasi Junction"], theme: "CLASSIC" } });
+  assert.deepEqual(points.data.terms, { ...standard, points: ["Lucknow Airport (LKO)", "Varanasi Junction"], theme: "CLASSIC" });
+  assert.equal((await call(api, ctx, "/quotation-terms", { method: "PUT", body: { theme: "NEON" } })).response.status, 400);
   assert.equal((await call(api, ctx, "/quotation-terms", { method: "PUT", body: { inclusions: [""] } })).response.status, 400);
 
   const created = await call(api, ctx, "/quotations", { body: {
     title: "Lucknow Tour", customerName: "Ajay Pal Singh", startDate: day(20), adults: 2, markupPct: 10, ...standard,
+    arrivalPoint: "Lucknow Airport (LKO)", departurePoint: "Charbagh station", theme: "MINIMAL",
     lines: [{ kind: "CUSTOM", dayNumber: 1, title: "Airport cab", amountInr: 1500 }],
   } });
   assert.equal(created.response.status, 201, JSON.stringify(created.data));
@@ -333,4 +348,78 @@ test("standard inclusions and exclusions are saved once, filled into a quotation
   await call(api, ctx, "/quotation-terms", { method: "PUT", body: { inclusions: ["Something else"], exclusions: [] } });
   const copy = await call(api, ctx, `/quotations/${created.data.quotation.id}/copy`, { body: { startDate: day(40) } });
   assert.deepEqual([copy.data.quotation.inclusions, copy.data.quotation.exclusions], [standard.inclusions, standard.exclusions]);
+  assert.deepEqual([copy.data.quotation.arrivalPoint, copy.data.quotation.departurePoint, copy.data.quotation.theme], ["Lucknow Airport (LKO)", "Charbagh station", "MINIMAL"]);
+});
+
+test("the trip calculator prices a half-built draft without saving it", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+  const ctx = setup(db);
+  const checkIn = day(30);
+  const hotel = (await call(api, ctx, "/hotels", { body: { name: "Ganga View", city: "Varanasi", starRating: 3 } })).data.hotel;
+  await call(api, ctx, `/hotels/${hotel.id}/rates`, { body: { roomType: "Deluxe", mealPlan: "CP", validFrom: day(20), validTo: day(60), netPerNightInr: 3000 } });
+  const before = db.prepare("SELECT COUNT(*) AS n FROM quotations").get().n;
+
+  const stay = { kind: "HOTEL", dayNumber: 1, title: "Stay", hotelId: hotel.id, roomType: "Deluxe", mealPlan: "CP", checkIn, nights: 2, rooms: 1 };
+  const preview = await call(api, ctx, "/quotations/preview", { body: {
+    adults: 2, children: 0, markupPct: 10,
+    lines: [stay, { kind: "CUSTOM", dayNumber: 1, title: "Boat ride", amountInr: 1000 }, { kind: "HOTEL", dayNumber: 3, title: "Stay" }, { ...stay, checkIn: day(59), nights: 4 }],
+  } });
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.data));
+  assert.deepEqual(preview.data.lines.map((line) => line.priceInr), [6000, 1000, null, null]);
+  assert.equal(preview.data.lines[2].error, "Not filled in yet");
+  assert.match(preview.data.lines[3].error, /rate/i);
+  assert.equal(preview.data.unpriced, 2);
+  // 7000 cost + 700 markup = 7700, + 5% GST (385) = 8085.
+  assert.deepEqual([preview.data.totals.costInr, preview.data.totals.markupInr, preview.data.totals.totalInr, preview.data.totals.perPersonInr, preview.data.totals.perCoupleInr], [7000, 700, 8085, 4043, 8085]);
+  assert.equal(preview.data.totals.byKind.HOTEL, 6000);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM quotations").get().n, before);
+
+  // Hotel options are priced one by one.
+  const options = await call(api, ctx, "/quotations/preview", { body: { adults: 2, markupPct: 0, options: [{ name: "3 Star" }, { name: "Upgrade" }], lines: [stay, { ...stay, option: 2, rooms: 2 }] } });
+  assert.deepEqual(options.data.options.map((option) => option.totals.costInr), [6000, 12000]);
+});
+
+test("the quotation email is previewed in its theme, escapes the supplier's note, and goes to the address chosen", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+  const ctx = setup(db);
+  const base = { title: "Varanasi Escape", startDate: day(30), adults: 2, markupPct: 0, theme: "CLASSIC", legs: [{ city: "Varanasi", nights: 2 }],
+    days: [{ dayNumber: 1, title: "Arrive in Varanasi" }, { dayNumber: 2, title: "Ghats at sunrise" }],
+    lines: [{ kind: "CUSTOM", dayNumber: 1, title: "Boat ride", amountInr: 10000 }] };
+  const direct = (await call(api, ctx, "/quotations", { body: { ...base, customerName: "Meera Iyer", customerEmail: "meera@example.com" } })).data.quotation;
+
+  const preview = await call(api, ctx, `/quotations/${direct.id}/email?message=${encodeURIComponent("See you soon <script>alert(1)</script>")}`);
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.data));
+  const { email } = preview.data;
+  // The supplier's name as it appears in HTML ("&" escaped).
+  const brandPattern = new RegExp(ctx.supplier.company_name.replace(/&/g, "&amp;").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.equal(email.to, "meera@example.com");
+  assert.equal(email.subject, `Your trip: Varanasi Escape (${direct.ref})`);
+  assert.match(email.html, /Hello Meera Iyer,/);
+  assert.match(email.html, /Ghats at sunrise/);
+  assert.match(email.html, /#1e3a5f/); // the Classic theme's colour
+  assert.match(email.html, /href="[^"]*\/q\/[^"]+"/); // the web itinerary button
+  assert.match(email.html, brandPattern);
+  assert.match(email.html, /See you soon &lt;script&gt;/);
+  assert.doesNotMatch(email.html, /<script>/);
+  assert.match(email.text, /INR 10,500 for the whole group/);
+
+  const sent = await call(api, ctx, `/quotations/${direct.id}/send`, { body: { to: "trip.lead@example.com", message: "Hello!" } });
+  assert.equal(sent.response.status, 200, JSON.stringify(sent.data));
+  assert.equal(sent.data.email.to, "trip.lead@example.com");
+
+  // The agent's copy: the trade email, net price, no supplier brand and no link to the branded page.
+  const agent = (await call(api, ctx, "/agents", { body: { name: "Awadh Travels", contactName: "Rahul", email: "rahul@awadh.example" } })).data.agent;
+  const traded = (await call(api, ctx, "/quotations", { body: { ...base, agentId: agent.id } })).data.quotation;
+  const trade = (await call(api, ctx, `/quotations/${traded.id}/email?audience=agent`)).data.email;
+  assert.deepEqual([trade.to, trade.subject], ["rahul@awadh.example", `Trade quotation ${traded.ref}: Varanasi Escape`]);
+  assert.match(trade.html, /Hello Rahul,/);
+  assert.match(trade.text, /Net INR 10,500/);
+  assert.doesNotMatch(trade.html, brandPattern);
+  assert.doesNotMatch(trade.html, /\/q\//);
+  const toAgent = await call(api, ctx, `/quotations/${traded.id}/send-to-agent`, { body: {} });
+  assert.equal(toAgent.response.status, 200, JSON.stringify(toAgent.data));
+  assert.equal(toAgent.data.agent.email, "rahul@awadh.example");
+  assert.equal((await call(api, ctx, `/quotations/${direct.id}/email?audience=agent`)).data.code, "AGENT_MISSING");
 });

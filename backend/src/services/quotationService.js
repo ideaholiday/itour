@@ -69,7 +69,13 @@ const daySchema = z.object({
 }).strict();
 
 // Inclusions and exclusions (migration 077): short items, one per line on the PDF.
-const termItems = z.array(z.string().trim().min(1).max(300)).max(40).default([]);
+const itemList = z.array(z.string().trim().min(1).max(300)).max(40);
+const termItems = itemList.default([]);
+
+// Itinerary themes (ADR 051): the look of the PDF, the web itinerary page and the email.
+export const THEMES = ["HERITAGE", "CLASSIC", "MINIMAL"];
+export const DEFAULT_THEME = "HERITAGE";
+const pointName = z.string().trim().max(120);
 
 const legSchema = z.object({
   city: z.string().trim().min(1).max(120),
@@ -98,6 +104,10 @@ export const quotationSchema = z.object({
   legs: z.array(legSchema).max(20).default([]),
   // Hotel options (ADR 043): none or one means a single package; 2–6 named options, hotels chosen per option.
   options: z.array(z.object({ name: z.string().trim().min(1).max(60) }).strict()).max(MAX_OPTIONS).default([]),
+  // Where the trip starts and ends, and its look (ADR 051, migration 079). Empty theme: the supplier's default.
+  arrivalPoint: pointName.optional().nullable(),
+  departurePoint: pointName.optional().nullable(),
+  theme: z.enum(THEMES).optional().nullable().or(z.literal("")),
 }).strict().refine((quote) => quote.agentId || quote.customerName, { message: "Enter the customer's name", path: ["customerName"] });
 
 export const quotationPaymentSchema = z.object({
@@ -316,6 +326,7 @@ export function quotationView(db, row) {
     customerName: row.customer_name, customerEmail: row.customer_email || null, customerPhone: row.customer_phone || null, agentId: row.agent_id || null,
     startDate: row.start_date, adults: row.adults, children: row.children, markupPct: Number(row.markup_pct), notes: row.notes || null, validUntil: row.valid_until || null,
     inclusions: parseItems(row.inclusions), exclusions: parseItems(row.exclusions),
+    arrivalPoint: row.arrival_point || null, departurePoint: row.departure_point || null, theme: row.theme || null,
     totals: {
       costInr: row.cost_inr, listingsInr: row.listings_inr, markupInr: row.markup_inr, subtotalInr: row.subtotal_inr,
       gstPct: Number(row.gst_pct), gstInr: row.gst_inr, totalInr: row.total_inr, paidInr: paid, dueInr: Math.max(0, row.total_inr - paid),
@@ -353,6 +364,51 @@ export function suggestQuotations(db, supplierId, { destination = "", days = nul
     .map((row) => ({ id: row.id, ref: row.ref, title: row.title, destination: row.destination || null, days: Number(row.days), adults: row.adults, children: row.children, status: row.status, totalInr: row.total_inr, updatedAt: row.updated_at }));
 }
 
+// The trip calculator's input (ADR 051): the header fields that set the price, and lines that may still be half filled in.
+export const quotationPreviewSchema = z.object({
+  adults: z.number().int().min(1).max(100).default(2),
+  children: z.number().int().min(0).max(100).default(0),
+  markupPct: z.number().min(0).max(200).default(0),
+  lines: z.array(z.unknown()).max(120).default([]),
+  options: z.array(z.object({ name: z.string().trim().max(60) }).passthrough()).max(MAX_OPTIONS).default([]),
+});
+
+/**
+ * Prices a quotation without saving it, for the builder's live total (ADR 051).
+ * Each line is priced on its own: a line not filled in yet, or one the rate
+ * sheet can't price, comes back unpriced with the reason and stays out of the
+ * totals, so the rest of the trip still has a price. The server stays the only
+ * place a price is worked out; saving prices everything again.
+ */
+export function previewQuotation(db, supplierId, input) {
+  const data = quotationPreviewSchema.parse(input || {});
+  const travelers = { adults: data.adults, children: data.children };
+  const lines = data.lines.map((raw, index) => {
+    const parsed = lineSchema.safeParse(raw);
+    if (!parsed.success) return { index, kind: raw?.kind || null, priceInr: null, error: "Not filled in yet" };
+    try {
+      return { index, kind: parsed.data.kind, option: parsed.data.kind === "HOTEL" ? parsed.data.option : null, priceInr: priceLine(db, supplierId, parsed.data, travelers).price, error: null };
+    } catch (error) {
+      if (!error.status) throw error;
+      return { index, kind: parsed.data.kind, priceInr: null, error: error.message };
+    }
+  });
+  const priced = lines.filter((line) => line.priceInr != null).map((line) => ({ kind: line.kind, option: line.option, price: line.priceInr }));
+  const gstPct = supplierGstPct(db, supplierId);
+  const people = data.adults + data.children;
+  const view = (totals) => ({
+    costInr: totals.cost_inr, listingsInr: totals.listings_inr, markupInr: totals.markup_inr, subtotalInr: totals.subtotal_inr,
+    gstPct: totals.gst_pct, gstInr: totals.gst_inr, totalInr: totals.total_inr,
+    perPersonInr: people ? Math.ceil(totals.total_inr / people) : totals.total_inr,
+    perCoupleInr: people >= 2 ? Math.ceil((totals.total_inr * 2) / people) : null,
+    byKind: Object.fromEntries(["HOTEL", "TRANSPORT", "ACTIVITY", "LISTING", "CUSTOM"].map((kind) => [kind, priced.filter((line) => line.kind === kind && (kind !== "HOTEL" || (line.option || 1) === 1)).reduce((sum, line) => sum + line.price, 0)])),
+  });
+  const options = data.options.length >= 2
+    ? data.options.map((option, index) => ({ number: index + 1, name: option.name || `Option ${index + 1}`, totals: view(packageTotals(linesOfOption(priced, index + 1), { markupPct: data.markupPct, gstPct })) }))
+    : [];
+  return { lines, totals: view(packageTotals(linesOfOption(priced, 1), { markupPct: data.markupPct, gstPct })), options, unpriced: lines.filter((line) => line.priceInr == null).length };
+}
+
 /** Creates or replaces a draft or sent quotation, pricing every line on the server. Accepted and declined ones are final. */
 export function saveQuotation(db, supplierId, input, { actor = null, quotationId = null } = {}) {
   const data = quotationSchema.parse(input);
@@ -373,14 +429,14 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
     let id = quotationId;
     const header = [data.title, data.destination || null, data.customerName, data.customerEmail ? data.customerEmail.toLowerCase() : null, data.customerPhone || null, data.agentId || null,
       data.startDate, data.adults, data.children, data.markupPct, data.notes || null, data.validUntil || null,
-      JSON.stringify(data.inclusions), JSON.stringify(data.exclusions),
+      JSON.stringify(data.inclusions), JSON.stringify(data.exclusions), data.arrivalPoint || null, data.departurePoint || null, data.theme || null,
       totals.cost_inr, totals.listings_inr, totals.markup_inr, totals.subtotal_inr, totals.gst_pct, totals.gst_inr, totals.total_inr];
     if (id) {
       const existing = findQuotation(db, supplierId, id);
       if (["ACCEPTED", "DECLINED"].includes(existing.status)) throw quotationError(`An ${existing.status.toLowerCase()} quotation can't be changed. Copy it instead.`, 409, "QUOTATION_FINAL");
       id = existing.id;
       db.prepare(`UPDATE quotations SET title = ?, destination = ?, customer_name = ?, customer_email = ?, customer_phone = ?, agent_id = ?, start_date = ?, adults = ?, children = ?,
-          markup_pct = ?, notes = ?, valid_until = ?, inclusions = ?, exclusions = ?, cost_inr = ?, listings_inr = ?, markup_inr = ?, subtotal_inr = ?, gst_pct = ?, gst_inr = ?, total_inr = ?, updated_at = CURRENT_TIMESTAMP
+          markup_pct = ?, notes = ?, valid_until = ?, inclusions = ?, exclusions = ?, arrival_point = ?, departure_point = ?, theme = ?, cost_inr = ?, listings_inr = ?, markup_inr = ?, subtotal_inr = ?, gst_pct = ?, gst_inr = ?, total_inr = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`).run(...header, id);
       db.prepare("DELETE FROM quotation_lines WHERE quotation_id = ?").run(id);
       db.prepare("DELETE FROM quotation_days WHERE quotation_id = ?").run(id);
@@ -389,8 +445,8 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
     } else {
       id = `qtn_${nanoid(12)}`;
       db.prepare(`INSERT INTO quotations (id, supplier_id, ref, title, destination, customer_name, customer_email, customer_phone, agent_id, start_date, adults, children,
-          markup_pct, notes, valid_until, inclusions, exclusions, cost_inr, listings_inr, markup_inr, subtotal_inr, gst_pct, gst_inr, total_inr, created_by_user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, supplierId, `Q-${quoteRef()}`, ...header, actor?.id || null);
+          markup_pct, notes, valid_until, inclusions, exclusions, arrival_point, departure_point, theme, cost_inr, listings_inr, markup_inr, subtotal_inr, gst_pct, gst_inr, total_inr, created_by_user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, supplierId, `Q-${quoteRef()}`, ...header, actor?.id || null);
     }
     const insert = db.prepare(`INSERT INTO quotation_lines (id, quotation_id, day_number, sort_order, kind, title, description, line_date, hotel_id, room_type, meal_plan,
         nights, rooms, extra_adults, product_id, product_option_id, pickup_time, adults, children, amount_inr, service_id, cab_type_id, vehicles, option_number, km, car_days, price_inr)
@@ -458,6 +514,7 @@ export function copyQuotation(db, supplierId, quotationId, input, { actor = null
     agentId: source.agentId, startDate: options.startDate, adults: source.adults, children: source.children, markupPct: source.markupPct,
     notes: source.notes, inclusions: source.inclusions, exclusions: source.exclusions, validUntil: null, lines: source.lines.map((line) => lineInput(line, shift)),
     days: source.days, legs: source.legs, options: source.options.map((option) => ({ name: option.name })),
+    arrivalPoint: source.arrivalPoint, departurePoint: source.departurePoint, theme: source.theme,
   }, { actor });
 }
 
@@ -466,20 +523,32 @@ function parseItems(value) {
   try { const items = JSON.parse(value || "[]"); return Array.isArray(items) ? items.filter((item) => typeof item === "string" && item.trim()) : []; } catch { return []; }
 }
 
-export const quotationTermsSchema = z.object({ inclusions: termItems, exclusions: termItems }).strict();
+// Each field is optional: a save changes only what it sends. points: the saved arrival and departure points (ADR 051).
+export const quotationTermsSchema = z.object({
+  inclusions: itemList.optional(), exclusions: itemList.optional(),
+  points: z.array(z.string().trim().min(1).max(120)).max(60).optional(),
+  theme: z.enum(THEMES).optional(),
+}).strict();
 
 /** The supplier's standard inclusions and exclusions, to fill into a quotation in one click (migration 077). */
 export function quotationTerms(db, supplierId) {
-  const row = db.prepare("SELECT inclusions, exclusions FROM supplier_quotation_terms WHERE supplier_id = ?").get(supplierId);
-  return { inclusions: parseItems(row?.inclusions), exclusions: parseItems(row?.exclusions) };
+  const row = db.prepare("SELECT inclusions, exclusions, points, theme FROM supplier_quotation_terms WHERE supplier_id = ?").get(supplierId);
+  return { inclusions: parseItems(row?.inclusions), exclusions: parseItems(row?.exclusions), points: parseItems(row?.points), theme: row?.theme || DEFAULT_THEME };
+}
+
+// A points list without blanks or repeats, in the order typed.
+function cleanPoints(points = []) {
+  const kept = new Map();
+  for (const point of points.map((item) => String(item).trim()).filter(Boolean)) if (!kept.has(point.toLowerCase())) kept.set(point.toLowerCase(), point);
+  return [...kept.values()];
 }
 
 /** Replaces the supplier's standard lists. Saved quotations keep their own copy. */
 export function saveQuotationTerms(db, supplierId, input) {
-  const data = quotationTermsSchema.parse(input);
-  db.prepare(`INSERT INTO supplier_quotation_terms (supplier_id, inclusions, exclusions, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT (supplier_id) DO UPDATE SET inclusions = excluded.inclusions, exclusions = excluded.exclusions, updated_at = CURRENT_TIMESTAMP`)
-    .run(supplierId, JSON.stringify(data.inclusions), JSON.stringify(data.exclusions));
+  const data = { ...quotationTerms(db, supplierId), ...quotationTermsSchema.parse(input) };
+  db.prepare(`INSERT INTO supplier_quotation_terms (supplier_id, inclusions, exclusions, points, theme, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT (supplier_id) DO UPDATE SET inclusions = excluded.inclusions, exclusions = excluded.exclusions, points = excluded.points, theme = excluded.theme, updated_at = CURRENT_TIMESTAMP`)
+    .run(supplierId, JSON.stringify(data.inclusions), JSON.stringify(data.exclusions), JSON.stringify(cleanPoints(data.points)), data.theme);
   return quotationTerms(db, supplierId);
 }
 
@@ -582,7 +651,11 @@ function publicBase(baseUrl) {
 }
 
 /** A link anyone can open to download the PDF, like a voucher link. */
+// The customer's link opens the web itinerary page (ADR 051); the page offers the PDF from quotationPdfUrl.
 export function quotationShareUrl(quotation, baseUrl = null) {
+  return `${publicBase(baseUrl)}/q/${encodeURIComponent(createQuotationToken(quotation))}`;
+}
+export function quotationPdfUrl(quotation, baseUrl = null) {
   return `${publicBase(baseUrl)}/api/quotations/share/${encodeURIComponent(createQuotationToken(quotation))}`;
 }
 

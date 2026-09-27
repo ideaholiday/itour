@@ -14,6 +14,7 @@ import { parseReferralParams, captureReferral, parseTravelerReferralParams, capt
 
 const DriverTrip = React.lazy(() => import("./pages/DriverTrip.jsx"));
 const TripTracking = React.lazy(() => import("./pages/TripTracking.jsx"));
+const QuotationItinerary = React.lazy(() => import("./pages/QuotationItinerary.jsx"));
 const Home = React.lazy(() => import("./pages/Home.jsx"));
 const Search = React.lazy(() => import("./pages/Search.jsx"));
 const TransferSearch = React.lazy(() => import("./pages/TransferSearch.jsx"));
@@ -69,7 +70,7 @@ function AppContent() {
   const domain = getDomainInfo();
   const portalUrls = getPortalUrls();
   // Match whole path segments, so the public /suppliers directory keeps the traveler layout.
-  const isWorkspace = ["/supplier", "/admin", "/ops", "/driver", "/track"].some((prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)) || domain.isSupplier || domain.isAdmin;
+  const isWorkspace = ["/supplier", "/admin", "/ops", "/driver", "/track", "/q"].some((prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`)) || domain.isSupplier || domain.isAdmin;
 
   React.useEffect(() => {
     analytics.captureCampaign(location.search);
@@ -124,6 +125,7 @@ function AppContent() {
           <Routes>
             <Route path="/driver/trip" element={<DriverTrip />} />
             <Route path="/track/:ref" element={<TripTracking />} />
+            <Route path="/q/:token" element={<QuotationItinerary />} />
             {/* Root Route Handled According to Domain */}
             <Route
               path="/"
