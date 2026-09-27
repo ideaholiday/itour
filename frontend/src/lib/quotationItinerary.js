@@ -242,7 +242,7 @@ export function builderSteps(draft, { saved = false } = {}) {
     { key: "trip", label: draft.forAgent === false ? "Customer & dates" : "Agent & dates", missing: [
       draft.forAgent !== false && !draft.agentId && "the agent",
       !String(draft.title || "").trim() && "a trip title",
-      String(draft.customerName || "").trim().length < 2 && (draft.forAgent === false ? "the customer's name" : "the traveller's name"),
+      draft.forAgent === false && String(draft.customerName || "").trim().length < 2 && "the customer's name",
       !draft.startDate && "a start date",
     ].filter(Boolean) },
     { key: "route", label: "Route & hotels", missing: [
@@ -299,8 +299,9 @@ export function linePayload(line) {
 // read-only ones (totals, trip, warnings, ...) that the server's strict schema rejects.
 export function quotationPayload(draft) {
   return {
-    title: draft.title, destination: draft.destination || null, customerName: draft.customerName,
-    customerEmail: draft.customerEmail || null, customerPhone: draft.customerPhone || null, agentId: draft.agentId || null,
+    title: draft.title, destination: draft.destination || null, agentId: draft.agentId || null,
+    // An agent's quotation has no customer of its own: the server fills it from the agent.
+    ...(draft.agentId ? {} : { customerName: draft.customerName, customerEmail: draft.customerEmail || null, customerPhone: draft.customerPhone || null }),
     startDate: draft.startDate, adults: Number(draft.adults), children: Number(draft.children), markupPct: Number(draft.markupPct),
     notes: draft.notes || null, validUntil: draft.validUntil || null, lines: (draft.lines || []).map(linePayload),
     inclusions: cleanItems(draft.inclusions), exclusions: cleanItems(draft.exclusions),

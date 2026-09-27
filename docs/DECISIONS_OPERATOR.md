@@ -159,8 +159,15 @@
 - **Date**: 2026-09-26
 - **Context**: Tour operators build most packages for B2B travel agents, not direct travellers, but the builder treated the agent as an optional field. Every operator also retyped the same circuits (Lucknow – Ayodhya – Varanasi) day by day, with the same city descriptions.
 - **Decision Made** (owner, 2026-09-26):
-  1. **Agent first.** A quotation starts as "for an agent" and asks for the agent, then the agent's traveller (name, contact). Direct customer is the other choice, remembered per browser. An agent can be added from the builder without leaving it. For an agent quotation the builder shows the agent's net and margin next to the retail price, and puts Send to agent and the agent PDF first.
+  1. **Agent first.** A quotation starts as "for an agent" and asks for the agent. It does not ask for the agent's traveller: the agent is the customer (amended 2026-09-27, see ADR 049). Direct customer is the other choice, remembered per browser. An agent can be added from the builder without leaving it. For an agent quotation the builder shows the agent's net and margin next to the retail price, and puts Send to agent and the agent PDF first.
   2. **Route library** (`package_routes`): a named circuit with a description, cities and nights, day-by-day titles and text, inclusions and exclusions, and per day the ready-made cars and activities (ADR 047 entries) it uses. The Idea Holiday admin keeps the shared routes (`supplier_id` NULL) by region; a supplier also saves its own from any quotation, private to it.
   3. **City library** (`package_cities`): a city with a description and the title and text of a day spent there. Laying out a route titles a day in that city with the city's day text instead of just its name.
   4. **Using a route copies, it doesn't link**, like ADR 047: it fills the quotation's cities, nights, days, inclusions and exclusions, lays out one hotel stay per city, and adds each day's car or activity when the supplier has that library entry on its rate sheet (with its first priced cab). Missing entries can be added to the rate sheet in one click. The supplier still picks hotels, and everything is priced by the server from the supplier's own rates.
 - **Consequences**: Routes and cities carry no prices. Shared routes and cities are hidden, never deleted; a supplier's own routes can be deleted. Route and city text is starter copy the admin should review.
+
+---
+
+## ADR 049: The Supplier Doesn't Collect an Agent's Client
+- **Date**: 2026-09-27
+- **Decision Made** (owner, 2026-09-27): A quotation for an agent asks only for the agent, not the agent's traveller. Only a direct-customer quotation asks for the customer's name, email and phone.
+- **Consequences**: The server sets an agent quotation's customer name, email and phone from the agent, so bookings, hotel requests and the car schedule name the agent. The branded PDF of an agent quotation names no one; there is no "Send to traveller". A listing line on an agent quotation needs the agent's phone to be booked. Agent quotations no longer add to the saved-customers list. Quotations saved before keep their traveller until they are saved again.

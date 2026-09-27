@@ -192,8 +192,13 @@ test("a quotation saves as a route with its days, text and library cars", () => 
   });
 });
 
-test("an agent quotation needs the agent and the traveller's name", () => {
+test("an agent quotation needs only the agent, not the agent's client", () => {
   const [trip] = builderSteps({ title: "Tour", customerName: "", startDate: "2026-09-26", lines: [], days: [] });
   assert.equal(trip.label, "Agent & dates");
-  assert.deepEqual(trip.missing, ["the agent", "the traveller's name"]);
+  assert.deepEqual(trip.missing, ["the agent"]);
+  const [direct] = builderSteps({ forAgent: false, title: "Tour", customerName: "", startDate: "2026-09-26", lines: [], days: [] });
+  assert.deepEqual(direct.missing, ["the customer's name"]);
+  // The server fills an agent quotation's customer from the agent, so none is sent.
+  const body = quotationPayload({ title: "Tour", agentId: "agt_1", customerName: "Old traveller", startDate: "2026-09-26", lines: [], days: [] });
+  assert.equal("customerName" in body || "customerEmail" in body || "customerPhone" in body, false);
 });

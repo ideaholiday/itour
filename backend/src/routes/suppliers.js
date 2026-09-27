@@ -81,7 +81,7 @@ import { addHotelRate, deleteHotelRate, listHotels, saveHotel } from "../service
 import { bookQuotationLine, copyQuotation, findQuotation, listQuotations, quotationShareUrl, quotationTerms, quotationView, recordQuotationPayment, saveQuotation, saveQuotationTerms, setQuotationStatus, suggestQuotations } from "../services/quotationService.js";
 import { carSchedule, recordVendorPayment, requestHotelBooking, sendItinerary, updateArrangement } from "../services/tripService.js";
 import { itineraryPdf } from "../services/tripItineraryPdfService.js";
-import { addServiceRate, deleteServiceRate, listCabTypes, listServices, saveCabType, saveService } from "../services/supplierRateSheetService.js";
+import { addServiceRate, deleteServiceRate, listCabTypes, listServices, removeService, saveCabType, saveService } from "../services/supplierRateSheetService.js";
 import { importLibraryItems, supplierLibrary } from "../services/packageLibraryService.js";
 import { deleteSupplierRoute, saveSupplierRoute, supplierRouteLibrary } from "../services/routeLibraryService.js";
 import { quotationPdf } from "../services/quotationPdfService.js";
@@ -2435,6 +2435,9 @@ router.post("/:id/services", (req, res) => {
 });
 router.put("/:id/services/:serviceId", (req, res) => {
   try { res.json({ success: true, service: saveService(db, req.params.id, req.body, req.params.serviceId) }); } catch (error) { directBookingFailure(res, req, error, "Could not save the service"); }
+});
+router.delete("/:id/services/:serviceId", (req, res) => {
+  try { res.json({ success: true, ...removeService(db, req.params.id, req.params.serviceId) }); } catch (error) { directBookingFailure(res, req, error, "Could not remove the service"); }
 });
 router.post("/:id/services/:serviceId/rates", (req, res) => {
   try { res.status(201).json({ success: true, service: addServiceRate(db, req.params.id, req.params.serviceId, req.body) }); } catch (error) { directBookingFailure(res, req, error, "Could not add the rate"); }

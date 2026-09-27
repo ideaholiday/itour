@@ -20,7 +20,7 @@ async function request(url, options = {}) {
  * for popular destinations. Ticked entries are added to the supplier's own rate
  * sheet with a year of the example prices, to check and change there.
  */
-export default function SupplierPackageLibrary({ supplierId, startOpen = false, onAdded }) {
+export default function SupplierPackageLibrary({ supplierId, startOpen = false, onAdded, sheetSize = 0 }) {
   const base = `/api/suppliers/${supplierId}/package-library`;
   const [open, setOpen] = useState(startOpen);
   const [library, setLibrary] = useState({ regions: [], items: [] });
@@ -37,7 +37,8 @@ export default function SupplierPackageLibrary({ supplierId, startOpen = false, 
       setLibrary(data);
       setRegion((current) => current || data.regions[0] || "");
     }).catch((err) => setError(err.message));
-  }, [base, open]);
+    // Re-read when the rate sheet grows or shrinks, so a removed service can be added again.
+  }, [base, open, sheetSize]);
 
   const items = useMemo(() => library.items.filter((item) => item.region === region), [library, region]);
   const toAdd = items.filter((item) => !item.added);

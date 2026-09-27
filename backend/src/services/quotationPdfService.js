@@ -126,8 +126,9 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes 
     doc.y = 118;
     doc.x = 48;
 
-    // Prepared-for line. BRAND names the customer; AGENT names the agent.
-    doc.font("Helvetica").fontSize(10).fillColor(MUTED).text(isAgent ? `Prepared for ${agent?.contactName || agent?.name || "your agent"}` : `Prepared for ${quotation.customerName}`, { width });
+    // Prepared-for line. BRAND names the customer; AGENT names the agent. An agent's branded copy
+    // goes to a client the supplier doesn't know, so it names no one.
+    if (isAgent || !quotation.agentId) doc.font("Helvetica").fontSize(10).fillColor(MUTED).text(isAgent ? `Prepared for ${agent?.contactName || agent?.name || "your agent"}` : `Prepared for ${quotation.customerName}`, { width });
     doc.moveDown(0.6);
 
     // Trip details at a glance: dates, travellers, hotels and room types, cars.

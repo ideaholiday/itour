@@ -66,6 +66,19 @@ test("suppliers add library entries to their rate sheet at example prices, once,
   assert.equal(quotation.response.status, 201, JSON.stringify(quotation.data));
   assert.equal(quotation.data.quotation.totals.costInr, 2200);
 
+  // Removing a service: one no quotation uses is deleted; one a quotation uses is archived and keeps pricing it.
+  assert.deepEqual((await call(`/services/${taj.id}`, { method: "DELETE" })).data.removed, "DELETED");
+  assert.deepEqual((await call(`/services/${tour.id}`, { method: "DELETE" })).data.removed, "ARCHIVED");
+  assert.equal((await call(`/services/${taj.id}`, { method: "DELETE" })).response.status, 404);
+  const afterRemove = (await call("/services")).data.services;
+  assert.equal(afterRemove.some((service) => service.id === taj.id), false);
+  assert.equal(afterRemove.find((service) => service.id === tour.id).status, "INACTIVE");
+  const repriced = await call(`/quotations/${quotation.data.quotation.id}`);
+  assert.equal(repriced.data.quotation.totals.costInr, 2200);
+  // Both can be added from the library again.
+  assert.equal((await call("/package-library")).data.items.find((item) => item.id === "plib_up_02").added, false);
+  assert.deepEqual((await call("/package-library/import", { body: { itemIds: ["plib_up_02", "plib_gt_09"] } })).data.added, ["Lucknow full-day sightseeing", "Taj Mahal entry with mausoleum"]);
+
   // Unknown entries are refused and nothing is added.
   const unknown = await call("/package-library/import", { body: { itemIds: ["plib_gt_01", "plib_nope"] } });
   assert.equal(unknown.response.status, 404);

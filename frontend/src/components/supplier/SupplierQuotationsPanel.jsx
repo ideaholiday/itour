@@ -130,7 +130,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     setSaved(quotation); setShared(null); setNotice(""); setError("");
     const group = quotation.adults + quotation.children;
     setAcceptOption(quotation.selectedOption || 1);
-    setDraft({ ...quotation, forAgent: Boolean(quotation.agentId), inclusions: quotation.inclusions || [], exclusions: quotation.exclusions || [], destination: quotation.destination || "", days: quotation.days || [], legs: quotation.legs || [], options: (quotation.options || []).map((option) => ({ name: option.name })), customerEmail: quotation.customerEmail || "", customerPhone: quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
+    setDraft({ ...quotation, forAgent: Boolean(quotation.agentId), inclusions: quotation.inclusions || [], exclusions: quotation.exclusions || [], destination: quotation.destination || "", days: quotation.days || [], legs: quotation.legs || [], options: (quotation.options || []).map((option) => ({ name: option.name })), customerName: quotation.agentId ? "" : quotation.customerName, customerEmail: quotation.agentId ? "" : quotation.customerEmail || "", customerPhone: quotation.agentId ? "" : quotation.customerPhone || "", agentId: quotation.agentId || "", notes: quotation.notes || "", validUntil: quotation.validUntil || "",
       lines: quotation.lines.map((line) => {
         const next = { ...line, checkIn: line.kind === "HOTEL" ? line.date : undefined };
         if (line.kind !== "TRANSPORT" && line.kind !== "ACTIVITY") return next;
@@ -417,7 +417,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             {shownList.map((row) => (
               <li key={row.id}>
                 <button onClick={() => request(`${base}/quotations/${row.id}`).then((data) => { open(data.quotation); setStep(data.quotation.status === "DRAFT" ? "days" : "price"); }).catch((err) => setError(err.message))} className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-stone-50">
-                  <span className="min-w-0"><strong className="block truncate text-sm text-stone-900">{row.title}</strong><span className="text-xs text-stone-500">{row.agentName && <span className="mr-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-black text-indigo-800">{row.agentName}</span>}{row.ref} · {row.customerName}{row.destination ? ` · ${row.destination}` : ""} · from {row.startDate}</span></span>
+                  <span className="min-w-0"><strong className="block truncate text-sm text-stone-900">{row.title}</strong><span className="text-xs text-stone-500">{row.agentName && <span className="mr-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-black text-indigo-800">{row.agentName}</span>}{row.ref}{row.agentName ? "" : ` · ${row.customerName}`}{row.destination ? ` · ${row.destination}` : ""} · from {row.startDate}</span></span>
                   <span className="text-right"><span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${STATUS_STYLES[row.status]}`}>{row.status}</span><span className="mt-1 block font-mono text-sm font-bold">{inr(row.totalInr)}</span></span>
                 </button>
               </li>
@@ -463,7 +463,8 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
               </fieldset>
             )}
             <fieldset disabled={!editable} className="grid gap-3 sm:grid-cols-3">
-              <label className="text-xs text-stone-500">{isAgentMode ? "Traveller (the agent's client)" : "Customer"}<Combobox
+              {!isAgentMode && <>
+              <label className="text-xs text-stone-500">Customer<Combobox
                 freeText allowClear={false}
                 value={draft.customerName}
                 onChange={(next) => {
@@ -472,14 +473,15 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                   else setDraft({ ...draft, customerName: next });
                 }}
                 options={customerOptions.map((option) => ({ ...option, value: option.label }))}
-                placeholder={isAgentMode ? "Traveller's name, or pick one of this agent's" : "Name, or pick a saved customer"}
+                placeholder="Name, or pick a saved customer"
                 ariaLabel="customer-name"
                 className="mt-1"
               /></label>
               <span className="grid grid-cols-2 gap-2 self-end sm:col-span-2">
-                <input placeholder={isAgentMode ? "Traveller's email (optional)" : "Customer email"} type="email" value={draft.customerEmail} onChange={(event) => setDraft({ ...draft, customerEmail: event.target.value })} className={input} aria-label="Customer email" />
-                <input placeholder={isAgentMode ? "Traveller's phone (optional)" : "Customer phone"} value={draft.customerPhone} onChange={(event) => setDraft({ ...draft, customerPhone: event.target.value })} className={input} aria-label="Customer phone" />
+                <input placeholder="Customer email" type="email" value={draft.customerEmail} onChange={(event) => setDraft({ ...draft, customerEmail: event.target.value })} className={input} aria-label="Customer email" />
+                <input placeholder="Customer phone" value={draft.customerPhone} onChange={(event) => setDraft({ ...draft, customerPhone: event.target.value })} className={input} aria-label="Customer phone" />
               </span>
+              </>}
               <label className="text-xs text-stone-500">Starts<input type="date" value={draft.startDate} onChange={(event) => setStart(event.target.value)} className={`mt-1 w-full ${input}`} /></label>
               <label className="text-xs text-stone-500">Adults / children<span className="mt-1 flex gap-2"><input type="number" min={1} value={draft.adults} onChange={(event) => setDraft({ ...draft, adults: event.target.value })} className={`w-full ${input}`} aria-label="Adults" /><input type="number" min={0} value={draft.children} onChange={(event) => setDraft({ ...draft, children: event.target.value })} className={`w-full ${input}`} aria-label="Children" /></span></label>
               <label className="text-xs text-stone-500">Destination<Combobox freeText allowClear={false} value={draft.destination} onChange={(value) => setDraft({ ...draft, destination: value })} options={cityOptions.map((city) => ({ value: city.name, label: city.name, hint: city.hint }))} placeholder="e.g. Lucknow, Ayodhya" ariaLabel="destination" className="mt-1" /></label>
@@ -693,7 +695,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             {saved?.agentId && saved.status !== "DECLINED" && <button onClick={sendToAgent} className="flex items-center gap-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white"><Send className="h-4 w-4" /> Send to agent</button>}
             {saved?.agentId && <button onClick={() => downloadPdf("AGENT")} className="flex items-center gap-1 rounded-xl border border-indigo-300 px-4 py-2.5 text-xs font-bold text-indigo-800"><Download className="h-4 w-4" /> Agent PDF</button>}
             {saved && <button onClick={() => downloadPdf("BRAND")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Download className="h-4 w-4" /> {saved.agentId ? "Branded PDF" : "PDF"}</button>}
-            {saved && saved.status !== "DECLINED" && (!saved.agentId || saved.customerEmail || saved.customerPhone) && <button onClick={send} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Send className="h-4 w-4" /> {saved.agentId ? "Send to traveller" : "Send to customer"}</button>}
+            {saved && saved.status !== "DECLINED" && !saved.agentId && <button onClick={send} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Send className="h-4 w-4" /> Send to customer</button>}
             {saved && <button type="button" onClick={saveAsRoute} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><BookmarkPlus className="h-4 w-4" /> Save as my route</button>}
             {saved && <span className="flex items-center gap-1">
               <input type="date" value={copyDate} onChange={(event) => setCopyDate(event.target.value)} className={`${input} py-2 text-xs`} aria-label="Start date for the copy" />

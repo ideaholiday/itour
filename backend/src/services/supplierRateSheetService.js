@@ -142,6 +142,25 @@ export function saveService(db, supplierId, input, serviceId = null) {
 }
 
 /**
+ * Removes a service from the rate sheet. One no quotation uses is deleted with
+ * its seasons; one a quotation uses is archived (INACTIVE) so that quotation and
+ * its trip keep their prices. Either way the library can add it again.
+ */
+export function removeService(db, supplierId, serviceId) {
+  const service = findService(db, supplierId, serviceId);
+  const used = db.prepare("SELECT 1 FROM quotation_lines WHERE service_id = ? LIMIT 1").get(service.id);
+  db.transaction(() => {
+    if (used) {
+      db.prepare("UPDATE supplier_services SET status = 'INACTIVE', library_item_id = NULL WHERE id = ? AND supplier_id = ?").run(service.id, supplierId);
+    } else {
+      db.prepare("DELETE FROM supplier_service_rates WHERE service_id = ?").run(service.id);
+      db.prepare("DELETE FROM supplier_services WHERE id = ? AND supplier_id = ?").run(service.id, supplierId);
+    }
+  })();
+  return { removed: used ? "ARCHIVED" : "DELETED" };
+}
+
+/**
  * Adds a season. A car service needs a cab type and a price per vehicle, or a
  * price per km when it is priced per km; an activity needs an adult price. Seasons for the same cab type (or the same
  * activity) may not overlap, so every date has one price.

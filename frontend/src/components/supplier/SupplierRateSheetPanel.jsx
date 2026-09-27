@@ -85,12 +85,18 @@ export default function SupplierRateSheetPanel({ supplierId, onChange }) {
   const setRate = (serviceId, field, value) => setRateDrafts({ ...rateDrafts, [serviceId]: { ...(rateDrafts[serviceId] || {}), [field]: value } });
   const toggleDay = (day) => setServiceDraft({ ...serviceDraft, closedWeekdays: serviceDraft.closedWeekdays.includes(day) ? serviceDraft.closedWeekdays.filter((item) => item !== day) : [...serviceDraft.closedWeekdays, day] });
   const cabName = (id) => cabTypes.find((cab) => cab.id === id)?.name || "Cab";
+  const removeService = (service) => {
+    if (!window.confirm(`Remove ${service.name} and its prices? Quotations already made keep their prices.`)) return;
+    run(() => request(`${base}/services/${service.id}`, { method: "DELETE" }));
+  };
+  // Archived services stay in the API for the quotations that use them, but leave the rate sheet.
+  const activeServices = services.filter((service) => service.status === "ACTIVE");
 
   return (
     <div className="space-y-6">
       <p className="text-sm text-stone-600">Your own prices for transfers, sightseeing and tickets. Only you see them; quotations use them and add your markup. Nothing here is listed or sold online.</p>
       {error && <p role="alert" className="flex items-center gap-2 rounded-xl bg-rose-50 p-3 text-xs font-semibold text-rose-700"><AlertCircle className="h-4 w-4" />{error}</p>}
-      <SupplierPackageLibrary supplierId={supplierId} startOpen={loaded && !services.length} onAdded={load} />
+      <SupplierPackageLibrary supplierId={supplierId} startOpen={loaded && !activeServices.length} sheetSize={activeServices.length} onAdded={load} />
 
       <div className="space-y-2">
         <h3 className="flex items-center gap-1.5 text-sm font-bold text-stone-900"><Car className="h-4 w-4" /> Cab types</h3>
@@ -136,15 +142,18 @@ export default function SupplierRateSheetPanel({ supplierId, onChange }) {
           <button type="submit" className="flex items-center justify-center gap-1 rounded-xl bg-amber-500 px-3 py-2 font-bold text-stone-950"><Plus className="h-4 w-4" /> Add service</button>
         </form>
 
-        {services.map((service) => {
+        {activeServices.map((service) => {
           const draft = rateDrafts[service.id] || {};
           const car = isTransport(service.kind);
           const perKm = car && service.pricing === "PER_KM";
           return (
             <div key={service.id} className="rounded-2xl border border-stone-200 p-4">
+              <div className="flex items-start justify-between gap-2">
               <p className="font-bold text-stone-900">{service.name}
                 <span className="font-normal text-stone-500"> · {SERVICE_KIND_LABELS[service.kind]}{service.city ? ` · ${service.city}` : ""}{service.fromPlace || service.toPlace ? ` · ${service.fromPlace || "?"} → ${service.toPlace || "?"}` : ""}{perKm ? ` · per km${service.distanceKm ? `, usually ${service.distanceKm} km` : ""}` : ""}{service.closedWeekdays.length ? ` · closed ${service.closedWeekdays.map((day) => WEEKDAYS[day]).join(", ")}` : ""}</span>
               </p>
+              <button type="button" onClick={() => removeService(service)} aria-label={`Remove ${service.name}`} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold text-stone-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /> Remove</button>
+              </div>
               {service.dayTitle && <p className="text-xs text-stone-500">Day title: {service.dayTitle}</p>}
               <table className="mt-2 w-full text-left text-xs">
                 <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1">{car ? "Cab" : "Ticket"}</th><th>Season</th><th className="text-right">{perKm ? "Per km · min km/day · driver/day" : car ? "Per vehicle" : "Adult"}</th>{!car && <th className="text-right">Child</th>}<th /></tr></thead>
@@ -181,7 +190,7 @@ export default function SupplierRateSheetPanel({ supplierId, onChange }) {
             </div>
           );
         })}
-        {!services.length && <p className="text-xs text-stone-500">No services yet.</p>}
+        {!activeServices.length && <p className="text-xs text-stone-500">No services yet.</p>}
       </div>
     </div>
   );

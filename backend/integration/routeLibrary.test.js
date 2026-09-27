@@ -104,7 +104,7 @@ test("an agent quotation shows the agent's net and margin, and the list names th
 
   const agent = (await call("/agents", { body: { name: "Awadh Travels", email: "desk@awadh.example", markupPct: 5 } })).data.agent;
   const created = await call("/quotations", { body: {
-    title: "Lucknow Tour", customerName: "Ajay Pal Singh", agentId: agent.id, startDate: day(20), adults: 2, markupPct: 15,
+    title: "Lucknow Tour", agentId: agent.id, startDate: day(20), adults: 2, markupPct: 15,
     lines: [{ kind: "CUSTOM", dayNumber: 1, title: "Airport cab", amountInr: 10000 }],
   } });
   assert.equal(created.response.status, 201, JSON.stringify(created.data));
@@ -112,8 +112,12 @@ test("an agent quotation shows the agent's net and margin, and the list names th
   const { quotation } = created.data;
   assert.equal(quotation.totals.totalInr, 12075);
   assert.equal(quotation.agentName, "Awadh Travels");
+  // No client details for an agent's quotation: the agent is the customer.
+  assert.deepEqual([quotation.customerName, quotation.customerEmail], ["Awadh Travels", "desk@awadh.example"]);
   assert.deepEqual([quotation.trade.markupPct, quotation.trade.netInr, quotation.trade.marginInr], [5, 11025, 1050]);
 
+  // A direct quotation still needs its customer.
+  assert.equal((await call("/quotations", { body: { title: "Direct", startDate: day(20), adults: 1, lines: [] } })).response.status, 400);
   const direct = (await call("/quotations", { body: { title: "Direct", customerName: "Meera Iyer", startDate: day(20), adults: 1, lines: [] } })).data.quotation;
   assert.equal(direct.trade, null);
   const list = (await call("/quotations")).data.quotations;

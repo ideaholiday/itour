@@ -79,7 +79,8 @@ const legSchema = z.object({
 export const quotationSchema = z.object({
   title: z.string().trim().min(2).max(160),
   destination: z.string().trim().max(120).optional().nullable(),
-  customerName: z.string().trim().min(2).max(120),
+  // A direct customer's details. For an agent's quotation the agent is the customer, so these come from the agent.
+  customerName: z.string().trim().min(2).max(120).optional().nullable(),
   customerEmail: z.string().trim().email().max(200).optional().nullable().or(z.literal("")),
   customerPhone: z.string().trim().max(24).optional().nullable(),
   agentId: z.string().trim().max(120).optional().nullable(),
@@ -97,7 +98,7 @@ export const quotationSchema = z.object({
   legs: z.array(legSchema).max(20).default([]),
   // Hotel options (ADR 043): none or one means a single package; 2–6 named options, hotels chosen per option.
   options: z.array(z.object({ name: z.string().trim().min(1).max(60) }).strict()).max(MAX_OPTIONS).default([]),
-}).strict();
+}).strict().refine((quote) => quote.agentId || quote.customerName, { message: "Enter the customer's name", path: ["customerName"] });
 
 export const quotationPaymentSchema = z.object({
   mode: z.enum(DIRECT_PAYMENT_MODES),
@@ -373,8 +374,11 @@ export function suggestQuotations(db, supplierId, { destination = "", days = nul
 /** Creates or replaces a draft or sent quotation, pricing every line on the server. Accepted and declined ones are final. */
 export function saveQuotation(db, supplierId, input, { actor = null, quotationId = null } = {}) {
   const data = quotationSchema.parse(input);
-  if (data.agentId && !db.prepare("SELECT id FROM supplier_agents WHERE id = ? AND supplier_id = ?").get(data.agentId, supplierId)) {
-    throw quotationError("Agent not found", 404, "AGENT_NOT_FOUND");
+  if (data.agentId) {
+    const agent = db.prepare("SELECT name, phone, email FROM supplier_agents WHERE id = ? AND supplier_id = ?").get(data.agentId, supplierId);
+    if (!agent) throw quotationError("Agent not found", 404, "AGENT_NOT_FOUND");
+    // The supplier doesn't collect the agent's client: the agent is who it quotes and books for.
+    Object.assign(data, { customerName: agent.name, customerEmail: agent.email || null, customerPhone: agent.phone || null });
   }
   const optionCount = data.options.length >= 2 ? data.options.length : 1;
   const stray = data.lines.find((line) => line.kind === "HOTEL" && line.option > optionCount);
@@ -432,12 +436,8 @@ export function saveQuotation(db, supplierId, input, { actor = null, quotationId
       const insertLeg = db.prepare("INSERT INTO quotation_legs (id, quotation_id, sort_order, city, nights) VALUES (?, ?, ?, ?, ?)");
       data.legs.forEach((leg, index) => insertLeg.run(`qlg_${nanoid(12)}`, id, index, leg.city, leg.nights));
     }
-    // Remember the customer for autocomplete next time (migration 076).
-    // Scope is by agent: an agent's customer stays on that agent's list.
-    rememberCustomer(db, supplierId, {
-      agentId: data.agentId || null, name: data.customerName,
-      email: data.customerEmail || null, phone: data.customerPhone || null,
-    });
+    // Remember a direct customer for autocomplete next time (migration 076).
+    if (!data.agentId) rememberCustomer(db, supplierId, { agentId: null, name: data.customerName, email: data.customerEmail || null, phone: data.customerPhone || null });
     return quotationView(db, findQuotation(db, supplierId, id));
   })();
 }
@@ -551,7 +551,7 @@ export function bookQuotationLine(db, { supplierId, quotationId, lineId, actor }
   if (!line) throw quotationError("Line not found", 404, "LINE_NOT_FOUND");
   if (line.kind !== "LISTING") throw quotationError("Only listing lines are booked here; hotels, cars and activities are arranged by you", 409, "NOT_A_LISTING");
   if (line.booking_id) throw quotationError("This line is already booked", 409, "ALREADY_BOOKED");
-  if (!row.customer_phone) throw quotationError("Add the customer's phone number before booking", 409, "PHONE_REQUIRED");
+  if (!row.customer_phone) throw quotationError(row.agent_id ? "Add the agent's phone number before booking" : "Add the customer's phone number before booking", 409, "PHONE_REQUIRED");
 
   const { booking } = createSupplierBooking(db, {
     supplierId, actor,
