@@ -84,7 +84,7 @@ import { itineraryPdf } from "../services/tripItineraryPdfService.js";
 import { addServiceRate, deleteServiceRate, listCabTypes, listServices, removeService, saveCabType, saveService } from "../services/supplierRateSheetService.js";
 import { importLibraryItems, supplierLibrary } from "../services/packageLibraryService.js";
 import { deleteSupplierRoute, saveSupplierRoute, supplierRouteLibrary } from "../services/routeLibraryService.js";
-import { quotationPdf } from "../services/quotationPdfService.js";
+import { quotationPdf, quotationText } from "../services/quotationPdfService.js";
 import { createResellerKey, listResellerKeys, revokeResellerKey, setProductChannels } from "../services/supplierChannelSettingsService.js";
 import { sendEmail } from "../services/emailService.js";
 import { addStaffMember, listStaff, OWNER_ROLE, removeStaffMember, resetStaffPassword, supplierRoleAllows, updateStaffMember } from "../services/supplierStaffService.js";
@@ -2503,6 +2503,10 @@ router.post("/:id/quotations/:quotationId/payments", (req, res) => {
 router.post("/:id/quotations/:quotationId/lines/:lineId/book", (req, res) => {
   try { res.status(201).json({ success: true, ...bookQuotationLine(db, { supplierId: req.params.id, quotationId: req.params.quotationId, lineId: req.params.lineId, actor: req.user }) }); } catch (error) { directBookingFailure(res, req, error, "Could not book this line"); }
 });
+// The whole quotation as plain text with no branding, to paste into an email or chat (ADR 050).
+router.get("/:id/quotations/:quotationId/text", (req, res) => {
+  try { res.set("Cache-Control", "no-store").json({ success: true, text: quotationText(db, req.params.id, req.params.quotationId) }); } catch (error) { directBookingFailure(res, req, error, "Could not make the text"); }
+});
 router.get("/:id/quotations/:quotationId/pdf", async (req, res) => {
   try {
     const variant = req.query.variant === "AGENT" ? "AGENT" : "BRAND";
@@ -2582,11 +2586,10 @@ router.post("/:id/quotations/:quotationId/send-to-agent", async (req, res) => {
     const { buffer, filename, agent } = await quotationPdf(db, req.params.id, row.id, { variant: "AGENT" });
     if (!agent) return res.status(409).json({ error: "Agent not found", code: "AGENT_MISSING" });
     const view = quotationView(db, row);
-    // The same net and margin as the trade PDF and the builder (tradeTotals, ADR 048).
-    const { markupPct, netInr } = view.trade || { markupPct: 0, netInr: view.totals.totalInr };
+    // The agent's net is the quotation's own total: no agent markup (ADR 050).
     const price = view.options.length && !view.selectedOption
-      ? `${view.options.length} hotel options; retail from INR ${Math.min(...view.options.map((o) => o.totals.totalInr)).toLocaleString("en-IN")}.`
-      : `Retail INR ${view.totals.totalInr.toLocaleString("en-IN")} · Your net INR ${netInr.toLocaleString("en-IN")} at ${markupPct}% markup.`;
+      ? `${view.options.length} hotel options; net from INR ${Math.min(...view.options.map((o) => o.totals.totalInr)).toLocaleString("en-IN")}.`
+      : `Net INR ${view.totals.totalInr.toLocaleString("en-IN")}.`;
     const to = (req.body?.email && String(req.body.email).trim()) || agent.email;
     let email = { status: "SKIPPED", error: "No agent email" };
     if (to) {

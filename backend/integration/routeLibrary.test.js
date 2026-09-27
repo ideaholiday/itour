@@ -102,24 +102,31 @@ test("an agent quotation shows the agent's net and margin, and the list names th
   const { supplier, token } = supplierToken(db);
   const call = (path, options = {}) => requestJson(api.baseUrl, `/api/suppliers/${supplier.id}${path}`, { token, ...options });
 
-  const agent = (await call("/agents", { body: { name: "Awadh Travels", email: "desk@awadh.example", markupPct: 5 } })).data.agent;
+  const agent = (await call("/agents", { body: { name: "Awadh Travels", email: "desk@awadh.example" } })).data.agent;
   const created = await call("/quotations", { body: {
     title: "Lucknow Tour", agentId: agent.id, startDate: day(20), adults: 2, markupPct: 15,
     lines: [{ kind: "CUSTOM", dayNumber: 1, title: "Airport cab", amountInr: 10000 }],
   } });
   assert.equal(created.response.status, 201, JSON.stringify(created.data));
-  // Retail: 10,000 + 15% = 11,500 + 5% GST = 12,075. Agent net: 10,000 + 5% = 10,500 + 5% GST = 11,025.
+  // The agent pays the quotation's own price, its net: 10,000 + the supplier's 15% = 11,500 + 5% GST = 12,075. No agent markup.
   const { quotation } = created.data;
   assert.equal(quotation.totals.totalInr, 12075);
   assert.equal(quotation.agentName, "Awadh Travels");
   // No client details for an agent's quotation: the agent is the customer.
   assert.deepEqual([quotation.customerName, quotation.customerEmail], ["Awadh Travels", "desk@awadh.example"]);
-  assert.deepEqual([quotation.trade.markupPct, quotation.trade.netInr, quotation.trade.marginInr], [5, 11025, 1050]);
+  assert.equal("trade" in quotation, false);
+  // An agent can't be given a separate package markup any more.
+  assert.equal((await call("/agents", { body: { name: "Other Travels", markupPct: 5 } })).response.status, 400);
+  // The whole quotation copies as plain text with the net price and no branding.
+  const copied = await call(`/quotations/${quotation.id}/text`);
+  assert.equal(copied.response.status, 200, JSON.stringify(copied.data));
+  assert.match(copied.data.text, /^Lucknow Tour \(Q-/);
+  assert.match(copied.data.text, /Net price: INR 12,075 for the group/);
 
   // A direct quotation still needs its customer.
   assert.equal((await call("/quotations", { body: { title: "Direct", startDate: day(20), adults: 1, lines: [] } })).response.status, 400);
   const direct = (await call("/quotations", { body: { title: "Direct", customerName: "Meera Iyer", startDate: day(20), adults: 1, lines: [] } })).data.quotation;
-  assert.equal(direct.trade, null);
+  assert.match((await call(`/quotations/${direct.id}/text`)).data.text, /\nPrice: INR /);
   const list = (await call("/quotations")).data.quotations;
   assert.equal(list.find((row) => row.id === quotation.id).agentName, "Awadh Travels");
   assert.equal(list.find((row) => row.id === direct.id).agentName, null);

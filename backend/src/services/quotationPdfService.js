@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit";
-import { findQuotation, quotationView, tradeTotals } from "./quotationService.js";
+import { findQuotation, quotationView } from "./quotationService.js";
 import { listHotels } from "./supplierHotelService.js";
 import { listCabTypes } from "./supplierRateSheetService.js";
 import { findAgent } from "./supplierAgentService.js";
@@ -14,8 +14,7 @@ import { findAgent } from "./supplierAgentService.js";
  *    This is what the direct customer sees.
  *  - AGENT: supplier identity is stripped from the header (the agent resells
  *    under their own brand), a "Trade quotation — confidential" band replaces
- *    it, and the price panel breaks retail into agent-net and the agent's
- *    margin using the agent's commission_pct (ADR 039).
+ *    it, and the price is the agent's net: the same total, with no agent markup (ADR 050).
  *
  * The built-in PDF fonts have no rupee sign, so amounts read "INR 12,345".
  */
@@ -208,7 +207,7 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes 
     if (!days.length) doc.font("Helvetica").fontSize(10).fillColor(MUTED).text("The day-by-day plan will follow.", { width });
 
     const people = quotation.adults + quotation.children;
-    // Retail price box, shown to the customer, or the retail half of the trade panel.
+    // The price box: what the customer pays, or the agent's net on the agent copy.
     const retailBox = (totals, label = "Package price") => {
       if (doc.y > doc.page.height - 160) doc.addPage();
       doc.moveDown(0.4);
@@ -229,36 +228,7 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes 
       doc.y = y + 44;
     };
 
-    // Trade price panel: retail / agent net / your margin. The agent's net is
-    // the same package priced with the agent's own markup on the cost lines
-    // (hotels, cars, activities, custom); listings stay at their own price
-    // and GST is unchanged. So retail − net is the retailer's markup on top
-    // of the agent's markup, which is the agent's margin.
-    const tradeBox = (totals, lines) => {
-      if (doc.y > doc.page.height - 200) doc.addPage();
-      doc.moveDown(0.4);
-      const boxTop = doc.y;
-      const { markupPct, netInr, marginInr } = tradeTotals(lines, { agentMarkupPct: agent?.markupPct, gstPct: quotation.totals.gstPct, retailTotalInr: totals.totalInr });
-      const rows = [
-        ["Retail price (what the guest pays)", inr(totals.totalInr), INK],
-        [`Your net at ${markupPct}% markup`, inr(netInr), INK],
-        ["Your margin", inr(marginInr), "#087f5b"],
-      ];
-      const boxHeight = 22 + rows.length * 22 + 16;
-      doc.roundedRect(48, boxTop, width, boxHeight, 8).fillColor(CARD_BG).fill();
-      doc.rect(48, boxTop, 4, boxHeight).fillColor(ACCENT).fill();
-      doc.font("Helvetica-Bold").fontSize(10).fillColor(MUTED).text("TRADE PRICE — CONFIDENTIAL", 64, boxTop + 12, { width: width - 32 });
-      let y = boxTop + 30;
-      for (const [rowLabel, value, colour] of rows) {
-        doc.font("Helvetica").fontSize(10.5).fillColor(MUTED).text(rowLabel, 64, y, { width: width * 0.6 });
-        doc.font("Helvetica-Bold").fontSize(11).fillColor(colour).text(value, 48 + width * 0.6, y, { width: width * 0.4 - 16, align: "right" });
-        y += 22;
-      }
-      doc.x = 48;
-      doc.y = boxTop + boxHeight + 8;
-    };
-
-    const priceBox = (totals, lines) => (isAgent ? tradeBox(totals, lines) : retailBox(totals));
+    const priceBox = (totals) => retailBox(totals, isAgent ? "Net package price" : "Package price");
 
     if (openOptions.length) {
       if (doc.y > doc.page.height - 200) doc.addPage();
@@ -272,12 +242,11 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes 
         for (const line of quotation.lines.filter((item) => item.kind === "HOTEL" && (item.option || 1) === option.number)) {
           doc.font("Helvetica").fontSize(9.5).fillColor(INK).text(`• Day ${line.dayNumber}: ${lineSummary(line, hotelsById, cabsById)}`, { width, indent: 8 });
         }
-        const optionLines = quotation.lines.filter((item) => item.kind !== "HOTEL" || (item.option || 1) === option.number);
-        priceBox(option.totals, optionLines);
+        priceBox(option.totals);
       }
     } else {
       if (doc.y > doc.page.height - 200) doc.addPage();
-      priceBox(quotation.totals, chosenLines);
+      priceBox(quotation.totals);
     }
 
     doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(
@@ -316,6 +285,77 @@ export function renderQuotationPdf({ quotation, supplier, hotels = [], cabTypes 
   });
 }
 
+/**
+ * The quotation as plain text, with no supplier or Idea Holiday branding, for the
+ * supplier to paste into an email or chat (ADR 050). Same content as the PDF:
+ * trip details, day by day, hotels, the price (the agent's net for an agent), inclusions, notes.
+ */
+export function renderQuotationText({ quotation, hotels = [], cabTypes = [] }) {
+  const hotelsById = new Map(hotels.map((hotel) => [hotel.id, hotel]));
+  const cabsById = new Map(cabTypes.map((cab) => [cab.id, cab]));
+  const dayText = new Map((quotation.days || []).map((day) => [day.dayNumber, day]));
+  const openOptions = (quotation.options || []).length > 1 && !quotation.selectedOption ? quotation.options : [];
+  const chosen = quotation.selectedOption || 1;
+  const itineraryLines = quotation.lines.filter((line) => line.kind !== "HOTEL" || (!openOptions.length && (line.option || 1) === chosen));
+  const chosenLines = quotation.lines.filter((line) => line.kind !== "HOTEL" || (line.option || 1) === chosen);
+  const stays = hotelStays(chosenLines);
+  const days = [...new Set([...itineraryLines.map((line) => line.dayNumber), ...dayText.keys()])].sort((a, b) => a - b);
+  const lastDay = Math.max(1, ...days, ...stays.map((stay) => Math.round((Date.parse(`${stay.checkOut}T00:00:00Z`) - Date.parse(`${quotation.startDate}T00:00:00Z`)) / 86400000) + 1));
+  const people = quotation.adults + quotation.children;
+  const travelers = `${quotation.adults} adult${quotation.adults === 1 ? "" : "s"}${quotation.children ? `, ${quotation.children} child${quotation.children === 1 ? "" : "ren"}` : ""}`;
+  const priceLabel = quotation.agentId ? "Net price" : "Price";
+  const price = (totals) => [
+    `${priceLabel}: ${inr(totals.totalInr)} for the group${totals.gstInr > 0 ? ` (includes GST ${quotation.totals.gstPct}%)` : ""}`,
+    people > 1 ? `About ${inr(totals.perPersonInr)} per person` : null,
+  ].filter(Boolean);
+  const out = [
+    `${quotation.title} (${quotation.ref})`,
+    destinationsChain(quotation.legs, stays, hotelsById).replaceAll(CHAIN_JOIN, " > ") || null,
+    `Travel dates: ${lastDay > 1 ? `${shortDate(quotation.startDate)} to ${shortDate(addDays(quotation.startDate, lastDay - 1))} (${lastDay} days / ${lastDay - 1} night${lastDay === 2 ? "" : "s"})` : shortDate(quotation.startDate)}`,
+    `Travellers: ${travelers}`,
+  ].filter(Boolean);
+  if (!openOptions.length && stays.length) {
+    out.push("", "HOTELS");
+    for (const stay of stays) {
+      const hotel = hotelsById.get(stay.hotelId);
+      out.push(`- ${[hotel?.name || stay.title, hotel?.city].filter(Boolean).join(", ")}${hotel?.starRating ? ` (${hotel.starRating} star)` : ""}: ${stay.roomType}, ${stay.rooms} room${stay.rooms === 1 ? "" : "s"}, ${MEAL_PLANS[stay.mealPlan] || stay.mealPlan}, ${shortDate(stay.checkIn)} to ${shortDate(stay.checkOut)} (${stay.nights}N)`);
+    }
+  }
+  out.push("", "ITINERARY");
+  for (const day of days) {
+    const text = dayText.get(day);
+    out.push("", `Day ${day} - ${dayDate(quotation.startDate, day)}${text?.title ? `: ${text.title}` : ""}`);
+    if (text?.description) out.push(text.description);
+    for (const line of itineraryLines.filter((item) => item.dayNumber === day)) {
+      out.push(`- ${lineSummary(line, hotelsById, cabsById)}${line.description ? ` (${line.description})` : ""}`);
+    }
+  }
+  if (!days.length) out.push("The day-by-day plan will follow.");
+  out.push("");
+  if (openOptions.length) {
+    out.push("HOTEL OPTIONS");
+    for (const option of openOptions) {
+      out.push("", option.name);
+      for (const line of quotation.lines.filter((item) => item.kind === "HOTEL" && (item.option || 1) === option.number)) out.push(`- Day ${line.dayNumber}: ${lineSummary(line, hotelsById, cabsById)}`);
+      out.push(...price(option.totals));
+    }
+  } else {
+    out.push("PRICE", ...price(quotation.totals));
+  }
+  for (const [heading, items] of [["INCLUDED", quotation.inclusions], ["NOT INCLUDED", quotation.exclusions]]) {
+    if (items?.length) out.push("", heading, ...items.map((item) => `- ${item}`));
+  }
+  if (quotation.notes) out.push("", "NOTES", quotation.notes);
+  if (quotation.validUntil) out.push("", `Valid until ${shortDate(quotation.validUntil)}.`);
+  return out.join("\n");
+}
+
+/** The plain-text quotation for a supplier's quotation (ADR 050). */
+export function quotationText(database, supplierId, quotationId) {
+  const quotation = quotationView(database, findQuotation(database, supplierId, quotationId));
+  return renderQuotationText({ quotation, hotels: listHotels(database, supplierId), cabTypes: listCabTypes(database, supplierId) });
+}
+
 /** The PDF of a supplier's quotation. `variant` picks branded vs agent (ADR 040, ADR 039). */
 export async function quotationPdf(database, supplierId, quotationId, { variant = "BRAND" } = {}) {
   const row = findQuotation(database, supplierId, quotationId);
@@ -323,7 +363,7 @@ export async function quotationPdf(database, supplierId, quotationId, { variant 
   const quotation = quotationView(database, row);
   const isAgent = variant === "AGENT";
   const agent = isAgent && quotation.agentId
-    ? (() => { try { const a = findAgent(database, supplierId, quotation.agentId); return { id: a.id, name: a.name, contactName: a.contact_name || null, email: a.email || null, commissionPct: Number(a.commission_pct), markupPct: Number(a.markup_pct || 0) }; } catch { return null; } })()
+    ? (() => { try { const a = findAgent(database, supplierId, quotation.agentId); return { id: a.id, name: a.name, contactName: a.contact_name || null, email: a.email || null }; } catch { return null; } })()
     : null;
   const buffer = await renderQuotationPdf({ quotation, supplier: supplier || {}, hotels: listHotels(database, supplierId), cabTypes: listCabTypes(database, supplierId), variant, agent });
   const suffix = isAgent ? "-agent" : "";

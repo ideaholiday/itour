@@ -178,6 +178,12 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     } catch (err) { setError(err.message); }
   };
 
+  // The whole quotation as plain text with no branding, to paste into an email or chat (ADR 050).
+  const copyQuote = () => run(async () => {
+    const { text } = await request(`${base}/quotations/${saved.id}/text`);
+    await navigator.clipboard.writeText(text);
+  }, "Quotation copied. Paste it into your email or chat.");
+
   const sendToAgent = async () => {
     const data = await act("/send-to-agent", {}, null);
     if (!data) return;
@@ -348,7 +354,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   const setMode = (forAgent) => { rememberMode(forAgent); setDraft({ ...draft, forAgent, agentId: forAgent ? draft.agentId : "" }); };
   // A new agent from inside the builder, picked at once (ADR 048).
   const addAgent = () => run(async () => {
-    const body = { name: newAgent.name, contactName: newAgent.contactName || null, phone: newAgent.phone || null, email: newAgent.email || null, markupPct: Number(newAgent.markupPct) || 0 };
+    const body = { name: newAgent.name, contactName: newAgent.contactName || null, phone: newAgent.phone || null, email: newAgent.email || null };
     const { agent } = await request(`${base}/agents`, { method: "POST", body: JSON.stringify(body) });
     setAgents([...agents, agent]);
     setDraft({ ...draft, forAgent: true, agentId: agent.id });
@@ -436,7 +442,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
 
           {step === "trip" && <>
             <div role="radiogroup" aria-label="Who the quotation is for" className="grid gap-2 sm:grid-cols-2">
-              {[[true, Users, "For a travel agent (B2B)", "Trade PDF with the agent's net price and margin; your brand stays off it."], [false, User, "Direct customer", "Your branded PDF with one retail price."]].map(([value, Icon, label, hint]) => (
+              {[[true, Users, "For a travel agent (B2B)", "Your net price to the agent; the agent PDF carries no brand."], [false, User, "Direct customer", "Your branded PDF with one retail price."]].map(([value, Icon, label, hint]) => (
                 <button key={label} type="button" role="radio" aria-checked={isAgentMode === value} disabled={!editable} onClick={() => setMode(value)}
                   className={`flex items-start gap-2 rounded-2xl border p-3 text-left text-xs ${isAgentMode === value ? (value ? "border-indigo-400 bg-indigo-50 text-indigo-950" : "border-emerald-400 bg-emerald-50 text-emerald-950") : "border-stone-200 text-stone-500"}`}>
                   <Icon className="mt-0.5 h-4 w-4 shrink-0" /><span><strong className="block text-sm">{label}</strong>{hint}</span>
@@ -447,19 +453,18 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
               <fieldset disabled={!editable} className="space-y-2 rounded-2xl border border-indigo-200 p-3 text-xs">
                 <div className="flex flex-wrap items-end gap-2">
                   <label className="min-w-56 flex-1 text-stone-500">Agent<Combobox value={draft.agentId || ""} onChange={(value) => setDraft({ ...draft, agentId: value })} options={agentOptionsList} placeholder="Search your agents…" ariaLabel="agent" className="mt-1" /></label>
-                  <button type="button" onClick={() => setNewAgent(newAgent ? null : { name: "", contactName: "", phone: "", email: "", markupPct: "" })} className="rounded-xl border border-indigo-300 px-3 py-2 font-bold text-indigo-800">{newAgent ? "Cancel" : "+ New agent"}</button>
+                  <button type="button" onClick={() => setNewAgent(newAgent ? null : { name: "", contactName: "", phone: "", email: "" })} className="rounded-xl border border-indigo-300 px-3 py-2 font-bold text-indigo-800">{newAgent ? "Cancel" : "+ New agent"}</button>
                 </div>
                 {newAgent && (
-                  <div className="grid gap-2 rounded-xl bg-indigo-50 p-2 sm:grid-cols-5">
+                  <div className="grid gap-2 rounded-xl bg-indigo-50 p-2 sm:grid-cols-[1fr_1fr_1fr_1fr_auto]">
                     <input placeholder="Agency name" value={newAgent.name} onChange={(event) => setNewAgent({ ...newAgent, name: event.target.value })} className={input} aria-label="New agent name" />
                     <input placeholder="Contact person" value={newAgent.contactName} onChange={(event) => setNewAgent({ ...newAgent, contactName: event.target.value })} className={input} aria-label="New agent contact" />
                     <input placeholder="Phone" value={newAgent.phone} onChange={(event) => setNewAgent({ ...newAgent, phone: event.target.value })} className={input} aria-label="New agent phone" />
                     <input placeholder="Email" type="email" value={newAgent.email} onChange={(event) => setNewAgent({ ...newAgent, email: event.target.value })} className={input} aria-label="New agent email" />
-                    <span className="flex gap-2"><input type="number" min={0} max={200} placeholder="Markup %" value={newAgent.markupPct} onChange={(event) => setNewAgent({ ...newAgent, markupPct: event.target.value })} className={`w-full ${input}`} aria-label="New agent markup" />
-                      <button type="button" disabled={newAgent.name.trim().length < 2} onClick={addAgent} className="rounded-xl bg-indigo-600 px-3 font-bold text-white disabled:opacity-40">Add</button></span>
+                    <button type="button" disabled={newAgent.name.trim().length < 2} onClick={addAgent} className="rounded-xl bg-indigo-600 px-4 py-2 font-bold text-white disabled:opacity-40">Add</button>
                   </div>
                 )}
-                {pickedAgent && <p className="text-indigo-900">{pickedAgent.contactName ? `${pickedAgent.contactName} · ` : ""}the agent's markup is <strong>{Number(pickedAgent.markupPct || 0)}%</strong> on your costs. {pickedAgent.email ? `The trade PDF goes to ${pickedAgent.email}.` : "No email on file: download the agent PDF to share it."}</p>}
+                {pickedAgent && <p className="text-indigo-900">{pickedAgent.contactName ? `${pickedAgent.contactName} · ` : ""}{pickedAgent.email ? `The agent PDF goes to ${pickedAgent.email}.` : "No email on file: download the agent PDF or copy the quote to share it."}</p>}
               </fieldset>
             )}
             <fieldset disabled={!editable} className="grid gap-3 sm:grid-cols-3">
@@ -618,7 +623,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
 
           {step === "price" && <>
             <fieldset disabled={!editable} className="grid gap-3 sm:grid-cols-3">
-              <label className="text-xs text-stone-500">Markup on your costs (%)<input type="number" min={0} max={200} step="0.5" value={draft.markupPct} onChange={(event) => setDraft({ ...draft, markupPct: event.target.value })} className={`mt-1 w-full ${input}`} /></label>
+              <label className="text-xs text-stone-500">{isAgentMode ? "Your markup on costs (%), part of the agent's net" : "Markup on your costs (%)"}<input type="number" min={0} max={200} step="0.5" value={draft.markupPct} onChange={(event) => setDraft({ ...draft, markupPct: event.target.value })} className={`mt-1 w-full ${input}`} /></label>
               <label className="text-xs text-stone-500">Valid until<input type="date" value={draft.validUntil} onChange={(event) => setDraft({ ...draft, validUntil: event.target.value })} className={`mt-1 w-full ${input}`} /></label>
               <div className="flex flex-wrap items-center gap-2 self-end text-xs">
                 <button type="button" disabled={!terms.inclusions.length && !terms.exclusions.length} title={terms.inclusions.length || terms.exclusions.length ? "" : "Save your lists as standard first"} onClick={() => setDraft({ ...draft, inclusions: mergeItems(draft.inclusions, terms.inclusions), exclusions: mergeItems(draft.exclusions, terms.exclusions) })} className="rounded-xl border border-stone-300 px-3 py-2 font-bold disabled:opacity-40">Use my standard lists</button>
@@ -635,12 +640,11 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
           {saved && saved.options.length > 0 && !saved.selectedOption && (
             <div className="overflow-x-auto rounded-2xl border border-stone-200 p-3">
               <table className="w-full text-right text-xs">
-                <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1 text-left">Option</th><th>Your costs</th><th>Markup</th><th>Your listings</th><th>GST</th>{saved.trade && <th className="text-indigo-700">Agent net</th>}<th className="text-stone-600">Customer pays</th><th>Per person</th></tr></thead>
+                <thead className="text-[10px] uppercase text-stone-400"><tr><th className="py-1 text-left">Option</th><th>Your costs</th><th>Markup</th><th>Your listings</th><th>GST</th><th className="text-stone-600">{saved.agentId ? "Agent pays (net)" : "Customer pays"}</th><th>Per person</th></tr></thead>
                 <tbody className="divide-y divide-stone-100 font-mono">
                   {saved.options.map((option) => (
                     <tr key={option.number}>
                       <td className="py-1.5 text-left font-sans font-bold">{option.name}</td><td>{inr(option.totals.costInr)}</td><td>{inr(option.totals.markupInr)}</td><td>{inr(option.totals.listingsInr)}</td><td>{inr(option.totals.gstInr)}</td>
-                      {saved.trade && <td className="text-indigo-700">{inr(saved.trade.options.find((item) => item.number === option.number)?.netInr)}</td>}
                       <td className="text-sm font-black">{inr(option.totals.totalInr)}</td><td>{inr(option.totals.perPersonInr)}</td>
                     </tr>
                   ))}
@@ -665,8 +669,8 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
                 <p>Your listings <span className="float-right font-mono">{inr(saved.totals.listingsInr)}</span></p>
               </div>
               <div className="space-y-1">
-                <p className="text-[10px] font-black uppercase text-stone-400">The customer sees</p>
-                {saved.selectedOption && <p className="text-xs font-bold text-emerald-700">Customer chose {saved.options.find((option) => option.number === saved.selectedOption)?.name}</p>}
+                <p className="text-[10px] font-black uppercase text-stone-400">{saved.agentId ? `${saved.agentName || "The agent"} pays you (net)` : "The customer sees"}</p>
+                {saved.selectedOption && <p className="text-xs font-bold text-emerald-700">{saved.agentId ? "Agent chose" : "Customer chose"} {saved.options.find((option) => option.number === saved.selectedOption)?.name}</p>}
                 <p>Package price <span className="float-right font-mono">{inr(saved.totals.subtotalInr)}</span></p>
                 {saved.totals.gstInr > 0 && <p>GST {saved.totals.gstPct}% <span className="float-right font-mono">{inr(saved.totals.gstInr)}</span></p>}
                 <p className="text-lg font-black">Total <span className="float-right font-mono">{inr(saved.totals.totalInr)}</span></p>
@@ -676,13 +680,6 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             </div>
           )}
 
-          {saved?.trade && !(saved.options.length > 0 && !saved.selectedOption) && (
-            <div className="grid gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950 sm:grid-cols-3" role="group" aria-label="Agent's price">
-              <p className="text-xs">Guest pays (retail)<strong className="block font-mono text-lg">{inr(saved.totals.totalInr)}</strong></p>
-              <p className="text-xs">{saved.agentName || "The agent"} pays you, at {saved.trade.markupPct}% markup<strong className="block font-mono text-lg">{inr(saved.trade.netInr)}</strong></p>
-              <p className="text-xs">Agent's margin<strong className="block font-mono text-lg text-emerald-700">{inr(saved.trade.marginInr)}</strong></p>
-            </div>
-          )}
           {saved?.warnings?.length > 0 && (
             <div role="status" className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
               <p className="flex items-center gap-1 font-bold"><TriangleAlert className="h-4 w-4" /> Check before sending</p>
@@ -696,6 +693,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
             {saved?.agentId && <button onClick={() => downloadPdf("AGENT")} className="flex items-center gap-1 rounded-xl border border-indigo-300 px-4 py-2.5 text-xs font-bold text-indigo-800"><Download className="h-4 w-4" /> Agent PDF</button>}
             {saved && <button onClick={() => downloadPdf("BRAND")} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Download className="h-4 w-4" /> {saved.agentId ? "Branded PDF" : "PDF"}</button>}
             {saved && saved.status !== "DECLINED" && !saved.agentId && <button onClick={send} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Send className="h-4 w-4" /> Send to customer</button>}
+            {saved && <button type="button" onClick={copyQuote} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><Copy className="h-4 w-4" /> Copy quote (no branding)</button>}
             {saved && <button type="button" onClick={saveAsRoute} className="flex items-center gap-1 rounded-xl border border-stone-300 px-4 py-2.5 text-xs font-bold"><BookmarkPlus className="h-4 w-4" /> Save as my route</button>}
             {saved && <span className="flex items-center gap-1">
               <input type="date" value={copyDate} onChange={(event) => setCopyDate(event.target.value)} className={`${input} py-2 text-xs`} aria-label="Start date for the copy" />

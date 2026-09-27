@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import zlib from "node:zlib";
-import { hotelStays, renderQuotationPdf } from "../src/services/quotationPdfService.js";
+import { hotelStays, renderQuotationPdf, renderQuotationText } from "../src/services/quotationPdfService.js";
 
 // The text pdfkit wrote: inflate each content stream and decode its hex strings.
 function pdfText(buffer) {
@@ -75,4 +75,34 @@ test("the PDF lists what's included and not included", async () => {
   };
   const text = pdfText(await renderQuotationPdf({ quotation, supplier: { company_name: "Multi Tours" } }));
   assert.match(text, /What's included\n\x95 Daily breakfast\nNot included\n\x95 Airfare/);
+});
+
+test("the agent PDF shows one net price and no supplier brand", async () => {
+  const quotation = {
+    ref: "Q-TEST04", title: "Lucknow Tour", customerName: "Awadh Travels", agentId: "agt_1", startDate: "2026-09-26", adults: 2, children: 0, validUntil: null, notes: null,
+    options: [], selectedOption: null, days: [], lines: [], inclusions: [], exclusions: [],
+    totals: { subtotalInr: 11500, gstPct: 5, gstInr: 575, totalInr: 12075, perPersonInr: 6038 },
+  };
+  const text = pdfText(await renderQuotationPdf({ quotation, supplier: { company_name: "Multi Tours" }, variant: "AGENT", agent: { name: "Awadh Travels" } }));
+  assert.match(text, /Net package price/);
+  assert.match(text, /INR 12,075/);
+  assert.doesNotMatch(text, /margin|Retail|Multi Tours/i);
+});
+
+test("the quotation copies as plain text with no branding", () => {
+  const quotation = {
+    ref: "Q-TEST05", title: "Lucknow Tour", agentId: "agt_1", startDate: "2026-09-26", adults: 2, children: 0, validUntil: "2026-10-01", notes: "Pay 30% to confirm.",
+    options: [], selectedOption: null, legs: [{ city: "Lucknow", nights: 2 }],
+    days: [{ dayNumber: 1, title: "Arrive in Lucknow", description: "Pickup and check-in." }],
+    lines: [hotel(1, "2026-09-26", { nights: 2 }), { kind: "TRANSPORT", dayNumber: 1, date: "2026-09-26", title: "Lucknow Airport Pickup", cabTypeId: "c1", vehicles: 1 }],
+    inclusions: ["Daily breakfast"], exclusions: ["Airfare"],
+    totals: { subtotalInr: 11500, gstPct: 5, gstInr: 575, totalInr: 12075, perPersonInr: 6038 },
+  };
+  const text = renderQuotationText({ quotation, hotels: [{ id: "h1", name: "Hotel Bloom", city: "Lucknow", starRating: 3 }], cabTypes: [{ id: "c1", name: "Sedan" }] });
+  assert.match(text, /^Lucknow Tour \(Q-TEST05\)\nLucknow · 2N\nTravel dates: 26 Sept 2026 to 28 Sept 2026 \(3 days \/ 2 nights\)\nTravellers: 2 adults/);
+  assert.match(text, /- Hotel Bloom, Lucknow \(3 star\): Deluxe Room, 1 room, Breakfast, 26 Sept 2026 to 28 Sept 2026 \(2N\)/);
+  assert.match(text, /Day 1 - Sat, 26 Sept, 2026: Arrive in Lucknow\nPickup and check-in.\n- Hotel Bloom · Deluxe Room · Breakfast · 2 nights\n- Lucknow Airport Pickup · Sedan/);
+  assert.match(text, /PRICE\nNet price: INR 12,075 for the group \(includes GST 5%\)\nAbout INR 6,038 per person/);
+  assert.match(text, /INCLUDED\n- Daily breakfast\n\nNOT INCLUDED\n- Airfare\n\nNOTES\nPay 30% to confirm.\n\nValid until 1 Oct 2026./);
+  assert.doesNotMatch(text, /Multi Tours|Idea ?Holiday/i);
 });

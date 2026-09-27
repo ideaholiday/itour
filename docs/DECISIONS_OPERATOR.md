@@ -159,7 +159,7 @@
 - **Date**: 2026-09-26
 - **Context**: Tour operators build most packages for B2B travel agents, not direct travellers, but the builder treated the agent as an optional field. Every operator also retyped the same circuits (Lucknow – Ayodhya – Varanasi) day by day, with the same city descriptions.
 - **Decision Made** (owner, 2026-09-26):
-  1. **Agent first.** A quotation starts as "for an agent" and asks for the agent. It does not ask for the agent's traveller: the agent is the customer (amended 2026-09-27, see ADR 049). Direct customer is the other choice, remembered per browser. An agent can be added from the builder without leaving it. For an agent quotation the builder shows the agent's net and margin next to the retail price, and puts Send to agent and the agent PDF first.
+  1. **Agent first.** A quotation starts as "for an agent" and asks for the agent. It does not ask for the agent's traveller: the agent is the customer (amended 2026-09-27, see ADR 049). Direct customer is the other choice, remembered per browser. An agent can be added from the builder without leaving it. For an agent quotation the builder puts Send to agent and the agent PDF first (the separate agent net and margin were dropped by ADR 050).
   2. **Route library** (`package_routes`): a named circuit with a description, cities and nights, day-by-day titles and text, inclusions and exclusions, and per day the ready-made cars and activities (ADR 047 entries) it uses. The Idea Holiday admin keeps the shared routes (`supplier_id` NULL) by region; a supplier also saves its own from any quotation, private to it.
   3. **City library** (`package_cities`): a city with a description and the title and text of a day spent there. Laying out a route titles a day in that city with the city's day text instead of just its name.
   4. **Using a route copies, it doesn't link**, like ADR 047: it fills the quotation's cities, nights, days, inclusions and exclusions, lays out one hotel stay per city, and adds each day's car or activity when the supplier has that library entry on its rate sheet (with its first priced cab). Missing entries can be added to the rate sheet in one click. The supplier still picks hotels, and everything is priced by the server from the supplier's own rates.
@@ -171,3 +171,10 @@
 - **Date**: 2026-09-27
 - **Decision Made** (owner, 2026-09-27): A quotation for an agent asks only for the agent, not the agent's traveller. Only a direct-customer quotation asks for the customer's name, email and phone.
 - **Consequences**: The server sets an agent quotation's customer name, email and phone from the agent, so bookings, hotel requests and the car schedule name the agent. The branded PDF of an agent quotation names no one; there is no "Send to traveller". A listing line on an agent quotation needs the agent's phone to be booked. Agent quotations no longer add to the saved-customers list. Quotations saved before keep their traveller until they are saved again.
+
+---
+
+## ADR 050: Agents Get One Net Price; Quotations Copy as Plain Text
+- **Date**: 2026-09-27
+- **Decision Made** (owner, 2026-09-27): The supplier (DMC) sends the agent its net price; the agent adds its own margin outside the system. So an agent has no package markup, and an agent quotation has one price: the supplier's costs + the quotation's markup + any extra custom lines + GST. The supplier can copy the whole quotation, with no branding, and paste it into an email or chat.
+- **Consequences**: `supplier_agents.markup_pct` is no longer read or set (the API refuses `markupPct`; the column stays, since migrations are append-only). The quotation view drops `trade`; the agent PDF and send-to-agent email show "Net price" only. New `GET …/quotations/:quotationId/text`. Direct bookings still use the agent's `commission_pct` (ADR 039).
