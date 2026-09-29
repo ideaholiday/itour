@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idea Holiday - Revenue Growth for Tour Operators</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+        }
+
+        /* HEADER */
+        .header {
+            background: linear-gradient(135deg, #0B2545 0%, #722F37 100%);
+            color: white;
+            padding: 35px 20px;
+            text-align: center;
+            border-bottom: 4px solid #D4A574;
+        }
+
+        .header h1 {
+            font-size: 26px;
+            margin-bottom: 5px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 15px;
+            opacity: 0.95;
+        }
+
+        /* HERO */
+        .hero {
+            background: linear-gradient(135deg, #D4A574 0%, #D4A574 100%);
+            color: white;
+            padding: 25px 20px;
+            text-align: center;
+        }
+
+        .hero p {
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .hero span {
+            font-size: 24px;
+            color: #fff;
+        }
+
+        /* CONTENT */
+        .content {
+            padding: 30px 20px;
+        }
+
+        .intro {
+            background: #FAF3E7;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 25px;
+            border-left: 4px solid #D4A574;
+        }
+
+        .intro h2 {
+            color: #0B2545;
+            font-size: 18px;
+            margin-bottom: 12px;
+        }
+
+        /* REVENUE MATH */
+        .revenue-calc {
+            background: linear-gradient(135deg, #0B2545 0%, #1a3a5c 100%);
+            color: white;
+            padding: 25px 20px;
+            border-radius: 8px;
+            margin: 25px 0;
+            border-top: 3px solid #D4A574;
+        }
+
+        .revenue-calc h3 {
+            font-size: 16px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .calc-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .calc-item {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid rgba(212, 165, 116, 0.3);
+        }
+
+        .calc-label {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-bottom: 8px;
+        }
+
+        .calc-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #D4A574;
+        }
+
+        .calc-breakdown {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 8px;
+        }
+
+        /* COMPARISON */
+        .comparison {
+            margin: 25px 0;
+        }
+
+        .comparison h3 {
+            color: #0B2545;
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .comparison-table th,
+        .comparison-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .comparison-table th {
+            background: #0B2545;
+            color: white;
+            font-weight: 600;
+        }
+
+        .comparison-table tr:nth-child(even) {
+            background: #FAF3E7;
+        }
+
+        .check {
+            color: #722F37;
+            font-weight: bold;
+        }
+
+        .cross {
+            color: #999;
+        }
+
+        /* TESTIMONIAL SECTION */
+        .testimonials {
+            margin: 30px 0;
+        }
+
+        .testimonials h3 {
+            color: #0B2545;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 16px;
+        }
+
+        .testimonial {
+            background: #F5E6D3;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            border-left: 4px solid #D4A574;
+        }
+
+        .testimonial-text {
+            font-size: 13px;
+            font-style: italic;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .testimonial-author {
+            font-size: 12px;
+            font-weight: 600;
+            color: #0B2545;
+        }
+
+        /* BENEFITS */
+        .benefits {
+            background: #FAF3E7;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 25px 0;
+        }
+
+        .benefits h3 {
+            color: #0B2545;
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+
+        .benefit-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .benefit-item {
+            padding: 10px;
+            background: white;
+            border-radius: 4px;
+            border-top: 2px solid #D4A574;
+        }
+
+        .benefit-item strong {
+            display: block;
+            color: #0B2545;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+
+        .benefit-item span {
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* CTA */
+        .cta-section {
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 16px 45px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 15px;
+            margin: 10px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #722F37 0%, #8B3A47 100%);
+            color: white;
+            border-top: 3px solid #D4A574;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(114, 47, 55, 0.3);
+        }
+
+        /* URGENCY */
+        .urgency {
+            background: linear-gradient(135deg, #722F37 0%, #8B3A47 100%);
+            color: white;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .urgency strong {
+            color: #D4A574;
+            display: block;
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+
+        /* CONTACT */
+        .contact {
+            background: #0B2545;
+            color: white;
+            padding: 25px 20px;
+            margin-top: 30px;
+            text-align: center;
+            border-top: 4px solid #D4A574;
+        }
+
+        .contact h3 {
+            margin-bottom: 15px;
+        }
+
+        .contact-item {
+            margin: 10px 0;
+            font-size: 14px;
+        }
+
+        .contact a {
+            color: #D4A574;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        /* FOOTER */
+        .footer {
+            background: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #ddd;
+        }
+
+        .tagline {
+            color: #0B2545;
+            font-weight: 600;
+            margin: 10px 0;
+            font-style: italic;
+        }
+
+        @media (max-width: 600px) {
+            .calc-grid, .benefit-list {
+                grid-template-columns: 1fr;
+            }
+
+            .btn {
+                display: block;
+                width: 90%;
+                margin: 10px auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <!-- HEADER -->
+        <div class="header">
+            <h1>📈 SCALE YOUR TOUR BUSINESS</h1>
+            <p>Unlock ₹50L+ Annual Revenue This Diwali</p>
+        </div>
+
+        <!-- HERO -->
+        <div class="hero">
+            <p>Turn Your Tours Into Passive Income</p>
+        </div>
+
+        <!-- INTRO -->
+        <div class="content">
+            <div class="intro">
+                <h2>Real Numbers. Real Opportunity.</h2>
+                <p>We've partnered with 300+ tour operators across India. They're now earning ₹50L+ annually by simply listing their inventory on our platform. Here's how you can too.</p>
+            </div>
+
+            <!-- REVENUE MATH -->
+            <div class="revenue-calc">
+                <h3>🎯 REVENUE POTENTIAL (Annual)</h3>
+                <div class="calc-grid">
+                    <div class="calc-item">
+                        <div class="calc-label">1 Tour × ₹5K Commission</div>
+                        <div class="calc-value">₹60K</div>
+                        <div class="calc-breakdown">10 bookings/month</div>
+                    </div>
+                    <div class="calc-item">
+                        <div class="calc-label">10 Tours</div>
+                        <div class="calc-value">₹6L</div>
+                        <div class="calc-breakdown">Estimated per year</div>
+                    </div>
+                    <div class="calc-item">
+                        <div class="calc-label">15 Tours</div>
+                        <div class="calc-value">₹90L</div>
+                        <div class="calc-breakdown">Full portfolio</div>
+                    </div>
+                    <div class="calc-item">
+                        <div class="calc-label">Cost This Diwali</div>
+                        <div class="calc-value">₹999</div>
+                        <div class="calc-breakdown">Per year (save ₹15K)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- COMPARISON TABLE -->
+            <div class="comparison">
+                <h3>Why Choose Idea Holiday?</h3>
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            <th style="text-align: center;">Us</th>
+                            <th style="text-align: center;">Others</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Verified Agents</td>
+                            <td style="text-align: center;"><span class="check">✓ 4,200+</span></td>
+                            <td style="text-align: center;"><span class="cross">50-100</span></td>
+                        </tr>
+                        <tr>
+                            <td>Commission Markup</td>
+                            <td style="text-align: center;"><span class="check">✓ None</span></td>
+                            <td style="text-align: center;"><span class="cross">15-20%</span></td>
+                        </tr>
+                        <tr>
+                            <td>Listing Fees</td>
+                            <td style="text-align: center;"><span class="check">✓ ₹999/yr</span></td>
+                            <td style="text-align: center;"><span class="cross">₹10-20K/yr</span></td>
+                        </tr>
+                        <tr>
+                            <td>Monthly Travelers</td>
+                            <td style="text-align: center;"><span class="check">✓ 50,000+</span></td>
+                            <td style="text-align: center;"><span class="cross">5-10K</span></td>
+                        </tr>
+                        <tr>
+                            <td>Itinerary Builder</td>
+                            <td style="text-align: center;"><span class="check">✓ Professional</span></td>
+                            <td style="text-align: center;"><span class="cross">Basic</span></td>
+                        </tr>
+                        <tr>
+                            <td>Real-Time Updates</td>
+                            <td style="text-align: center;"><span class="check">✓ WhatsApp</span></td>
+                            <td style="text-align: center;"><span class="cross">Email only</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- TESTIMONIALS -->
+            <div class="testimonials">
+                <h3>What Tour Operators Are Earning</h3>
+                <div class="testimonial">
+                    <div class="testimonial-text">"In 3 months on Idea Holiday, I got 45+ bookings. That's ₹2.25L in commissions. No other platform comes close."</div>
+                    <div class="testimonial-author">— Rajesh Kumar, Bangkok Specialist</div>
+                </div>
+                <div class="testimonial">
+                    <div class="testimonial-text">"The WhatsApp notifications mean I respond faster. Better response = more conversions. Revenue jumped 40% in first quarter."</div>
+                    <div class="testimonial-author">— Priya Sharma, Activity Provider</div>
+                </div>
+                <div class="testimonial">
+                    <div class="testimonial-text">"Finally, a platform that doesn't steal commission. I earn ₹50K/month from just 5 tours on Idea Holiday."</div>
+                    <div class="testimonial-author">— Amit Patel, Northern India Tours</div>
+                </div>
+            </div>
+
+            <!-- BENEFITS -->
+            <div class="benefits">
+                <h3>✓ What You Get</h3>
+                <div class="benefit-list">
+                    <div class="benefit-item">
+                        <strong>Zero Commission Theft</strong>
+                        <span>You set rates, you keep 100%</span>
+                    </div>
+                    <div class="benefit-item">
+                        <strong>4,200+ Agents</strong>
+                        <span>Verified, actively booking</span>
+                    </div>
+                    <div class="benefit-item">
+                        <strong>50K+ Monthly Travelers</strong>
+                        <span>Direct consumer bookings</span>
+                    </div>
+                    <div class="benefit-item">
+                        <strong>Real-Time Dashboard</strong>
+                        <span>Track every booking, commission</span>
+                    </div>
+                    <div class="benefit-item">
+                        <strong>WhatsApp Integration</strong>
+                        <span>Instant booking notifications</span>
+                    </div>
+                    <div class="benefit-item">
+                        <strong>Professional Support</strong>
+                        <span>Response within 2 hours</span>
+                    </div>
+                    <div class="benefit-item">
+                        <strong>Itinerary Builder</strong>
+                        <span>Close deals 10x faster</span>
+                    </div>
+                    <div class="benefit-item">
+                        <strong>Fast Payouts</strong>
+                        <span>Integrated payment gateway</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PRICING -->
+            <div style="background: linear-gradient(135deg, #F5E6D3 0%, #F9F0E0 100%); padding: 20px; border-radius: 8px; margin: 25px 0; border: 2px solid #D4A574; text-align: center;">
+                <h3 style="color: #0B2545; margin-bottom: 10px;">DIWALI SPECIAL: ₹999/year</h3>
+                <p style="font-size: 13px; color: #666;">Normally ₹15,999 — Save ₹15,000</p>
+                <p style="font-size: 12px; color: #722F37; margin-top: 10px;"><strong>Lock in 10 products FREE FOREVER</strong> (even after pricing increases)</p>
+            </div>
+
+            <!-- URGENCY -->
+            <div class="urgency">
+                <strong>⏰ OFFER ENDS DIWALI</strong>
+                <p>After Diwali: ₹3,000 per product per month</p>
+                <p style="margin-top: 10px; font-size: 13px;">Don't let this window close. Act now.</p>
+            </div>
+
+            <!-- CTA -->
+            <div class="cta-section">
+                <a href="https://supply.ideaholiday.in?utm_source=brevo&utm_medium=email&utm_campaign=diwali_revenue" class="btn btn-primary">🚀 UNLOCK YOUR REVENUE POTENTIAL</a>
+            </div>
+
+            <p style="text-align: center; font-size: 13px; color: #666; margin-top: 20px;">
+                Curious? See your potential earnings or ask questions below.
+            </p>
+        </div>
+
+        <!-- CONTACT -->
+        <div class="contact">
+            <h3>Ready? Let's Get Started</h3>
+            <div class="contact-item">
+                📧 <a href="mailto:info@ideaholiday.in">info@ideaholiday.in</a>
+            </div>
+            <div class="contact-item">
+                📱 <a href="tel:+919696777391">+91 9876 543 210</a>
+            </div>
+            <div class="contact-item">
+                💬 <a href="https://wa.me/919696777391">Quick Chat on WhatsApp</a>
+            </div>
+            <p style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2); font-size: 12px;">
+                Questions about earnings? Our partnership team responds within 2 hours.
+            </p>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+            <div class="tagline">From Idea to Itinerary</div>
+            <p style="margin: 10px 0; font-size: 11px;">300+ tour operators. ₹50L+ annual revenue. 100+ destinations.</p>
+            <p style="font-size: 11px;">© 2026 Idea Holiday | <a href="{unsubscribeLink}" style="color: #999;">Unsubscribe</a></p>
+        </div>
+    </div>
+</body>
+</html>

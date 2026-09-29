@@ -63,6 +63,12 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
     await request(`${base}/${hotel.id}`, { method: "PUT", body: JSON.stringify({ name: hotel.name, city: hotel.city, starRating: hotel.starRating, notes: hotel.notes, status: hotel.status, email: contact.email || null, phone: contact.phone || null }) });
     setContacts({ ...contacts, [hotel.id]: undefined });
   });
+  const removeHotel = (hotel) => {
+    if (!window.confirm(`Remove ${hotel.name} and its rates? Quotations already made keep their hotel and prices.`)) return;
+    run(() => request(`${base}/${hotel.id}`, { method: "DELETE" }));
+  };
+  // Archived hotels stay in the API for the quotations that use them, but leave the rate sheet.
+  const activeHotels = hotels.filter((hotel) => hotel.status === "ACTIVE");
   const setRate = (hotelId, field, value) => setRateDrafts({ ...rateDrafts, [hotelId]: { ...(rateDrafts[hotelId] || {}), [field]: value } });
 
   return (
@@ -78,11 +84,14 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
         <button type="submit" className="flex items-center gap-1 rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-stone-950"><Plus className="h-4 w-4" /> Add hotel</button>
       </form>
 
-      {hotels.map((hotel) => {
+      {activeHotels.map((hotel) => {
         const draft = rateDrafts[hotel.id] || {};
         return (
           <div key={hotel.id} className="rounded-2xl border border-stone-200 p-4">
-            <p className="font-bold text-stone-900">{hotel.name}<span className="font-normal text-stone-500">{hotel.city ? ` · ${hotel.city}` : ""}{hotel.starRating ? ` · ${hotel.starRating}★` : ""}</span></p>
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-bold text-stone-900">{hotel.name}<span className="font-normal text-stone-500">{hotel.city ? ` · ${hotel.city}` : ""}{hotel.starRating ? ` · ${hotel.starRating}★` : ""}</span></p>
+              <button type="button" onClick={() => removeHotel(hotel)} aria-label={`Remove ${hotel.name}`} className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold text-stone-500 hover:bg-rose-50 hover:text-rose-600"><Trash2 className="h-3.5 w-3.5" /> Remove hotel</button>
+            </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
               <input type="email" placeholder="Reservations email (for booking requests)" value={contactOf(hotel).email} onChange={(event) => setContacts({ ...contacts, [hotel.id]: { ...contactOf(hotel), email: event.target.value } })} className={`${input} w-64 py-1.5`} aria-label={`${hotel.name} email`} />
               <input placeholder="Phone" value={contactOf(hotel).phone} onChange={(event) => setContacts({ ...contacts, [hotel.id]: { ...contactOf(hotel), phone: event.target.value } })} className={`${input} w-36 py-1.5`} aria-label={`${hotel.name} phone`} />
@@ -115,7 +124,7 @@ export default function SupplierHotelRatesPanel({ supplierId, onChange }) {
           </div>
         );
       })}
-      {!hotels.length && <p className="text-xs text-stone-500">No hotels yet.</p>}
+      {!activeHotels.length && <p className="text-xs text-stone-500">No hotels yet.</p>}
     </div>
   );
 }

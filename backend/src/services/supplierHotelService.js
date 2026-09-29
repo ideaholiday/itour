@@ -77,6 +77,25 @@ export function saveHotel(db, supplierId, input, hotelId = null) {
   return hotelView(db, findHotel(db, supplierId, hotelId));
 }
 
+/**
+ * Removes a hotel from the rate sheet. One no quotation uses is deleted with
+ * its seasons; one a quotation uses is archived (INACTIVE) so that quotation,
+ * its PDF and its trip keep the hotel's name, contact and prices.
+ */
+export function removeHotel(db, supplierId, hotelId) {
+  const hotel = findHotel(db, supplierId, hotelId);
+  const used = db.prepare("SELECT 1 FROM quotation_lines WHERE hotel_id = ? LIMIT 1").get(hotel.id);
+  db.transaction(() => {
+    if (used) {
+      db.prepare("UPDATE supplier_hotels SET status = 'INACTIVE' WHERE id = ? AND supplier_id = ?").run(hotel.id, supplierId);
+    } else {
+      db.prepare("DELETE FROM supplier_hotel_rates WHERE hotel_id = ?").run(hotel.id);
+      db.prepare("DELETE FROM supplier_hotels WHERE id = ? AND supplier_id = ?").run(hotel.id, supplierId);
+    }
+  })();
+  return { removed: used ? "ARCHIVED" : "DELETED" };
+}
+
 /** Adds a season. Two seasons for the same room and meal plan may not overlap, so every night has one rate. */
 export function addHotelRate(db, supplierId, hotelId, input) {
   const rate = hotelRateSchema.parse(input);

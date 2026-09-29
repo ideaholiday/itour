@@ -270,7 +270,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
     setDraft({ ...draft, ...removeDay(draft, dayNumber) });
   };
   // With nothing set up for a kind of item, the button opens the rate sheet instead; the draft is kept.
-  const hasHotels = hotels.some((hotel) => hotel.rates?.length);
+  const hasHotels = hotels.some((hotel) => hotel.status === "ACTIVE" && hotel.rates?.length);
   const hasTransport = services.some((service) => isTransport(service.kind) && service.status === "ACTIVE");
   const hasActivities = services.some((service) => service.kind === "ACTIVITY" && service.status === "ACTIVE");
   const editable = !saved || ["DRAFT", "SENT"].includes(saved.status);
@@ -314,7 +314,8 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
   // The day's city (from the route) comes first in every picker.
   const serviceOptionsList = (kinds, city) => nearestFirst(services.filter((service) => kinds.includes(service.kind) && service.status === "ACTIVE"), city)
     .map((service) => ({ value: service.id, label: service.name, hint: service.city || "" }));
-  const hotelOptionsList = (city) => nearestFirst(hotels, city).map((hotel) => ({ value: hotel.id, label: hotel.name, hint: [hotel.city, hotel.starRating ? `${hotel.starRating}★` : ""].filter(Boolean).join(" · ") }));
+  // Archived hotels stay for the quotations that use them, but are not offered for new stays.
+  const hotelOptionsList = (city, current) => nearestFirst(hotels.filter((hotel) => hotel.status === "ACTIVE" || hotel.id === current), city).map((hotel) => ({ value: hotel.id, label: hotel.name, hint: [hotel.city, hotel.starRating ? `${hotel.starRating}★` : ""].filter(Boolean).join(" · ") }));
   const lineCity = (line) => (draft ? line.city || cityOfDay(draft.legs, Number(line.dayNumber) || 1) : "");
   // The route laid out as hotel stays; the hotels match it when option 1 has one stay per city on its check-in day.
   const routeStays = draft ? legStays(draft.legs).filter((stay) => stay.nights > 0) : [];
@@ -337,7 +338,7 @@ export default function SupplierQuotationsPanel({ supplierId, products = [] }) {
         {line.kind !== "HOTEL" && <label>Day<input type="number" min={1} value={line.dayNumber} onChange={(event) => setLine(index, { dayNumber: event.target.value })} className={`mt-1 block w-16 ${input}`} /></label>}
         {line.kind === "HOTEL" && <>
           {draft.options.length >= 2 && <label>Option<select value={Number(line.option) || 1} onChange={(event) => setLine(index, { option: Number(event.target.value) })} className={`mt-1 block ${input}`}>{draft.options.map((option, i) => <option key={i} value={i + 1}>{option.name || `Option ${i + 1}`}</option>)}</select></label>}
-          <label className="block w-56">{lineCity(line) ? `Hotel in ${lineCity(line)}` : "Hotel"}<Combobox value={line.hotelId || ""} onChange={(value) => setLine(index, { hotelId: value, roomType: "" })} options={hotelOptionsList(lineCity(line))} placeholder="Search hotels…" ariaLabel={`hotel-${index}`} className="mt-1" /></label>
+          <label className="block w-56">{lineCity(line) ? `Hotel in ${lineCity(line)}` : "Hotel"}<Combobox value={line.hotelId || ""} onChange={(value) => setLine(index, { hotelId: value, roomType: "" })} options={hotelOptionsList(lineCity(line), line.hotelId)} placeholder="Search hotels…" ariaLabel={`hotel-${index}`} className="mt-1" /></label>
           <label>Room<select value={line.roomType || ""} onChange={(event) => { const plans = mealPlansFor(hotel, event.target.value, null, Object.keys(MEAL_PLAN_LABELS)); setLine(index, { roomType: event.target.value, ...(plans.includes(line.mealPlan) ? {} : { mealPlan: plans[0] }) }); }} className={`mt-1 block ${input}`}><option value="">Choose…</option>{rooms.map((room) => <option key={room}>{room}</option>)}</select></label>
           <label>Meals<select value={line.mealPlan} onChange={(event) => setLine(index, { mealPlan: event.target.value })} className={`mt-1 block ${input}`}>{mealPlansFor(hotel, line.roomType, line.mealPlan, Object.keys(MEAL_PLAN_LABELS)).map((value) => <option key={value} value={value}>{MEAL_PLAN_LABELS[value]}</option>)}</select></label>
           <label>Check-in<input type="date" value={line.checkIn || ""} onChange={(event) => setLine(index, { checkIn: event.target.value })} className={`mt-1 block ${input}`} /></label>

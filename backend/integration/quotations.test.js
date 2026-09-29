@@ -423,3 +423,33 @@ test("the quotation email is previewed in its theme, escapes the supplier's note
   assert.equal(toAgent.data.agent.email, "rahul@awadh.example");
   assert.equal((await call(api, ctx, `/quotations/${direct.id}/email?audience=agent`)).data.code, "AGENT_MISSING");
 });
+
+test("removing a hotel deletes it when unused and archives it when a quotation uses it", async t => {
+  const api = await startTestServer(); t.after(() => api.stop());
+  const db = new Database(api.databasePath); t.after(() => db.close());
+  const ctx = setup(db);
+  const add = async (name) => {
+    const hotel = (await call(api, ctx, "/hotels", { body: { name, city: "Ayodhya", starRating: 3 } })).data.hotel;
+    await call(api, ctx, `/hotels/${hotel.id}/rates`, { body: { roomType: "Deluxe", mealPlan: "CP", validFrom: day(20), validTo: day(60), netPerNightInr: 2400 } });
+    return hotel;
+  };
+  const unused = await add("Saryu Inn");
+  const used = await add("Ram Palace");
+  const quotation = await call(api, ctx, "/quotations", { body: {
+    title: "Ayodhya", customerName: "Ajay", startDate: day(30), adults: 2, markupPct: 0,
+    lines: [{ kind: "HOTEL", dayNumber: 1, title: "Stay", hotelId: used.id, roomType: "Deluxe", mealPlan: "CP", checkIn: day(30), nights: 2, rooms: 1 }],
+  } });
+  assert.equal(quotation.response.status, 201, JSON.stringify(quotation.data));
+
+  assert.equal((await call(api, ctx, `/hotels/${unused.id}`, { method: "DELETE" })).data.removed, "DELETED");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM supplier_hotel_rates WHERE hotel_id = ?").get(unused.id).n, 0);
+  assert.equal((await call(api, ctx, `/hotels/${used.id}`, { method: "DELETE" })).data.removed, "ARCHIVED");
+  assert.equal((await call(api, ctx, `/hotels/${unused.id}`, { method: "DELETE" })).response.status, 404);
+
+  const hotels = (await call(api, ctx, "/hotels")).data.hotels;
+  assert.equal(hotels.some((hotel) => hotel.id === unused.id), false);
+  assert.equal(hotels.find((hotel) => hotel.id === used.id).status, "INACTIVE");
+  // The quotation keeps its hotel and price.
+  const kept = await call(api, ctx, `/quotations/${quotation.data.quotation.id}`);
+  assert.equal(kept.data.quotation.totals.costInr, 4800);
+});

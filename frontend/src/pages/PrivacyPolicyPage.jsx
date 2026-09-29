@@ -5,6 +5,7 @@ import ContentPageLayout, { ArticleSection } from "../components/ContentPageLayo
 import SeoHead from "../components/SeoHead.jsx";
 
 const GRIEVANCE_EMAIL = "grievance@ideaholiday.in";
+const REGISTERED_OFFICE = "Shop No 129, Deva Palace, Viram Khand-1, Gomtinagar, Near Husedia Chauraha, Lucknow, Uttar Pradesh 226010, India";
 
 function Bullets({ items }) {
   return (
@@ -17,7 +18,7 @@ function Bullets({ items }) {
 export default function PrivacyPolicyPage() {
   return (
     <ContentPageLayout
-      eyebrow="Legal & Compliance · Last Updated: 17 September 2026"
+      eyebrow="Legal & Compliance · Last Updated: 28 September 2026"
       title="Privacy Policy"
       intro="How Idea Holiday Private Limited collects, uses, shares and protects personal data when you book, list a business, drive a trip or browse ideaholiday.in, and the rights you have under the Digital Personal Data Protection Act, 2023."
       badgeText="Your Data, Your Rights"
@@ -32,7 +33,8 @@ export default function PrivacyPolicyPage() {
         <ArticleSection number={1} title="Who we are">
           <p>
             <strong>Idea Holiday Private Limited</strong> (“Idea Holiday”, “we”, “us”) runs the travel marketplace at ideaholiday.in
-            and the supplier portal at supply.ideaholiday.in. We are the data fiduciary for the personal data described here.
+            the supplier portal at supply.ideaholiday.in and the Idea Holiday Driver app for Android. We are the data fiduciary
+            for the personal data described here. Registered office: {REGISTERED_OFFICE}.
             Tour operators you book with receive the details they need to run your trip and handle them as independent businesses.
           </p>
         </ArticleSection>
@@ -49,6 +51,7 @@ export default function PrivacyPolicyPage() {
           <Bullets items={[
             "Business and contact details, GSTIN, PAN, bank account for payouts and business documents such as licences, used to verify the business and pay it.",
             "Drivers: name, mobile number and, only during an accepted, active trip after you are told who will see it, your phone's location.",
+            "Idea Holiday Driver app (Android): your phone's precise location, from when you tap On the way until you complete the trip, including while you use Maps, the app is closed or the screen is locked. A notification shows the whole time, and sharing stops by itself when the trip is completed. The app asks only for location while in use (never all-the-time access) and collects no location outside an active trip. It shows the same trip page as the website, so the device and usage data below also apply.",
             "Creators and affiliates: PAN and payout details, required for tax deduction and payment.",
           ]} />
           <p><strong>Everyone who visits</strong></p>
@@ -63,7 +66,7 @@ export default function PrivacyPolicyPage() {
             "To create your account, hold seats, take payment, confirm bookings, issue vouchers and process cancellations and refunds.",
             "To send booking confirmations, reminders, trip updates and driver details by email, SMS and WhatsApp.",
             "To verify suppliers and creators, pay them and meet tax and accounting obligations (including GST and TDS).",
-            "To show a traveler where their driver is during a trip, and to alert our operations team to missed pickups.",
+            "To show the traveler and the operator where the driver is during a trip, and to alert our operations team to missed pickups.",
             "To prevent fraud and abuse, keep the platform secure and resolve disputes.",
             "To understand how the site is used, improve it and measure our advertising.",
             "To send offers or newsletters, only where you have agreed; every such email has an unsubscribe link.",
@@ -130,6 +133,7 @@ export default function PrivacyPolicyPage() {
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
             <strong className="text-neel-deep">Grievance Officer</strong>
             <p className="mt-1 text-sm text-slate-700">Idea Holiday Private Limited</p>
+            <p className="text-sm text-slate-600">{REGISTERED_OFFICE}</p>
             <p className="text-sm text-slate-600">Email: <a href={`mailto:${GRIEVANCE_EMAIL}`} className="font-bold text-neel">{GRIEVANCE_EMAIL}</a></p>
             <p className="mt-1 text-xs text-slate-500">Acknowledgment within 24 hours; resolution within 15 business days.</p>
           </div>

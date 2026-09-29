@@ -47,9 +47,11 @@ Do not rebuild these. Extend them if asked.
 
 - **Phase 1 — done:** drivers share phone location from the trip link (required before "On the way"), positions stored for 30 days, real positions with Live / Delayed / Signal lost on the ops map, supplier sees the driver's last position.
 - **Phase 2 — done:** traveler tracking link and Track live in My Trips with Ola Maps ETA, "You're at the pickup point" prompt, missed-pickup alerts (not on the way, signal lost, running late, not moving).
-- **Phase 3 — built, release ON HOLD:** `android-driver/` app (ADR 014).
-  - **Blocked on D-U-N-S** (applied, pending as of 2026-09-14; expected by about 2026-10-14). A Google Play organisation account needs it. Resume when the owner confirms approval.
-  - Then, in order: Play Console organisation account → privacy policy page covering driver location → upload key (kept outside the repo) → test on real Android phones (including Xiaomi/Oppo/Vivo battery savers) → Play listing, data-safety form and location foreground-service declaration → internal testing track → set `ANDROID_DRIVER_APP_SHA256` and `VITE_DRIVER_APP_URL` in production.
+- **Phase 3 — built, release in progress:** `android-driver/` app (ADR 014).
+  - **D-U-N-S approved** (owner, 2026-09-28) for Idea Holiday Private Limited, Lucknow. The Play organisation account must use that exact legal name and address.
+  - **Done:** privacy policy names the app and covers location while the app is closed or the screen is locked, who sees it, the notification and 30-day deletion; registered office added (2026-09-28).
+  - **Play Console organisation account** created 2026-09-28; Google's verification takes 4–5 days (expected about 2026-10-03).
+  - Then, in order: upload key (kept outside the repo) → test on real Android phones (including Xiaomi/Oppo/Vivo battery savers) → Play listing, data-safety form (precise location, and the website's analytics, since the WebView page loads Google Tag Manager) and location foreground-service declaration → internal testing track → set `ANDROID_DRIVER_APP_SHA256` and `VITE_DRIVER_APP_URL` in production.
   - Until then, drivers share location from the browser trip page (Phase 1–2 work as is). The app already targets API 36, which Play requires for new apps from 2026-08-31.
 
 **Operator platform** (owner request 2026-09-25; ADR 034–035, [`DECISIONS_OPERATOR.md`](DECISIONS_OPERATOR.md)): run a tour operator's whole business on supply.ideaholiday.in, Bókun-style, with Sembark-style packages. Every channel books the one inventory.

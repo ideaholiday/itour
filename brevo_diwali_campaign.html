@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idea Holiday - Diwali Special for Tour Operators</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-collapse: collapse;
+        }
+
+        /* HEADER */
+        .header {
+            background: linear-gradient(135deg, #0B2545 0%, #722F37 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+            border-bottom: 4px solid #D4A574;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.95;
+            margin-top: 10px;
+        }
+
+        .logo {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.3);
+        }
+
+        /* HERO SECTION */
+        .hero {
+            background: linear-gradient(135deg, #FAF3E7 0%, #f9f0e0 100%);
+            padding: 30px 20px;
+            text-align: center;
+            border-bottom: 2px solid #D4A574;
+        }
+
+        .hero h2 {
+            color: #0B2545;
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .hero p {
+            color: #722F37;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        /* MAIN CONTENT */
+        .content {
+            padding: 30px 20px;
+        }
+
+        .greeting {
+            color: #0B2545;
+            font-size: 16px;
+            margin-bottom: 20px;
+            line-height: 1.8;
+        }
+
+        /* BENEFITS SECTION */
+        .benefits {
+            background-color: #FAF3E7;
+            border-left: 4px solid #D4A574;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+
+        .benefits h3 {
+            color: #0B2545;
+            font-size: 18px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .benefits h3::before {
+            content: "✓";
+            color: #722F37;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 20px;
+        }
+
+        .benefit-item {
+            margin: 12px 0;
+            padding-left: 25px;
+            color: #333;
+            position: relative;
+        }
+
+        .benefit-item::before {
+            content: "→";
+            position: absolute;
+            left: 0;
+            color: #D4A574;
+            font-weight: bold;
+        }
+
+        /* STATS SECTION */
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+            margin: 30px 0;
+            text-align: center;
+        }
+
+        .stat-box {
+            background: linear-gradient(135deg, #0B2545 0%, #1a3a5c 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            border-top: 3px solid #D4A574;
+        }
+
+        .stat-number {
+            font-size: 24px;
+            font-weight: 700;
+            color: #D4A574;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            margin-top: 8px;
+            opacity: 0.9;
+        }
+
+        /* PRICING SECTION */
+        .pricing {
+            background: linear-gradient(135deg, #F5E6D3 0%, #F9F0E0 100%);
+            padding: 25px 20px;
+            margin: 25px 0;
+            border-radius: 8px;
+            border: 2px solid #D4A574;
+        }
+
+        .pricing h3 {
+            color: #0B2545;
+            font-size: 18px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .price-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .price-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #D4A574;
+        }
+
+        .price-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .price-amount {
+            font-size: 20px;
+            font-weight: 700;
+            color: #722F37;
+        }
+
+        .price-strike {
+            text-decoration: line-through;
+            color: #999;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .savings {
+            background: #722F37;
+            color: white;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+
+        /* HOW IT WORKS */
+        .how-it-works {
+            margin: 30px 0;
+        }
+
+        .how-it-works h3 {
+            color: #0B2545;
+            font-size: 18px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .steps {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 15px;
+        }
+
+        .step {
+            background: #F5E6D3;
+            padding: 20px;
+            border-radius: 6px;
+            text-align: center;
+            border-top: 3px solid #D4A574;
+        }
+
+        .step-number {
+            background: #0B2545;
+            color: #D4A574;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin: 0 auto 10px;
+        }
+
+        .step-title {
+            color: #0B2545;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .step-text {
+            font-size: 13px;
+            color: #666;
+        }
+
+        /* URGENCY BANNER */
+        .urgency {
+            background: linear-gradient(135deg, #722F37 0%, #8B3A47 100%);
+            color: white;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 6px;
+            text-align: center;
+            border: 2px solid #D4A574;
+        }
+
+        .urgency h3 {
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        .urgency p {
+            font-size: 13px;
+            margin: 8px 0;
+        }
+
+        .urgency strong {
+            color: #D4A574;
+        }
+
+        /* CTA BUTTONS */
+        .cta-section {
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 15px 40px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
+            margin: 10px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #0B2545 0%, #1a3a5c 100%);
+            color: white;
+            border-top: 3px solid #D4A574;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(11, 37, 69, 0.3);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: #0B2545;
+            border: 2px solid #0B2545;
+        }
+
+        .btn-secondary:hover {
+            background: #0B2545;
+            color: white;
+        }
+
+        /* FEATURES */
+        .features {
+            margin: 30px 0;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .feature {
+            background: #F5E6D3;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #D4A574;
+        }
+
+        .feature-title {
+            color: #0B2545;
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+
+        .feature-desc {
+            font-size: 12px;
+            color: #666;
+        }
+
+        /* CONTACT INFO */
+        .contact {
+            background: linear-gradient(135deg, #0B2545 0%, #1a3a5c 100%);
+            color: white;
+            padding: 25px 20px;
+            margin-top: 30px;
+            text-align: center;
+            border-top: 4px solid #D4A574;
+        }
+
+        .contact h3 {
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+
+        .contact-item {
+            margin: 10px 0;
+            font-size: 14px;
+        }
+
+        .contact a {
+            color: #D4A574;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .contact a:hover {
+            text-decoration: underline;
+        }
+
+        /* FOOTER */
+        .footer {
+            background: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #ddd;
+        }
+
+        .tagline {
+            color: #0B2545;
+            font-weight: 600;
+            margin: 10px 0;
+            font-style: italic;
+        }
+
+        .unsubscribe {
+            font-size: 11px;
+            color: #999;
+            margin-top: 15px;
+        }
+
+        .unsubscribe a {
+            color: #999;
+            text-decoration: none;
+        }
+
+        /* RESPONSIVE */
+        @media (max-width: 600px) {
+            .stats, .price-comparison, .steps, .feature-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .header h1 {
+                font-size: 22px;
+            }
+
+            .hero h2 {
+                font-size: 20px;
+            }
+
+            .btn {
+                display: block;
+                width: 90%;
+                margin: 10px auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <!-- HEADER -->
+        <div class="header">
+            <h1>🎉 DIWALI SPECIAL</h1>
+            <p>For Tour Operators & Activity Providers</p>
+            <div class="logo">Idea Holiday | From Idea to Itinerary</div>
+        </div>
+
+        <!-- HERO -->
+        <div class="hero">
+            <h2>Turn Your Tours Into Revenue</h2>
+            <p>List. Reach. Earn. All in One Platform.</p>
+        </div>
+
+        <!-- MAIN CONTENT -->
+        <div class="content">
+            <div class="greeting">
+                <p>Hello Tour Operator,</p>
+                <p style="margin-top: 12px;">We've been building India's most trusted B2B travel platform for travel agents and consumers. Now we're inviting <strong>2,500 tour operators</strong> like you to list your inventory and start earning from a verified network of agents and travelers.</p>
+            </div>
+
+            <!-- STATS -->
+            <div class="stats">
+                <div class="stat-box">
+                    <div class="stat-number">4,200+</div>
+                    <div class="stat-label">Travel Agents</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number">50K+</div>
+                    <div class="stat-label">Monthly Travelers</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-number">100+</div>
+                    <div class="stat-label">Destinations</div>
+                </div>
+            </div>
+
+            <!-- BENEFITS -->
+            <div class="benefits">
+                <h3>Why Partner With Idea Holiday?</h3>
+                <div class="benefit-item"><strong>Double Revenue Stream</strong> — Reach travel agents + direct consumers</div>
+                <div class="benefit-item"><strong>Zero Commission Markup</strong> — You set rates, you keep 100%</div>
+                <div class="benefit-item"><strong>Real-Time Bookings</strong> — WhatsApp notifications for every sale</div>
+                <div class="benefit-item"><strong>Professional Tools</strong> — Itinerary builder closes deals faster</div>
+                <div class="benefit-item"><strong>Fast Payouts</strong> — Integrated payment gateway, get paid on time</div>
+                <div class="benefit-item"><strong>Full Control</strong> — Your inventory, your pricing, your terms</div>
+            </div>
+
+            <!-- HOW IT WORKS -->
+            <div class="how-it-works">
+                <h3>How It Works</h3>
+                <div class="steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-title">Sign Up</div>
+                        <div class="step-text">Register on supply.ideaholiday.in in 2 minutes</div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-title">List Tours</div>
+                        <div class="step-text">Add your tours, activities, transfers</div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-title">Start Earning</div>
+                        <div class="step-text">Agents + travelers book. You earn.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PRICING -->
+            <div class="pricing">
+                <h3>🎁 DIWALI OFFER — Limited Time!</h3>
+                <div class="price-comparison">
+                    <div class="price-item">
+                        <div class="price-label">Regular Price</div>
+                        <div class="price-strike">₹15,999/year</div>
+                    </div>
+                    <div class="price-item">
+                        <div class="price-label" style="color: #722F37; font-weight: 600;">Diwali Price</div>
+                        <div class="price-amount">₹999/year</div>
+                        <div class="savings">Save ₹15,000+</div>
+                    </div>
+                </div>
+                <p style="text-align: center; margin-top: 15px; font-size: 13px; color: #333;">
+                    <strong>Smart Move:</strong> List 10 products before Diwali = Those 10 products stay <strong>FREE FOREVER</strong><br>
+                    (Locked in even when pricing increases to ₹3,000/product after Diwali)
+                </p>
+            </div>
+
+            <!-- FEATURES -->
+            <div class="features">
+                <h3 style="color: #0B2545; margin-bottom: 15px; text-align: center;">Your Tools on Supply Portal</h3>
+                <div class="feature-grid">
+                    <div class="feature">
+                        <div class="feature-title">📋 Product Management</div>
+                        <div class="feature-desc">List unlimited tours, activities, transfers</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-title">📊 Real-Time Dashboard</div>
+                        <div class="feature-desc">Track bookings, revenue, performance</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-title">🎯 Itinerary Builder</div>
+                        <div class="feature-desc">Create professional itineraries in minutes</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-title">💬 WhatsApp Integration</div>
+                        <div class="feature-desc">Get instant notifications on every booking</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-title">💰 Commission Tracker</div>
+                        <div class="feature-desc">See earnings from agents + consumers</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-title">🚀 Growth Support</div>
+                        <div class="feature-desc">Dedicated support team to help you scale</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- URGENCY -->
+            <div class="urgency">
+                <h3>⏰ OFFER ENDS ON DIWALI</h3>
+                <p>After Diwali: ₹3,000 per product per month</p>
+                <p style="margin-top: 12px;"><strong>Act now to lock in the best rates forever.</strong></p>
+            </div>
+
+            <!-- CTA -->
+            <div class="cta-section">
+                <a href="https://supply.ideaholiday.in?utm_source=brevo&utm_medium=email&utm_campaign=diwali_2026" class="btn btn-primary">👉 SIGN UP & START LISTING</a>
+                <a href="https://supply.ideaholiday.in?utm_source=brevo&utm_medium=email&utm_campaign=diwali_2026" class="btn btn-secondary">LEARN MORE</a>
+            </div>
+        </div>
+
+        <!-- CONTACT -->
+        <div class="contact">
+            <h3>Questions? We're Here to Help</h3>
+            <div class="contact-item">
+                📧 <a href="mailto:info@ideaholiday.in">info@ideaholiday.in</a>
+            </div>
+            <div class="contact-item">
+                📱 <a href="tel:+919696777391">+91 9876 543 210</a>
+            </div>
+            <div class="contact-item">
+                💬 <a href="https://wa.me/919696777391">Chat on WhatsApp</a>
+            </div>
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.2);">
+                <p style="margin-bottom: 8px;">Have a quick question? Our team responds within 2 hours.</p>
+                <p style="font-size: 12px;">Office: Mumbai | Branch: Lucknow | DMC: Pattaya, Thailand</p>
+            </div>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+            <div class="tagline">From Idea to Itinerary</div>
+            <p style="margin-top: 10px;">Idea Holiday Private Limited | 15+ years in travel & tourism</p>
+            <div class="unsubscribe">
+                © 2026 Idea Holiday. <a href="{unsubscribeLink}">Unsubscribe</a> | <a href="{preferencesLink}">Preferences</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
