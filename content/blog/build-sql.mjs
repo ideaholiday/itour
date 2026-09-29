@@ -14,7 +14,13 @@ hampi-vijayanagara-guide rishikesh-yoga-adventure-guide udaipur-city-of-lakes-gu
 darjeeling-tea-himalaya-guide munnar-tea-estates-guide coorg-coffee-estates-guide manali-adventure-guide khajuraho-temples-guide
 pushkar-camel-fair-guide ooty-nilgiri-hills-guide jaisalmer-desert-safari-guide sikkim-gangtok-monastery-guide ranthambore-tiger-safari-guide
 andaman-islands-travel-guide kolkata-city-of-joy-guide hyderabad-biryani-charminar-guide mahabalipuram-temples-guide aurangabad-ajanta-ellora-guide
-jodhpur-blue-city-guide shimla-hill-station-guide bhopal-lakes-mosques-guide tirupati-temple-pilgrimage-guide first-time-in-goa-4-day-plan`.split(/\s+/);
+jodhpur-blue-city-guide shimla-hill-station-guide bhopal-lakes-mosques-guide tirupati-temple-pilgrimage-guide first-time-in-goa-4-day-plan
+ayodhya-ram-mandir-darshan-guide bodh-gaya-buddhist-pilgrimage-guide delhi-3-days-itinerary haridwar-ganga-aarti-guide
+lucknow-ayodhya-varanasi-5-day-itinerary mathura-vrindavan-temples-holi-guide mumbai-2-days-itinerary prayagraj-triveni-sangam-guide
+rishikesh-river-rafting-guide srinagar-dal-lake-kashmir-guide
+bir-billing-paragliding-guide char-dham-yatra-guide jim-corbett-safari-guide kedarnath-yatra-guide kochi-fort-kochi-guide
+madurai-meenakshi-temple-guide pondicherry-french-quarter-auroville-guide puri-jagannath-konark-guide
+scuba-diving-andaman-havelock-guide shillong-cherrapunji-meghalaya-guide`.split(/\s+/);
 
 const [dir, status = "PUBLISHED"] = process.argv.slice(2);
 if (!dir || !["DRAFT", "PUBLISHED"].includes(status)) throw new Error("usage: build-sql.mjs <dir> [DRAFT|PUBLISHED]");
