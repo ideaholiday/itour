@@ -60,7 +60,7 @@ Legacy and noise files are hidden from search by `.ignore` / `.geminiignore`.
 | WhatsApp, payments, email, SMS, channel manager | [`INTEGRATIONS.md`](docs/INTEGRATIONS.md) + [`ENVIRONMENT.md`](docs/ENVIRONMENT.md) |
 | Run it locally, migrations, tooling | [`DEVELOPMENT.md`](docs/DEVELOPMENT.md) |
 | Write or fix tests | [`TESTING.md`](docs/TESTING.md) |
-| Why something was done this way | [`DECISIONS.md`](docs/DECISIONS.md) (SEO: [`DECISIONS_SEO.md`](docs/DECISIONS_SEO.md); operator platform: [`DECISIONS_OPERATOR.md`](docs/DECISIONS_OPERATOR.md)) |
+| Why something was done this way | [`DECISIONS.md`](docs/DECISIONS.md) (SEO: [`DECISIONS_SEO.md`](docs/DECISIONS_SEO.md); operator platform: [`DECISIONS_OPERATOR.md`](docs/DECISIONS_OPERATOR.md); mobile apps: [`DECISIONS_MOBILE.md`](docs/DECISIONS_MOBILE.md)) |
 | A term you don't recognise | [`GLOSSARY.md`](docs/GLOSSARY.md) |
 | A library or framework API (Context7 IDs) | [`LIBRARIES.md`](docs/LIBRARIES.md) |
 

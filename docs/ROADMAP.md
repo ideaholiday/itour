@@ -50,7 +50,7 @@ Do not rebuild these. Extend them if asked.
 - **Phase 3 — built, release in progress:** `android-driver/` app (ADR 014).
   - **D-U-N-S approved** (owner, 2026-09-28) for Idea Holiday Private Limited, Lucknow. The Play organisation account must use that exact legal name and address.
   - **Done:** privacy policy names the app and covers location while the app is closed or the screen is locked, who sees it, the notification and 30-day deletion; registered office added (2026-09-28).
-  - **Play Console organisation account** created 2026-09-28; Google's verification takes 4–5 days (expected about 2026-10-03).
+  - **Play Console organisation account** created 2026-09-28 and ready to publish 2026-09-29 (account ID 6122682140764081503). Before the first release, check that the public developer name is Idea Holiday Private Limited, and finish "Android developer verification" in the Console.
   - Then, in order: upload key (kept outside the repo) → test on real Android phones (including Xiaomi/Oppo/Vivo battery savers) → Play listing, data-safety form (precise location, and the website's analytics, since the WebView page loads Google Tag Manager) and location foreground-service declaration → internal testing track → set `ANDROID_DRIVER_APP_SHA256` and `VITE_DRIVER_APP_URL` in production.
   - Until then, drivers share location from the browser trip page (Phase 1–2 work as is). The app already targets API 36, which Play requires for new apps from 2026-08-31.
 
@@ -119,6 +119,12 @@ Bookingkit, TourCMS, Activitar, Anchor) still only import products and return
 `PROVIDER_CAPABILITY_MISSING` for live operations. Each needs that provider's
 own credentials and API documentation — they cannot be written honestly without
 them, so treat each as its own scoped piece of work.
+
+**3. Traveler and supplier Android apps** *(owner, 2026-09-29; ADR 052, [`DECISIONS_MOBILE.md`](DECISIONS_MOBILE.md))*
+These start after the driver app reaches the internal testing track. Each app is a thin Kotlin shell like `android-driver/`.
+- **Traveler app** (ideaholiday.in): search, book and pay in the app. Cashfree UPI payments must open the UPI app from the WebView, and App Links for booking and voucher URLs must open the app. Vouchers must download.
+- **Supplier app** (supply.ideaholiday.in): the extranet for owners and staff, with the same shell.
+- Owner to decide: package names (they are permanent once uploaded) and whether to add push notifications (Firebase is a new service).
 
 ---
 
