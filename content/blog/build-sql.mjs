@@ -20,7 +20,13 @@ lucknow-ayodhya-varanasi-5-day-itinerary mathura-vrindavan-temples-holi-guide mu
 rishikesh-river-rafting-guide srinagar-dal-lake-kashmir-guide
 bir-billing-paragliding-guide char-dham-yatra-guide jim-corbett-safari-guide kedarnath-yatra-guide kochi-fort-kochi-guide
 madurai-meenakshi-temple-guide pondicherry-french-quarter-auroville-guide puri-jagannath-konark-guide
-scuba-diving-andaman-havelock-guide shillong-cherrapunji-meghalaya-guide`.split(/\s+/);
+scuba-diving-andaman-havelock-guide shillong-cherrapunji-meghalaya-guide
+chittorgarh-kumbhalgarh-forts-guide gir-somnath-dwarka-guide goa-water-sports-guide gokarna-beaches-trek-guide
+kaziranga-rhino-safari-guide kodaikanal-hill-station-guide rann-of-kutch-rann-utsav-guide spiti-valley-road-trip-guide
+tawang-arunachal-travel-guide valley-of-flowers-hemkund-trek-guide
+badami-aihole-pattadakal-guide dalhousie-khajjiar-chamba-guide dharamshala-mcleodganj-triund-guide lonavala-khandala-monsoon-guide
+mahabaleshwar-panchgani-guide mussoorie-landour-guide nainital-lakes-guide shirdi-sai-baba-darshan-guide
+ujjain-mahakaleshwar-omkareshwar-guide varkala-cliff-beach-guide`.split(/\s+/);
 
 const [dir, status = "PUBLISHED"] = process.argv.slice(2);
 if (!dir || !["DRAFT", "PUBLISHED"].includes(status)) throw new Error("usage: build-sql.mjs <dir> [DRAFT|PUBLISHED]");
