@@ -12,7 +12,8 @@ const driverApp = () => (typeof window !== 'undefined' ? window.IdeaHolidayDrive
 const DRIVER_APP_URL = import.meta.env.VITE_DRIVER_APP_URL || '';
 
 export default function DriverTrip() {
-  const [session, setSession] = useState(() => sessionStorage.getItem('driverTripSession') || '');
+  // A link in the address replaces any earlier trip's session.
+  const [session, setSession] = useState(() => (window.location.hash.length > 1 ? '' : sessionStorage.getItem('driverTripSession') || ''));
   const [trip, setTrip] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -229,10 +230,10 @@ export default function DriverTrip() {
   const button = (label, action) => <button type="button" disabled={busy} onClick={() => act(action)} className="rounded-xl bg-stone-900 px-5 py-3 font-semibold text-white disabled:opacity-50">{label}</button>;
   const tripUnderWay = trip && SHARING_STATUSES.includes(trip.status);
   return <section className="mx-auto max-w-lg p-5 py-10">
-    <p className="text-sm font-semibold text-amber-700">Idea Holiday · Driver service</p>
+    <p className="flex justify-between text-sm font-semibold text-amber-700"><span>Idea Holiday · Driver service</span><a href="/driver" className="underline">My trips</a></p>
     <h1 className="my-4 text-2xl font-bold">Your assigned trip</h1>
     {error && <p role="alert" className="mb-4 rounded-xl bg-amber-50 p-4 text-amber-900">{error}</p>}
-    {!trip && !error && <p>{busy || session ? 'Loading trip…' : 'Open the private trip link from your email or WhatsApp.'}</p>}
+    {!trip && !error && <p>{busy || session ? 'Loading trip…' : <>Open the private trip link from your email or WhatsApp, or <a href="/driver" className="font-semibold underline">sign in to see your trips</a>.</>}</p>}
     {trip && <div className="space-y-5 rounded-2xl border bg-white p-5">
       <h2 className="text-lg font-bold">{trip.bookingRef}</h2>
       <p>{trip.date} · {trip.pickupTime} {trip.timeLabel || 'IST'}</p>

@@ -1,4 +1,5 @@
 import driverTripsRouter from "./routes/driverTrips.js";
+import driverAccountRouter from "./routes/driverAccount.js";
 import trackingRouter from "./routes/tracking.js";
 import { processDispatchSchedule, processDispatchOutbox } from "./services/dispatchWorkflowService.js";
 import { deliverDispatchNotification } from "./services/dispatchNotificationService.js";
@@ -218,6 +219,7 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/admin`, adminRouter);
   app.use(`${prefix}/analytics`, analyticsRouter);
   app.use(`${prefix}/driver-trips`, driverTripsRouter);
+  app.use(`${prefix}/driver-account`, driverAccountRouter);
   app.use(`${prefix}/tracking`, trackingRouter);
   app.use(`${prefix}/ops`, opsRouter);
   app.use(`${prefix}/checkout`, checkoutRouter);

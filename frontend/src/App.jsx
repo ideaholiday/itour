@@ -13,6 +13,7 @@ import { api } from "./lib/api.js";
 import { parseReferralParams, captureReferral, parseTravelerReferralParams, captureTravelerReferral } from "./lib/affiliateAttribution.js";
 
 const DriverTrip = React.lazy(() => import("./pages/DriverTrip.jsx"));
+const DriverHome = React.lazy(() => import("./pages/DriverHome.jsx"));
 const TripTracking = React.lazy(() => import("./pages/TripTracking.jsx"));
 const QuotationItinerary = React.lazy(() => import("./pages/QuotationItinerary.jsx"));
 const Home = React.lazy(() => import("./pages/Home.jsx"));
@@ -123,6 +124,7 @@ function AppContent() {
           </div>
         }>
           <Routes>
+            <Route path="/driver" element={<DriverHome />} />
             <Route path="/driver/trip" element={<DriverTrip />} />
             <Route path="/track/:ref" element={<TripTracking />} />
             <Route path="/q/:token" element={<QuotationItinerary />} />

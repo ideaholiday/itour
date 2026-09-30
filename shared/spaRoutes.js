@@ -2,7 +2,7 @@
 // send a real 404 status for anything else, so search engines don't index
 // "not found" pages as live ones. A unit test keeps this list and App.jsx in step.
 export const SPA_ROUTES = [
-  "/", "/driver/trip", "/track/:ref", "/q/:token", "/review/:token", "/r/:slug",
+  "/", "/driver", "/driver/trip", "/track/:ref", "/q/:token", "/review/:token", "/r/:slug",
   "/search", "/transfers", "/profile", "/wishlist", "/messages",
   "/things-to-do/:citySlug", "/hi/things-to-do/:citySlug", "/blog", "/blog/:slug",
   "/suppliers", "/suppliers/in/:citySlug", "/suppliers/:slug",

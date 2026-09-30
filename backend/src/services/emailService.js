@@ -111,6 +111,8 @@ export async function sendEmail({
   // [{ name, contentBase64 }]: sent by Brevo; the SES path sends the body only,
   // so an attachment must never be the only way to reach its content.
   attachments = [],
+  // Stored in the delivery logs instead of `text`, for a body carrying a secret such as a sign-in code.
+  logText,
 }, { client, database = db, fetchImpl = globalThis.fetch } = {}) {
   const address = String(to || "").trim().toLowerCase();
   if (!validEmail(address)) return { success: false, status: "FAILED", error: "A valid recipient email is required" };
@@ -119,7 +121,7 @@ export async function sendEmail({
   const config = emailProviderConfiguration();
   const started = beginNotificationDelivery({
     eventKey, eventType, channel: "EMAIL", recipientRole, recipientId,
-    recipientAddress: address, provider: client ? "AMAZON_SES" : config.provider, subject, body: text, metadata,
+    recipientAddress: address, provider: client ? "AMAZON_SES" : config.provider, subject, body: logText ?? text, metadata,
   }, database);
 
   if (started.idempotent) {
@@ -135,7 +137,7 @@ export async function sendEmail({
   if (!config.enabled) {
     const delivery = finishNotificationDelivery(started.delivery.id, { status: "SKIPPED", errorMessage: "Email notifications are disabled" }, database);
     const result = { success: false, skipped: true, status: "SKIPPED", deliveryId: delivery.id, error: "Email notifications are disabled" };
-    writeLegacyEmailLog({ to: address, recipientName, subject, text, eventType, recipientRole, provider: client ? "AMAZON_SES" : config.provider }, result, database);
+    writeLegacyEmailLog({ to: address, recipientName, subject, text: logText ?? text, eventType, recipientRole, provider: client ? "AMAZON_SES" : config.provider }, result, database);
     return result;
   }
 
@@ -181,13 +183,13 @@ export async function sendEmail({
       const messageId = data?.messageId || `brevo_${nanoid(16)}`;
       const delivery = finishNotificationDelivery(started.delivery.id, { status: "SENT", providerMessageId: messageId }, database);
       const result = { success: true, status: "SENT", deliveryId: delivery.id, providerMessageId: messageId };
-      writeLegacyEmailLog({ to: address, recipientName, subject, text, eventType, recipientRole, provider: "BREVO" }, result, database);
+      writeLegacyEmailLog({ to: address, recipientName, subject, text: logText ?? text, eventType, recipientRole, provider: "BREVO" }, result, database);
       return result;
     } catch (error) {
       const message = String(error?.message || "Brevo rejected the message").slice(0, 500);
       const delivery = finishNotificationDelivery(started.delivery.id, { status: "FAILED", errorMessage: message }, database);
       const result = { success: false, status: "FAILED", deliveryId: delivery.id, error: message };
-      writeLegacyEmailLog({ to: address, recipientName, subject, text, eventType, recipientRole, provider: "BREVO" }, result, database);
+      writeLegacyEmailLog({ to: address, recipientName, subject, text: logText ?? text, eventType, recipientRole, provider: "BREVO" }, result, database);
       logger.error("Brevo email notification failed", { error: new Error(message) });
       return result;
     }
@@ -217,13 +219,13 @@ export async function sendEmail({
     }));
     const delivery = finishNotificationDelivery(started.delivery.id, { status: "SENT", providerMessageId: response.MessageId }, database);
     const result = { success: true, status: "SENT", deliveryId: delivery.id, providerMessageId: response.MessageId };
-    writeLegacyEmailLog({ to: address, recipientName, subject, text, eventType, recipientRole, provider: "AMAZON_SES" }, result, database);
+    writeLegacyEmailLog({ to: address, recipientName, subject, text: logText ?? text, eventType, recipientRole, provider: "AMAZON_SES" }, result, database);
     return result;
   } catch (error) {
     const message = String(error?.message || "Amazon SES rejected the message").slice(0, 500);
     const delivery = finishNotificationDelivery(started.delivery.id, { status: "FAILED", errorMessage: message }, database);
     const result = { success: false, status: "FAILED", deliveryId: delivery.id, error: message };
-    writeLegacyEmailLog({ to: address, recipientName, subject, text, eventType, recipientRole, provider: "AMAZON_SES" }, result, database);
+    writeLegacyEmailLog({ to: address, recipientName, subject, text: logText ?? text, eventType, recipientRole, provider: "AMAZON_SES" }, result, database);
     logger.error("Amazon SES notification failed", { error: new Error(message) });
     return result;
   }

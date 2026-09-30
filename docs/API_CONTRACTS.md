@@ -248,6 +248,12 @@ Moved to [`API_CONTRACTS_SUPPLIER.md`](API_CONTRACTS_SUPPLIER.md): the supplier 
 - Supplier `GET /api/suppliers/:id` bookings carry `driver_last_lat`, `driver_last_lng`, `driver_last_accuracy_m`, `driver_last_location_at`.
 - **`GET /api/tracking/:ref`** (traveler): `X-Tracking-Token` from the signed link (`/track/<ref>#<token>`, 7 days) or the signed-in owner; else `404`. → `{ trip: { status, driver, location (EN_ROUTE–TRIP_STARTED only), eta { minutes, distanceM, source OLA|MAPPLS|ESTIMATE|NEARBY, to PICKUP|DROP }, pickup, drop, timeLabel } }`; `timeLabel` (`IST`, `ICT`) names the zone of `activityDate`/`pickupTime`. Driver `GET /` adds `pickup`, `distanceToPickupM`, `timeZone`, `timeLabel`.
 
+### 4.1.2 Driver sign-in and trip list (`/api/driver-account`, ADR 053)
+- **`POST /code`** `{ login }` (email or mobile) → always `200 { message }`; emails a 6-digit code to the roster email when the login is a driver (5 codes/hour per email). 10 requests per 15 min per IP, shared with `/session`.
+- **`POST /session`** `{ login, code }` → `{ token }` (30 days). `401 WRONG_CODE` / `CODE_EXPIRED`, `429 TOO_MANY_ATTEMPTS` after 5 wrong tries.
+- **`GET /trips`** (Bearer driver token) → `{ email, waiting, upcoming, past }`: trips of every supplier for this email. Each has `assignmentId, bookingRef, tour, supplierName, date, pickupTime, pickupLocation, dropLocation, travelerName, passengers, vehicle, acknowledgement, status, responseDeadline, completedAt`; never the traveler's phone. `past`: the last 30.
+- **`POST /trips/:assignmentId/link`** → `{ linkToken }` for `/driver/trip#<linkToken>`. `404` for another driver's trip, `409` when completed or expired.
+
 ### 4.2 Circuit Management Queue
 - **`GET /api/ops/circuits`**: Lists pending multi-supplier circuit reschedule/cancellation requests.
 - **`POST /api/ops/circuits/:id/approve`**: Atomically approves a circuit modification across all suppliers and executes grouped refund.

@@ -134,4 +134,12 @@ test("drivers share live location before going on the way, and operations and th
   const supplierBooking = supplierView.data.bookings.find((item) => item.id === booking.data.bookingId);
   assert.equal(supplierBooking.driver_last_lat, 15.5449);
   assert.ok(supplierBooking.driver_last_location_at);
+
+  // The driver can call the traveler during the trip, not after it is completed.
+  assert.equal(tripView.data.trip.travelerPhone, "+919876543210");
+  db.prepare("UPDATE driver_assignments SET assignment_status = 'COMPLETED' WHERE id = ?").run(assignment.id);
+  const afterTrip = await requestJson(api.baseUrl, "/api/driver-trips", { token: driverToken });
+  assert.equal(afterTrip.response.status, 200, JSON.stringify(afterTrip.data));
+  assert.equal(afterTrip.data.trip.travelerName, "GPS Traveler");
+  assert.equal(afterTrip.data.trip.travelerPhone, null);
 });

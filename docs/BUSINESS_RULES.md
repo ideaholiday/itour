@@ -134,7 +134,7 @@ Every dispatch message goes by email (HTML trip card with a plain-text part) and
 
 1. **No duplicate reminders.** A driver who confirms inside the 24-hour (or 2-hour) window has just received the same details, so that window's reminder is skipped.
 2. **Operations are messaged only when action is needed.** Routine trip progress is shown on the ops live board, not sent to every staff user.
-3. **Traveler contact stays private until acceptance.** A trip request shows the pickup but not the traveler's phone.
+3. **Traveler contact stays private until acceptance.** Drivers see the traveler's phone only from acceptance to completion.
 4. **Every lost driver re-alerts.** Each decline, timeout or replacement raises a new "assign manually" alert. Each escalation stage and the overdue alert are sent once per schedule.
 
 ### 6.2 Manual Assignment Fallback

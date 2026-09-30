@@ -73,7 +73,9 @@ class MainActivity : Activity() {
             LocationService.stop(this)
         }
         if (fromLink != null) store.save(fromLink, null, active = store.active && fromLink == store.linkToken)
-        web.loadUrl(baseUri.buildUpon().path("/driver/trip").encodedFragment(token).build().toString())
+        // Without a trip, the driver signs in and picks one from their trip list (ADR 053).
+        val page = if (token == null) baseUri.buildUpon().path("/driver") else baseUri.buildUpon().path("/driver/trip").encodedFragment(token)
+        web.loadUrl(page.build().toString())
     }
 
     private fun isOwnSite(uri: Uri): Boolean = uri.scheme == baseUri.scheme && uri.host == baseUri.host && uri.port == baseUri.port
