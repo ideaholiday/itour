@@ -3,8 +3,9 @@
  *
  * Android opens a site's links in an installed app only when this file lists
  * the app's signing certificate. Each app's variable holds the SHA-256
- * fingerprint(s) from Play Console → App integrity (comma-separated, e.g. the
- * Play signing key and an upload key for internal testing). The same file is
+ * fingerprint(s) from Play Console → App integrity, separated by commas or
+ * semicolons (e.g. the Play signing key and an upload key for internal testing;
+ * use `;` in deploy.sh, whose Cloud Run variable list is comma-separated). The same file is
  * served on ideaholiday.in and supply.ideaholiday.in; an app is listed only
  * when its variable is set. None set: 404, and links keep opening in the browser.
  */
@@ -20,7 +21,7 @@ export function androidAppAssetLinks(env = process.env) {
   const statements = ANDROID_APPS.map(({ packageName, env: name }) => ({
     packageName,
     fingerprints: String(env[name] || "")
-      .split(",")
+      .split(/[,;\s]+/)
       .map((value) => value.trim().toUpperCase())
       .filter((value) => FINGERPRINT.test(value)),
   }))

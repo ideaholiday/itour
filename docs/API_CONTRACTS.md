@@ -253,6 +253,11 @@ Moved to [`API_CONTRACTS_SUPPLIER.md`](API_CONTRACTS_SUPPLIER.md): the supplier 
 - **`POST /session`** `{ login, code }` → `{ token }` (30 days). `401 WRONG_CODE` / `CODE_EXPIRED`, `429 TOO_MANY_ATTEMPTS` after 5 wrong tries.
 - **`GET /trips`** (Bearer driver token) → `{ email, waiting, upcoming, past }`: trips of every supplier for this email. Each has `assignmentId, bookingRef, tour, supplierName, date, pickupTime, pickupLocation, dropLocation, travelerName, passengers, vehicle, acknowledgement, status, responseDeadline, completedAt`; never the traveler's phone. `past`: the last 30.
 - **`POST /trips/:assignmentId/link`** → `{ linkToken }` for `/driver/trip#<linkToken>`. `404` for another driver's trip, `409` when completed or expired.
+- **`POST /push-token`** `{ token }` (driver session) → registers the driver app's Firebase token for trip alerts.
+
+### 4.1.3 Push devices (`/api/push`, ADR 053)
+- **`POST /devices`** `{ token, app: traveler|supplier }` (signed in) → registers this phone for the account's alerts. A token moves to whoever registers it last.
+- **`POST /unregister`** `{ token }` (no session; the token identifies the phone) → removes it, on sign-out.
 
 ### 4.2 Circuit Management Queue
 - **`GET /api/ops/circuits`**: Lists pending multi-supplier circuit reschedule/cancellation requests.

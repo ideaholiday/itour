@@ -3,6 +3,8 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    // Reads google-services.json (Firebase project ideaholiday-todothing) for push.
+    id("com.google.gms.google-services")
 }
 
 // The site this app shows. Override for local testing:

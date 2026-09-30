@@ -15,4 +15,6 @@
     <string name="disclosure_message">Idea Holiday Driver shares your live location with Idea Holiday, your supplier and the traveler from when you go on the way until you complete the trip, including while you use Maps, the app is closed or the screen is locked. Sharing stops automatically when the trip is completed. Positions are deleted after 30 days.</string>
     <string name="disclosure_continue">Continue</string>
     <string name="disclosure_not_now">Not now</string>
+    <string name="channel_trip_alerts">Trip requests</string>
+    <string name="channel_trip_alerts_description">New trips from your suppliers and reminders to accept them.</string>
 </resources>

@@ -177,6 +177,7 @@ cd android-apps
 ./gradlew :traveler:bundleRelease :supplier:bundleRelease                     # signed when keystore-<app>.properties exists
 ```
 - **Google sign-in** opens in a Chrome Custom Tab (Google refuses WebViews) and comes back through the site's `/login` App Link. It returns to the app only when `ANDROID_TRAVELER_APP_SHA256` / `ANDROID_SUPPLIER_APP_SHA256` are set and Android has verified the link; otherwise the traveler ends up signed in in Chrome instead.
+- **Push:** put `google-services.json` (Firebase console, project `ideaholiday-todothing`, one file listing all three apps) in `android-driver/app/`, `android-apps/traveler/` and `android-apps/supplier/`. It is git-ignored; the build fails without it.
 - Each app has its own upload key in `android-apps/keystore-traveler.properties` / `keystore-supplier.properties` (git-ignored).
 
 ### Deploying

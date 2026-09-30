@@ -8,3 +8,4 @@ keystore.properties
 *.iml
 captures/
 keystore-*.properties
+google-services.json

@@ -21,4 +21,4 @@
   - **Firebase Cloud Messaging is approved** for push notifications in all three apps. WhatsApp and email alerts stay.
   - **Package names:** `in.ideaholiday.app` (traveler) and `in.ideaholiday.supplier` (supplier), with `in.ideaholiday.driver` unchanged.
   - **The three apps are built together and released together**, replacing ADR 052's release order.
-- **Consequences**: Firebase is a new service (rule R2, approved here) and needs a Firebase project, each app's `google-services.json` and a server credential. A driver whose email changes on the roster sees trips under the new email only.
+- **Consequences**: Firebase is a new service (rule R2, approved here): project `ideaholiday-todothing` (created 2026-09-30), each app's `google-services.json`, and the Cloud Run service account granted FCM access (the organisation policy blocks service-account keys, so none is used). Push needs Google Play services, so drivers on phones without it get WhatsApp and email only; location sharing still doesn't depend on it (ADR 014). A driver whose email changes on the roster sees trips under the new email only.

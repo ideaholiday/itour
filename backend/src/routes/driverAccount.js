@@ -5,6 +5,7 @@ import db from '../db.js';
 import logger from '../config/logger.js';
 import { validateBody } from '../middleware/validation.js';
 import { authenticateDriverAccount, driverTripLink, driverTrips, requestDriverCode, verifyDriverCode } from '../services/driverAccountService.js';
+import { registerPushDevice } from '../services/pushService.js';
 
 // Driver sign-in by email code and the driver's trip list (ADR 053).
 const router = express.Router();
@@ -31,6 +32,11 @@ router.get('/trips', (req, res) => {
 });
 router.post('/trips/:assignmentId/link', (req, res) => {
   try { res.json({ success: true, linkToken: driverTripLink(db, req.driverEmail, req.params.assignmentId) }); }
+  catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+// The driver app's push token, so trip requests reach the phone (ADR 053).
+router.post('/push-token', validateBody(z.object({ token: z.string().trim().min(20).max(4096) }).strict()), (req, res) => {
+  try { registerPushDevice(db, { token: req.body.token, app: 'driver', ownerType: 'DRIVER', ownerKey: req.driverEmail }); res.json({ success: true }); }
   catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 export default router;

@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Saving vouchers and exports to Downloads on Android 8 and 9 only. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- Push alerts (ADR 053); Android 13+ asks when the signed-in page turns them on. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
@@ -17,4 +19,16 @@
             <data android:scheme="upi" android:host="pay" />
         </intent>
     </queries>
+
+    <application>
+        <service
+            android:name="in.ideaholiday.shell.PushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="alerts" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/shell_ic_notification" />
+    </application>
 </manifest>

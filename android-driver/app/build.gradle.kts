@@ -3,6 +3,8 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
+    // Reads google-services.json (Firebase project ideaholiday-todothing) for trip-request push.
+    id("com.google.gms.google-services")
 }
 
 // The site the app opens and sends locations to. Override for local testing:
@@ -58,6 +60,9 @@ android {
 }
 
 dependencies {
+    // Trip-request push (ADR 053); location sharing does not use it.
+    implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
+    implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
     // Android provides org.json at runtime; JVM unit tests need a real implementation.
     testImplementation("org.json:json:20260814")

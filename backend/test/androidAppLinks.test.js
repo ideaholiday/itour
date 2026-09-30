@@ -20,4 +20,6 @@ test("asset links list each configured app with its own fingerprints", () => {
   assert.deepEqual(links.map((statement) => statement.target.package_name), ["in.ideaholiday.app", "in.ideaholiday.supplier"]);
   assert.deepEqual(links[0].target.sha256_cert_fingerprints, [PLAY_KEY, UPLOAD_KEY]);
   assert.deepEqual(links[1].target.sha256_cert_fingerprints, [UPLOAD_KEY]);
+  const semicolons = androidAppAssetLinks({ ANDROID_TRAVELER_APP_SHA256: `${PLAY_KEY};${UPLOAD_KEY}` });
+  assert.deepEqual(semicolons[0].target.sha256_cert_fingerprints, [PLAY_KEY, UPLOAD_KEY], "deploy.sh passes several fingerprints with ;");
 });

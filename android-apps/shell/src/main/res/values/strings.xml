@@ -11,4 +11,6 @@
     <string name="shell_download_failed">The file couldn\'t be saved. Try again.</string>
     <string name="shell_download_too_large">This file is too large to save in the app.</string>
     <string name="shell_download_needs_storage">Allow storage access to save files to Downloads.</string>
+    <string name="shell_channel_alerts">Bookings and trip alerts</string>
+    <string name="shell_channel_alerts_description">New bookings, trip requests and changes to your trips.</string>
 </resources>

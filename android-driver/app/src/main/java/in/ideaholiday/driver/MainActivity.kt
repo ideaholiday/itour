@@ -14,6 +14,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.google.firebase.messaging.FirebaseMessaging
 import org.json.JSONObject
 
 /**
@@ -25,6 +26,7 @@ class MainActivity : Activity() {
     private companion object {
         const val LOCATION_REQUEST = 41
         const val NOTIFICATION_REQUEST = 42
+        const val ALERTS_REQUEST = 43
     }
 
     private lateinit var web: WebView
@@ -52,6 +54,8 @@ class MainActivity : Activity() {
         }
         web.addJavascriptInterface(Bridge(), "IdeaHolidayDriverApp")
         LocationService.listener = statusListener
+        TripAlerts.ensureChannel(this)
+        TripAlerts.onToken = { token -> runOnUiThread { sendPushToken(token) } }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { goBack() }
         }
@@ -67,7 +71,10 @@ class MainActivity : Activity() {
     private fun openTrip(intent: Intent?) {
         val store = TripStore(this)
         val fromLink = TripLink.tokenFrom(intent?.data, baseUri.host ?: "ideaholiday.in")
-        val token = fromLink ?: store.linkToken.takeIf { store.active }
+        // A tapped trip alert opens the trip list, even while another trip is shared. Android
+        // shows alerts itself while the app is closed, passing the push's data.path instead.
+        val fromAlert = intent?.getBooleanExtra(TripAlerts.EXTRA_OPEN_TRIPS, false) == true || intent?.getStringExtra("path") == "/driver"
+        val token = if (fromAlert) null else fromLink ?: store.linkToken.takeIf { store.active }
         if (fromLink != null && fromLink != store.linkToken && store.active) {
             // A new trip link replaces the one being shared.
             LocationService.stop(this)
@@ -76,6 +83,11 @@ class MainActivity : Activity() {
         // Without a trip, the driver signs in and picks one from their trip list (ADR 053).
         val page = if (token == null) baseUri.buildUpon().path("/driver") else baseUri.buildUpon().path("/driver/trip").encodedFragment(token)
         web.loadUrl(page.build().toString())
+    }
+
+    private fun sendPushToken(token: String) {
+        if (!isOwnSite(Uri.parse(web.url ?: ""))) return
+        web.evaluateJavascript("window.dispatchEvent(new CustomEvent('ideaholiday:push-token', { detail: ${JSONObject.quote(token)} }))", null)
     }
 
     private fun isOwnSite(uri: Uri): Boolean = uri.scheme == baseUri.scheme && uri.host == baseUri.host && uri.port == baseUri.port
@@ -116,6 +128,24 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun version(): String = BuildConfig.VERSION_NAME
+
+        /** The signed-in trip list turns on trip alerts; the token comes back in an `ideaholiday:push-token` event. */
+        @JavascriptInterface
+        fun enablePush() = onPage {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), ALERTS_REQUEST)
+            }
+            runCatching {
+                FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                    TripAlerts.save(this@MainActivity, token)
+                    sendPushToken(token)
+                }
+            }
+        }
+
+        /** The saved token, so signing out can unregister this phone. */
+        @JavascriptInterface
+        fun pushToken(): String = TripAlerts.savedToken(this@MainActivity).orEmpty()
 
         private fun onPage(action: () -> Unit) = runOnUiThread { if (isOwnSite(Uri.parse(web.url ?: ""))) action() }
     }
@@ -184,6 +214,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         if (LocationService.listener === statusListener) LocationService.listener = null
+        TripAlerts.onToken = null
         web.destroy()
         super.onDestroy()
     }

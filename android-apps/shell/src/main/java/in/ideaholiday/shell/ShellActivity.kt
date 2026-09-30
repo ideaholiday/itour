@@ -21,6 +21,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import com.google.firebase.messaging.FirebaseMessaging
 import android.window.OnBackInvokedDispatcher
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -45,6 +46,7 @@ abstract class ShellActivity : Activity() {
         const val FILE_REQUEST = 51
         const val LOCATION_REQUEST = 52
         const val STORAGE_REQUEST = 53
+        const val NOTIFICATION_REQUEST = 54
         const val MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
         const val CUSTOM_TABS_SESSION = "android.support.customtabs.extra.SESSION"
     }
@@ -76,6 +78,8 @@ abstract class ShellActivity : Activity() {
         web.webChromeClient = ShellChrome()
         web.addJavascriptInterface(Bridge(), "IdeaHolidayApp")
         web.setDownloadListener { url, userAgent, contentDisposition, mime, _ -> download(url, userAgent, contentDisposition, mime) }
+        Push.ensureChannel(this)
+        Push.onToken = { token -> runOnUiThread { sendPushToken(token) } }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { goBack() }
         }
@@ -88,11 +92,13 @@ abstract class ShellActivity : Activity() {
         open(intent, firstOpen = false)
     }
 
-    /** An App Link (a shared page, or Google sign-in returning to /login) opens in place. */
+    /** An App Link (a shared page, or Google sign-in returning to /login) or a tapped notification opens in place. */
     private fun open(intent: Intent?, firstOpen: Boolean) {
         val link = intent?.dataString
+        val pushed = LinkPolicy.safeOpenPath(intent?.getStringExtra(Push.EXTRA_PATH))
         when {
             link != null && LinkPolicy.isOwnLink(link, config.ownHosts) -> web.loadUrl(link)
+            pushed != null -> web.loadUrl(config.siteUrl.trimEnd('/') + pushed)
             firstOpen -> web.loadUrl(config.siteUrl)
         }
     }
@@ -173,6 +179,35 @@ abstract class ShellActivity : Activity() {
 
         @JavascriptInterface
         fun saveFailed() = runOnUiThread { toast(R.string.shell_download_failed) }
+
+        /** The signed-in page turns on alerts; the token comes back in an `ideaholiday:push-token` event. */
+        @JavascriptInterface
+        fun enablePush() = runOnUiThread {
+            if (!isOwnPage()) return@runOnUiThread
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_REQUEST)
+            }
+            fetchPushToken()
+        }
+
+        /** The saved token, so signing out can unregister this phone. */
+        @JavascriptInterface
+        fun pushToken(): String = Push.savedToken(this@ShellActivity).orEmpty()
+    }
+
+    /** Phones without Google Play services get no token; the site's email and WhatsApp alerts still reach them. */
+    private fun fetchPushToken() {
+        runCatching {
+            FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                Push.save(this, token)
+                sendPushToken(token)
+            }
+        }
+    }
+
+    private fun sendPushToken(token: String) {
+        if (!isOwnPage()) return
+        web.evaluateJavascript("window.dispatchEvent(new CustomEvent('ideaholiday:push-token', { detail: ${JSONObject.quote(token)} }))", null)
     }
 
     private fun download(url: String, userAgent: String?, contentDisposition: String?, mime: String?) {
@@ -289,6 +324,7 @@ abstract class ShellActivity : Activity() {
     }
 
     override fun onDestroy() {
+        Push.onToken = null
         fileCallback?.onReceiveValue(null)
         io.shutdown()
         web.destroy()

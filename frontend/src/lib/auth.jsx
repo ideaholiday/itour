@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import { authenticatedFetch } from "./api.js";
+import { appName, enableAppPush, unregisterAppPush } from "./appPush.js";
 
 const AuthContext = createContext(null);
 
@@ -85,6 +87,15 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  // Inside the traveler or supplier app, this phone gets the signed-in account's alerts.
+  useEffect(() => {
+    const app = appName();
+    if (!user?.id || !app) return undefined;
+    return enableAppPush((token) => authenticatedFetch("/api/push/devices", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, app }),
+    }));
+  }, [user?.id]);
+
   const login = (token, u) => {
     localStorage.setItem("wi_token", token);
     const enrichedUser = {
@@ -95,6 +106,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    unregisterAppPush();
     localStorage.removeItem("wi_token");
     if (supabaseRef.current) {
       supabaseRef.current.auth.signOut();

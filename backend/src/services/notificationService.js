@@ -1,6 +1,7 @@
 import { sendSupplierSms, smsConfiguration } from "./smsService.js";
 import { sendEmail, sendSupplierNotification } from "./emailService.js";
 import { normalizeWhatsAppPhone, sendWhatsAppMessage, whatsAppTemplate } from "./whatsappService.js";
+import { sendPush } from "./pushService.js";
 import { isServiceablePayment } from "../lib/bookingSources.js";
 import { guestDocumentLinks } from "./guestDocumentService.js";
 import logger from "../config/logger.js";
@@ -59,7 +60,11 @@ export async function sendRecipientChannels({ database, eventType, eventKeyPrefi
       metadata,
     }, { database }).then((result) => ({ channel: "WHATSAPP", recipientRole: recipient.role, ...result })));
   }
-  return Promise.all(tasks);
+  // The same alert as a push to the recipient's Android app, if they use it (ADR 053).
+  tasks.push(sendPush({ database, recipient, eventType, eventKeyPrefix, body: subject, metadata })
+    .then((results) => results.map((result) => ({ recipientRole: recipient.role, ...result })))
+    .catch((err) => { logger.error("Push notification failed", { error: err.message, eventType }); return []; }));
+  return Promise.all(tasks).then((results) => results.flat());
 }
 
 export function queueNotification(work, label = "notification") {

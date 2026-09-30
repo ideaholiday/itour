@@ -44,4 +44,13 @@ test("drivers sign in with an email code and see only their own trips", async (t
   const someoneElse = db.prepare("SELECT id FROM driver_assignments WHERE LOWER(COALESCE(driver_email, '')) <> ? LIMIT 1").get(EMAIL);
   const link = await requestJson(api.baseUrl, `/api/driver-account/trips/${someoneElse?.id || "missing"}/link`, { token: session.data.token, body: {} });
   assert.equal(link.response.status, 404, "another driver's trip is not found");
+
+  // The driver app registers its push token with the driver session (ADR 053).
+  const pushToken = "driver-app-registration-token-0123456789";
+  assert.equal((await requestJson(api.baseUrl, "/api/driver-account/push-token", { body: { token: pushToken } })).response.status, 401);
+  assert.equal((await requestJson(api.baseUrl, "/api/driver-account/push-token", { token: session.data.token, body: { token: pushToken } })).response.status, 200);
+  assert.deepEqual(db.prepare("SELECT app, owner_type, owner_key FROM push_devices WHERE token = ?").get(pushToken), { app: "driver", owner_type: "DRIVER", owner_key: EMAIL });
+  assert.equal((await requestJson(api.baseUrl, "/api/push/devices", { body: { token: pushToken, app: "traveler" } })).response.status, 401, "app users register only when signed in");
+  assert.equal((await requestJson(api.baseUrl, "/api/push/unregister", { body: { token: pushToken } })).response.status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM push_devices WHERE token = ?").get(pushToken).n, 0, "signing out removes the phone");
 });

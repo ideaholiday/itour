@@ -48,6 +48,10 @@ object LinkPolicy {
         return (uri.scheme == "https" || uri.scheme == "http") && uri.host?.lowercase() in ownHosts
     }
 
+    /** A path from a push notification, opened on the app's own site; anything else is ignored. */
+    fun safeOpenPath(path: String?): String? =
+        path?.takeIf { it.startsWith("/") && !it.startsWith("//") && !it.contains('\\') && !it.contains(':') && it.length <= 500 }
+
     /** A file name safe to save in Downloads, keeping its extension. */
     fun safeFileName(name: String?, fallbackExtension: String?): String {
         val cleaned = name.orEmpty().substringAfterLast('/').substringAfterLast('\\')

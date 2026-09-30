@@ -46,6 +46,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Trip-request alerts by Firebase push (ADR 053). -->
+        <service
+            android:name=".TripAlertService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="alerts" />
+        <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/ic_notification" />
+
         <service
             android:name=".LocationService"
             android:exported="false"

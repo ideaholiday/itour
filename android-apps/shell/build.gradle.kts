@@ -18,5 +18,8 @@ android {
 }
 
 dependencies {
+    // Push notifications (ADR 053). The apps apply the google-services plugin.
+    implementation(platform("com.google.firebase:firebase-bom:34.18.0"))
+    implementation("com.google.firebase:firebase-messaging")
     testImplementation("junit:junit:4.13.2")
 }

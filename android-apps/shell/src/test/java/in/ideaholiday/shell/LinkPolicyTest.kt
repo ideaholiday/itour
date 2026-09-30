@@ -56,6 +56,15 @@ class LinkPolicyTest {
     }
 
     @Test
+    fun notificationsOpenOnlyOwnSitePaths() {
+        org.junit.Assert.assertEquals("/supplier/bookings", LinkPolicy.safeOpenPath("/supplier/bookings"))
+        org.junit.Assert.assertEquals(null, LinkPolicy.safeOpenPath("//evil.example/x"))
+        org.junit.Assert.assertEquals(null, LinkPolicy.safeOpenPath("https://evil.example"))
+        org.junit.Assert.assertEquals(null, LinkPolicy.safeOpenPath("/\\evil.example"))
+        org.junit.Assert.assertEquals(null, LinkPolicy.safeOpenPath(null))
+    }
+
+    @Test
     fun downloadNamesAreSafe() {
         assertEquals("guest-list-2026-10-01.csv", LinkPolicy.safeFileName("guest-list-2026-10-01.csv", "csv"))
         assertEquals("passwd.pdf", LinkPolicy.safeFileName("../../etc/passwd", "pdf"))

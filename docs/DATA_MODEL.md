@@ -312,6 +312,7 @@ erDiagram
 - **`supplier_drivers`**: a supplier's fleet, one row per driver and vehicle (`driver_name`, `driver_phone`, `vehicle_model`, `vehicle_number`, `license_number`, `seat_capacity`, `status`).
   - `license_expiry`, `permit_expiry`, `insurance_expiry`, `fitness_expiry` (migration 051): `YYYY-MM-DD` or `NULL`. A vehicle with any of these before the trip's `activity_date` can't be assigned, by hand or by automatic dispatch (ADR 024).
 - **`driver_login_codes`** (migration 080, ADR 053): driver sign-in codes. `email` (lowercase roster email), `code_hash` (HMAC-SHA-256, never the code), `expires_at` (10 minutes), `attempts` (5 allowed), `used_at`.
+- **`push_devices`** (migration 081, ADR 053): one row per Firebase token. `app` (`driver`, `traveler`, `supplier`), `owner_type` `DRIVER` (`owner_key` = roster email) or `USER` (`owner_key` = `users.id`), `disabled_at` when FCM reports it unregistered.
 - **`driver_location_pings`** (migration 035): every accepted driver position.
   - `assignment_id`, `booking_id`, `supplier_id`.
   - `lat`, `lng`, `accuracy_m`, `speed_kmh`, `heading`.

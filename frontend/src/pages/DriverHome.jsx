@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { enableAppPush, unregisterAppPush } from '../lib/appPush.js';
 
 // Driver sign-in by email code and the driver's trips from every supplier (ADR 053).
 // Opening a trip hands its link to the existing trip page, so accepting, GPS
@@ -28,6 +29,7 @@ export default function DriverHome() {
   const [busy, setBusy] = useState(false);
 
   function signOut(reason = '') {
+    unregisterAppPush('IdeaHolidayDriverApp');
     writeSession('');
     setSession('');
     setTrips(null);
@@ -43,6 +45,8 @@ export default function DriverHome() {
     finally { setBusy(false); }
   }
   useEffect(() => { if (session) load(); }, [session]);
+  // In the driver app, new trip requests arrive as notifications (ADR 053).
+  useEffect(() => (session ? enableAppPush((token) => request('/push-token', { body: { token }, token: session }), 'IdeaHolidayDriverApp') : undefined), [session]);
 
   async function sendCode(event) {
     event.preventDefault();

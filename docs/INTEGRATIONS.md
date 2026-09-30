@@ -127,6 +127,11 @@ Fallback channel for urgent supplier booking dispatches in low-connectivity area
 
 ---
 
+## 5.1 Firebase Cloud Messaging (push to the Android apps)
+- **What:** every recipient alert sent by `sendRecipientChannels` also goes as a push to that recipient's app phones (ADR 053): drivers by roster email, travelers by user, a supplier's owner and front-desk/manager staff (not guides). The push text is the alert's subject; tapping opens `/driver`, `/bookings` or `/supplier/bookings`.
+- **How:** `pushService.js` gets an access token from the Cloud Run metadata server (`FIREBASE_PROJECT_ID`, keyless, production) or by signing a service-account key JWT (`FIREBASE_SERVICE_ACCOUNT`), caches it, and calls FCM HTTP v1 `messages:send`. `UNREGISTERED` / `INVALID_ARGUMENT` switch the device off (`push_devices.disabled_at`). Each push is a `notification_deliveries` row with channel `PUSH`, never the device token.
+- **Config:** `FIREBASE_PROJECT_ID` (backend, set by `deploy.sh`); the Cloud Run runtime service account needs the Firebase Cloud Messaging API Admin role on `ideaholiday-todothing`. Each app needs `google-services.json` from the Firebase console next to its `build.gradle.kts` (git-ignored). Push needs Google Play services on the phone.
+
 ## 6. Ola Maps (Maps, Places, ETA)
 
 ### Overview & Purpose
