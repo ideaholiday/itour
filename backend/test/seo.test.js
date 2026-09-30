@@ -15,6 +15,7 @@ test("sitemap.xml lists public routes, cities with live products, and products w
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/transfers<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/search<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/privacy-policy<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/ideaholiday.in\/delete-account<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/things-to-do\/goa<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/things-to-do\/navi-mumbai<\/loc>/);
   assert.match(xml, /<loc>https:\/\/ideaholiday.in\/hi\/things-to-do\/goa<\/loc>/, "each city's Hindi page too");
@@ -261,7 +262,7 @@ test("a path the app has no page for is a noindex 404; every App.jsx route is kn
   assert.deepEqual(appRoutes.filter((route) => !SPA_ROUTES.includes(route)), [], "add new App.jsx routes to shared/spaRoutes.js");
   assert.deepEqual(SPA_ROUTES.filter((route) => !appRoutes.includes(route)), [], "remove routes App.jsx no longer has");
 
-  for (const known of ["/", "/activity/Goa-Scuba/p1", "/About-Us/", "/checkout/verify", "/privacy-policy"]) assert.equal(isKnownSpaPath(known), true, known);
+  for (const known of ["/", "/activity/Goa-Scuba/p1", "/About-Us/", "/checkout/verify", "/privacy-policy", "/delete-account"]) assert.equal(isKnownSpaPath(known), true, known);
   for (const unknown of ["/my-trips", "/activity", "/assets/missing.js", "/admin/nope/deeper"]) assert.equal(isKnownSpaPath(unknown), false, unknown);
 });
 

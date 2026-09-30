@@ -45,6 +45,7 @@ export function generateSitemapXml(products = [], baseUrl = BASE_URL, cities = [
     { loc: `${baseUrl}/terms`, priority: "0.5", changefreq: "monthly" },
     { loc: `${baseUrl}/cancellation`, priority: "0.5", changefreq: "monthly" },
     { loc: `${baseUrl}/privacy-policy`, priority: "0.5", changefreq: "monthly" },
+    { loc: `${baseUrl}/delete-account`, priority: "0.3", changefreq: "yearly" },
   ];
 
   const destinationUrls = [

@@ -29,6 +29,7 @@ const Login = React.lazy(() => import("./pages/Login.jsx"));
 const HowItWorks = React.lazy(() => import("./pages/HowItWorks.jsx"));
 const TermsPage = React.lazy(() => import("./pages/TermsPage.jsx"));
 const PrivacyPolicyPage = React.lazy(() => import("./pages/PrivacyPolicyPage.jsx"));
+const DeleteAccountPage = React.lazy(() => import("./pages/DeleteAccountPage.jsx"));
 const CancellationPage = React.lazy(() => import("./pages/CancellationPage.jsx"));
 const AboutPage = React.lazy(() => import("./pages/AboutPage.jsx"));
 const ContactPage = React.lazy(() => import("./pages/ContactPage.jsx"));
@@ -220,6 +221,7 @@ function AppContent() {
             <Route path="/cancellation" element={<CancellationPage />} />
             <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
             <Route path="/privacy" element={<Navigate to="/privacy-policy" replace />} />
+            <Route path="/delete-account" element={<DeleteAccountPage />} />
             <Route path="/about-us" element={<AboutPage />} />
             <Route path="/contact-us" element={<ContactPage />} />
             <Route path="*" element={<NotFound404 />} />

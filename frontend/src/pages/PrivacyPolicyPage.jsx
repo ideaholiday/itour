@@ -18,7 +18,7 @@ function Bullets({ items }) {
 export default function PrivacyPolicyPage() {
   return (
     <ContentPageLayout
-      eyebrow="Legal & Compliance · Last Updated: 28 September 2026"
+      eyebrow="Legal & Compliance · Last Updated: 30 September 2026"
       title="Privacy Policy"
       intro="How Idea Holiday Private Limited collects, uses, shares and protects personal data when you book, list a business, drive a trip or browse ideaholiday.in, and the rights you have under the Digital Personal Data Protection Act, 2023."
       badgeText="Your Data, Your Rights"
@@ -32,8 +32,9 @@ export default function PrivacyPolicyPage() {
       <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-10 lg:p-12">
         <ArticleSection number={1} title="Who we are">
           <p>
-            <strong>Idea Holiday Private Limited</strong> (“Idea Holiday”, “we”, “us”) runs the travel marketplace at ideaholiday.in
-            the supplier portal at supply.ideaholiday.in and the Idea Holiday Driver app for Android. We are the data fiduciary
+            <strong>Idea Holiday Private Limited</strong> (“Idea Holiday”, “we”, “us”) runs the travel marketplace at ideaholiday.in,
+            the supplier portal at supply.ideaholiday.in, and the Idea Holiday, Idea Holiday Supplier and Idea Holiday Driver
+            apps for Android. We are the data fiduciary
             for the personal data described here. Registered office: {REGISTERED_OFFICE}.
             Tour operators you book with receive the details they need to run your trip and handle them as independent businesses.
           </p>
@@ -58,6 +59,7 @@ export default function PrivacyPolicyPage() {
           <Bullets items={[
             "Device and usage data: pages viewed, searches, approximate location from IP address, browser and device type, and page-speed measurements that carry no identifiers.",
             "Cookies and browser storage that keep you signed in, remember a referral or creator link for 30 days, and measure visits and marketing campaigns (see section 6).",
+            "Our Android apps show the same pages as the website, so everything above applies to them. They also store a push notification token for your device (through Google Firebase) to send booking and trip alerts, and ask for your location only when you use a feature that needs it, such as choosing a pickup point.",
           ]} />
         </ArticleSection>
 
@@ -125,7 +127,7 @@ export default function PrivacyPolicyPage() {
           ]} />
           <p>
             Write to <a href={`mailto:${GRIEVANCE_EMAIL}`} className="font-bold text-neel underline">{GRIEVANCE_EMAIL}</a> from
-            the email address on your account.
+            the email address on your account. To delete your account, see <Link to="/delete-account" className="font-bold text-neel underline">Delete your account</Link>.
           </p>
         </ArticleSection>
 

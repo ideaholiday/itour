@@ -67,6 +67,7 @@ const footerGroups = [
       ["Terms & Conditions", "/terms"],
       ["Cancellation & Refund", "/cancellation"],
       ["Privacy Policy", "/privacy-policy"],
+      ["Delete your account", "/delete-account"],
       ["How Idea Holiday works", "/how-it-works"],
     ],
   },
