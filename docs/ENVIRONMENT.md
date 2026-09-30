@@ -156,6 +156,8 @@ Idea Holiday booking {{1}} needs a driver assignment. Service: {{2}}. Scheduled 
 | :--- | :--- | :--- | :--- |
 | `MAPPLS_API_KEY` | Optional | `<mappls-api-key>` | Mappls MapmyIndia search key; also used for traveler ETA when `ETA_PROVIDER=mappls`. |
 | `ANDROID_DRIVER_APP_SHA256` | For app links | `AB:CD:…` (32 bytes) | SHA-256 signing-certificate fingerprint(s) of the driver app, comma-separated (Play Console → App integrity). Enables `/.well-known/assetlinks.json` so trip links open in the app. |
+| `ANDROID_TRAVELER_APP_SHA256` | For app links | `AB:CD:…` | Same, for the traveler app (`in.ideaholiday.app`): marketplace links and the Google sign-in return open in the app. |
+| `ANDROID_SUPPLIER_APP_SHA256` | For app links | `AB:CD:…` | Same, for the supplier app (`in.ideaholiday.supplier`) on supply.ideaholiday.in. |
 | `OLA_MAPS_CLIENT_ID`, `OLA_MAPS_CLIENT_SECRET` | Recommended | `<ola-client-id>`, `<ola-client-secret>` | Ola Maps OAuth client credentials, server-side only. Enable map tiles (`/api/maps/tiles`), place search, geocoding and the `ETA_PROVIDER=ola` ETA. Unset: OpenStreetMap tiles, OSM place search, estimated ETA. Production reads Secret Manager `idea-holiday-ola-maps-client-id` and `idea-holiday-ola-maps-client-secret`. |
 | `PLACES_PROVIDER` | Optional | `ola` | Forces `ola`, `osm` or `mappls` for `/api/places*`. Unset: `ola` when Ola credentials are set, else `osm`. |
 | `MAP_TILE_RATE_LIMIT` | Optional | `5000` | Map tile requests per IP per 15 minutes; tiles are exempt from the general API limit. |

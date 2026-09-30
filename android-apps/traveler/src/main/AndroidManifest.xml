@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"
+        android:usesCleartextTraffic="${cleartextAllowed}">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Marketplace links open in the app, and Google sign-in returns to /login here. Driver trip links (/driver) and supplier pages are left to their own apps. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="${siteHost}" />
+                <data android:path="/" />
+                <data android:pathPrefix="/activity" />
+                <data android:pathPrefix="/things-to-do" />
+                <data android:pathPrefix="/hi/things-to-do" />
+                <data android:pathPrefix="/search" />
+                <data android:pathPrefix="/transfers" />
+                <data android:pathPrefix="/checkout" />
+                <data android:pathPrefix="/booking-confirmed" />
+                <data android:pathPrefix="/bookings" />
+                <data android:pathPrefix="/my-bookings" />
+                <data android:pathPrefix="/my-reviews" />
+                <data android:pathPrefix="/trip" />
+                <data android:pathPrefix="/circuit" />
+                <data android:pathPrefix="/plan-trip" />
+                <data android:pathPrefix="/q/" />
+                <data android:pathPrefix="/track/" />
+                <data android:pathPrefix="/review/" />
+                <data android:pathPrefix="/r/" />
+                <data android:pathPrefix="/blog" />
+                <data android:pathPrefix="/wishlist" />
+                <data android:pathPrefix="/profile" />
+                <data android:pathPrefix="/messages" />
+                <data android:pathPrefix="/referrals" />
+                <data android:pathPrefix="/travel-and-earn" />
+                <data android:pathPrefix="/login" />
+                <data android:pathPrefix="/signup" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

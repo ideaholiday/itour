@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shell_offline_title">You\'re offline</string>
+    <string name="shell_offline_message">Idea Holiday couldn\'t load this page. Check your internet connection and try again.</string>
+    <string name="shell_offline_retry">Try again</string>
+    <string name="shell_no_browser">Install or turn on a web browser, such as Chrome, to continue.</string>
+    <string name="shell_no_app">No app on this phone can open this link.</string>
+    <string name="shell_no_upi_app">No UPI app found. Install Google Pay, PhonePe, Paytm or BHIM, or choose another payment method.</string>
+    <string name="shell_download_started">Downloading %1$s to Downloads</string>
+    <string name="shell_download_saved">Saved %1$s to Downloads</string>
+    <string name="shell_download_failed">The file couldn\'t be saved. Try again.</string>
+    <string name="shell_download_too_large">This file is too large to save in the app.</string>
+    <string name="shell_download_needs_storage">Allow storage access to save files to Downloads.</string>
+</resources>

@@ -122,10 +122,10 @@ own credentials and API documentation — they cannot be written honestly withou
 them, so treat each as its own scoped piece of work.
 
 **3. Traveler and supplier Android apps** *(owner, 2026-09-29; ADR 052, [`DECISIONS_MOBILE.md`](DECISIONS_MOBILE.md))*
-These start after the driver app reaches the internal testing track. Each app is a thin Kotlin shell like `android-driver/`.
+Built together with the driver app and released together (ADR 053). Both are in `android-apps/` on one shared WebView shell: Google sign-in in a Custom Tab, Cashfree UPI handoff, file uploads, downloads, App Links. **Next:** Firebase push (needs the Firebase project and each app's `google-services.json`), store listings, and testing on real phones.
 - **Traveler app** (ideaholiday.in): search, book and pay in the app. Cashfree UPI payments must open the UPI app from the WebView, and App Links for booking and voucher URLs must open the app. Vouchers must download.
 - **Supplier app** (supply.ideaholiday.in): the extranet for owners and staff, with the same shell.
-- Owner to decide: package names (they are permanent once uploaded) and whether to add push notifications (Firebase is a new service).
+- Decided (ADR 053): `in.ideaholiday.app`, `in.ideaholiday.supplier`, Firebase push for all three apps.
 
 ---
 

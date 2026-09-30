@@ -119,7 +119,7 @@ import reviewsRouter from "./routes/reviews.js";
 import analyticsRouter from "./routes/analytics.js";
 import seoRouter, { indexTemplate, notFoundPage } from "./routes/seo.js";
 import { isKnownSpaPath } from "../../shared/spaRoutes.js";
-import { driverAppAssetLinks } from "./lib/androidAppLinks.js";
+import { androidAppAssetLinks } from "./lib/androidAppLinks.js";
 import publicSuppliersRouter from "./routes/publicSuppliers.js";
 import blogRouter from "./routes/blog.js";
 import { goRouter, shareRouter } from "./routes/shareKit.js";
@@ -272,9 +272,9 @@ app.get(["/api/health", "/api/v1/health"], (req, res) =>
   })
 );
 
-// Android App Links: trip links open in the driver app once its certificate is configured.
+// Android App Links: site links open in the driver, traveler or supplier app once its certificate is configured.
 app.get("/.well-known/assetlinks.json", (_req, res) => {
-  const links = driverAppAssetLinks();
+  const links = androidAppAssetLinks();
   if (!links) return res.status(404).json({ error: "Not configured" });
   res.set("Cache-Control", "public, max-age=3600");
   return res.json(links);

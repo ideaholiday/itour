@@ -167,6 +167,18 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 Release signing reads `android-driver/keystore.properties` (git-ignored). Never commit the keystore or its passwords.
 
+### Traveler and supplier Android apps (`android-apps/`)
+One Gradle project: `shell/` (the shared WebView activity) and the `traveler/` (`in.ideaholiday.app`) and `supplier/` (`in.ideaholiday.supplier`) apps. Same JDK and SDK as the driver app (`android-apps/local.properties`).
+```bash
+cd android-apps
+./gradlew :shell:testDebugUnitTest :traveler:assembleDebug :supplier:assembleDebug
+./gradlew :traveler:assembleDebug -PtravelerSiteUrl=http://10.0.2.2:5173     # emulator against local dev
+./gradlew :supplier:assembleDebug -PsupplierSiteUrl=http://10.0.2.2:5173
+./gradlew :traveler:bundleRelease :supplier:bundleRelease                     # signed when keystore-<app>.properties exists
+```
+- **Google sign-in** opens in a Chrome Custom Tab (Google refuses WebViews) and comes back through the site's `/login` App Link. It returns to the app only when `ANDROID_TRAVELER_APP_SHA256` / `ANDROID_SUPPLIER_APP_SHA256` are set and Android has verified the link; otherwise the traveler ends up signed in in Chrome instead.
+- Each app has its own upload key in `android-apps/keystore-traveler.properties` / `keystore-supplier.properties` (git-ignored).
+
 ### Deploying
 CI/CD runs from `.github/workflows/deploy.yml` (staging on `staging`, blue-green production on `main`, with smoke tests and rollback).
 Manual deploy: `./deploy.sh`. Smoke-test a URL: `bash scripts/smoke-tests.sh <service-url>`. Roll back: `bash scripts/rollback.sh [SERVICE_NAME] [REGION] [PROJECT_ID]`.
