@@ -178,7 +178,10 @@ cd android-apps
 ```
 - **Google sign-in** opens in a Chrome Custom Tab (Google refuses WebViews) and comes back through the site's `/login` App Link. It returns to the app only when `ANDROID_TRAVELER_APP_SHA256` / `ANDROID_SUPPLIER_APP_SHA256` are set and Android has verified the link; otherwise the traveler ends up signed in in Chrome instead.
 - **Push:** put `google-services.json` (Firebase console, project `ideaholiday-todothing`, one file listing all three apps) in `android-driver/app/`, `android-apps/traveler/` and `android-apps/supplier/`. It is git-ignored; the build fails without it.
-- Each app has its own upload key in `android-apps/keystore-traveler.properties` / `keystore-supplier.properties` (git-ignored).
+- **Release signing:** each app has its own upload key in `~/idea-holiday-keys/` on the owner's Mac (back it up; without it no update can be uploaded). `android-apps/keystore-traveler.properties` / `keystore-supplier.properties` point at them (`storeFile`, `storePassword`, `keyAlias=upload`, `keyPassword`; git-ignored). Without that file `bundleRelease` builds an **unsigned** bundle, which Play rejects with "All uploaded bundles must be signed". Check before uploading: `keytool -printcert -jarfile <app>-release.aab` must print an `Owner:` line.
+- **Every upload needs a higher `versionCode`** in the app's `build.gradle.kts` (driver: 2 / 1.1.0, traveler and supplier: 1 / 1.0.0 as of 2026-09-30).
+- **App Links fingerprints** come from Play Console → the app → **Android developer verification** (or Protected with Play). List every Play certificate (classic, deployment and hybrid), not just the classic key: download the `.der` files and take `shasum -a 256` of each, which avoids copying errors. They live in `deploy.sh`; after a key change, update them there and deploy, then check `curl https://ideaholiday.in/.well-known/assetlinks.json` and, on a phone, `adb shell pm get-app-links <package>`.
+- **Push needs the Cloud Run service account** (`723912383049-compute@developer.gserviceaccount.com`) to hold `roles/firebasecloudmessaging.admin` on `ideaholiday-todothing`, and `fcm.googleapis.com` enabled in both projects (done 2026-09-30).
 
 ### Deploying
 CI/CD runs from `.github/workflows/deploy.yml` (staging on `staging`, blue-green production on `main`, with smoke tests and rollback).
