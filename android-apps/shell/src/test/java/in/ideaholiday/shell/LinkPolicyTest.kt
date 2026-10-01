@@ -62,6 +62,18 @@ class LinkPolicyTest {
         org.junit.Assert.assertEquals(null, LinkPolicy.safeOpenPath("https://evil.example"))
         org.junit.Assert.assertEquals(null, LinkPolicy.safeOpenPath("/\\evil.example"))
         org.junit.Assert.assertEquals(null, LinkPolicy.safeOpenPath(null))
+        org.junit.Assert.assertEquals("/bookings?ref=IH-AB12", LinkPolicy.safeOpenPath("/bookings?ref=IH-AB12"))
+    }
+
+    @Test
+    fun onlyOwnPagesGetTheCameraAndNeverTheMicrophone() {
+        val supplier = setOf("supply.ideaholiday.in")
+        val camera = LinkPolicy.VIDEO_CAPTURE
+        val microphone = "android.webkit.resource.AUDIO_CAPTURE"
+        org.junit.Assert.assertEquals(listOf(camera), LinkPolicy.mediaToGrant("https://supply.ideaholiday.in/", supplier, listOf(camera, microphone)))
+        org.junit.Assert.assertEquals(emptyList<String>(), LinkPolicy.mediaToGrant("https://supply.ideaholiday.in/", supplier, listOf(microphone)))
+        org.junit.Assert.assertEquals(emptyList<String>(), LinkPolicy.mediaToGrant("https://evil.example/", supplier, listOf(camera)))
+        org.junit.Assert.assertEquals(emptyList<String>(), LinkPolicy.mediaToGrant("https://ideaholiday.in/", supplier, listOf(camera)))
     }
 
     @Test

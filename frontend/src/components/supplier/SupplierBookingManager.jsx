@@ -92,7 +92,8 @@ function DriverLocationLine({ booking, onRefresh }) {
 export default function SupplierBookingManager({ supplierData, loading, onRefresh, canManage = true }) {
   const [activeFilter, setActiveFilter] = useState("ALL"); // ALL, PENDING, IN_PROGRESS, COMPLETED, CANCELLED
   const [sourceFilter, setSourceFilter] = useState("ALL"); // ALL, DIRECT, IDEAHOLIDAY, API
-  const [searchTerm, setSearchTerm] = useState("");
+  // A push notification opens /supplier/bookings?ref=… on the booking it is about.
+  const [searchTerm, setSearchTerm] = useState(() => new URLSearchParams(window.location.search).get("ref") || "");
   const [sortBy, setSortBy] = useState("NEWEST");
   const [selectedBooking, setSelectedBooking] = useState(null);
 

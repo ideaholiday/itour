@@ -12,6 +12,13 @@ import { beginNotificationDelivery, finishNotificationDelivery } from "./notific
  */
 export const PUSH_APPS = Object.freeze(["driver", "traveler", "supplier"]);
 const OPEN_PATH = Object.freeze({ driver: "/driver", traveler: "/bookings", supplier: "/supplier/bookings" });
+
+/** The page a push opens: the booking list, focused on the alert's booking when it has one. Drivers see every trip on /driver. */
+export function pushPath(app, metadata) {
+  const ref = metadata?.bookingRef;
+  if (!ref || app === "driver") return OPEN_PATH[app];
+  return `${OPEN_PATH[app]}?ref=${encodeURIComponent(ref)}`;
+}
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 // Cloud Run's own service account, with no key file (organisation policy blocks keys).
@@ -120,7 +127,7 @@ export async function sendPush({ database = db, recipient, eventType, eventKeyPr
         body: JSON.stringify({ message: {
           token: device.token,
           notification: { title, body },
-          data: { path: OPEN_PATH[device.app] },
+          data: { path: pushPath(device.app, metadata) },
           android: { priority: "HIGH", notification: { channel_id: "alerts" } },
         } }),
       });

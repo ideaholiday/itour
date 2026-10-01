@@ -14,6 +14,7 @@ import android.util.Base64
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -47,6 +48,7 @@ abstract class ShellActivity : Activity() {
         const val LOCATION_REQUEST = 52
         const val STORAGE_REQUEST = 53
         const val NOTIFICATION_REQUEST = 54
+        const val CAMERA_REQUEST = 55
         const val MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
         const val CUSTOM_TABS_SESSION = "android.support.customtabs.extra.SESSION"
     }
@@ -58,6 +60,7 @@ abstract class ShellActivity : Activity() {
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var pendingLocation: Pair<String, GeolocationPermissions.Callback>? = null
     private var pendingStorageAction: (() -> Unit)? = null
+    private var pendingCamera: Pair<PermissionRequest, List<String>>? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -150,6 +153,20 @@ abstract class ShellActivity : Activity() {
             }
             pendingLocation = origin to callback
             requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), LOCATION_REQUEST)
+        }
+
+        /** The camera for our own pages (QR check-in, KYB selfie). An app that doesn't declare CAMERA is refused by Android. */
+        override fun onPermissionRequest(request: PermissionRequest) {
+            val grant = LinkPolicy.mediaToGrant(request.origin.toString(), config.ownHosts, request.resources.toList())
+            if (grant.isEmpty()) return request.deny()
+            if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) return request.grant(grant.toTypedArray())
+            pendingCamera?.first?.deny()
+            pendingCamera = request to grant
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_REQUEST)
+        }
+
+        override fun onPermissionRequestCanceled(request: PermissionRequest) {
+            if (pendingCamera?.first == request) pendingCamera = null
         }
     }
 
@@ -299,6 +316,7 @@ abstract class ShellActivity : Activity() {
         val granted = grantResults.any { it == PackageManager.PERMISSION_GRANTED }
         when (requestCode) {
             LOCATION_REQUEST -> pendingLocation?.let { (origin, callback) -> callback.invoke(origin, granted, false) }.also { pendingLocation = null }
+            CAMERA_REQUEST -> pendingCamera?.let { (request, grant) -> if (granted) request.grant(grant.toTypedArray()) else request.deny() }.also { pendingCamera = null }
             STORAGE_REQUEST -> {
                 val action = pendingStorageAction
                 pendingStorageAction = null

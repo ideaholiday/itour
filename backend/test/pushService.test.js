@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import jwt from "jsonwebtoken";
-import { firebaseConfiguration, pushDevicesFor, registerPushDevice, sendPush, unregisterPushDevice } from "../src/services/pushService.js";
+import { firebaseConfiguration, pushDevicesFor, pushPath, registerPushDevice, sendPush, unregisterPushDevice } from "../src/services/pushService.js";
 import { migratedDb } from "./helpers/migratedDb.js";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
@@ -65,7 +65,7 @@ test("a push is sent once through FCM v1, and a dead token is switched off", asy
   registerPushDevice(db, { token: TOKEN("owner-phone"), app: "supplier", ownerType: "USER", ownerKey: "usr_owner" });
   registerPushDevice(db, { token: TOKEN("owner-old-phone"), app: "supplier", ownerType: "USER", ownerKey: "usr_owner" });
   const firebase = fakeFirebase({ [TOKEN("owner-old-phone")]: { status: 404, body: { error: { status: "NOT_FOUND", details: [{ errorCode: "UNREGISTERED" }] } } } });
-  const alert = { database: db, recipient: { role: "SUPPLIER", id: "sup_c" }, eventType: "NEW_BOOKING", eventKeyPrefix: "booking:bk_1", body: "New booking IH-1 for Airport run" };
+  const alert = { database: db, recipient: { role: "SUPPLIER", id: "sup_c" }, eventType: "NEW_BOOKING", eventKeyPrefix: "booking:bk_1", body: "New booking IH-1 for Airport run", metadata: { bookingRef: "IH-1" } };
 
   const results = await sendPush(alert, { env: ENV, fetchImpl: firebase.fetchImpl });
   assert.deepEqual(results.map((r) => r.status).sort(), ["FAILED", "SENT"]);
@@ -74,7 +74,7 @@ test("a push is sent once through FCM v1, and a dead token is switched off", asy
   assert.equal(sent.options.headers.Authorization, "Bearer ya29.test");
   const { message } = JSON.parse(sent.options.body);
   assert.deepEqual(message.notification, { title: "Idea Holiday", body: "New booking IH-1 for Airport run" });
-  assert.deepEqual(message.data, { path: "/supplier/bookings" });
+  assert.deepEqual(message.data, { path: "/supplier/bookings?ref=IH-1" }, "the push opens the booking it is about");
   assert.equal(message.android.notification.channel_id, "alerts");
   assert.ok(db.prepare("SELECT disabled_at FROM push_devices WHERE token = ?").get(TOKEN("owner-old-phone")).disabled_at, "the uninstalled phone is switched off");
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM notification_deliveries WHERE channel = 'PUSH' AND recipient_address LIKE 'push:supplier:%'").get().n, 2);
@@ -82,6 +82,14 @@ test("a push is sent once through FCM v1, and a dead token is switched off", asy
 
   const again = await sendPush(alert, { env: ENV, fetchImpl: firebase.fetchImpl });
   assert.deepEqual(again.map((r) => r.idempotent), [true], "the same alert is not pushed twice; the dead phone is skipped");
+});
+
+test("a push opens the booking it is about, or the app's list without one", () => {
+  assert.equal(pushPath("traveler", { bookingId: "bk_1", bookingRef: "IH-AB 12" }), "/bookings?ref=IH-AB%2012");
+  assert.equal(pushPath("supplier", { bookingRef: "IH-1" }), "/supplier/bookings?ref=IH-1");
+  assert.equal(pushPath("supplier", { supplierId: "sup_c" }), "/supplier/bookings");
+  assert.equal(pushPath("traveler", undefined), "/bookings");
+  assert.equal(pushPath("driver", { bookingRef: "IH-1" }), "/driver", "drivers see every trip on one page");
 });
 
 test("on Cloud Run, push signs in as the service's own account, with no key", async (t) => {

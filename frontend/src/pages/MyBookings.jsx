@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
@@ -67,7 +67,9 @@ export default function MyBookings() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("UPCOMING");
+  // A push notification opens /bookings?ref=… on the booking it is about.
+  const focusRef = useSearchParams()[0].get("ref");
+  const [activeTab, setActiveTab] = useState(focusRef ? "ALL" : "UPCOMING");
   const [cancelModalBooking, setCancelModalBooking] = useState(null);
   const [supportInitialType, setSupportInitialType] = useState("CANCELLATION");
   const [supportCases, setSupportCases] = useState([]);
@@ -187,6 +189,10 @@ export default function MyBookings() {
       ? groups.history
       : bookings;
   const nextTrip = groups.upcoming[0];
+
+  useEffect(() => {
+    if (focusRef && !loading) document.getElementById(`booking-${focusRef}`)?.scrollIntoView({ block: "start" });
+  }, [focusRef, loading]);
 
   if (!user) {
     return (
@@ -575,7 +581,8 @@ export default function MyBookings() {
               return (
                 <article
                   key={booking.id}
-                  className="overflow-hidden rounded-3xl border border-stone-200 bg-white shadow-sm transition hover:shadow-lg"
+                  id={`booking-${booking.ref}`}
+                  className={`overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:shadow-lg ${booking.ref && booking.ref === focusRef ? "border-amber-500 ring-2 ring-amber-400" : "border-stone-200"}`}
                 >
                   <div className="grid md:grid-cols-[260px_1fr]">
                     {/* Media Thumbnail */}

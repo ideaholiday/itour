@@ -48,6 +48,13 @@ object LinkPolicy {
         return (uri.scheme == "https" || uri.scheme == "http") && uri.host?.lowercase() in ownHosts
     }
 
+    /** WebView's name for the camera (`PermissionRequest.RESOURCE_VIDEO_CAPTURE`). */
+    const val VIDEO_CAPTURE = "android.webkit.resource.VIDEO_CAPTURE"
+
+    /** What a page's camera request is granted: the camera for our own pages (QR check-in, KYB selfie), never the microphone or anything else. */
+    fun mediaToGrant(origin: String, ownHosts: Set<String>, requested: List<String>): List<String> =
+        if (isOwnLink(origin, ownHosts)) requested.filter { it == VIDEO_CAPTURE } else emptyList()
+
     /** A path from a push notification, opened on the app's own site; anything else is ignored. */
     fun safeOpenPath(path: String?): String? =
         path?.takeIf { it.startsWith("/") && !it.startsWith("//") && !it.contains('\\') && !it.contains(':') && it.length <= 500 }
