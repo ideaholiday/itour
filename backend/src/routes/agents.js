@@ -6,7 +6,7 @@ import { travelAgencySchemas } from "../validators/apiSchemas.js";
 import { recordAuditEvent } from "../services/auditService.js";
 import { queueNotification } from "../services/notificationService.js";
 import {
-  agencyStatementCsv, agencyView, applyForAgency, getAgencyForUser, listAgencyBookings, sendAgencyEmail,
+  agencyStatementCsv, agencyView, applyForAgency, getAgencyForUser, listAgencyBookings, sendAgencyEmail, setAgencyLogo,
   AGENCY_DISCOUNT_MAX_PCT, AGENCY_DISCOUNT_MIN_PCT,
 } from "../services/travelAgencyService.js";
 import logger from "../config/logger.js";
@@ -49,6 +49,17 @@ router.post("/apply", authenticate, validateBody(travelAgencySchemas.apply), (re
     return res.status(resubmitted ? 200 : 201).json({ success: true, agency: agencyView(agency) });
   } catch (error) {
     return failure(res, req, error, "Could not save your application");
+  }
+});
+
+/** PUT /api/agents/logo { logoUrl | null }: the brand on the agency's client vouchers (ADR 055). */
+router.put("/logo", authenticate, validateBody(travelAgencySchemas.logo), (req, res) => {
+  try {
+    const agency = setAgencyLogo(db, req.user.id, req.body.logoUrl);
+    recordAuditEvent(db, { action: "TRAVEL_AGENCY_LOGO_CHANGED", actor: req.user, resourceType: "TRAVEL_AGENCY", resourceId: agency.id, requestId: req.requestId });
+    return res.json({ success: true, agency: agencyView(agency) });
+  } catch (error) {
+    return failure(res, req, error, "Could not save your logo");
   }
 });
 

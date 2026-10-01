@@ -217,6 +217,7 @@ export default function AgentDashboardPage() {
                     <>
                       <p className="font-bold text-stone-900">Paid {inr(booking.paidInr)}</p>
                       {booking.agentDiscountInr > 0 && <p className="text-xs text-emerald-700">Saved {inr(booking.agentDiscountInr)} on {inr(booking.websitePriceInr)}</p>}
+                      {booking.serviceGstInr > 0 && <p className="text-xs text-stone-500">incl. {inr(booking.serviceGstInr)} GST on service fee</p>}
                       {booking.refundInr > 0 && <p className="text-xs text-rose-700">Refunded {inr(booking.refundInr)}</p>}
                     </>
                   ) : <p className="text-xs text-stone-500">Payment not completed</p>}

@@ -4,7 +4,7 @@ import { evaluateSupplierAvailability } from "./availabilityService.js";
 import { resolveCommissionRate } from "./financeService.js";
 import { isSupplierSubscriptionCovered } from "./supplierKybGate.js";
 import { PHONE_FORMAT_HINT, toE164 } from "../lib/phone.js";
-import { approvedAgencyForUser } from "./travelAgencyService.js";
+import { AGENT_SERVICE_GST_PCT, approvedAgencyForUser } from "./travelAgencyService.js";
 
 const HOLD_VALIDITY_MS = 10 * 60 * 1000;
 const ACTIVE_ORDER_STATUS = "PENDING_PAYMENT";
@@ -92,8 +92,9 @@ function orderRecord(database, orderId, userId) {
     breakdown: {
       baseAmount: Number(order.base_amount),
       taxesAmount: Number(order.taxes_amount),
-      // An agency's order: base + taxes − agentDiscountAmount = totalAmount, what is paid (ADR 054).
+      // An agency's order: base + taxes − agentDiscountAmount + agentServiceGstAmount = totalAmount, what is paid (ADR 054, 055).
       agentDiscountAmount: Number(order.agent_discount_inr || 0),
+      agentServiceGstAmount: Number(order.agent_service_gst_inr || 0),
       totalAmount: Number(order.total_amount),
     },
     holdExpiresAt: order.hold_expires_at,
@@ -272,6 +273,7 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
     throw orderError("Your agency is no longer approved for agent prices. Request a fresh quote", 409, "AGENCY_NOT_APPROVED");
   }
   let orderAgentDiscount = 0;
+  let orderAgentGst = 0;
   const contact = contactDetails(user, input);
   const orderId = `co_${nanoid(14)}`;
   const orderRef = `IHC-${nanoid(8).toUpperCase()}`;
@@ -336,6 +338,10 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
       // The quoted agent discount, still kept below this booking's commission.
       const agentDiscount = agency ? Math.min(Math.round(Number(line.agentDiscountInr || 0)), Math.max(0, Math.round(commissionAmount) - 1)) : 0;
       orderAgentDiscount += agentDiscount;
+      // GST on IdeaHoliday's service fee, worked on this booking's own commission (ADR 055).
+      const agentServiceFee = agency ? Math.max(0, Math.round(commissionAmount) - agentDiscount) : 0;
+      const agentServiceGst = agency ? Math.round(agentServiceFee * AGENT_SERVICE_GST_PCT / 100) : 0;
+      orderAgentGst += agentServiceGst;
       const location = String(line.location || product.city || product.destination_name || "Supplier meeting point").trim();
 
       database.prepare(`
@@ -356,12 +362,13 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
         line.activityDate, linePickupTime, location,
         Number(line.adults ?? quote.adults_count), Number(line.children ?? quote.children_count), Number(line.luggage || 0),
         line.vehicleCategory || null, contact.travelerName, contact.travelerPhone, contact.travelerEmail,
-        money(totalAmount - agentDiscount), taxesAmount, commissionAmount, commissionRate, supplierPayout,
+        money(totalAmount - agentDiscount + agentServiceGst), taxesAmount, commissionAmount, commissionRate, supplierPayout,
         "Reserved from an owned, ready circuit quote", product.id,
       );
       if (agency) {
-        database.prepare("UPDATE bookings SET source = 'IH_B2B', agency_id = ?, agent_discount_pct = ?, agent_discount_inr = ? WHERE id = ?")
-          .run(agency.id, Number(agency.discount_pct), agentDiscount, bookingId);
+        database.prepare(`UPDATE bookings SET source = 'IH_B2B', agency_id = ?, agent_discount_pct = ?, agent_discount_inr = ?,
+          agent_service_fee_inr = ?, agent_service_gst_inr = ? WHERE id = ?`)
+          .run(agency.id, Number(agency.discount_pct), agentDiscount, agentServiceFee, agentServiceGst, bookingId);
       }
       const nativeRules = getInventoryRules(database, product.id);
       if (nativeRules) {
@@ -399,8 +406,8 @@ export function consumeCircuitQuote(database, input, { now = new Date() } = {}) 
     }
 
     if (agency) {
-      database.prepare("UPDATE circuit_orders SET agency_id = ?, agent_discount_inr = ?, total_amount = ? WHERE id = ?")
-        .run(agency.id, orderAgentDiscount, money(Number(quote.total_amount) - orderAgentDiscount), orderId);
+      database.prepare("UPDATE circuit_orders SET agency_id = ?, agent_discount_inr = ?, agent_service_gst_inr = ?, total_amount = ? WHERE id = ?")
+        .run(agency.id, orderAgentDiscount, orderAgentGst, money(Number(quote.total_amount) - orderAgentDiscount + orderAgentGst), orderId);
     }
 
     const consumed = database.prepare(`

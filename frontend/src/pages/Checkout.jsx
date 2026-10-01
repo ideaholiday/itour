@@ -301,10 +301,12 @@ export default function Checkout() {
   // An approved travel agency's price comes from the server quote, with no coupon or referral (ADR 054).
   const agentQuote = quote?.agent || null;
   const agentDiscountAmount = Number(agentQuote?.discountInr || 0);
+  // 18% GST on IdeaHoliday's service fee, added for agents (ADR 055).
+  const agentServiceGstAmount = Number(agentQuote?.serviceGstInr || 0);
   const discountAmount = !agentQuote && promoCodeForQuote && quote?.coupon?.valid ? Number(quote.coupon.discountInr || 0) : 0;
   const referralDiscountAmount = agentQuote ? 0 : Number(quote?.referral?.discountInr || 0);
   const referralUnavailable = !agentQuote && appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
-  const remainingBeforeWallet = Math.max(0, totalAmount - agentDiscountAmount - discountAmount - referralDiscountAmount);
+  const remainingBeforeWallet = Math.max(0, totalAmount - agentDiscountAmount + agentServiceGstAmount - discountAmount - referralDiscountAmount);
   // Referral credit is capped; creator earnings and refund credit in the wallet can pay the rest (the server applies the same split).
   const creatorCredit = Math.min(walletBalance, Number(walletPolicy.affiliateCreditInr || 0) + Number(walletPolicy.refundCreditInr || 0));
   const cappedWalletCredit = Math.floor(Math.min(walletBalance - creatorCredit, remainingBeforeWallet * Number(walletPolicy.walletMaxSharePct) / 100, Number(walletPolicy.walletMaxPerBookingInr)));
@@ -1125,6 +1127,12 @@ export default function Checkout() {
                         <Tag className="w-3.5 h-3.5" /> Agent price ({agentQuote.discountPct}% off)
                       </span>
                       <span>−{formatPrice(agentDiscountAmount)}</span>
+                    </div>
+                  )}
+                  {agentServiceGstAmount > 0 && (
+                    <div className="flex justify-between items-center text-stone-700 p-2">
+                      <span>GST {agentQuote.serviceGstPct}% on Idea Holiday service fee</span>
+                      <span>+{formatPrice(agentServiceGstAmount)}</span>
                     </div>
                   )}
 

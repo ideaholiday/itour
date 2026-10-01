@@ -444,7 +444,10 @@ BUSINESS_RULES §11.
   Agent bookings (migration 083, ADR 054): `agency_id` → `travel_agencies`,
   `agent_discount_pct`, `agent_discount_inr`; `source = 'IH_B2B'`.
   `circuit_quotes` and `circuit_orders` carry `agency_id` and `agent_discount_inr`;
-  an agency's `circuit_orders.total_amount` is net of it.
+  an agency's `circuit_orders.total_amount` is net of it. Migration 084 (ADR 055):
+  `bookings.agent_service_fee_inr` and `agent_service_gst_inr` (18% GST on the fee,
+  included in `amount_inr`), `circuit_quotes`/`circuit_orders.agent_service_gst_inr`
+  (added to the order total), `travel_agencies.logo_url`.
 - **`user_referrals`**: v1 table, no longer written. Carried into the tables
   above at startup.
 

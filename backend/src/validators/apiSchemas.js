@@ -90,6 +90,7 @@ export const travelAgencySchemas = {
     gstin: optionalText(20), pan: optionalText(12), address: optionalText(500),
     city: text(2, 100), state: text(2, 100), website: optionalText(300),
   }),
+  logo: object({ logoUrl: z.string().trim().max(600).nullable() }),
   review: object({
     status: z.enum(["APPROVED", "REJECTED", "SUSPENDED"]),
     discountPct: z.number().min(5).max(10).optional(),

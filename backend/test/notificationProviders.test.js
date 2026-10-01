@@ -214,3 +214,57 @@ test("supplier SMS records provider acceptance and suppresses successful retries
   assert.equal((await sendSupplierSms(input, { database, request })).idempotent, true);
   assert.equal(calls, 1);
 });
+
+test("an agent's client gets email in the agency's name, with replies to the agency (ADR 055)", async () => {
+  const previous = { enabled: process.env.EMAIL_NOTIFICATIONS_ENABLED, key: process.env.BREVO_API_KEY, provider: process.env.EMAIL_PROVIDER };
+  process.env.EMAIL_NOTIFICATIONS_ENABLED = "true";
+  const message = {
+    to: "client@example.com", recipientName: "Client", recipientRole: "TRAVELER", eventType: "TEST", subject: "Booking confirmed", text: "Your voucher",
+    fromName: 'Awadh "Holidays"\r\nBcc: x@evil.test', replyTo: { email: "Sana@Awadh.example" },
+  };
+
+  // Amazon SES: a display name on our verified address, with no header injection.
+  let database = notificationDatabase();
+  let sesInput;
+  const client = { send: async (command) => { sesInput = command.input; return { MessageId: "ses-agent-1" }; } };
+  await sendEmail({ ...message, eventKey: "test:agent:ses" }, { client, database });
+  assert.equal(sesInput.FromEmailAddress, '"Awadh HolidaysBcc: x@evil.test" <info@ideaholiday.in>');
+  assert.deepEqual(sesInput.ReplyToAddresses, ["sana@awadh.example"]);
+  database.close();
+
+  // Brevo: the sender name and reply-to in the API payload.
+  process.env.EMAIL_PROVIDER = "BREVO";
+  process.env.BREVO_API_KEY = "test-key";
+  database = notificationDatabase();
+  let brevoBody;
+  const fetchImpl = async (_url, options) => { brevoBody = JSON.parse(options.body); return { ok: true, json: async () => ({ messageId: "brevo-agent-1" }) }; };
+  await sendEmail({ ...message, eventKey: "test:agent:brevo" }, { database, fetchImpl });
+  assert.equal(brevoBody.sender.name, "Awadh HolidaysBcc: x@evil.test");
+  assert.equal(brevoBody.sender.email, "info@ideaholiday.in");
+  assert.deepEqual(brevoBody.replyTo, { email: "sana@awadh.example", name: "Awadh HolidaysBcc: x@evil.test" });
+
+  // Without them, mail is ours as before.
+  await sendEmail({ ...message, fromName: undefined, replyTo: undefined, eventKey: "test:agent:plain" }, { database, fetchImpl });
+  assert.equal(brevoBody.sender.name, "Idea Holiday");
+  assert.equal(brevoBody.replyTo, undefined);
+  database.close();
+  restoreEnv("EMAIL_NOTIFICATIONS_ENABLED", previous.enabled);
+  restoreEnv("BREVO_API_KEY", previous.key);
+  restoreEnv("EMAIL_PROVIDER", previous.provider);
+});
+
+test("an agent's client gets the neutral WhatsApp template once it is approved (ADR 055)", async () => {
+  const { agentGuestWhatsAppTemplate } = await import("../src/services/notificationService.js");
+  const previous = process.env.WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE;
+  const message = "Hello Meera,\n\nYour booking is confirmed. Booking IH-1 for Scuba on 2026-10-21.\nVoucher: https://x.test/v\n\nFor any change, contact Awadh Holidays (+91 98765).\n— Awadh Holidays";
+  const fallback = { name: "idea_holiday_trip_status" };
+  delete process.env.WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE;
+  assert.equal(agentGuestWhatsAppTemplate("Awadh Holidays", "IH-1", message, fallback), fallback, "until approved, the current template");
+  process.env.WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE = "agent_guest_update";
+  const template = agentGuestWhatsAppTemplate("Awadh Holidays", "IH-1", message, fallback);
+  assert.equal(template.name, "agent_guest_update");
+  assert.deepEqual(template.components[0].parameters.map((p) => p.text), [
+    "Awadh Holidays", "IH-1", "Your booking is confirmed. Booking IH-1 for Scuba on 2026-10-21. Voucher: https://x.test/v",
+  ]);
+  restoreEnv("WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE", previous);
+});

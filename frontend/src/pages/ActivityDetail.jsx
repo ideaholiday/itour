@@ -162,8 +162,8 @@ function QuoteSummary({ serverQuote, quoteLoading, formatPrice, addonsTotalInr, 
           )}
           {serverQuote.agent?.discountInr > 0 && (
             <div className="flex justify-between text-[11px] font-bold text-emerald-700">
-              <span>Your agent price ({serverQuote.agent.discountPct}% off)</span>
-              <span className="font-mono">{formatPrice(totalAmount - serverQuote.agent.discountInr)}</span>
+              <span>Your agent price ({serverQuote.agent.discountPct}% off{serverQuote.agent.serviceGstInr > 0 ? `, + ${serverQuote.agent.serviceGstPct}% GST on our fee` : ""})</span>
+              <span className="font-mono">{formatPrice(totalAmount - serverQuote.agent.discountInr + Number(serverQuote.agent.serviceGstInr || 0))}</span>
             </div>
           )}
         </div>

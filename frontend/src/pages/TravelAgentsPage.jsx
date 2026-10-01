@@ -16,16 +16,69 @@ import { useAuth } from "../lib/auth.jsx";
 const EMPTY = { agencyName: "", contactName: "", phone: "", gstin: "", pan: "", address: "", city: "", state: "", website: "" };
 const inputClass = "mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-500";
 
-function StatusPanel({ agency, onEdit }) {
+/**
+ * The agency's logo on its clients' vouchers and in their messages (ADR 055).
+ * Uploaded like any photo, then saved; without one, the agency's name is shown.
+ */
+function AgencyLogo({ agency, onSaved }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const save = async (logoUrl) => {
+    const res = await api.setAgencyLogo(logoUrl);
+    onSaved(res.agency);
+  };
+  const upload = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { setError("Use an image under 2 MB"); return; }
+    setBusy(true);
+    setError("");
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const res = await api.uploadFile({ data: reader.result, filename: file.name, mimeType: file.type, entityType: "GENERAL" });
+        await save(res.upload.url);
+      } catch (err) {
+        setError(err.message || "The logo couldn't be uploaded");
+      } finally {
+        setBusy(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+  return (
+    <div className="mt-5 rounded-xl border border-stone-200 bg-white p-4">
+      <h3 className="text-sm font-bold text-stone-900">Your brand on client vouchers</h3>
+      <p className="mt-1 text-xs text-stone-600">Your clients see your logo and name on their voucher and in their emails, not Idea Holiday's.</p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {agency.logoUrl
+          ? <img src={agency.logoUrl} alt={`${agency.agencyName} logo`} className="h-12 max-w-[180px] rounded border border-stone-200 bg-white object-contain p-1" />
+          : <span className="text-sm font-bold text-stone-700">{agency.agencyName}</span>}
+        <label className={`cursor-pointer rounded-lg border border-stone-300 px-3 py-1.5 text-xs font-bold hover:bg-stone-100 ${busy ? "opacity-50" : ""}`}>
+          {busy ? "Uploading…" : agency.logoUrl ? "Change logo" : "Upload logo"}
+          <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy} onChange={upload} />
+        </label>
+        {agency.logoUrl && !busy && (
+          <button type="button" onClick={() => save(null).catch((err) => setError(err.message))} className="text-xs font-bold text-rose-700 hover:underline">Remove</button>
+        )}
+      </div>
+      {error && <p role="alert" className="mt-2 text-xs font-semibold text-rose-700">{error}</p>}
+    </div>
+  );
+}
+
+function StatusPanel({ agency, onEdit, onSaved }) {
   if (agency.status === "APPROVED") {
     return (
       <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-6">
         <div className="flex items-center gap-2 text-emerald-800"><CheckCircle2 className="h-5 w-5" aria-hidden="true" /><h2 className="font-bold">{agency.agencyName} is approved</h2></div>
-        <p className="mt-2 text-sm text-emerald-900">Your agent price is <strong>{agency.discountPct}% below the website price</strong> on every listing and circuit. You see it on the listing and at checkout; enter your client's details and they get the voucher without the price.</p>
+        <p className="mt-2 text-sm text-emerald-900">Your agent price is <strong>{agency.discountPct}% below the website price</strong> on every listing and circuit, plus 18% GST on Idea Holiday's service fee, invoiced to your agency. You see it on the listing and at checkout; enter your client's details and they get the voucher without the price.</p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Link to="/search" className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-500">Book for a client</Link>
           <Link to="/agents/dashboard" className="rounded-xl border border-emerald-400 px-4 py-2.5 text-sm font-bold text-emerald-800 hover:bg-emerald-100">My agent bookings</Link>
         </div>
+        <AgencyLogo agency={agency} onSaved={onSaved} />
       </div>
     );
   }
@@ -141,7 +194,7 @@ export default function TravelAgentsPage({ openForm = false }) {
               You're signed in with a supplier or staff login. Sign in with a traveler account to apply as a travel agent.
             </div>
           )}
-          {!loading && isTraveler && !editing && agency && <StatusPanel agency={agency} onEdit={startApplication} />}
+          {!loading && isTraveler && !editing && agency && <StatusPanel agency={agency} onEdit={startApplication} onSaved={setAgency} />}
           {!loading && isTraveler && !editing && !agency && (
             <div className="rounded-2xl border border-stone-200 bg-white p-6">
               <h2 className="font-bold text-stone-900">Join as a travel agent</h2>

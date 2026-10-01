@@ -14,6 +14,8 @@ import { csvCell } from "./supplierDepartureService.js";
 export const AGENCY_STATUSES = Object.freeze(["PENDING", "APPROVED", "REJECTED", "SUSPENDED"]);
 export const AGENCY_DISCOUNT_MIN_PCT = 5;
 export const AGENCY_DISCOUNT_MAX_PCT = 10;
+// GST on IdeaHoliday's service fee to an agent (ADR 055; owner's CA, 2026-10-01).
+export const AGENT_SERVICE_GST_PCT = 18;
 
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
@@ -67,6 +69,10 @@ export function agentPrice(agency, { totalInr, commissionInr }) {
   const offered = Math.round(total * pct / 100);
   const ceiling = Math.max(0, Math.round(Number(commissionInr) || 0) - 1);
   const discountInr = Math.min(offered, ceiling);
+  // GST on IdeaHoliday's service fee, added on top (ADR 055): the fee is what
+  // IdeaHoliday keeps of the commission after the agent discount.
+  const serviceFeeInr = Math.max(0, Math.round(Number(commissionInr) || 0) - discountInr);
+  const serviceGstInr = Math.round(serviceFeeInr * AGENT_SERVICE_GST_PCT / 100);
   return {
     agencyId: agency.id,
     agencyName: agency.agency_name,
@@ -74,6 +80,10 @@ export function agentPrice(agency, { totalInr, commissionInr }) {
     websitePriceInr: total,
     discountInr,
     agentPriceInr: total - discountInr,
+    serviceFeeInr,
+    serviceGstPct: AGENT_SERVICE_GST_PCT,
+    serviceGstInr,
+    payableInr: total - discountInr + serviceGstInr,
     cappedByCommission: discountInr < offered,
   };
 }
@@ -99,6 +109,7 @@ export function agencyView(agency) {
     city: agency.city,
     state: agency.state,
     website: agency.website,
+    logoUrl: agency.logo_url || null,
     status: agency.status,
     discountPct: agency.status === "APPROVED" ? Number(agency.discount_pct) : null,
     reviewNote: agency.status === "REJECTED" || agency.status === "SUSPENDED" ? agency.review_note : null,
@@ -153,6 +164,24 @@ export function applyForAgency(database, userId, input) {
         fields.address, fields.city, fields.state, fields.website);
   }
   return { agency: getAgencyForUser(database, userId), user, resubmitted: Boolean(existing) };
+}
+
+/**
+ * The agency's logo for its clients' vouchers (ADR 055): an image this same
+ * account uploaded through POST /api/uploads, never an outside URL. null removes it.
+ */
+export function setAgencyLogo(database, userId, logoUrl) {
+  const agency = getAgencyForUser(database, userId);
+  if (!agency) throw agencyError("Apply as a travel agent first", 404, "NO_AGENCY");
+  const url = clean(logoUrl);
+  if (url) {
+    const upload = database.prepare("SELECT mime_type FROM uploads WHERE url = ? AND user_id = ?").get(url, userId);
+    if (!upload || !/^image\/(png|jpe?g|webp)$/i.test(String(upload.mime_type || ""))) {
+      throw agencyError("Upload the logo as a PNG, JPG or WEBP image first", 400, "INVALID_LOGO");
+    }
+  }
+  database.prepare("UPDATE travel_agencies SET logo_url = ?, updated_at = datetime('now') WHERE id = ?").run(url, agency.id);
+  return getAgencyForUser(database, userId);
 }
 
 export function listAgencies(database, { status } = {}) {
@@ -249,6 +278,7 @@ function bookingRow(row, today) {
   const paidInr = paid ? Number(row.amount_inr || 0) + Number(row.wallet_credit_applied_inr || 0) : 0;
   const refundInr = paid ? Math.max(Number(row.refund_amount_inr || 0), Number(row.refunded_amount || 0)) : 0;
   const agentDiscountInr = Number(row.agent_discount_inr || 0);
+  const serviceGstInr = Number(row.agent_service_gst_inr || 0);
   return {
     id: row.id,
     ref: row.ref,
@@ -265,8 +295,9 @@ function bookingRow(row, today) {
     status,
     paymentStatus: row.payment_status,
     paid,
-    websitePriceInr: Number(row.amount_inr || 0) + Number(row.wallet_credit_applied_inr || 0) + agentDiscountInr,
+    websitePriceInr: Number(row.amount_inr || 0) + Number(row.wallet_credit_applied_inr || 0) + agentDiscountInr - serviceGstInr,
     agentDiscountInr,
+    serviceGstInr,
     agentDiscountPct: row.agent_discount_pct == null ? null : Number(row.agent_discount_pct),
     paidInr,
     refundInr,
@@ -315,6 +346,7 @@ export function listAgencyBookings(database, agencyId, { from, to, dateBy = "tri
       guests: paidRows.filter((b) => b.status !== "cancelled").reduce((total, b) => total + b.adults + b.children, 0),
       websitePriceInr: sum("websitePriceInr"),
       agentDiscountInr: sum("agentDiscountInr"),
+      serviceGstInr: sum("serviceGstInr"),
       paidInr: sum("paidInr"),
       refundInr: sum("refundInr"),
       netInr: sum("netInr"),
@@ -324,12 +356,12 @@ export function listAgencyBookings(database, agencyId, { from, to, dateBy = "tri
 }
 
 export function agencyStatementCsv(statement) {
-  const header = ["Reference", "Booked on", "Trip date", "Listing", "Guest", "Guests", "Status", "Website price (INR)", "Agent discount (INR)", "Paid (INR)", "Refunded (INR)", "Net (INR)"];
+  const header = ["Reference", "Booked on", "Trip date", "Listing", "Guest", "Guests", "Status", "Website price (INR)", "Agent discount (INR)", "GST on service fee (INR)", "Paid (INR)", "Refunded (INR)", "Net (INR)"];
   const lines = statement.bookings.map((b) => [
     b.ref, String(b.bookedAt || "").slice(0, 10), b.tripDate, b.productTitle, b.guestName, b.adults + b.children,
-    b.paid ? b.status : "unpaid", b.websitePriceInr, b.agentDiscountInr, b.paidInr, b.refundInr, b.netInr,
+    b.paid ? b.status : "unpaid", b.websitePriceInr, b.agentDiscountInr, b.serviceGstInr, b.paidInr, b.refundInr, b.netInr,
   ]);
   const t = statement.totals;
-  lines.push(["Total", "", "", "", "", t.guests, `${t.bookings} paid bookings`, t.websitePriceInr, t.agentDiscountInr, t.paidInr, t.refundInr, t.netInr]);
+  lines.push(["Total", "", "", "", "", t.guests, `${t.bookings} paid bookings`, t.websitePriceInr, t.agentDiscountInr, t.serviceGstInr, t.paidInr, t.refundInr, t.netInr]);
   return `${[header, ...lines].map((cells) => cells.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }

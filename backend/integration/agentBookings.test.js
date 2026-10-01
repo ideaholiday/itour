@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import Database from "better-sqlite3";
 import { requestJson, startTestServer } from "./helpers/serverHarness.js";
+import { sendGuestBookingNotification } from "../src/services/notificationService.js";
 
 /**
  * IdeaHoliday B2B agent bookings (ADR 054, plan B2): an approved agency pays
@@ -54,6 +55,11 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.equal(price.websitePriceInr, breakdown.totalAmount);
     assert.equal(price.discountInr, Math.round(breakdown.totalAmount * 0.08));
     assert.equal(price.agentPriceInr, breakdown.totalAmount - price.discountInr);
+    // 18% GST on IdeaHoliday's service fee, added on top (ADR 055).
+    assert.equal(price.serviceGstPct, 18);
+    assert.ok(price.serviceFeeInr > 0);
+    assert.equal(price.serviceGstInr, Math.round(price.serviceFeeInr * 0.18));
+    assert.equal(price.payableInr, price.agentPriceInr + price.serviceGstInr);
     assert.equal(quote.data.quote.coupon, null, "no coupon for agents");
     const plain = await requestJson(api.baseUrl, "/api/bookings/quote", { token: traveler.token, body: quoteInput });
     assert.equal(plain.data.quote.agent, undefined);
@@ -74,9 +80,11 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.equal(row.user_id, agent.user.id, "the agency owns the booking");
     assert.equal(row.traveler_name, "Meera Kapoor");
     assert.equal(row.agent_discount_inr, Math.round(created.data.original_amount_inr * 0.08));
-    assert.equal(row.amount_inr, created.data.original_amount_inr - row.agent_discount_inr);
+    assert.equal(row.agent_service_fee_inr, row.commission_amount - row.agent_discount_inr, "the service fee is IdeaHoliday's commission after the discount");
+    assert.equal(row.agent_service_gst_inr, Math.round(row.agent_service_fee_inr * 0.18));
+    assert.equal(row.amount_inr, created.data.original_amount_inr - row.agent_discount_inr + row.agent_service_gst_inr);
     assert.ok(row.agent_discount_inr < row.commission_amount, "the discount stays below the commission");
-    assert.equal(row.amount_inr + row.agent_discount_inr, row.commission_amount + row.supplier_payout_amount, "the supplier's payout is untouched");
+    assert.equal(row.amount_inr + row.agent_discount_inr, row.commission_amount + row.supplier_payout_amount + row.agent_service_gst_inr, "the supplier's payout is untouched");
     const payout = withDatabase((database) => database.prepare("SELECT gross_amount, net_payout FROM payouts WHERE booking_id = ?").get(bookingId));
     assert.deepEqual([payout.gross_amount, payout.net_payout], [created.data.original_amount_inr, row.supplier_payout_amount]);
 
@@ -91,6 +99,8 @@ test("an approved agency books at its agent price, single and circuit", async (t
     const html = await invoice.text();
     assert.ok(html.includes("Awadh Holidays") && html.includes("09ABCDE1234F1Z5"), "billed to the agency with its GSTIN");
     assert.ok(html.includes("Agent discount (8%)"));
+    assert.ok(html.includes("GST @ 18% on the service fee"), "GST on our service fee is invoiced to the agency");
+    assert.ok(!html.includes("SAC"), "no SAC until the owner sets BUSINESS_AGENT_SAC");
 
     const deliveries = await waitFor(
       () => withDatabase((database) => database.prepare("SELECT recipient_address, body FROM notification_deliveries WHERE event_type = 'BOOKING_CONFIRMED' AND channel = 'EMAIL' AND event_key LIKE ?").all(`${bookingId}:%`)),
@@ -100,16 +110,53 @@ test("an approved agency books at its agent price, single and circuit", async (t
     const toAgent = deliveries.find((row) => row.recipient_address === "sana.agent@example.test");
     assert.ok(toGuest && toAgent, JSON.stringify(deliveries));
     assert.ok(toGuest.body.includes("Voucher:") && !toGuest.body.includes("Invoice"), "the guest never sees the invoice or price");
-    assert.ok(toGuest.body.includes("Booked for you by Awadh Holidays"));
+    // The link stays on ideaholiday.in; the words never name us.
+    assert.ok(!/idea ?holiday/i.test(toGuest.body.replace(/https?:\/\/\S+/g, "")), "white-label: the client's message never names us");
+    assert.ok(toGuest.body.includes("— Awadh Holidays"));
     assert.ok(toAgent.body.includes("Invoice (for Awadh Holidays)"));
-    assert.ok(toGuest.body.includes("(+919876522233): contact them for changes"), "the guest knows whom to call");
+    assert.ok(toGuest.body.includes("For any change, contact Awadh Holidays (+919876522233)."), "the guest knows whom to call");
+    const subject = withDatabase((database) => database.prepare("SELECT subject FROM notification_deliveries WHERE event_type = 'BOOKING_CONFIRMED' AND recipient_address = 'meera.client@example.test'").get().subject);
+    assert.match(subject, /^Awadh Holidays: booking IH-/);
+
+    // The agency brands its clients' vouchers with a logo it uploaded itself; no outside URLs.
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const uploaded = await requestJson(api.baseUrl, "/api/uploads", { token: agent.token, body: { data: png, filename: "awadh.png", mimeType: "image/png", entityType: "GENERAL" } });
+    assert.equal(uploaded.response.status, 201, JSON.stringify(uploaded.data));
+    const outside = await requestJson(api.baseUrl, "/api/agents/logo", { method: "PUT", token: agent.token, body: { logoUrl: "https://evil.example/track.png" } });
+    assert.equal(outside.data.code, "INVALID_LOGO");
+    const othersUpload = await requestJson(api.baseUrl, "/api/agents/logo", { method: "PUT", token: traveler.token, body: { logoUrl: uploaded.data.upload.url } });
+    assert.equal(othersUpload.response.status, 404, "an account without an agency has no logo to set");
+    const logo = await requestJson(api.baseUrl, "/api/agents/logo", { method: "PUT", token: agent.token, body: { logoUrl: uploaded.data.upload.url } });
+    assert.equal(logo.response.status, 200, JSON.stringify(logo.data));
+    assert.equal(logo.data.agency.logoUrl, uploaded.data.upload.url);
+
+    // Trip messages go to the client in the agency's name; the review invite is skipped
+    // (the client has no account) and amendments go to the agency, which manages the booking.
+    const database = new Database(api.databasePath);
+    try {
+      await sendGuestBookingNotification(database, bookingId, "PRE_TRIP_REMINDER", { eventKeySuffix: "it" });
+      const review = await sendGuestBookingNotification(database, bookingId, "POST_TRIP_REVIEW_INVITE", { eventKeySuffix: "it" });
+      assert.equal(review.skipped, "AGENT_BOOKING");
+      await sendGuestBookingNotification(database, bookingId, "AMENDMENT_RESULT", { eventKeySuffix: "it" });
+      const sent = (event) => database.prepare("SELECT recipient_address, subject, body FROM notification_deliveries WHERE event_type = ? AND channel = 'EMAIL' AND event_key LIKE ?").all(event, `${bookingId}:%`);
+      const [reminder] = sent("PRE_TRIP_REMINDER");
+      assert.equal(reminder.recipient_address, "meera.client@example.test");
+      assert.match(reminder.subject, /^Awadh Holidays: /);
+      assert.ok(!/idea ?holiday|helpline/i.test(reminder.body) && reminder.body.endsWith("— Awadh Holidays"), reminder.body);
+      assert.deepEqual(sent("AMENDMENT_RESULT").map((row) => row.recipient_address), ["sana.agent@example.test"]);
+    } finally {
+      database.close();
+    }
 
     // The client's voucher, opened from the link in their message: the agency, never a price.
     const voucherUrl = toGuest.body.match(/Voucher: (\S+)/)[1];
     const voucher = await fetch(`${api.baseUrl}${new URL(voucherUrl).pathname}${new URL(voucherUrl).search}`);
     assert.equal(voucher.status, 200);
     const voucherHtml = await voucher.text();
-    assert.ok(voucherHtml.includes("Booked through") && voucherHtml.includes("Awadh Holidays") && voucherHtml.includes("+919876522233"));
+    assert.ok(voucherHtml.includes("Your travel agent") && voucherHtml.includes("Awadh Holidays") && voucherHtml.includes("+919876522233"));
+    assert.ok(voucherHtml.includes(`<img src="${uploaded.data.upload.url}"`), "the agency's logo heads the voucher");
+    assert.ok(voucherHtml.includes("sana.agent@example.test"), "with the agency's contact");
+    assert.ok(!/idea ?holiday|idea<\/i>holiday|My Trips/i.test(voucherHtml), "white-label: nothing of ours on the client's voucher");
     assert.ok(voucherHtml.includes("Meera Kapoor"));
     assert.ok(!voucherHtml.includes("₹") && !voucherHtml.includes("INR"), "no price on the client's voucher");
     assert.ok(!voucherHtml.includes("Travelling with friends"), "no agent referral link");
@@ -125,7 +172,8 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.equal(row.guestName, "Meera Kapoor");
     assert.equal(row.paid, true);
     assert.equal(row.canCancel, true);
-    assert.equal(row.websitePriceInr - row.agentDiscountInr, row.paidInr);
+    assert.equal(row.websitePriceInr - row.agentDiscountInr + row.serviceGstInr, row.paidInr);
+    assert.ok(row.serviceGstInr > 0);
     assert.deepEqual(
       [listed.data.totals.bookings, listed.data.totals.guests, listed.data.totals.paidInr, listed.data.totals.agentDiscountInr],
       [1, 2, row.paidInr, row.agentDiscountInr],
@@ -175,18 +223,22 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.equal(quote.response.status, 201, JSON.stringify(quote.data));
     const circuit = quote.data.quote;
     const expected = circuit.lineItems.reduce((sum, line) => sum + Math.round(line.breakdown.totalAmount * 0.08), 0);
+    const expectedGst = circuit.lineItems.reduce((sum, line) => sum + line.agentServiceGstInr, 0);
+    assert.ok(expectedGst > 0);
+    assert.equal(circuit.agent.serviceGstInr, expectedGst);
     assert.equal(circuit.agent.discountInr, expected);
-    assert.equal(circuit.agent.payableAmount, circuit.breakdown.totalAmount - expected);
+    assert.equal(circuit.agent.payableAmount, circuit.breakdown.totalAmount - expected + expectedGst);
 
     const order = await requestJson(api.baseUrl, "/api/circuit-orders", { token: agent.token, headers: { "Idempotency-Key": "agent-circuit-0001" }, body: { quoteId: circuit.quoteId } });
     assert.equal(order.response.status, 201, `${JSON.stringify(order.data)}\n${api.output()}`);
     assert.equal(order.data.order.breakdown.agentDiscountAmount, expected);
-    assert.equal(order.data.order.breakdown.totalAmount, circuit.breakdown.totalAmount - expected);
-    const children = withDatabase((database) => database.prepare("SELECT source, amount_inr, agent_discount_inr, commission_amount, supplier_payout_amount FROM bookings WHERE circuit_order_id = ?").all(order.data.order.orderId));
+    assert.equal(order.data.order.breakdown.agentServiceGstAmount, expectedGst);
+    assert.equal(order.data.order.breakdown.totalAmount, circuit.breakdown.totalAmount - expected + expectedGst);
+    const children = withDatabase((database) => database.prepare("SELECT source, amount_inr, agent_discount_inr, agent_service_gst_inr, commission_amount, supplier_payout_amount FROM bookings WHERE circuit_order_id = ?").all(order.data.order.orderId));
     assert.equal(children.length, 2);
     for (const child of children) {
       assert.equal(child.source, "IH_B2B");
-      assert.equal(child.amount_inr + child.agent_discount_inr, child.commission_amount + child.supplier_payout_amount);
+      assert.equal(child.amount_inr + child.agent_discount_inr, child.commission_amount + child.supplier_payout_amount + child.agent_service_gst_inr);
     }
     assert.equal(children.reduce((sum, child) => sum + child.amount_inr, 0), order.data.order.breakdown.totalAmount, "the order charges what its bookings cost");
 

@@ -41,7 +41,7 @@ function testDatabase() {
       adults_count INTEGER, children_count INTEGER, start_date TEXT, end_date TEXT,
       base_amount REAL, taxes_amount REAL, total_amount REAL, line_items TEXT, issues TEXT,
       expires_at TEXT, created_at TEXT DEFAULT (datetime('now')),
-      agency_id TEXT, agent_discount_inr INTEGER NOT NULL DEFAULT 0
+      agency_id TEXT, agent_discount_inr INTEGER NOT NULL DEFAULT 0, agent_service_gst_inr INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE travel_agencies (id TEXT PRIMARY KEY, user_id TEXT, agency_name TEXT, discount_pct REAL, status TEXT);
   `);

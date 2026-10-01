@@ -295,6 +295,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     assertNoAgentCoupon(agency, req.body.promo_code);
     const agent = agency ? agentPrice(agency, { totalInr: quote.totalAmount, commissionInr: assignmentCommissionAmount }) : null;
     const agentDiscount = agent?.discountInr || 0;
+    const agentServiceGst = agent?.serviceGstInr || 0;
     const selectedAssignmentReason = assignmentReason(selectedSupplier);
     const requestedUserId = actor.id || `ext_${nanoid(12)}`;
     const existingUser = db.prepare("SELECT id FROM users WHERE id = ? OR LOWER(email) = LOWER(?)").get(requestedUserId, req.body.traveler_email.trim());
@@ -338,7 +339,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     let walletMaxFromOther = null;
     if (requestedWalletCredit > 0 && existingUser) {
       const walletCalc = applyWalletCreditsToCheckout(db, userId, {
-        bookingAmountInr: quote.totalAmount - agentDiscount - (expectedReferral.discountInr || 0) - (expectedCoupon?.discountInr || 0),
+        bookingAmountInr: quote.totalAmount - agentDiscount + agentServiceGst - (expectedReferral.discountInr || 0) - (expectedCoupon?.discountInr || 0),
         requestedCreditInr: requestedWalletCredit,
       });
       if (walletCalc?.applied) {
@@ -349,7 +350,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     let referralDiscount = 0;
     let referrerCredit = 0;
     let couponDiscount = 0;
-    let finalPayableAmount = Math.max(0, quote.totalAmount - agentDiscount - appliedWalletCredit);
+    let finalPayableAmount = Math.max(0, quote.totalAmount - agentDiscount + agentServiceGst - appliedWalletCredit);
 
     db.transaction(() => {
       db.prepare("UPDATE products SET id = id WHERE id = ?").run(quote.product.id);
@@ -397,8 +398,9 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       }
 
       if (agent) {
-        db.prepare("UPDATE bookings SET source = 'IH_B2B', agency_id = ?, agent_discount_pct = ?, agent_discount_inr = ? WHERE id = ?")
-          .run(agent.agencyId, agent.discountPct, agentDiscount, bookingId);
+        db.prepare(`UPDATE bookings SET source = 'IH_B2B', agency_id = ?, agent_discount_pct = ?, agent_discount_inr = ?,
+          agent_service_fee_inr = ?, agent_service_gst_inr = ? WHERE id = ?`)
+          .run(agent.agencyId, agent.discountPct, agentDiscount, agent.serviceFeeInr, agentServiceGst, bookingId);
       }
 
       if (!affiliateAttributed && !agency) {
@@ -548,6 +550,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       referral_discount_inr: referralDiscount,
       coupon_discount_inr: couponDiscount,
       agent_discount_inr: agentDiscount,
+      agent_service_gst_inr: agentServiceGst,
       agent: agent || null,
       quote: {
         ...publicQuote(quote),
@@ -866,8 +869,14 @@ router.get("/:ref/documents/:type", (req, res) => {
     // An agent booking's voucher goes to the agent's client: no referral link. Its
     // invoice is billed to the agency, which paid (ADR 054).
     if (booking.agency_id) {
-      const agency = db.prepare("SELECT agency_name, phone, gstin, address, city, state FROM travel_agencies WHERE id = ?").get(booking.agency_id);
-      if (agency) Object.assign(booking, { agency_name: agency.agency_name, agency_phone: agency.phone, agency_gstin: agency.gstin, agency_address: [agency.address, agency.city, agency.state].filter(Boolean).join(", ") });
+      const agency = db.prepare(`SELECT a.agency_name, a.phone, a.gstin, a.address, a.city, a.state, a.logo_url, u.email
+        FROM travel_agencies a JOIN users u ON u.id = a.user_id WHERE a.id = ?`).get(booking.agency_id);
+      if (agency) {
+        Object.assign(booking, {
+          agency_name: agency.agency_name, agency_phone: agency.phone, agency_email: agency.email, agency_logo_url: agency.logo_url,
+          agency_gstin: agency.gstin, agency_address: [agency.address, agency.city, agency.state].filter(Boolean).join(", "),
+        });
+      }
     }
     if (documentType === "VOUCHER" && booking.user_id && !booking.agency_id) {
       try {

@@ -22,13 +22,39 @@ function uniqueRecipients(recipients) {
 
 // An agent booking (ADR 054): messages about money (price, invoice, refunds) go
 // to the agency that paid; messages about the trip go to the guest.
-const AGENT_MONEY_EVENTS = new Set(["BOOKING_CONFIRMED", "DOCUMENTS", "BOOKING_CANCELLED", "SUPPLIER_RESCHEDULED"]);
+// The agency also manages the booking, so amendments and pending confirmation go to it too.
+const AGENT_MONEY_EVENTS = new Set(["BOOKING_CONFIRMED", "DOCUMENTS", "BOOKING_CANCELLED", "SUPPLIER_RESCHEDULED", "AMENDMENT_RESULT", "SUPPLIER_CONFIRMATION_PENDING"]);
 
 function agencyRecipient(database, agencyId) {
   if (!agencyId) return null;
   const agency = database.prepare("SELECT a.agency_name, a.contact_name, a.phone, u.id AS user_id, u.email FROM travel_agencies a JOIN users u ON u.id = a.user_id WHERE a.id = ?").get(agencyId);
-  return agency ? { id: agency.user_id, role: "TRAVELER", name: agency.contact_name || agency.agency_name, email: agency.email, phone: agency.phone } : null;
+  return agency ? { id: agency.user_id, role: "TRAVELER", name: agency.contact_name || agency.agency_name, email: agency.email, phone: agency.phone, agencyName: agency.agency_name } : null;
 }
+
+// White-label (ADR 055): what the agent's client receives carries the agency's
+// name, never ours. Email comes in the agency's name and replies go to it.
+// WhatsApp still comes from IdeaHoliday's number with its approved templates.
+function whiteLabelGuestContent(content, agency) {
+  const contact = `${agency.agencyName}${agency.phone ? ` (${agency.phone})` : ""}`;
+  const lines = String(content.message || "").split("\n").filter((line) => !/idea ?holiday|my trips|helpline/i.test(line));
+  return {
+    ...content,
+    subject: `${agency.agencyName}: ${content.subject}`,
+    message: `${lines.join("\n").trimEnd()}\n\nFor any change, contact ${contact}.\n— ${agency.agencyName}`,
+  };
+}
+
+// WhatsApp can only send Meta-approved wording, and our templates name Idea Holiday.
+// Once the owner has the neutral WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE approved
+// ("Booking update from {{1}} for booking {{2}}: {{3}}. ..."), the client gets that.
+export function agentGuestWhatsAppTemplate(agencyName, bookingRef, message, fallback) {
+  const detail = String(message || "").split("\n").map((line) => line.trim())
+    .filter((line) => line && !/^hello\b/i.test(line) && !line.startsWith("—") && !/^for any change/i.test(line))
+    .join(" ").slice(0, 900);
+  return whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE, [agencyName, bookingRef, detail]) || fallback;
+}
+
+const agencyEmailFrom = (agency) => (agency ? { fromName: agency.agencyName, replyTo: { email: agency.email } } : undefined);
 
 export function guestNotificationPreferences(database, userId) {
   if (!database || !userId) return { emailEnabled: true, whatsappEnabled: true };
@@ -40,7 +66,7 @@ export function guestNotificationPreferences(database, userId) {
   }
 }
 
-export async function sendRecipientChannels({ database, eventType, eventKeyPrefix, recipient, subject, emailText, emailHtml, whatsappText, whatsappTemplate, metadata }) {
+export async function sendRecipientChannels({ database, eventType, eventKeyPrefix, recipient, subject, emailText, emailHtml, whatsappText, whatsappTemplate, metadata, emailFrom }) {
   const tasks = [];
   const preferences = recipient.role === "TRAVELER" ? guestNotificationPreferences(database, recipient.id) : { emailEnabled: true, whatsappEnabled: true };
   if (recipient.email && preferences.emailEnabled) {
@@ -55,6 +81,7 @@ export async function sendRecipientChannels({ database, eventType, eventKeyPrefi
       text: emailText,
       html: emailHtml,
       metadata,
+      ...(emailFrom || {}),
     }, { database }).then((result) => ({ channel: "EMAIL", recipientRole: recipient.role, ...result })));
   }
   if (recipient.phone && preferences.whatsappEnabled) {
@@ -106,9 +133,9 @@ export async function notifyBookingConfirmed(database, bookingId) {
   const operations = database.prepare("SELECT id, name, email, phone, role FROM users WHERE UPPER(role) IN ('ADMIN', 'STAFF')").all();
   // An agent booking (ADR 054): the agency that paid gets the invoice; the guest,
   // the agent's client, gets the voucher only, never what the agent paid.
-  const agencyContact = agencyRecipient(database, booking.agency_id);
-  const agency = agencyContact ? database.prepare("SELECT agency_name, phone FROM travel_agencies WHERE id = ?").get(booking.agency_id) : null;
-  const agent = agencyContact ? { ...agencyContact, agent: true } : null;
+  const agentContact = agencyRecipient(database, booking.agency_id);
+  const agency = agentContact ? database.prepare("SELECT agency_name, phone FROM travel_agencies WHERE id = ?").get(booking.agency_id) : null;
+  const agent = agentContact ? { ...agentContact, agent: true } : null;
   const recipients = uniqueRecipients([...(agent ? [agent] : []), traveler, supplier, ...operations.map((user) => ({ ...user, role: String(user.role).toUpperCase() }))]);
 
   const results = [];
@@ -119,7 +146,8 @@ export async function notifyBookingConfirmed(database, bookingId) {
     if (recipient.agent) {
       message = `Hello ${recipient.name || "there"},\n\nPayment confirmed for your client ${booking.traveler_name}. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher (for your client): ${documents.voucherUrl}\nInvoice (for ${agency.agency_name}): ${documents.invoiceUrl}\n\nYour client also gets the voucher by email and WhatsApp, without the price.`;
     } else if (guestOfAgent) {
-      message = `Hello ${recipient.name || "Traveler"},\n\nYour booking is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\n\nBooked for you by ${agency.agency_name}${agency.phone ? ` (${agency.phone})` : ""}: contact them for changes. ${booking.confirmation_type === "INSTANT" ? "Show your voucher when you arrive." : "Your supplier is confirming the booking."}`;
+      subject = `${agency.agency_name}: booking ${booking.ref} confirmed`;
+      message = `Hello ${recipient.name || "Traveler"},\n\nYour booking is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\n\n${booking.confirmation_type === "INSTANT" ? "Show your voucher when you arrive." : "The operator is confirming the booking."}\n\nFor any change, contact ${agency.agency_name}${agency.phone ? ` (${agency.phone})` : ""}.\n— ${agency.agency_name}`;
     } else if (recipient.role === "TRAVELER") {
       message = `Hello ${recipient.name || "Traveler"},\n\nYour payment is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}\n\n${booking.confirmation_type === "INSTANT" ? "Your booking is confirmed. Show your voucher when you arrive." : "Your supplier is confirming the booking."} Your private pickup OTP is available only in My Trips.`;
     } else if (recipient.role === "SUPPLIER") {
@@ -129,8 +157,12 @@ export async function notifyBookingConfirmed(database, bookingId) {
       subject = `New paid booking ${booking.ref}`;
       message = `${common}\nSupplier: ${booking.supplier_name || "Pending"}\nTraveler: ${booking.traveler_name}\nMonitor supplier acceptance and dispatch in Operations.`;
     }
-    // The approved traveler template carries the invoice link, so a guest of an agent gets plain text.
-    const template = guestOfAgent ? null : recipient.role === "TRAVELER"
+    // The approved confirmation template carries the invoice link, so a guest of an agent
+    // gets the generic trip-status template instead: a business-initiated WhatsApp needs one.
+    const template = guestOfAgent
+      ? agentGuestWhatsAppTemplate(agency.agency_name, booking.ref, message,
+        whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_TRIP_STATUS, [booking.ref, `Confirmed by ${agency.agency_name}`, `Voucher: ${documents.voucherUrl}`]))
+      : recipient.role === "TRAVELER"
       ? whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, booking.product_title || booking.product_type, booking.activity_date, booking.pickup_time, booking.pickup_location, documents.voucherUrl, documents.invoiceUrl])
       : recipient.role === "SUPPLIER"
         ? booking.confirmation_type === "INSTANT"
@@ -143,6 +175,7 @@ export async function notifyBookingConfirmed(database, bookingId) {
       eventKeyPrefix: `${booking.id}:${eventType}:${recipient.agent ? "AGENT" : recipient.role}:${recipient.id || "external"}`,
       // The guest's own notification preferences don't exist; the agent's are on the account.
       recipient: guestOfAgent ? { ...recipient, id: null } : recipient,
+      emailFrom: guestOfAgent ? agencyEmailFrom(agentContact) : undefined,
       subject,
       emailText: message,
       whatsappText: message,
@@ -183,8 +216,14 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     id: booking.user_id, role: "TRAVELER", name: booking.traveler_name,
     email: booking.traveler_email, phone: booking.traveler_phone,
   };
-  const recipient = booking.agency_id
-    ? (AGENT_MONEY_EVENTS.has(eventType) ? agencyRecipient(database, booking.agency_id) || guest : { ...guest, id: null })
+  const agencyContact = agencyRecipient(database, booking.agency_id);
+  // An agent's client has no account to review from, so no review invite (ADR 055).
+  if (agencyContact && eventType === "POST_TRIP_REVIEW_INVITE") {
+    return { eventType, bookingId: booking.id, bookingRef: booking.ref, attempted: 0, results: [], skipped: "AGENT_BOOKING" };
+  }
+  const guestOfAgent = Boolean(agencyContact) && !AGENT_MONEY_EVENTS.has(eventType);
+  const recipient = agencyContact
+    ? (guestOfAgent ? { ...guest, id: null } : agencyContact)
     : guest;
   const experienceName = booking.product_title || booking.product_type;
   const reviewUrl = `https://ideaholiday.in/my-reviews?bookingRef=${encodeURIComponent(booking.ref)}`;
@@ -213,7 +252,7 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     };
   };
 
-  const content = {
+  const baseContent = {
     BOOKING_CONFIRMED: {
       subject: `Booking ${booking.ref} confirmed`,
       message: `Hello ${booking.traveler_name || "Traveler"},\n\nYour booking for ${booking.product_title || booking.product_type} on ${booking.activity_date} is confirmed.\nPickup: ${booking.pickup_time || "Time TBC"}, ${booking.pickup_location}.\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}`,
@@ -270,15 +309,17 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
     // A getter, so the wallet lookup only runs for this event.
     get BOOKING_CANCELLED() { return cancelledContent(); },
   }[eventType];
+  const content = guestOfAgent ? whiteLabelGuestContent(baseContent, agencyContact) : baseContent;
   const results = await sendRecipientChannels({
     database,
     eventType,
     eventKeyPrefix: `${booking.id}:${eventType}:TRAVELER:${eventKeySuffix}`,
     recipient,
+    emailFrom: guestOfAgent ? agencyEmailFrom(agencyContact) : undefined,
     subject: content.subject,
     emailText: content.message,
     whatsappText: content.message,
-    whatsappTemplate: content.template,
+    whatsappTemplate: guestOfAgent ? agentGuestWhatsAppTemplate(agencyContact.agencyName, booking.ref, content.message, content.template) : content.template,
     metadata: { bookingId: booking.id, bookingRef: booking.ref, resend: true },
   });
   return { eventType, bookingId: booking.id, bookingRef: booking.ref, attempted: results.length, results };

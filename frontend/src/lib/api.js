@@ -359,6 +359,8 @@ export const api = {
     fetch("/api/agents/me", { headers: authHeaders() }).then(handle),
   applyAsAgency: (payload) =>
     fetch("/api/agents/apply", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  setAgencyLogo: (logoUrl) =>
+    fetch("/api/agents/logo", { method: "PUT", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ logoUrl }) }).then(handle),
   getAgencyBookings: (params = {}) =>
     fetch(`/api/agents/bookings?${new URLSearchParams(params)}`, { headers: authHeaders() }).then(handle),
   downloadAgencyStatement: (params = {}) =>

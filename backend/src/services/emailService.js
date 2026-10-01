@@ -113,12 +113,18 @@ export async function sendEmail({
   attachments = [],
   // Stored in the delivery logs instead of `text`, for a body carrying a secret such as a sign-in code.
   logText,
+  // A travel agency's client hears from the agency (ADR 055): its name as the sender
+  // (still our address, which the provider has verified) and replies to the agency.
+  fromName,
+  replyTo,
 }, { client, database = db, fetchImpl = globalThis.fetch } = {}) {
   const address = String(to || "").trim().toLowerCase();
   if (!validEmail(address)) return { success: false, status: "FAILED", error: "A valid recipient email is required" };
   if (!String(subject || "").trim() || !String(text || "").trim()) return { success: false, status: "FAILED", error: "Email subject and body are required" };
 
   const config = emailProviderConfiguration();
+  const senderName = String(fromName || "").replace(/["\r\n<>]/g, "").trim().slice(0, 80) || config.senderName;
+  const replyToEmail = validEmail(String(replyTo?.email || "").trim().toLowerCase()) ? String(replyTo.email).trim().toLowerCase() : null;
   const started = beginNotificationDelivery({
     eventKey, eventType, channel: "EMAIL", recipientRole, recipientId,
     recipientAddress: address, provider: client ? "AMAZON_SES" : config.provider, subject, body: logText ?? text, metadata,
@@ -153,9 +159,10 @@ export async function sendEmail({
         },
         body: JSON.stringify({
           sender: {
-            name: config.senderName,
+            name: senderName,
             email: config.fromEmail,
           },
+          ...(replyToEmail ? { replyTo: { email: replyToEmail, name: senderName } } : {}),
           to: [
             {
               email: address,
@@ -199,14 +206,14 @@ export async function sendEmail({
   try {
     const ses = client || new SESv2Client({ region: config.region });
     const response = await ses.send(new SendEmailCommand({
-      FromEmailAddress: config.fromEmail,
+      FromEmailAddress: fromName ? `"${senderName}" <${config.fromEmail}>` : config.fromEmail,
       ConfigurationSetName: process.env.SES_CONFIGURATION_SET || undefined,
       EmailTags: [
         { Name: "event_type", Value: String(eventType).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 256) },
         { Name: "recipient_role", Value: String(recipientRole).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 256) },
       ],
       Destination: { ToAddresses: [address] },
-      ReplyToAddresses: process.env.SES_REPLY_TO_EMAIL ? [process.env.SES_REPLY_TO_EMAIL] : undefined,
+      ReplyToAddresses: replyToEmail ? [replyToEmail] : process.env.SES_REPLY_TO_EMAIL ? [process.env.SES_REPLY_TO_EMAIL] : undefined,
       Content: {
         Simple: {
           Subject: { Data: subject, Charset: "UTF-8" },

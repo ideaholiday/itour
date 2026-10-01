@@ -15,3 +15,16 @@
   6. **GST invoice to agents: yes.** Its SAC, rate and wording are UNKNOWN until the CA confirms.
   7. **Products in the first release:** every marketplace listing type (activities, tours, attractions, transfers, packages) and circuits. "Packages" means marketplace `PACKAGE` listings, not supplier quotations.
 - **Consequences**: Agent bookings use the existing source `IH_B2B` with IdeaHoliday commission frozen as for B2C. A listing with the marketplace channel off (ADR 041) is not offered to agents. Until the admin sets one, an agency's discount is 5%, the bottom of the range.
+
+---
+
+## ADR 055: 18% GST on Our Service Fee to Agents; White-Label Vouchers and Messages
+- **Date**: 2026-10-01
+- **Context**: B1–B4 of ADR 054 were deployed and checked by the owner on 2026-10-01. The GST invoice to agents was UNKNOWN, and the client's voucher still carried IdeaHoliday's brand.
+- **Decision Made** (owner, 2026-10-01, GST advice from the owner's CA):
+  1. **GST on the agent invoice is 18% on IdeaHoliday's service fee, added on top** of the agent price. The service fee is the booking's commission less the agent discount. Agents pay the agent price plus that GST; supplier payouts don't change.
+  2. **SAC: the travel-agent SAC, number not yet given.** The invoice prints it from `BUSINESS_AGENT_SAC` once the owner sets it; until then none is printed.
+  3. **White-label for the agent's client: the voucher and the guest's messages.** The voucher shows the agency's logo (or name) and contact, never IdeaHoliday. Guest emails come in the agency's name with replies to the agency; the text never names IdeaHoliday.
+  4. **Agency logo** uploaded by the agent (PNG, JPG or WEBP), shown on the voucher; without one, the agency's name.
+- **Consequences**: Migration 084 adds the fee, GST and logo columns. WhatsApp can only send Meta-approved wording from IdeaHoliday's number, and the approved templates name IdeaHoliday, so the client's WhatsApp is white-label only once the owner gets a neutral template approved and sets `WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE`. The link domain stays ideaholiday.in. The tax invoice stays IdeaHoliday's, billed to the agency.
+

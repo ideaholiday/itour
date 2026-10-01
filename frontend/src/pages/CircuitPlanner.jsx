@@ -1529,7 +1529,7 @@ export default function CircuitPlanner() {
                     <p className="text-xs font-black uppercase tracking-wider text-stone-600">{circuitQuote.status === "READY" ? "All items available" : "Action required"}</p>
                     <p className="mt-1 text-xs text-stone-600">{circuitQuote.lineItems.length} of {items.length} itinerary items priced from live marketplace data.</p>
                   </div>
-                  <strong className="font-mono text-3xl text-stone-950">{formatPrice(circuitQuote.breakdown.totalAmount - Number(circuitQuote.agent?.discountInr || 0))}</strong>
+                  <strong className="font-mono text-3xl text-stone-950">{formatPrice(circuitQuote.breakdown.totalAmount - Number(circuitQuote.agent?.discountInr || 0) + Number(circuitQuote.agent?.serviceGstInr || 0))}</strong>
                 </div>
               </div>
 
@@ -1565,7 +1565,8 @@ export default function CircuitPlanner() {
                 <span className="text-stone-600">Activities and transfers</span><strong className="text-right">{formatPrice(circuitQuote.breakdown.baseAmount)}</strong>
                 <span className="text-stone-600">Taxes, tolls and permits</span><strong className="text-right">{formatPrice(circuitQuote.breakdown.taxesAmount)}</strong>
                 {circuitQuote.agent?.discountInr > 0 && (<><span className="font-bold text-emerald-700">Agent price discount</span><strong className="text-right text-emerald-700">−{formatPrice(circuitQuote.agent.discountInr)}</strong></>)}
-                <span className="border-t border-stone-300 pt-3 font-bold text-stone-900">Verified circuit total</span><strong className="border-t border-stone-300 pt-3 text-right font-mono text-base">{formatPrice(circuitQuote.breakdown.totalAmount - Number(circuitQuote.agent?.discountInr || 0))}</strong>
+                {circuitQuote.agent?.serviceGstInr > 0 && (<><span className="text-stone-600">GST 18% on Idea Holiday service fee</span><strong className="text-right">+{formatPrice(circuitQuote.agent.serviceGstInr)}</strong></>)}
+                <span className="border-t border-stone-300 pt-3 font-bold text-stone-900">Verified circuit total</span><strong className="border-t border-stone-300 pt-3 text-right font-mono text-base">{formatPrice(circuitQuote.breakdown.totalAmount - Number(circuitQuote.agent?.discountInr || 0) + Number(circuitQuote.agent?.serviceGstInr || 0))}</strong>
               </div>
 
               <p className="mt-4 text-xs leading-relaxed text-stone-500">

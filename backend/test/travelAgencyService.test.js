@@ -7,7 +7,10 @@ const agency = { id: "agy_1", agency_name: "Awadh Holidays", discount_pct: 10 };
 test("the agent price is the website price less the agency's %, rounded", () => {
   assert.deepEqual(agentPrice(agency, { totalInr: 4_999, commissionInr: 1_500 }), {
     agencyId: "agy_1", agencyName: "Awadh Holidays", discountPct: 10,
-    websitePriceInr: 4_999, discountInr: 500, agentPriceInr: 4_499, cappedByCommission: false,
+    websitePriceInr: 4_999, discountInr: 500, agentPriceInr: 4_499,
+    // 18% GST on IdeaHoliday's service fee (commission less the discount), added on top (ADR 055).
+    serviceFeeInr: 1_000, serviceGstPct: 18, serviceGstInr: 180, payableInr: 4_679,
+    cappedByCommission: false,
   });
   assert.equal(agentPrice(null, { totalInr: 1000, commissionInr: 300 }), null);
 });
@@ -18,6 +21,8 @@ test("the discount always stays below the booking's commission", () => {
   assert.equal(price.discountInr, 99, "IdeaHoliday keeps at least ₹1");
   assert.equal(price.agentPriceInr, 1_901);
   assert.equal(price.cappedByCommission, true);
+  assert.equal(price.serviceFeeInr, 1, "IdeaHoliday's ₹1 fee");
+  assert.equal(price.serviceGstInr, 0);
   assert.equal(agentPrice(agency, { totalInr: 2_000, commissionInr: 0 }).discountInr, 0);
 });
 
