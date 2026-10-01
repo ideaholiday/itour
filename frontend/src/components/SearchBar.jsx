@@ -5,7 +5,7 @@ import DatePicker, { toLocalISO } from "./ui/DatePicker.jsx";
 import { api } from "../lib/api.js";
 import { destinationParam } from "../lib/destinations.js";
 
-export default function SearchBar({ initial = "" }) {
+export default function SearchBar({ initial = "", type = "", placeholder = "Search a destination or experience" }) {
   const [q, setQ] = useState(initial);
   const [date, setDate] = useState("");
   const [destinations, setDestinations] = useState([]);
@@ -31,7 +31,7 @@ export default function SearchBar({ initial = "" }) {
     const timer = window.setTimeout(() => {
       setSearching(true);
       api.getActivities({ q: query })
-        .then((data) => { if (active) setExperiences(Array.isArray(data) ? data.slice(0, 4) : []); })
+        .then((data) => { if (active) setExperiences((Array.isArray(data) ? data : data?.products || []).slice(0, 4)); })
         .catch(() => { if (active) setExperiences([]); })
         .finally(() => { if (active) setSearching(false); });
     }, 250);
@@ -50,6 +50,7 @@ export default function SearchBar({ initial = "" }) {
     event.preventDefault();
     const params = new URLSearchParams();
     if (query) params.set("q", query);
+    if (type) params.set("type", type);
     if (date) params.set("date", date);
     setShowSuggestions(false);
     setFocusedField(null);
@@ -58,8 +59,10 @@ export default function SearchBar({ initial = "" }) {
 
   const searchFor = (value = query, destination = "") => {
     const params = new URLSearchParams();
-    if (value) params.set("q", value);
+    // A picked destination is the whole search; its name as `q` too would only narrow it.
     if (destination) params.set("destination", destination);
+    else if (value) params.set("q", value);
+    if (type) params.set("type", type);
     if (date) params.set("date", date);
     setShowSuggestions(false);
     setFocusedField(null);
@@ -91,7 +94,7 @@ export default function SearchBar({ initial = "" }) {
             value={q}
             onChange={(e) => { setQ(e.target.value); setShowSuggestions(true); }}
             onFocus={() => { setShowSuggestions(true); setFocusedField("where"); }}
-            placeholder="Search a destination or experience"
+            placeholder={placeholder}
             aria-autocomplete="list"
             aria-expanded={showSuggestions && Boolean(query)}
             className="w-full bg-transparent text-sm font-semibold text-stone-900 dark:text-stone-100 outline-none placeholder:font-medium placeholder:text-stone-400 dark:placeholder:text-stone-500 sm:text-base"

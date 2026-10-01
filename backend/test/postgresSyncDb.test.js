@@ -51,6 +51,7 @@ test("no SQL tests a bare placeholder for NULL, which PostgreSQL cannot type", a
 function fakeDatabase(answers) {
   const database = Object.create(PostgresSyncDatabase.prototype);
   const log = { sql: [], restarts: 0 };
+  database.responseBuffer = new SharedArrayBuffer(64);
   database.worker = { postMessage: ({ sql }) => log.sql.push(sql), terminate() {} };
   database._initWorker = () => { log.restarts += 1; };
   database._waitForResponse = () => {
@@ -60,6 +61,31 @@ function fakeDatabase(answers) {
   };
   return { database, log };
 }
+
+test("every query reuses the worker's one answer buffer instead of allocating 16 MB each", () => {
+  // A buffer per query piled up faster than both threads freed it and ran
+  // Cloud Run out of memory at startup.
+  const database = Object.create(PostgresSyncDatabase.prototype);
+  database.responseBuffer = new SharedArrayBuffer(1024);
+  const buffers = new Set();
+  database.worker = {
+    // Answers synchronously, the way the real worker writes into the buffer.
+    postMessage: ({ sharedBuffer, sql }) => {
+      buffers.add(sharedBuffer);
+      const control = new Int32Array(sharedBuffer, 0, 2);
+      const bytes = new TextEncoder().encode(JSON.stringify({ rows: [{ sql }], rowCount: 1 }));
+      new Uint8Array(sharedBuffer, 8).set(bytes);
+      Atomics.store(control, 1, bytes.length);
+      Atomics.store(control, 0, 1);
+    },
+    terminate() {},
+  };
+  for (let i = 0; i < 300; i += 1) {
+    assert.deepEqual(database.prepare(`SELECT ${i}`).get(), { sql: `SELECT ${i}` });
+  }
+  assert.equal(buffers.size, 1);
+  assert.equal([...buffers][0], database.responseBuffer);
+});
 
 const notQueryable = () => new Error("Client has encountered a connection error and is not queryable");
 

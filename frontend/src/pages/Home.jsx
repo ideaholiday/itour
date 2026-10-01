@@ -21,13 +21,20 @@ import {
   Users,
   Zap,
   ChevronRight,
+  ChevronLeft,
   Globe,
+  Car,
+  Map as MapIcon,
+  Package,
+  Plane,
+  Ticket,
 } from "lucide-react";
 import SearchBar from "../components/SearchBar.jsx";
+import TicketCard from "../components/TicketCard.jsx";
 import SeoHead from "../components/SeoHead.jsx";
 import { SkeletonCard } from "../components/ui/SkeletonLoader.jsx";
 import { api } from "../lib/api.js";
-import { destinationParam, featuredDestinations, withImageList } from "../lib/destinations.js";
+import { popularDestinations, withImageList } from "../lib/destinations.js";
 import { destinationPath } from "../../../shared/destinationSeo.js";
 import { useCurrency } from "../lib/currency.jsx";
 
@@ -52,12 +59,60 @@ const CATEGORIES = [
   { emoji: "🏎️", label: "ATV & Off-Road", q: "ATV", color: "from-stone-50 to-warm-100 border-stone-200 hover:border-stone-400" },
 ];
 
-const FALLBACK_DESTINATIONS = [
-  { id: "goa", name: "Goa", tagline: "Sun, sea & slow days", hero_image: "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=900&q=85" },
-  { id: "jaipur", name: "Jaipur", tagline: "Palaces & pink streets", hero_image: "https://images.unsplash.com/photo-1599661046827-dacde6976549?auto=format&fit=crop&w=900&q=85" },
-  { id: "kerala", name: "Kerala", tagline: "Backwaters & green escapes", hero_image: "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=900&q=85" },
-  { id: "agra", name: "Agra", tagline: "Timeless wonder", hero_image: "https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=900&q=85" },
-  { id: "ladakh", name: "Ladakh", tagline: "High roads & clear skies", hero_image: "https://images.unsplash.com/photo-1581791538302-03537b9c97bf?auto=format&fit=crop&w=900&q=85" },
+// Curated in display order; counts come from live search facets. A `kind: "country"`
+// card searches the whole country. Photos checked by eye: each shows its place.
+const POPULAR_DESTINATIONS = [
+  { id: "dubai", name: "Dubai", country: "UAE", tagline: "Desert safaris & skyline views", hero_image: "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?auto=format&fit=crop&w=700&q=80" },
+  { id: "goa", name: "Goa", tagline: "Sun, sea & slow days", hero_image: "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&w=700&q=80" },
+  { id: "thailand", name: "Thailand", kind: "country", tagline: "Islands, temples & street food", hero_image: "https://images.unsplash.com/photo-1552465011-b4e21bf6e79a?auto=format&fit=crop&w=700&q=80" },
+  { id: "jaipur", name: "Jaipur", tagline: "Palaces & pink streets", hero_image: "https://images.unsplash.com/photo-1477587458883-47145ed94245?auto=format&fit=crop&w=700&q=80" },
+  { id: "bali", name: "Bali", country: "Indonesia", tagline: "Temples, rice terraces & surf", hero_image: "https://images.unsplash.com/photo-1537996194471-e657df975ab4?auto=format&fit=crop&w=700&q=80" },
+  { id: "kerala", name: "Kerala", tagline: "Backwaters & green escapes", hero_image: "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?auto=format&fit=crop&w=700&q=80" },
+  { id: "bangkok", name: "Bangkok", country: "Thailand", tagline: "Night markets & river temples", hero_image: "https://images.unsplash.com/photo-1508009603885-50cf7c579365?auto=format&fit=crop&w=700&q=80" },
+  { id: "agra", name: "Agra", tagline: "The Taj Mahal at sunrise", hero_image: "https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=700&q=80" },
+  { id: "singapore", name: "Singapore", country: "Singapore", tagline: "Gardens, zoos & Sentosa", hero_image: "https://images.unsplash.com/photo-1525625293386-3f8f99389edd?auto=format&fit=crop&w=700&q=80" },
+  { id: "delhi", name: "Delhi", tagline: "Old lanes & grand monuments", hero_image: "https://images.unsplash.com/photo-1587474260584-136574528ed5?auto=format&fit=crop&w=700&q=80" },
+  { id: "phuket", name: "Phuket", country: "Thailand", tagline: "Phi Phi & island hopping", hero_image: "https://images.unsplash.com/photo-1589394815804-964ed0be2eb5?auto=format&fit=crop&w=700&q=80" },
+  { id: "udaipur", name: "Udaipur", tagline: "Lakes & royal palaces", hero_image: "https://images.unsplash.com/photo-1615836245337-f5b9b2303f10?auto=format&fit=crop&w=700&q=80" },
+  { id: "maldives", name: "Maldives", kind: "country", tagline: "Lagoons & water villas", hero_image: "https://images.unsplash.com/photo-1514282401047-d79a71a590e8?auto=format&fit=crop&w=700&q=80" },
+  { id: "mumbai", name: "Mumbai", tagline: "Sea face & city lights", hero_image: "https://images.unsplash.com/photo-1570168007204-dfb528c6958f?auto=format&fit=crop&w=700&q=80" },
+  { id: "ladakh", name: "Ladakh", tagline: "High roads & clear skies", hero_image: "https://images.unsplash.com/photo-1581791538302-03537b9c97bf?auto=format&fit=crop&w=700&q=80" },
+  { id: "manali", name: "Manali", tagline: "Snow peaks & mountain trails", hero_image: "https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?auto=format&fit=crop&w=700&q=80" },
+];
+const DESTINATION_FALLBACK_IMAGE = "https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=700&q=80";
+
+const DESTINATION_TABS = [
+  { id: "all", label: "All" },
+  { id: "india", label: "India" },
+  { id: "abroad", label: "International" },
+];
+
+// Hero search tabs: each narrows the search to one product type.
+const SEARCH_TABS = [
+  { type: "", label: "All", icon: Globe, placeholder: "Search a destination or experience" },
+  { type: "TOUR", label: "Tours & Sightseeing", icon: MapIcon, placeholder: "City tours in Jaipur, Dubai, Bangkok…" },
+  { type: "PACKAGE", label: "Packages", icon: Package, placeholder: "Holiday packages to Goa, Thailand, Kerala…" },
+  { type: "TRANSFER", label: "Transfers", icon: Car, placeholder: "Airport or city transfers in…" },
+  { type: "ATTRACTION", label: "Attractions", icon: Ticket, placeholder: "Tickets for theme parks, shows, museums…" },
+  { type: "EXPERIENCE", label: "Activities", icon: Sparkles, placeholder: "Scuba, safaris, food walks…" },
+];
+
+const HERO_QUICK_LINKS = [
+  { label: "Dubai", to: "/search?q=Dubai" },
+  { label: "Goa", to: "/search?q=Goa" },
+  { label: "Thailand", to: "/search?country=Thailand" },
+  { label: "Bali", to: "/search?q=Bali" },
+  { label: "Jaipur", to: "/search?q=Jaipur" },
+  { label: "Airport Transfers", to: "/transfers" },
+];
+
+// "Explore by type" rows; `type` is the search filter and the facet key.
+const TYPE_ROWS = [
+  { type: "TOUR", label: "City tours & sightseeing", icon: MapIcon, blurb: "Guided city tours, day trips and sightseeing with local experts." },
+  { type: "PACKAGE", label: "Holiday packages", icon: Package, blurb: "Multi-day trips with stays, transfers and sightseeing in one booking." },
+  { type: "TRANSFER", label: "Transfers", icon: Car, blurb: "Private cabs between airports, hotels, stations and cities." },
+  { type: "ATTRACTION", label: "Attractions & tickets", icon: Ticket, blurb: "Entry tickets for theme parks, monuments, shows and museums." },
+  { type: "EXPERIENCE", label: "Activities", icon: Sparkles, blurb: "Scuba, safaris, cooking classes, food walks and more." },
 ];
 
 const TRUST_ITEMS = [
@@ -110,6 +165,62 @@ function HeroSlide({ src, label, active }) {
   );
 }
 
+// ── Horizontal carousel with desktop arrows ─────────────────
+function Carousel({ children, label }) {
+  const trackRef = useRef(null);
+  const scroll = (dir) => trackRef.current?.scrollBy({ left: dir * trackRef.current.clientWidth * 0.85, behavior: "smooth" });
+  return (
+    <div className="relative group/carousel">
+      <div ref={trackRef} aria-label={label} className="hide-scrollbar snap-x-mandatory -mx-5 flex gap-4 overflow-x-auto scroll-smooth px-5 pb-2 sm:-mx-8 sm:px-8">
+        {children}
+      </div>
+      {[-1, 1].map((dir) => (
+        <button
+          key={dir}
+          type="button"
+          onClick={() => scroll(dir)}
+          aria-label={dir < 0 ? "Scroll left" : "Scroll right"}
+          className={`absolute top-1/2 z-10 hidden h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-stone-200 bg-white/95 text-stone-800 shadow-card transition hover:scale-105 hover:border-amber-400 dark:border-stone-700 dark:bg-stone-900/95 dark:text-stone-100 lg:grid ${dir < 0 ? "-left-5" : "-right-5"}`}
+        >
+          {dir < 0 ? <ChevronLeft className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Popular destination card ─────────────────────────────────
+function DestinationCard({ dest }) {
+  // A city with live products has its own "things to do" page.
+  const to = dest.kind === "country"
+    ? `/search?country=${encodeURIComponent(dest.name)}`
+    : dest.count > 0 ? destinationPath(dest.name) : `/search?q=${encodeURIComponent(dest.name)}`;
+  return (
+    <Link to={to} className="group relative block aspect-[3/4] w-48 flex-shrink-0 snap-start overflow-hidden rounded-3xl shadow-card sm:w-56">
+      <img
+        src={dest.hero_image || DESTINATION_FALLBACK_IMAGE}
+        alt={dest.name}
+        loading="lazy"
+        className="h-full w-full object-cover transition duration-700 ease-out group-hover:scale-110"
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-stone-950/90 via-stone-950/20 to-transparent" />
+      {dest.abroad && (
+        <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-stone-900 shadow-sm">
+          <Plane className="h-3 w-3 text-amber-600" /> {dest.kind === "country" ? "Country" : dest.country}
+        </span>
+      )}
+      <div className="absolute inset-x-0 bottom-0 p-4">
+        <h3 className="font-display text-2xl leading-none text-white sm:text-[1.7rem]">{dest.name}</h3>
+        {dest.tagline && <p className="mt-1.5 line-clamp-2 text-[11px] font-semibold text-white/80">{dest.tagline}</p>}
+        <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-3 py-1 text-[11px] font-extrabold text-stone-950 shadow-sm transition group-hover:bg-amber-300">
+          {dest.count > 0 ? `${dest.count} experience${dest.count > 1 ? "s" : ""}` : "Explore"}
+          <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
 // ── Experience card (home) ───────────────────────────────────
 function ExperienceCard({ activity, index = 0 }) {
   const { formatPrice, currency } = useCurrency();
@@ -137,7 +248,7 @@ function ExperienceCard({ activity, index = 0 }) {
           <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-80 group-hover:opacity-100 transition-opacity duration-300" />
 
           {/* Bestseller badge */}
-          {bestseller && (
+          {Boolean(bestseller) && (
             <span className="absolute left-3 top-3 rounded-full bg-gradient-to-r from-amber-400 to-amber-600 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-stone-950 shadow-md">
               ⭐ Bestseller
             </span>
@@ -210,8 +321,13 @@ function StatCounter({ value, label }) {
 
 export default function Home() {
   const [heroIndex, setHeroIndex] = useState(0);
-  const [destinations, setDestinations] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const [facets, setFacets] = useState(null);
   const [bestsellers, setBestsellers] = useState([]);
+  const [searchTab, setSearchTab] = useState(SEARCH_TABS[0]);
+  const [destTab, setDestTab] = useState("all");
+  const [typeTab, setTypeTab] = useState(TYPE_ROWS[0].type);
+  const [typeProducts, setTypeProducts] = useState({});
   const [loading, setLoading] = useState(true);
   const [nlEmail, setNlEmail] = useState("");
   const [nlName, setNlName] = useState("");
@@ -221,6 +337,7 @@ export default function Home() {
   const destRef = useRevealOnScroll();
   const bestRef = useRevealOnScroll();
   const catRef = useRevealOnScroll();
+  const typeRef = useRevealOnScroll();
   const trustRef = useRevealOnScroll();
   const howRef = useRevealOnScroll();
 
@@ -248,22 +365,28 @@ export default function Home() {
       .then(([destData, actData]) => {
         // /search answers { products, facets }, not a bare list.
         const products = Array.isArray(actData) ? actData : (actData?.products || []);
-        setDestinations(featuredDestinations(destData, actData?.facets?.cities, FALLBACK_DESTINATIONS));
+        setCatalog(Array.isArray(destData) ? destData : []);
+        setFacets(actData?.facets || null);
         setBestsellers(products.filter((a) => a.is_published !== false).slice(0, 8).map(withImageList));
       })
-      .catch(() => { setDestinations(FALLBACK_DESTINATIONS); setBestsellers([]); })
+      .catch(() => setBestsellers([]))
       .finally(() => setLoading(false));
   }, []);
 
-  // Link a country abroad only once it has something bookable (ADR 023, ADR 024).
-  const [liveAbroad, setLiveAbroad] = useState([]);
+  // Products for the open "Explore by type" tab, fetched once per tab.
   useEffect(() => {
-    api.getActivities({ limit: 1 })
-      .then((data) => setLiveAbroad((data?.facets?.countries || []).filter((c) => c.name && c.name !== "India" && c.count > 0).map((c) => c.name)))
-      .catch(() => {});
-  }, []);
+    if (typeProducts[typeTab]) return;
+    api.getActivities({ type: typeTab, sort: "bestseller", limit: 10 })
+      .then((data) => (Array.isArray(data) ? data : data?.products || []).map(withImageList))
+      .catch(() => [])
+      .then((list) => setTypeProducts((all) => ({ ...all, [typeTab]: list })));
+  }, [typeTab, typeProducts]);
 
-  const featuredDests = (destinations.length ? destinations : FALLBACK_DESTINATIONS).slice(0, 5);
+  const allDestinations = popularDestinations(POPULAR_DESTINATIONS, catalog, facets?.cities, facets?.countries);
+  const shownDestinations = allDestinations.filter((d) => destTab === "all" || (destTab === "abroad") === d.abroad);
+  const typeCount = (type) => facets?.productTypes?.find((t) => t.type === type)?.count || 0;
+  const activeRow = TYPE_ROWS.find((r) => r.type === typeTab);
+  const activeProducts = typeProducts[typeTab];
 
   const homeJsonLd = {
     "@context": "https://schema.org",
@@ -304,23 +427,47 @@ export default function Home() {
           </h1>
 
           <p className="mt-5 max-w-xl text-base leading-relaxed text-white/80 sm:text-lg animate-reveal-up animate-delay-2">
-            Book tours, attractions, transfers and day trips — handpicked, clearly priced, easy to cancel.
+            City tours, sightseeing, transfers and holiday packages across India, Dubai, Thailand and beyond — clearly priced, easy to cancel.
           </p>
 
+          {/* Search type tabs */}
+          <div role="tablist" aria-label="What are you looking for?" className="hide-scrollbar mt-8 flex w-full max-w-3xl gap-2 overflow-x-auto px-1 pb-1 sm:justify-center animate-reveal-up animate-delay-3">
+            {SEARCH_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const active = tab.type === searchTab.type;
+              return (
+                <button
+                  key={tab.label}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setSearchTab(tab)}
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold backdrop-blur-md transition-all duration-200 ${
+                    active ? "bg-white text-stone-950 shadow-lg" : "border border-white/25 bg-white/10 text-white hover:bg-white/20"
+                  }`}
+                >
+                  <Icon className={`h-3.5 w-3.5 ${active ? "text-amber-600" : ""}`} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Search bar */}
-          <div className="mt-8 w-full max-w-3xl animate-reveal-up animate-delay-3">
-            <SearchBar />
+          <div className="mt-3 w-full max-w-3xl animate-reveal-up animate-delay-3">
+            <SearchBar type={searchTab.type} placeholder={searchTab.placeholder} />
           </div>
 
           {/* Quick links */}
-          <div className="mt-6 flex flex-wrap justify-center gap-2.5 animate-reveal-up animate-delay-4">
-            {["Taj Mahal", "Goa Beaches", "Jaipur Forts", "Kerala Houseboats", "Airport Transfers"].map((place) => (
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5 animate-reveal-up animate-delay-4">
+            <span className="text-[12px] font-semibold text-white/70">Popular:</span>
+            {HERO_QUICK_LINKS.map(({ label, to }) => (
               <Link
-                key={place}
-                to={`/search?q=${encodeURIComponent(place)}`}
+                key={label}
+                to={to}
                 className="rounded-full border border-white/30 bg-white/10 px-4 py-1.5 text-[12px] font-semibold text-white backdrop-blur-sm transition-all duration-200 hover:bg-white/20 hover:border-white/50 hover:scale-[1.02]"
               >
-                {place}
+                {label}
               </Link>
             ))}
           </div>
@@ -379,51 +526,129 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── DESTINATIONS MOSAIC ──────────────────────────────────── */}
+      {/* ─── POPULAR DESTINATIONS ─────────────────────────────────── */}
       <section ref={destRef} className="reveal-up mx-auto max-w-7xl px-5 py-16 sm:px-8 sm:py-20">
-        <div className="mb-10 flex items-end justify-between gap-5">
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
           <div>
-            <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">Where India feels different</p>
-            <h2 className="font-display text-3xl text-stone-900 dark:text-stone-100 sm:text-5xl">Find your next story</h2>
-            {liveAbroad.length > 0 && <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-bold text-amber-700 dark:text-amber-400">
-              <span>Now across Asia too:</span>
-              {liveAbroad.map((country) => (
-                <Link key={country} to={`/search?country=${encodeURIComponent(country)}`} className="inline-flex items-center gap-1 hover:text-amber-800 dark:hover:text-amber-300">
-                  {country} <ArrowRight className="h-4 w-4" />
-                </Link>
-              ))}
-            </p>}
+            <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">India and beyond</p>
+            <h2 className="font-display text-3xl text-stone-900 dark:text-stone-100 sm:text-5xl">Popular destinations</h2>
           </div>
-          <Link to="/search" className="hidden items-center gap-2 text-sm font-extrabold text-amber-700 dark:text-amber-400 transition hover:text-amber-800 dark:hover:text-amber-300 sm:flex">
-            All destinations <ArrowRight className="h-4 w-4" />
-          </Link>
+          <div role="tablist" aria-label="Destination region" className="flex rounded-full border border-stone-200 bg-stone-50 p-1 dark:border-stone-700 dark:bg-stone-900">
+            {DESTINATION_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={destTab === tab.id}
+                onClick={() => setDestTab(tab.id)}
+                className={`rounded-full px-4 py-2 text-xs font-extrabold transition ${
+                  destTab === tab.id ? "bg-amber-500 text-stone-950 shadow-sm" : "text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="grid auto-rows-[210px] grid-cols-2 gap-3 lg:grid-cols-4">
-          {featuredDests.map((dest, i) => (
-            <Link
-              key={dest.id}
-              to={dest.live ? destinationPath(dest.name) : `/search?destination=${encodeURIComponent(destinationParam(dest))}`}
-              className={`group relative overflow-hidden rounded-3xl ${i === 0 ? "col-span-2 row-span-2" : ""}`}
-            >
-              <img
-                src={dest.hero_image}
-                alt={dest.name}
-                loading={i === 0 ? "eager" : "lazy"}
-                className="h-full w-full object-cover transition duration-700 ease-out group-hover:scale-110"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-stone-950/85 via-stone-950/15 to-transparent" />
-              {/* Shimmer overlay */}
-              <div className="absolute inset-0 bg-gradient-to-tr from-amber-500/0 to-amber-500/0 group-hover:from-amber-500/5 group-hover:to-transparent transition-all duration-500" />
-              <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5 translate-y-2 group-hover:translate-y-0 transition-transform duration-300">
-                <h3 className={`font-display leading-none text-white ${i === 0 ? "text-3xl sm:text-5xl" : "text-2xl"}`}>{dest.name}</h3>
-                <p className="mt-1 text-[11px] font-semibold text-white/80 sm:text-sm">{dest.tagline || dest.state}</p>
-                <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-[10px] font-bold text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  <MapPin className="h-3 w-3" /> Explore
-                </span>
-              </div>
+        <Carousel label="Popular destinations">
+          {shownDestinations.map((dest) => <DestinationCard key={dest.id} dest={dest} />)}
+        </Carousel>
+      </section>
+
+      {/* ─── EXPLORE BY TYPE ──────────────────────────────────────── */}
+      <section ref={typeRef} className="reveal-up border-y border-stone-200 bg-gradient-to-b from-amber-50/60 to-white py-16 dark:border-stone-800 dark:from-stone-900 dark:to-stone-950 sm:py-20">
+        <div className="mx-auto max-w-7xl px-5 sm:px-8">
+          <div className="mb-8 text-center">
+            <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-400">Tours · Packages · Transfers · Tickets</p>
+            <h2 className="font-display text-3xl text-stone-900 dark:text-stone-100 sm:text-5xl">Explore by type</h2>
+          </div>
+
+          <div role="tablist" aria-label="Product type" className="hide-scrollbar -mx-5 mb-4 flex gap-2.5 overflow-x-auto px-5 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:px-0">
+            {TYPE_ROWS.map(({ type, label, icon: Icon }) => {
+              const active = type === typeTab;
+              const count = typeCount(type);
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTypeTab(type)}
+                  className={`inline-flex shrink-0 items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-extrabold transition-all duration-200 ${
+                    active
+                      ? "border-amber-500 bg-amber-500 text-stone-950 shadow-glow-sm"
+                      : "border-stone-200 bg-white text-stone-700 hover:-translate-y-0.5 hover:border-amber-400 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                  {count > 0 && (
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${active ? "bg-stone-950/15" : "bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400"}`}>{count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-stone-600 dark:text-stone-400">{activeRow.blurb}</p>
+            <Link to={`/search?type=${typeTab}`} className="inline-flex items-center gap-1.5 text-sm font-extrabold text-amber-700 transition hover:text-amber-800 dark:text-amber-400">
+              See all {activeRow.label.toLowerCase()} <ArrowRight className="h-4 w-4" />
             </Link>
-          ))}
+          </div>
+
+          {!activeProducts ? (
+            <Carousel label={activeRow.label}>
+              {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} className="w-72 flex-shrink-0" />)}
+            </Carousel>
+          ) : activeProducts.length ? (
+            <Carousel label={activeRow.label}>
+              {activeProducts.map((activity) => (
+                <div key={activity.id} className="w-72 flex-shrink-0 snap-start">
+                  <TicketCard activity={activity} />
+                </div>
+              ))}
+            </Carousel>
+          ) : (
+            <div className="rounded-3xl border border-dashed border-stone-300 bg-white p-10 text-center dark:border-stone-700 dark:bg-stone-900">
+              <p className="font-display text-xl text-stone-900 dark:text-stone-100">New {activeRow.label.toLowerCase()} are on the way</p>
+              <p className="mt-2 text-sm text-stone-500 dark:text-stone-400">Verified operators are adding listings. Search everything in the meantime.</p>
+              <Link to="/search" className="btn-primary mt-5 inline-flex">Browse all experiences <ArrowRight className="h-4 w-4" /></Link>
+            </div>
+          )}
+
+          {/* Transfers promo */}
+          <div className="relative mt-12 overflow-hidden rounded-3xl bg-stone-950 shadow-xl">
+            <img
+              src="https://images.unsplash.com/photo-1530521954074-e64f6810b32d?auto=format&fit=crop&w=1400&q=80"
+              alt="Traveler waiting at an airport"
+              loading="lazy"
+              className="absolute inset-0 h-full w-full object-cover opacity-40"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-stone-950 via-stone-950/80 to-transparent" />
+            <div className="relative grid gap-6 p-8 sm:p-12 lg:grid-cols-2 lg:items-center">
+              <div>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider text-amber-300">
+                  <Plane className="h-3.5 w-3.5" /> Airport & city transfers
+                </span>
+                <h3 className="mt-3 font-display text-3xl text-white sm:text-4xl">Land, and your cab is already booked.</h3>
+                <ul className="mt-4 space-y-2 text-sm text-white/80">
+                  {["Fixed price shown before you book", "Private cabs from airports, hotels and stations", "Verified local operators"].map((point) => (
+                    <li key={point} className="flex items-center gap-2"><Check className="h-4 w-4 shrink-0 text-amber-400" /> {point}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
+                <Link to="/transfers" className="inline-flex items-center justify-center gap-2 rounded-full bg-amber-400 px-6 py-3.5 text-sm font-extrabold text-stone-950 shadow-md transition hover:-translate-y-0.5 hover:bg-amber-300">
+                  <Car className="h-4 w-4" /> Search transfers
+                </Link>
+                <Link to="/search?type=TRANSFER" className="inline-flex items-center justify-center gap-2 rounded-full border border-white/30 px-6 py-3.5 text-sm font-extrabold text-white transition hover:bg-white/10">
+                  Browse all cabs <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

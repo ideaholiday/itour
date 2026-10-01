@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { catalogCity, destinationParam, featuredDestinations, withImageList } from "./destinations.js";
+import { catalogCity, destinationParam, featuredDestinations, popularDestinations, withImageList } from "./destinations.js";
 
 test("a city abroad links by name; an Indian city by its id", () => {
   assert.equal(destinationParam({ id: "city_th_bangkok", name: "Bangkok", country: "Thailand" }), "Bangkok");
@@ -21,6 +21,24 @@ test("home features the busiest live cities, then curated ones", () => {
   assert.equal(featured[1].hero_image, "goa.jpg", "the curated photo beats the generic one");
   assert.equal(featured[2].hero_image, "goa.jpg", "a city outside the catalogue still gets a photo");
   assert.deepEqual(featuredDestinations(catalog, undefined, curated).map((d) => d.name), ["Goa", "Agra"]);
+});
+
+test("popular destinations keep the curated order, count live products and add other live cities", () => {
+  const curated = [
+    { id: "dubai", name: "Dubai", country: "UAE" },
+    { id: "goa", name: "Goa" },
+    { id: "thailand", name: "Thailand", kind: "country" },
+  ];
+  const catalog = [{ id: "lucknow", name: "Lucknow", state: "Uttar Pradesh", country: "India" }];
+  const list = popularDestinations(curated, catalog, [{ name: "Lucknow", count: 7 }, { name: "goa ", count: 3 }], [{ name: "Thailand", count: 5 }]);
+  assert.deepEqual(list.map((d) => [d.name, d.count, d.abroad]), [
+    ["Dubai", 0, true],
+    ["Goa", 3, false],
+    ["Thailand", 5, true],
+    ["Lucknow", 7, false],
+  ]);
+  assert.equal(list[3].tagline, "Uttar Pradesh");
+  assert.deepEqual(popularDestinations(curated, undefined, undefined, undefined).map((d) => d.count), [0, 0, 0]);
 });
 
 test("a search result's images string becomes a list", () => {

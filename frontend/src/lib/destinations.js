@@ -28,6 +28,29 @@ export function featuredDestinations(catalog, cityFacets, curated = [], count = 
   return [...live, ...curated.filter((d) => !names.has(d.name.toLowerCase()))].slice(0, count);
 }
 
+/**
+ * Home's popular destinations: the curated list in its own order, each with its
+ * live product count from search facets (a `kind: "country"` entry counts its
+ * country, the rest their city), then live cities the list doesn't name, with
+ * their country from the catalogue. Every entry gets `abroad` for the tabs.
+ */
+export function popularDestinations(curated, catalog, cityFacets, countryFacets) {
+  const key = (name) => String(name || "").trim().toLowerCase();
+  const countOf = (facets, name) => (facets || []).find((f) => key(f.name) === key(name))?.count || 0;
+  const byName = new Map((catalog || []).map((d) => [key(d.name), d]));
+  const picks = curated.map((d) => {
+    const country = d.kind === "country" ? d.name : d.country || "India";
+    return { ...d, country, abroad: country !== "India", count: countOf(d.kind === "country" ? countryFacets : cityFacets, d.name) };
+  });
+  const named = new Set(picks.map((d) => key(d.name)));
+  const extra = (cityFacets || []).filter((c) => key(c.name) && !named.has(key(c.name))).map((c) => {
+    const d = byName.get(key(c.name));
+    const country = d?.country || "India";
+    return { id: c.name.trim(), name: c.name.trim(), country, abroad: country !== "India", tagline: d?.tagline || d?.state, hero_image: d?.hero_image, count: c.count };
+  });
+  return [...picks, ...extra];
+}
+
 /** Search returns `images` as stored; a JSON string becomes a list. */
 export function withImageList(product) {
   if (typeof product.images !== "string") return product;

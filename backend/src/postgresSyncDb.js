@@ -114,6 +114,12 @@ export class PostgresSyncDatabase {
 
   _initWorker() {
     const readyBuffer = new SharedArrayBuffer(RESPONSE_BUFFER_BYTES);
+    // One answer buffer per worker, reused by every query (they run one at a
+    // time). A new 16 MB buffer per query is freed only after both threads
+    // collect it, so startup's few hundred queries ran Cloud Run out of memory.
+    // A restarted worker gets its own buffer, so a late answer from a timed-out
+    // query cannot land in the next query's.
+    this.responseBuffer = readyBuffer;
     this.worker = new Worker(new URL("./postgresWorker.js", import.meta.url), {
       workerData: { connection: this.connection, readyBuffer },
       execArgv: process.execArgv.filter((argument) => !argument.startsWith("--input-type")),
@@ -141,7 +147,8 @@ export class PostgresSyncDatabase {
   }
 
   _execute(sql, params = [], retried = false) {
-    const sharedBuffer = new SharedArrayBuffer(RESPONSE_BUFFER_BYTES);
+    const sharedBuffer = this.responseBuffer;
+    Atomics.store(new Int32Array(sharedBuffer, 0, 2), 0, 0);
     this.worker.postMessage({ sharedBuffer, sql, params });
     try {
       return this._waitForResponse(sharedBuffer);

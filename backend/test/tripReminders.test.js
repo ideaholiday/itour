@@ -30,6 +30,8 @@ describe("WhatsApp & Email Automated Trip Reminders", () => {
     db.prepare("DELETE FROM supplier_drivers WHERE supplier_id = ?").run(testSupplierId);
     db.prepare("DELETE FROM booking_modifications WHERE booking_id IN (?, ?)").run(testBookingUpcoming, testBookingCompleted);
     db.prepare("DELETE FROM bookings WHERE id IN (?, ?) OR supplier_id = ?").run(testBookingUpcoming, testBookingCompleted, testSupplierId);
+    // Server startup gives every supplier a subscription row, which blocks the delete.
+    db.prepare("DELETE FROM supplier_subscriptions WHERE supplier_id = ?").run(testSupplierId);
     db.prepare("DELETE FROM suppliers WHERE id = ?").run(testSupplierId);
 
     // Create supplier

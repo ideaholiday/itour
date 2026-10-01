@@ -187,7 +187,7 @@ export default function TicketCard({ activity }) {
               <span>{isTransfer ? "Airport Transfer" : typeConfig.label}</span>
             </span>
 
-            {bestseller && (
+            {Boolean(bestseller) && (
               <span className="relative overflow-hidden rounded-md bg-gradient-to-r from-amber-400 to-amber-500 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-stone-950 shadow-sm">
                 ⭐ Bestseller
                 <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent translate-x-[-100%] group-hover:translate-x-[200%] transition-transform duration-700" />

@@ -591,8 +591,13 @@ export default function Search() {
                 onSelect={(item) => {
                   setLocalQ(item.value);
                   setShowSuggestions(false);
-                  if (item.type === "destination") update("destination", item.value);
-                  else update("q", item.value);
+                  if (item.type === "destination") {
+                    // A picked place is a new search: an old text query would filter it to nothing.
+                    const next = new URLSearchParams(params);
+                    next.set("destination", item.value);
+                    next.delete("q");
+                    setParams(next);
+                  } else update("q", item.value);
                 }}
               />
             )}
