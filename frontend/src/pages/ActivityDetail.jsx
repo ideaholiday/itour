@@ -160,6 +160,12 @@ function QuoteSummary({ serverQuote, quoteLoading, formatPrice, addonsTotalInr, 
               <span className="font-mono">+{formatPrice(addonsTotalInr)}</span>
             </div>
           )}
+          {serverQuote.agent?.discountInr > 0 && (
+            <div className="flex justify-between text-[11px] font-bold text-emerald-700">
+              <span>Your agent price ({serverQuote.agent.discountPct}% off)</span>
+              <span className="font-mono">{formatPrice(totalAmount - serverQuote.agent.discountInr)}</span>
+            </div>
+          )}
         </div>
       )}
       {currency !== "INR" && (

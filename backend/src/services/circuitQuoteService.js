@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 import { calculateBookingQuote, publicQuote } from "./bookingService.js";
+import { agentPrice, approvedAgencyForUser } from "./travelAgencyService.js";
 
 const QUOTE_VALIDITY_MS = 15 * 60 * 1000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -60,6 +61,10 @@ function normalizeStoredQuote(row) {
       taxesAmount: Number(row.taxes_amount),
       totalAmount: Number(row.total_amount),
     },
+    // An approved agency's discount, frozen when the circuit was priced (ADR 054).
+    agent: Number(row.agent_discount_inr || 0) > 0 || row.agency_id
+      ? { agencyId: row.agency_id, discountInr: Number(row.agent_discount_inr || 0), payableAmount: Number(row.total_amount) - Number(row.agent_discount_inr || 0) }
+      : null,
     lineItems: parse(row.line_items),
     issues: parse(row.issues),
     expiresAt: row.expires_at,
@@ -85,6 +90,7 @@ export function createCircuitQuote(database, itinerary, userId, input = {}) {
   const childrenCount = Math.max(0, Math.min(30, Number(input.childrenCount ?? itinerary.childrenCount ?? itinerary.children ?? 0) || 0));
   const luggage = Math.max(0, Math.min(60, Number(input.luggage ?? 0) || 0));
   const passengers = adultsCount + childrenCount;
+  const agency = approvedAgencyForUser(database, userId);
   const lineItems = [];
   const issues = [];
 
@@ -124,6 +130,7 @@ export function createCircuitQuote(database, itinerary, userId, input = {}) {
         dest_state: item.destState || item.dest_state,
       });
       const safeQuote = publicQuote(quote);
+      const agent = agency ? agentPrice(agency, { totalInr: quote.totalAmount, commissionInr: quote.commissionAmount }) : null;
       lineItems.push({
         itemId: itemIdentity,
         productId: safeQuote.productId,
@@ -144,6 +151,7 @@ export function createCircuitQuote(database, itinerary, userId, input = {}) {
         luggage: safeQuote.luggage,
         cancellationPolicy: parseCancellationPolicy(quote.product.cancellation_policy),
         breakdown: safeQuote.breakdown,
+        ...(agent ? { agentDiscountInr: agent.discountInr } : {}),
       });
     } catch (error) {
       issues.push({
@@ -163,6 +171,7 @@ export function createCircuitQuote(database, itinerary, userId, input = {}) {
     0,
   );
   const totalAmount = lineItems.reduce((sum, item) => sum + Number(item.breakdown.totalAmount || 0), 0);
+  const agentDiscountInr = lineItems.reduce((sum, item) => sum + Number(item.agentDiscountInr || 0), 0);
   const status = issues.length === 0 ? "READY" : lineItems.length > 0 ? "PARTIAL" : "ACTION_REQUIRED";
   const quoteId = `cq_${nanoid(16)}`;
   const endDate = addDays(startDate, Math.max(0, Number(itinerary.daysCount || 1) - 1));
@@ -171,8 +180,9 @@ export function createCircuitQuote(database, itinerary, userId, input = {}) {
   database.prepare(`
     INSERT INTO circuit_quotes (
       id, itinerary_id, user_id, status, currency, adults_count, children_count,
-      start_date, end_date, base_amount, taxes_amount, total_amount, line_items, issues, expires_at
-    ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      start_date, end_date, base_amount, taxes_amount, total_amount, line_items, issues, expires_at,
+      agency_id, agent_discount_inr
+    ) VALUES (?, ?, ?, ?, 'INR', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     quoteId,
     itinerary.id,
@@ -188,6 +198,8 @@ export function createCircuitQuote(database, itinerary, userId, input = {}) {
     JSON.stringify(lineItems),
     JSON.stringify(issues),
     expiresAt,
+    agency?.id || null,
+    agentDiscountInr,
   );
 
   return normalizeStoredQuote(database.prepare("SELECT * FROM circuit_quotes WHERE id = ?").get(quoteId));

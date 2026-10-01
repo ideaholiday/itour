@@ -330,5 +330,5 @@ This document records significant technical and product architectural decisions.
 
 ---
 
-## ADR 025+ (SEO) and ADR 034+ (operator platform)
-In [`DECISIONS_SEO.md`](DECISIONS_SEO.md) and [`DECISIONS_OPERATOR.md`](DECISIONS_OPERATOR.md). Add new ADRs in those areas there.
+## ADR 025+ by area
+[`DECISIONS_SEO.md`](DECISIONS_SEO.md), [`DECISIONS_OPERATOR.md`](DECISIONS_OPERATOR.md), [`DECISIONS_MOBILE.md`](DECISIONS_MOBILE.md), [`DECISIONS_B2B.md`](DECISIONS_B2B.md).

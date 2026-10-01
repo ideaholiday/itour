@@ -189,6 +189,10 @@ export default function Login({ initialMode = "login" }) {
             {isSignup ? "Log in" : "Sign up"}
           </button>
         </p>
+        <p className="mt-3 text-center text-sm text-stone-600">
+          Travel agent?{" "}
+          <Link to="/agents" className="font-bold text-amber-700 hover:text-amber-800">Book at agent prices</Link>
+        </p>
         <p className="mt-4 text-center text-[11px] leading-5 text-stone-500">
           By continuing, you agree to Idea Holiday's{" "}
           <Link to="/terms" className="font-semibold underline hover:text-amber-800">terms</Link> and{" "}

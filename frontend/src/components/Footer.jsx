@@ -45,6 +45,7 @@ const footerGroups = [
       ["Travel guides", "/blog"],
       ["Find tour operators", "/suppliers"],
       ["List your business", "/supplier/signup"],
+      ["For travel agents", "/agents"],
       ["Plan Circuit 🗺️", "/circuit-planner"],
       ["Travel & Earn ✨", "/travel-and-earn"],
       ["Influencer Program 🌟", "/affiliate"],

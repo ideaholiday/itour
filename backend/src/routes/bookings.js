@@ -39,6 +39,7 @@ import {
 import { localDateTimeMs, productTime } from "../lib/localTime.js";
 import { acceptSupplierReschedule, declineSupplierReschedule } from "../services/supplierRescheduleService.js";
 import { isGstFreeProduct, productCountry } from "../lib/productTax.js";
+import { agentPrice, approvedAgencyForUser, assertNoAgentCoupon } from "../services/travelAgencyService.js";
 
 const router = Router();
 router.use(optionalAuthMiddleware);
@@ -190,6 +191,12 @@ router.post("/quote", optionalAuthMiddleware, validateBody(bookingQuoteSchema), 
     const answers = validateQuestionAnswers(db, option?.id, req.body.booking_question_answers || {}, req.body);
     assertBookingLocations(db, req.body, { requireOperationalDetails: false, deferLocationValidation: true });
     const quote = calculateBookingQuote(db, req.body, { ownerId: req.user?.id });
+    // An approved travel agency sees its agent price and takes no coupon or referral (ADR 054).
+    const agency = approvedAgencyForUser(db, req.user?.id);
+    if (agency) {
+      const agent = agentPrice(agency, { totalInr: quote.totalAmount, commissionInr: quote.commissionAmount });
+      return res.json({ success: true, quote: { ...publicQuote(quote), agent, referral: { discountInr: 0 }, coupon: null, option: option || null, bookingQuestions: option ? getBookingQuestions(db, option.id) : [], normalizedAnswers: answers } });
+    }
     const referralBenefit = referralPreview(req, quote);
     const { referrerCreditInr: _referrerCredit, ...referral } = referralBenefit;
     res.json({ success: true, quote: { ...publicQuote(quote), referral, coupon: couponPreview(req, quote, referralBenefit), option: option || null, bookingQuestions: option ? getBookingQuestions(db, option.id) : [], normalizedAnswers: answers } });
@@ -217,14 +224,16 @@ router.post("/hold", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), v
     const locationValidation = assertBookingLocations(db, req.body, { requireOperationalDetails: false });
     const quote = calculateBookingQuote(db, req.body, { ownerId: req.user?.id });
     const logistics = buildLogisticsSnapshot(req.body, option, locationValidation);
+    const holdAgency = approvedAgencyForUser(db, req.user.id);
+    const agent = holdAgency ? agentPrice(holdAgency, { totalInr: quote.totalAmount, commissionInr: quote.commissionAmount }) : undefined;
     if (quote.nativeSlot) {
       const nativeHold = reserveNativeInventory(db, { productId, optionId: option.id, localDate: quote.activityDate,
         localTime: req.body.pickup_time || "09:00", adults: quote.adults, children: quote.children,
         ownerId: req.user.id, requestKey: requestKey || `checkout_${nanoid(20)}` });
-      return res.status(201).json({ success: true, holdId: nativeHold.id, nativeHoldId: nativeHold.id, expiresAt: nativeHold.utc_expires_at, quote: publicQuote(quote), option, logistics });
+      return res.status(201).json({ success: true, holdId: nativeHold.id, nativeHoldId: nativeHold.id, expiresAt: nativeHold.utc_expires_at, quote: { ...publicQuote(quote), agent }, option, logistics });
     }
     const hold = createBookingHold(db, { productId, optionId: option?.id || null, activityDate: quote.activityDate, adults: quote.adults, children: quote.children, amount: quote.totalAmount, quote: publicQuote(quote), logistics: { ...logistics, answers }, clientRequestId: req.body.client_request_id || req.headers["idempotency-key"] || null });
-    res.status(201).json({ success: true, holdId: hold.id, expiresAt: hold.expires_at, quote: publicQuote(quote), option: option || null, logistics, bookingQuestions: option ? getBookingQuestions(db, option.id) : [] });
+    res.status(201).json({ success: true, holdId: hold.id, expiresAt: hold.expires_at, quote: { ...publicQuote(quote), agent }, option: option || null, logistics, bookingQuestions: option ? getBookingQuestions(db, option.id) : [] });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message || "Could not hold this booking", code: error.code, requestId: req.requestId });
   }
@@ -280,6 +289,12 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     const selectedSupplier = assignment.selected;
     const assignmentCommissionAmount = Math.round(quote.totalAmount * selectedSupplier.commissionRate / 100);
     const assignmentSupplierPayout = quote.totalAmount - assignmentCommissionAmount;
+    // IdeaHoliday B2B (ADR 054): an approved agency pays its agent price, priced on
+    // this booking's own commission, and takes no coupon, referral or creator credit.
+    const agency = approvedAgencyForUser(db, actor.id);
+    assertNoAgentCoupon(agency, req.body.promo_code);
+    const agent = agency ? agentPrice(agency, { totalInr: quote.totalAmount, commissionInr: assignmentCommissionAmount }) : null;
+    const agentDiscount = agent?.discountInr || 0;
     const selectedAssignmentReason = assignmentReason(selectedSupplier);
     const requestedUserId = actor.id || `ext_${nanoid(12)}`;
     const existingUser = db.prepare("SELECT id FROM users WHERE id = ? OR LOWER(email) = LOWER(?)").get(requestedUserId, req.body.traveler_email.trim());
@@ -293,7 +308,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     // supplier's payout, so amount + credit + discount = commission + payout.
     const affiliateAttributed = hasAffiliateAttribution(req.body, existingUser?.id || null);
     const referralCode = requestReferralCode(req.body);
-    const expectedReferral = existingUser && !affiliateAttributed
+    const expectedReferral = existingUser && !affiliateAttributed && !agency
       ? previewReferralBenefit(db, {
         userId,
         referralCode,
@@ -323,7 +338,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     let walletMaxFromOther = null;
     if (requestedWalletCredit > 0 && existingUser) {
       const walletCalc = applyWalletCreditsToCheckout(db, userId, {
-        bookingAmountInr: quote.totalAmount - (expectedReferral.discountInr || 0) - (expectedCoupon?.discountInr || 0),
+        bookingAmountInr: quote.totalAmount - agentDiscount - (expectedReferral.discountInr || 0) - (expectedCoupon?.discountInr || 0),
         requestedCreditInr: requestedWalletCredit,
       });
       if (walletCalc?.applied) {
@@ -334,7 +349,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
     let referralDiscount = 0;
     let referrerCredit = 0;
     let couponDiscount = 0;
-    let finalPayableAmount = Math.max(0, quote.totalAmount - appliedWalletCredit);
+    let finalPayableAmount = Math.max(0, quote.totalAmount - agentDiscount - appliedWalletCredit);
 
     db.transaction(() => {
       db.prepare("UPDATE products SET id = id WHERE id = ?").run(quote.product.id);
@@ -381,7 +396,12 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
         db.prepare("UPDATE bookings SET wallet_credit_applied_inr = ? WHERE id = ?").run(appliedWalletCredit, bookingId);
       }
 
-      if (!affiliateAttributed) {
+      if (agent) {
+        db.prepare("UPDATE bookings SET source = 'IH_B2B', agency_id = ?, agent_discount_pct = ?, agent_discount_inr = ? WHERE id = ?")
+          .run(agent.agencyId, agent.discountPct, agentDiscount, bookingId);
+      }
+
+      if (!affiliateAttributed && !agency) {
         const referral = applyReferralToBooking(db, {
           bookingId,
           userId,
@@ -438,7 +458,7 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
             }
           }
         }
-      } else if (req.body.visitor_id || req.body.affiliate_code) {
+      } else if (!agency && (req.body.visitor_id || req.body.affiliate_code)) {
         // Link attribution is resolved from the server-side click record for
         // this visitor, not from the code the browser sends: the code alone is
         // a claim anyone could make.
@@ -527,6 +547,8 @@ router.post("/", authenticate, requireRoles("TRAVELER", "ADMIN", "STAFF"), valid
       wallet_credit_applied_inr: appliedWalletCredit,
       referral_discount_inr: referralDiscount,
       coupon_discount_inr: couponDiscount,
+      agent_discount_inr: agentDiscount,
+      agent: agent || null,
       quote: {
         ...publicQuote(quote),
         supplierId: selectedSupplier.supplierId,
@@ -841,7 +863,13 @@ router.get("/:ref/documents/:type", (req, res) => {
     if (!accountAccess && !linkAccess) return res.status(403).send("This secure document link is invalid or has expired");
     // The voucher gets forwarded to everyone on the trip, so it carries the
     // traveler's invite link. A missing code never blocks the document.
-    if (documentType === "VOUCHER" && booking.user_id) {
+    // An agent booking's voucher goes to the agent's client: no referral link. Its
+    // invoice is billed to the agency, which paid (ADR 054).
+    if (booking.agency_id) {
+      const agency = db.prepare("SELECT agency_name, gstin, address, city, state FROM travel_agencies WHERE id = ?").get(booking.agency_id);
+      if (agency) Object.assign(booking, { agency_name: agency.agency_name, agency_gstin: agency.gstin, agency_address: [agency.address, agency.city, agency.state].filter(Boolean).join(", ") });
+    }
+    if (documentType === "VOUCHER" && booking.user_id && !booking.agency_id) {
       try {
         const owner = db.prepare("SELECT id, name, referral_code, role FROM users WHERE id = ?").get(booking.user_id);
         if (owner && String(owner.role || "TRAVELER").toUpperCase() === "TRAVELER") {

@@ -83,6 +83,20 @@ export const affiliateAdminSchemas = {
   kyc: object({ kyc_status: z.enum(["VERIFIED", "REJECTED", "PENDING_REVIEW"]), reason: text(3, 500) }),
 };
 
+// IdeaHoliday B2B travel agents (ADR 054). Tax ids are checked in travelAgencyService.
+export const travelAgencySchemas = {
+  apply: object({
+    agencyName: text(2, 160), contactName: text(2, 120), phone,
+    gstin: optionalText(20), pan: optionalText(12), address: optionalText(500),
+    city: text(2, 100), state: text(2, 100), website: optionalText(300),
+  }),
+  review: object({
+    status: z.enum(["APPROVED", "REJECTED", "SUSPENDED"]),
+    discountPct: z.number().min(5).max(10).optional(),
+    reason: optionalText(500),
+  }),
+};
+
 export const bookingSchemas = {
   notificationPreferences: object({ emailEnabled: booleanValue.optional(), whatsappEnabled: booleanValue.optional(), email_enabled: booleanValue.optional(), whatsapp_enabled: booleanValue.optional() }),
   otp: object({ otp: z.string().regex(/^\d{6}$/) }),

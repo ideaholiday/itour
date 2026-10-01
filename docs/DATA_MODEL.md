@@ -403,6 +403,9 @@ tables enforce.
 - **`affiliate_clicks`**: Raw click log for conversion analytics, with the
   visitor IP stored only as a truncated SHA-256 hash.
 
+### 2.13a IdeaHoliday B2B travel agencies (`travel_agencies`, migration 082, ADR 054)
+One row per agency, keyed to a `TRAVELER` `users` row (`user_id` unique). `agency_name`, `contact_name`, `phone` (E.164), `gstin` and `pan` (at least one; a GSTIN's PAN is filled in), `address`, `city`, `state`, `website`, `discount_pct` (5–10, default 5: the agent price is this % below the website price), `status` (`PENDING`, `APPROVED`, `REJECTED`, `SUSPENDED`), `review_note` (the reason the agency sees), `reviewed_by`, `reviewed_at`. Only `APPROVED` gets the agent price. Not the supplier's own agents (`supplier_agents`, [`DATA_MODEL_OPERATOR.md`](DATA_MODEL_OPERATOR.md)).
+
 ### 2.14 Travel & Earn (`referral_*`, `wallet_transactions`)
 Traveler-to-traveler referrals and the wallet they pay into. Migration 030. See
 BUSINESS_RULES §11.
@@ -436,8 +439,12 @@ BUSINESS_RULES §11.
   is the traveler's `REF-` code.
 - **`bookings`**: `referral_discount_inr`, `wallet_credit_applied_inr` and
   `coupon_discount_inr` (migration 036, the charged `promo_codes` discount). With
-  them, `amount_inr + wallet_credit_applied_inr + referral_discount_inr + coupon_discount_inr =
-  commission_amount + supplier_payout_amount`.
+  them, `amount_inr + wallet_credit_applied_inr + referral_discount_inr + coupon_discount_inr
+  + agent_discount_inr = commission_amount + supplier_payout_amount`.
+  Agent bookings (migration 083, ADR 054): `agency_id` → `travel_agencies`,
+  `agent_discount_pct`, `agent_discount_inr`; `source = 'IH_B2B'`.
+  `circuit_quotes` and `circuit_orders` carry `agency_id` and `agent_discount_inr`;
+  an agency's `circuit_orders.total_amount` is net of it.
 - **`user_referrals`**: v1 table, no longer written. Carried into the tables
   above at startup.
 

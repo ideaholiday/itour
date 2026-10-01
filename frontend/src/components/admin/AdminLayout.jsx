@@ -28,7 +28,8 @@ import {
   TicketPercent,
   Library,
   BadgeCheck,
-  Newspaper
+  Newspaper,
+  Briefcase
 } from "lucide-react";
 
 export default function AdminLayout({ children }) {
@@ -125,6 +126,13 @@ export default function AdminLayout({ children }) {
       path: "/admin/coupons",
       label: "Coupons",
       icon: TicketPercent,
+      badge: null,
+      badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
+    },
+    {
+      path: "/admin/agencies",
+      label: "Travel agents",
+      icon: Briefcase,
       badge: null,
       badgeColor: "bg-amber-500/20 text-amber-600 border-amber-500/30"
     },

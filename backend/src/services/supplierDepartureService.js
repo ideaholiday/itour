@@ -168,7 +168,7 @@ export function departureManifest(db, { supplierId, productId, date, time = null
 }
 
 // A cell starting with = + - @ would run as a formula in Excel or Sheets. A plain phone number stays as it is.
-function csvCell(value) {
+export function csvCell(value) {
   let text = value == null ? "" : String(value);
   if (/^[=+\-@\t\r]/.test(text) && !/^\+[\d\s-]+$/.test(text)) text = `'${text}`;
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;

@@ -52,7 +52,7 @@ Legacy and noise files are hidden from search by `.ignore` / `.geminiignore`.
 | Understand the goal, users, scope, non-goals | [`PRODUCT.md`](docs/PRODUCT.md) |
 | Decide what to work on next | [`ROADMAP.md`](docs/ROADMAP.md) |
 | Seats, holds, rates, calendar, capacity | [`RESERVATION_ENGINE.md`](docs/RESERVATION_ENGINE.md) |
-| Pricing, commission, refunds, booking state, coupons, supplier subscriptions, check-in and departure cancellation | [`BUSINESS_RULES.md`](docs/BUSINESS_RULES.md), [`COUPONS.md`](docs/COUPONS.md), [`SUPPLIER_PLANS.md`](docs/SUPPLIER_PLANS.md), [`REFUND_CREDIT.md`](docs/REFUND_CREDIT.md), [`SUPPLIER_OPERATIONS.md`](docs/SUPPLIER_OPERATIONS.md) |
+| Pricing, commission, refunds, booking state, coupons, travel agents, supplier subscriptions, check-in and departure cancellation | [`BUSINESS_RULES.md`](docs/BUSINESS_RULES.md), [`COUPONS.md`](docs/COUPONS.md), [`B2B_AGENTS.md`](docs/B2B_AGENTS.md), [`SUPPLIER_PLANS.md`](docs/SUPPLIER_PLANS.md), [`REFUND_CREDIT.md`](docs/REFUND_CREDIT.md), [`SUPPLIER_OPERATIONS.md`](docs/SUPPLIER_OPERATIONS.md) |
 | Schema, tables, fields | [`DATA_MODEL.md`](docs/DATA_MODEL.md) (operator platform: [`DATA_MODEL_OPERATOR.md`](docs/DATA_MODEL_OPERATOR.md)) |
 | Add or change an endpoint | [`API_CONTRACTS.md`](docs/API_CONTRACTS.md) (supplier extranet: [`API_CONTRACTS_SUPPLIER.md`](docs/API_CONTRACTS_SUPPLIER.md)) + [`SECURITY.md`](docs/SECURITY.md) |
 | Auth, RBAC, PII, dependency CVEs | [`SECURITY.md`](docs/SECURITY.md) |
@@ -60,7 +60,7 @@ Legacy and noise files are hidden from search by `.ignore` / `.geminiignore`.
 | WhatsApp, payments, email, SMS, channel manager | [`INTEGRATIONS.md`](docs/INTEGRATIONS.md) + [`ENVIRONMENT.md`](docs/ENVIRONMENT.md) |
 | Run it locally, migrations, tooling | [`DEVELOPMENT.md`](docs/DEVELOPMENT.md) |
 | Write or fix tests | [`TESTING.md`](docs/TESTING.md) |
-| Why something was done this way | [`DECISIONS.md`](docs/DECISIONS.md) (SEO: [`DECISIONS_SEO.md`](docs/DECISIONS_SEO.md); operator platform: [`DECISIONS_OPERATOR.md`](docs/DECISIONS_OPERATOR.md); mobile apps: [`DECISIONS_MOBILE.md`](docs/DECISIONS_MOBILE.md)) |
+| Why something was done this way | [`DECISIONS.md`](docs/DECISIONS.md) (SEO: [`DECISIONS_SEO.md`](docs/DECISIONS_SEO.md); operator platform: [`DECISIONS_OPERATOR.md`](docs/DECISIONS_OPERATOR.md); mobile apps: [`DECISIONS_MOBILE.md`](docs/DECISIONS_MOBILE.md); B2B travel agents: [`DECISIONS_B2B.md`](docs/DECISIONS_B2B.md)) |
 | A term you don't recognise | [`GLOSSARY.md`](docs/GLOSSARY.md) |
 | A library or framework API (Context7 IDs) | [`LIBRARIES.md`](docs/LIBRARIES.md) |
 

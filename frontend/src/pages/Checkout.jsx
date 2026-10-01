@@ -298,10 +298,13 @@ export default function Checkout() {
     ticketTiersParsed.map(({ tierId, count }) => [tierId, count])
   ), [ticketTiersParam]);
 
-  const discountAmount = promoCodeForQuote && quote?.coupon?.valid ? Number(quote.coupon.discountInr || 0) : 0;
-  const referralDiscountAmount = Number(quote?.referral?.discountInr || 0);
-  const referralUnavailable = appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
-  const remainingBeforeWallet = Math.max(0, totalAmount - discountAmount - referralDiscountAmount);
+  // An approved travel agency's price comes from the server quote, with no coupon or referral (ADR 054).
+  const agentQuote = quote?.agent || null;
+  const agentDiscountAmount = Number(agentQuote?.discountInr || 0);
+  const discountAmount = !agentQuote && promoCodeForQuote && quote?.coupon?.valid ? Number(quote.coupon.discountInr || 0) : 0;
+  const referralDiscountAmount = agentQuote ? 0 : Number(quote?.referral?.discountInr || 0);
+  const referralUnavailable = !agentQuote && appliedPromo?.type === "REFERRAL" && quote?.referral && !quote.referral.eligible;
+  const remainingBeforeWallet = Math.max(0, totalAmount - agentDiscountAmount - discountAmount - referralDiscountAmount);
   // Referral credit is capped; creator earnings and refund credit in the wallet can pay the rest (the server applies the same split).
   const creatorCredit = Math.min(walletBalance, Number(walletPolicy.affiliateCreditInr || 0) + Number(walletPolicy.refundCreditInr || 0));
   const cappedWalletCredit = Math.floor(Math.min(walletBalance - creatorCredit, remainingBeforeWallet * Number(walletPolicy.walletMaxSharePct) / 100, Number(walletPolicy.walletMaxPerBookingInr)));
@@ -486,8 +489,8 @@ export default function Checkout() {
         package_hotels: packageHotels.map((hotel) => ({ day: hotel.day, name: hotel.point.address, city: hotel.city, lat: hotel.point.lat, lng: hotel.point.lng })),
         origin_state: params.get("originState"),
         special_requests: specialRequests.trim(),
-        promo_code: promoCodeForQuote,
-        referral_code: referralCodeForQuote,
+        promo_code: agentQuote ? null : promoCodeForQuote,
+        referral_code: agentQuote ? null : referralCodeForQuote,
         // Lets the server match this booking to the referral click that brought
         // the traveler here, so the creator is actually paid for the link.
         ...getBookingAttributionFields(),
@@ -628,6 +631,7 @@ export default function Checkout() {
           <form onSubmit={handleSubmitBooking} className="space-y-6">
             <section className="rounded-3xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-amber-100 text-amber-800"><UserRound className="h-5 w-5" /></span><div><h2 className="font-serif text-xl font-bold text-stone-900">Who’s traveling?</h2><p className="text-xs text-stone-500">Voucher and important trip updates go here.</p></div></div>
+              {agentQuote && <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Booking for a client? Enter your client's details: they get the voucher without the price. The invoice comes to {agentQuote.agencyName}.</p>}
               <div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-xs font-bold text-stone-700">Full name<input required value={travelerName} onChange={(e) => setTravelerName(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></label><div className="text-xs font-bold text-stone-700"><label htmlFor="checkout-phone">WhatsApp / mobile</label><PhoneInput id="checkout-phone" required value={travelerPhone} onChange={setTravelerPhone} className="mt-2" inputClassName="rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></div><label className="text-xs font-bold text-stone-700 sm:col-span-2">Email for e-ticket<input type="email" required value={travelerEmail} onChange={(e) => setTravelerEmail(e.target.value)} className="mt-2 w-full rounded-xl border border-stone-300 bg-[#FAF9F6] px-4 py-3 text-sm font-normal text-stone-900 outline-none focus:border-amber-500 focus:bg-white" /></label></div>
             </section>
 
@@ -1115,6 +1119,15 @@ export default function Checkout() {
                     </div>
                   )}
 
+                  {agentDiscountAmount > 0 && (
+                    <div className="flex justify-between items-center text-emerald-700 font-bold bg-emerald-50 p-2 rounded-xl border border-emerald-200">
+                      <span className="flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5" /> Agent price ({agentQuote.discountPct}% off)
+                      </span>
+                      <span>−{formatPrice(agentDiscountAmount)}</span>
+                    </div>
+                  )}
+
                   {/* Promo Code Discount */}
                   {discountAmount > 0 && (
                     <div className="flex justify-between items-center text-emerald-700 font-bold bg-emerald-50 p-2 rounded-xl border border-emerald-200">
@@ -1134,7 +1147,10 @@ export default function Checkout() {
                     </div>
                   )}
 
-                    {/* Promo Code Input Box */}
+                    {/* Promo Code Input Box: agents have their agent price instead */}
+                  {agentQuote ? (
+                    <p className="pt-2 border-t border-stone-100 text-[11px] text-stone-500">Booking as {agentQuote.agencyName}. Coupons don't apply to agent prices.</p>
+                  ) : (
                   <div className="pt-2 border-t border-stone-100 space-y-2">
                     {appliedPromo ? (
                       <div className="flex items-center justify-between text-[11px] font-mono text-emerald-800">
@@ -1187,6 +1203,7 @@ export default function Checkout() {
                       </p>
                     )}
                   </div>
+                  )}
 
                   {/* Wallet Credits Redemption */}
                   {walletBalance > 0 && (

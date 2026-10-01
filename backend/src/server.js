@@ -138,6 +138,8 @@ import promoRouter from "./routes/promo.js";
 import affiliateRouter from "./routes/affiliate.js";
 import referralRouter from "./routes/referral.js";
 import adminAffiliatesRouter from "./routes/adminAffiliates.js";
+import agentsRouter from "./routes/agents.js";
+import adminAgenciesRouter from "./routes/adminAgencies.js";
 import addonsRouter from "./routes/addons.js";
 import circuitOrdersRouter from "./routes/circuitOrders.js";
 import availabilityRouter from "./routes/availability.js";
@@ -240,6 +242,8 @@ const mountApiRoutes = (prefix) => {
   app.use(`${prefix}/affiliate`, affiliateRouter);
   app.use(`${prefix}/referral`, referralRouter);
   app.use(`${prefix}/admin/affiliates`, adminAffiliatesRouter);
+  app.use(`${prefix}/agents`, agentsRouter);
+  app.use(`${prefix}/admin/agencies`, adminAgenciesRouter);
   app.use(prefix, addonsRouter);
   app.use(`${prefix}/circuit-orders`, circuitOrdersRouter);
   app.use(`${prefix}/availability`, availabilityRouter);

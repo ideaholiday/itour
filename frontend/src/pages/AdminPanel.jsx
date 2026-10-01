@@ -16,6 +16,7 @@ import CouponsView from "./admin/CouponsView.jsx";
 import BlogPostsView from "./admin/BlogPostsView.jsx";
 import VerificationQueueView from "./admin/VerificationQueueView.jsx";
 import PackageLibraryView from "./admin/PackageLibraryView.jsx";
+import AgenciesView from "./admin/AgenciesView.jsx";
 
 export default function AdminPanel({ view }) {
   const location = useLocation();
@@ -35,6 +36,7 @@ export default function AdminPanel({ view }) {
     else if (location.pathname.includes("/blog")) activeView = "blog";
     else if (location.pathname.includes("/verifications")) activeView = "verifications";
     else if (location.pathname.includes("/package-library")) activeView = "package-library";
+    else if (location.pathname.includes("/agencies")) activeView = "agencies";
     else activeView = "overview";
   }
 
@@ -55,6 +57,7 @@ export default function AdminPanel({ view }) {
         {activeView === "blog" && <BlogPostsView />}
         {activeView === "verifications" && <VerificationQueueView />}
         {activeView === "package-library" && <PackageLibraryView />}
+        {activeView === "agencies" && <AgenciesView />}
       </AdminLayout>
     </AdminGuard>
   );

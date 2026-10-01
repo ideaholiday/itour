@@ -75,6 +75,13 @@ Do not rebuild these. Extend them if asked.
 - **Phase 11 — done:** running an accepted trip: a trip file with each line's status, confirmation and vendor cost; hotel booking requests by email; drivers for cars with clash checks and a weekly car schedule; vendor payments and margin; the final itinerary by email and WhatsApp (ADR 045). `DATA_MODEL.md` split: operator tables in `DATA_MODEL_OPERATOR.md`. Needs migration 072 (applied automatically on the next deploy).
 - **Phase 12 — done:** quotation builder replan (ADR 051): a start screen for single-city, multi-city, a ready route or a copy; a live trip calculator with room and cab suggestions and price from a target; travel days with the transfer between cities; arrival and departure points; three itinerary themes on a redesigned PDF, a web itinerary page (`/q/:token`) and a themed HTML email with a preview. Needs migration 079 (applied automatically on the next deploy).
 
+**IdeaHoliday B2B travel agents** (owner request 2026-10-01; [ADR 054](DECISIONS_B2B.md), [`plans/b2b-travel-agents.md`](plans/b2b-travel-agents.md)): agents sign up on ideaholiday.in, IdeaHoliday approves them, and they book every listing type and circuits at a 5–10% net price, prepaid.
+
+- **B1 — built 2026-10-01, not deployed:** `/agents` sign-up (GSTIN or PAN), admin approval at `/admin/agencies` with a 5–10% discount, emails. Needs migration 082 (applied automatically on the next deploy).
+- **B2 — built 2026-10-01, not deployed:** agent price on the listing, checkout and circuits (`IH_B2B`, out of commission, no coupons); the agency gets the invoice, the guest the voucher. Needs migration 083.
+- **B3 — built 2026-10-01, not deployed:** agent dashboard at `/agents/dashboard`: bookings by guest and date, voucher and invoice, cancel, statement CSV.
+- B4: client vouchers without the price.
+
 Standing obligations that apply to every change:
 
 - Keep `npm audit --omit=dev` at **0 vulnerabilities**.
@@ -134,7 +141,7 @@ Built together with the driver app and released together (ADR 053). Both are in 
 ## LATER
 
 - **Proximity dispatch** — allocate drivers by live GPS and rating.
-- **B2B sub-agent portal** — credit lines, whitelabel vouchers, corporate billing.
+- **B2B agent credit** — deposits, credit lines and corporate billing for IdeaHoliday's agents (ADR 054 starts prepaid).
 - **BigQuery warehouse** — only worth it past ~1000 bookings/day.
 
 ---

@@ -352,6 +352,22 @@ export const api = {
     fetch(`/api/referral/admin/rewards/${encodeURIComponent(rewardId)}/review`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   setReferralRelationshipStatus: (relationshipId, payload) =>
     fetch(`/api/referral/admin/relationships/${encodeURIComponent(relationshipId)}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  // IdeaHoliday B2B travel agents (ADR 054).
+  getAgentProgram: () =>
+    fetch("/api/agents/program").then(handle),
+  getMyAgency: () =>
+    fetch("/api/agents/me", { headers: authHeaders() }).then(handle),
+  applyAsAgency: (payload) =>
+    fetch("/api/agents/apply", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
+  getAgencyBookings: (params = {}) =>
+    fetch(`/api/agents/bookings?${new URLSearchParams(params)}`, { headers: authHeaders() }).then(handle),
+  downloadAgencyStatement: (params = {}) =>
+    fetch(`/api/agents/bookings.csv?${new URLSearchParams(params)}`, { headers: authHeaders() })
+      .then(async (res) => { if (!res.ok) await handle(res); return res.blob(); }),
+  adminListAgencies: (status = "") =>
+    fetch(`${BASE}/admin/agencies${status ? `?status=${encodeURIComponent(status)}` : ""}`, { headers: authHeaders() }).then(handle),
+  adminReviewAgency: (id, payload) =>
+    fetch(`${BASE}/admin/agencies/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify(payload) }).then(handle),
   getAffiliateProgram: () =>
     fetch("/api/affiliate/program").then(handle),
   getAffiliateMe: () =>

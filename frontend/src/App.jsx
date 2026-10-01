@@ -60,6 +60,8 @@ const TripSummary = React.lazy(() => import("./pages/TripSummary.jsx"));
 const TravelAndEarn = React.lazy(() => import("./pages/TravelAndEarn.jsx"));
 const AffiliateLandingPage = React.lazy(() => import("./pages/AffiliateLandingPage.jsx"));
 const AffiliateDashboardPage = React.lazy(() => import("./pages/AffiliateDashboardPage.jsx"));
+const TravelAgentsPage = React.lazy(() => import("./pages/TravelAgentsPage.jsx"));
+const AgentDashboardPage = React.lazy(() => import("./pages/AgentDashboardPage.jsx"));
 const CircuitPlanner = React.lazy(() => import("./pages/CircuitPlanner.jsx"));
 const CircuitCheckout = React.lazy(() => import("./pages/CircuitCheckout.jsx"));
 const CircuitConfirmed = React.lazy(() => import("./pages/CircuitConfirmed.jsx"));
@@ -182,6 +184,7 @@ function AppContent() {
             <Route path="/admin/programs" element={<AdminPanel view="programs" />} />
             <Route path="/admin/coupons" element={<AdminPanel view="coupons" />} />
             <Route path="/admin/package-library" element={<AdminPanel view="package-library" />} />
+            <Route path="/admin/agencies" element={<AdminPanel view="agencies" />} />
             <Route path="/admin/blog" element={<AdminPanel view="blog" />} />
             <Route path="/admin/verifications" element={<AdminPanel view="verifications" />} />
             <Route path="/ops" element={<OpsPanel view="live" />} />
@@ -206,6 +209,9 @@ function AppContent() {
             <Route path="/affiliate" element={<AffiliateLandingPage />} />
             <Route path="/influencer" element={<AffiliateLandingPage />} />
             <Route path="/affiliate/dashboard" element={<AffiliateDashboardPage />} />
+            <Route path="/agents" element={<TravelAgentsPage />} />
+            <Route path="/agents/signup" element={<TravelAgentsPage openForm />} />
+            <Route path="/agents/dashboard" element={<AgentDashboardPage />} />
             <Route path="/circuit-planner" element={<CircuitPlanner />} />
             <Route path="/plan-trip" element={<CircuitPlanner />} />
             <Route path="/circuit-checkout/:id" element={<CircuitCheckout />} />

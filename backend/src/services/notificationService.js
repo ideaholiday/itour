@@ -20,6 +20,16 @@ function uniqueRecipients(recipients) {
   });
 }
 
+// An agent booking (ADR 054): messages about money (price, invoice, refunds) go
+// to the agency that paid; messages about the trip go to the guest.
+const AGENT_MONEY_EVENTS = new Set(["BOOKING_CONFIRMED", "DOCUMENTS", "BOOKING_CANCELLED", "SUPPLIER_RESCHEDULED"]);
+
+function agencyRecipient(database, agencyId) {
+  if (!agencyId) return null;
+  const agency = database.prepare("SELECT a.agency_name, a.contact_name, a.phone, u.id AS user_id, u.email FROM travel_agencies a JOIN users u ON u.id = a.user_id WHERE a.id = ?").get(agencyId);
+  return agency ? { id: agency.user_id, role: "TRAVELER", name: agency.contact_name || agency.agency_name, email: agency.email, phone: agency.phone } : null;
+}
+
 export function guestNotificationPreferences(database, userId) {
   if (!database || !userId) return { emailEnabled: true, whatsappEnabled: true };
   try {
@@ -94,13 +104,23 @@ export async function notifyBookingConfirmed(database, bookingId) {
     email: booking.supplier_email, phone: booking.supplier_phone,
   };
   const operations = database.prepare("SELECT id, name, email, phone, role FROM users WHERE UPPER(role) IN ('ADMIN', 'STAFF')").all();
-  const recipients = uniqueRecipients([traveler, supplier, ...operations.map((user) => ({ ...user, role: String(user.role).toUpperCase() }))]);
+  // An agent booking (ADR 054): the agency that paid gets the invoice; the guest,
+  // the agent's client, gets the voucher only, never what the agent paid.
+  const agencyContact = agencyRecipient(database, booking.agency_id);
+  const agency = agencyContact ? database.prepare("SELECT agency_name FROM travel_agencies WHERE id = ?").get(booking.agency_id) : null;
+  const agent = agencyContact ? { ...agencyContact, agent: true } : null;
+  const recipients = uniqueRecipients([...(agent ? [agent] : []), traveler, supplier, ...operations.map((user) => ({ ...user, role: String(user.role).toUpperCase() }))]);
 
   const results = [];
   for (const recipient of recipients) {
     let subject = `Booking ${booking.ref} confirmed`;
     let message = `Hello ${recipient.name || "there"},\n\n${common}\n\nView the latest details in Idea Holiday.`;
-    if (recipient.role === "TRAVELER") {
+    const guestOfAgent = Boolean(agency) && recipient.role === "TRAVELER" && !recipient.agent;
+    if (recipient.agent) {
+      message = `Hello ${recipient.name || "there"},\n\nPayment confirmed for your client ${booking.traveler_name}. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher (for your client): ${documents.voucherUrl}\nInvoice (for ${agency.agency_name}): ${documents.invoiceUrl}\n\nYour client also gets the voucher by email and WhatsApp, without the price.`;
+    } else if (guestOfAgent) {
+      message = `Hello ${recipient.name || "Traveler"},\n\nYour booking is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\n\nBooked for you by ${agency.agency_name}. ${booking.confirmation_type === "INSTANT" ? "Show your voucher when you arrive." : "Your supplier is confirming the booking."}`;
+    } else if (recipient.role === "TRAVELER") {
       message = `Hello ${recipient.name || "Traveler"},\n\nYour payment is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}\n\n${booking.confirmation_type === "INSTANT" ? "Your booking is confirmed. Show your voucher when you arrive." : "Your supplier is confirming the booking."} Your private pickup OTP is available only in My Trips.`;
     } else if (recipient.role === "SUPPLIER") {
       subject = booking.confirmation_type === "INSTANT" ? `Confirmed booking ${booking.ref}` : `Action required: accept booking ${booking.ref}`;
@@ -109,7 +129,8 @@ export async function notifyBookingConfirmed(database, bookingId) {
       subject = `New paid booking ${booking.ref}`;
       message = `${common}\nSupplier: ${booking.supplier_name || "Pending"}\nTraveler: ${booking.traveler_name}\nMonitor supplier acceptance and dispatch in Operations.`;
     }
-    const template = recipient.role === "TRAVELER"
+    // The approved traveler template carries the invoice link, so a guest of an agent gets plain text.
+    const template = guestOfAgent ? null : recipient.role === "TRAVELER"
       ? whatsAppTemplate(process.env.WHATSAPP_TEMPLATE_BOOKING_CONFIRMED, [booking.ref, booking.product_title || booking.product_type, booking.activity_date, booking.pickup_time, booking.pickup_location, documents.voucherUrl, documents.invoiceUrl])
       : recipient.role === "SUPPLIER"
         ? booking.confirmation_type === "INSTANT"
@@ -119,8 +140,9 @@ export async function notifyBookingConfirmed(database, bookingId) {
     results.push(...await sendRecipientChannels({
       database,
       eventType,
-      eventKeyPrefix: `${booking.id}:${eventType}:${recipient.role}:${recipient.id || "external"}`,
-      recipient,
+      eventKeyPrefix: `${booking.id}:${eventType}:${recipient.agent ? "AGENT" : recipient.role}:${recipient.id || "external"}`,
+      // The guest's own notification preferences don't exist; the agent's are on the account.
+      recipient: guestOfAgent ? { ...recipient, id: null } : recipient,
       subject,
       emailText: message,
       whatsappText: message,
@@ -157,10 +179,13 @@ export async function sendGuestBookingNotification(database, bookingId, requeste
   }
 
   const documents = guestDocumentLinks(booking);
-  const recipient = {
+  const guest = {
     id: booking.user_id, role: "TRAVELER", name: booking.traveler_name,
     email: booking.traveler_email, phone: booking.traveler_phone,
   };
+  const recipient = booking.agency_id
+    ? (AGENT_MONEY_EVENTS.has(eventType) ? agencyRecipient(database, booking.agency_id) || guest : { ...guest, id: null })
+    : guest;
   const experienceName = booking.product_title || booking.product_type;
   const reviewUrl = `https://ideaholiday.in/my-reviews?bookingRef=${encodeURIComponent(booking.ref)}`;
   const driverInfo = booking.driver_name
@@ -348,7 +373,7 @@ export async function notifyDispatchStatusChanged(database, bookingId) {
 
 export async function notifyRefundProcessed(database, refundId, { includeSupplier = true } = {}) {
   const refund = database.prepare(`
-    SELECT r.*, b.user_id, b.supplier_id, b.traveler_name, b.traveler_email, b.traveler_phone,
+    SELECT r.*, b.user_id, b.supplier_id, b.agency_id, b.traveler_name, b.traveler_email, b.traveler_phone,
       s.company_name AS supplier_name, s.contact_name AS supplier_contact_name,
       s.email AS supplier_email, s.phone AS supplier_phone
     FROM refunds r JOIN bookings b ON b.id = r.booking_id
@@ -357,7 +382,8 @@ export async function notifyRefundProcessed(database, refundId, { includeSupplie
   `).get(refundId);
   if (!refund) throw new Error("Refund not found for notification");
   const recipients = uniqueRecipients([
-    { id: refund.user_id, role: "TRAVELER", name: refund.traveler_name, email: refund.traveler_email, phone: refund.traveler_phone },
+    (refund.agency_id && agencyRecipient(database, refund.agency_id))
+      || { id: refund.user_id, role: "TRAVELER", name: refund.traveler_name, email: refund.traveler_email, phone: refund.traveler_phone },
     ...(includeSupplier ? [{ id: refund.supplier_id, role: "SUPPLIER", name: refund.supplier_contact_name || refund.supplier_name, email: refund.supplier_email, phone: refund.supplier_phone }] : []),
   ]);
   const results = [];
