@@ -8,7 +8,7 @@ plugins {
 }
 
 // The site this app shows. Override for local testing:
-//   ./gradlew :/Users/jitendramaury/ToDoThingWithIdeaHoliday/android-apps/travelerssembleDebug -PtravelerSiteUrl=http://10.0.2.2:5173
+//   ./gradlew :traveler:assembleDebug -PtravelerSiteUrl=http://10.0.2.2:5173
 val siteUrl = (findProperty("travelerSiteUrl") as String?) ?: "https://ideaholiday.in"
 
 // Release signing uses this app's upload key from keystore-traveler.properties (never committed):
@@ -49,7 +49,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
             signingConfig = signingConfigs.findByName("upload")
         }
     }
