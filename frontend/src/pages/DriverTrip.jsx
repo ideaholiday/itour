@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { driverAppUrl } from '../lib/driverAppLink.js';
 
 // Live location is required from "On the way" until the trip is completed (ADR 012).
 const SHARING_STATUSES = ['EN_ROUTE', 'ARRIVED', 'TRIP_STARTED'];
@@ -9,7 +10,7 @@ const HEARTBEAT_MS = 60000;
 // Inside the Idea Holiday Driver Android app a native service shares location,
 // and keeps doing so while the driver uses Maps or locks the phone (ADR 014).
 const driverApp = () => (typeof window !== 'undefined' ? window.IdeaHolidayDriverApp : null);
-const DRIVER_APP_URL = import.meta.env.VITE_DRIVER_APP_URL || '';
+const DRIVER_APP_URL = driverAppUrl({ override: import.meta.env.VITE_DRIVER_APP_URL || '' });
 
 export default function DriverTrip() {
   // A link in the address replaces any earlier trip's session.
