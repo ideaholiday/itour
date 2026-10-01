@@ -81,7 +81,7 @@ Do not rebuild these. Extend them if asked.
 - **B2 — built 2026-10-01, not deployed:** agent price on the listing, checkout and circuits (`IH_B2B`, out of commission, no coupons); the agency gets the invoice, the guest the voucher. Needs migration 083.
 - **B3 — built 2026-10-01, not deployed:** agent dashboard at `/agents/dashboard`: bookings by guest and date, voucher and invoice, cancel, statement CSV.
 - **B4 — built 2026-10-01, not deployed:** the client's voucher names the agency and its phone, no price; links last to a week after the trip; "Send to client" on WhatsApp and copy from the dashboard. All four phases of the plan are built.
-- **GST and white-label — built 2026-10-01, not deployed (ADR 055):** 18% GST on our service fee added for agents; the client's voucher and emails in the agency's brand with its logo. Needs migration 084. Owner: set `BUSINESS_AGENT_SAC` when the CA gives the number, and submit the neutral WhatsApp template (`WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE`, wording in `ENVIRONMENT.md`) to Meta.
+- **GST and white-label — built 2026-10-01, not deployed (ADR 055):** 18% GST on our service fee added for agents; the client's voucher and emails in the agency's brand with its logo. Needs migration 084. Owner: set `BUSINESS_AGENT_SAC` when the CA gives the number, and set `WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE=agent_guest_update` once Meta approves it (submitted 2026-10-01, pending).
 
 Standing obligations that apply to every change:
 
