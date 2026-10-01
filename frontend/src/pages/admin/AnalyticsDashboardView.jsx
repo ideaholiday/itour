@@ -298,7 +298,14 @@ export default function AnalyticsDashboardView() {
                 {funnel?.overallConversion ?? 0}% Overall
               </span>
             </div>
-            <p className="text-xs text-stone-500 mb-4">Stage-by-stage progression efficiency</p>
+            <p className="text-xs text-stone-500 mb-4">
+              Stage-by-stage progression efficiency
+              {funnel && !(funnel.searchesTracked && funnel.viewsTracked) && (
+                <span className="block mt-1 text-stone-400">
+                  {funnel.searchesTracked || funnel.viewsTracked ? "Some" : "Searches and product views"} aren't tracked yet, so the funnel starts where real data does.
+                </span>
+              )}
+            </p>
 
             <div className="space-y-3">
               {funnel?.stages?.map((stage, idx) => {

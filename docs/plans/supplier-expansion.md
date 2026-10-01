@@ -1,7 +1,7 @@
 # Plan: Cross-Border Listings, Asia and Europe Suppliers, Individual Vehicle Owners
 
 > **Summary:** Three plans: (A) an Indian supplier lists a product in another country, (B) suppliers from more Asian and European countries, (C) individual owners (one or more vehicles) join without GST, using PAN, Aadhaar, driving licence and vehicle RC.
-> **Read when:** Building any of these. **Status:** Partly decided 2026-09-22 ([ADR 024](../DECISIONS.md)): order, country list, GST for A, owner auto-approval. D1, D4–D8 and the Cashfree DL/RC check are still open. Not on the ROADMAP.
+> **Read when:** Building any of these. **Status:** Partly decided 2026-09-22 ([ADR 024](../DECISIONS_COUNTRIES.md)): order, country list, GST for A, owner auto-approval. D1, D4–D8 and the Cashfree DL/RC check are still open. Not on the ROADMAP.
 
 Builds on ADR 022/023 (Thailand, UAE). File references are from `feat/supplier-profiles`.
 Nothing here starts until the owner answers §0 and it is recorded in `DECISIONS.md` (R8).

@@ -678,10 +678,14 @@ export async function runComprehensiveSupplierKyb(database, { supplierId, actorI
     }
   }
 
-  // Determine overall readiness
-  const isPanValid = results.pan?.valid !== false;
-  const isBankValid = results.bank?.valid !== false;
-  results.overallVerified = isPanValid && isBankValid;
+  // Overall: PAN and bank account both checked and valid (ADR 056). A check that
+  // never ran (no PAN or bank details on file) is missing, never a pass; it used
+  // to count as one, so a supplier with neither read as verified.
+  results.missing = [
+    ...(results.pan?.valid === true ? [] : ["PAN"]),
+    ...(results.bank?.valid === true ? [] : ["BANK_ACCOUNT"]),
+  ];
+  results.overallVerified = results.missing.length === 0;
 
   results.updatedSupplier = database.prepare("SELECT * FROM suppliers WHERE id = ?").get(supplierId);
   return results;

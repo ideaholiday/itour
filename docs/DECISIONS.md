@@ -262,57 +262,6 @@ This document records significant technical and product architectural decisions.
 
 ---
 
-## ADR 022: Thailand and the UAE Launch; Phones Carry a Country Code
-- **Date**: 2026-09-19
-- **Context**: Idea Holiday is expanding to Thailand and Dubai, for travelers and suppliers. Phone handling assumed India: any 10-digit number got `+91`, so a Thai (`081 234 5678`) or UAE (`050 123 4567`) local number became a wrong `+91` number and WhatsApp silently failed.
-- **Decision Made**:
-  - **Phones are E.164** (`+<country code><number>`). India, Thailand and the UAE are checked against their mobile format; other country codes are accepted on length. `backend/src/lib/phone.js` is the one place that reads a typed number.
-  - **Every phone field gets a country picker** (India, Thailand, UAE), for travelers, suppliers, drivers and staff.
-  - **Supplier payouts stay in INR**, including Thai and UAE suppliers (PRODUCT non-goal 3 holds).
-  - **Foreign suppliers upload their own country's documents** for KYB, and an admin approves them.
-  - **WhatsApp templates stay in English** for all countries; the higher per-country Meta price is accepted.
-  - **Address search stays India-only**; travelers abroad paste their full pickup address.
-- **Consequences**: Phase 1 (done): WhatsApp, SMS and phone validation use `toE164`; a local number with a leading 0 and no country code is rejected rather than sent to `+91`. Phase 2 (done): checkout, signup and profile have the picker (India, Thailand, UAE, Other) and send the number as E.164; the starting country follows the header currency (AED → UAE; there is no THB currency yet); circuit checkout uses the profile number. Phase 3 (done): supplier signup, driver (fleet, assignment, fallback, ops override), team and the ops WhatsApp test forms have the picker; traveler and supplier signup store the number as E.164 (drivers and staff already were). Phase 4 (done): bookings and circuit orders store the traveler number as E.164; migration 048 converts stored numbers (unambiguous Indian mobiles get `+91`, anything uncertain is left as typed) and keeps the originals in `phone_e164_backup`; Travel & Earn matches phones on the full E.164 number, not the last 10 digits. Supplier signup (done): migration 049 adds `destinations.country` and the base cities Bangkok, Pattaya, Phuket, Krabi, Chiang Mai and Dubai; signup groups cities by country and sets the phone country from the city. Listing products abroad is still blocked: `resolveIndiaCatalogLocation` accepts India only.
-
----
-
-## ADR 023: Products Can Be Listed in Thailand; Dubai Later
-- **Date**: 2026-09-19
-- **Context**: Thai and UAE suppliers can sign up (ADR 022), but listings were India-only: the city check refused other countries, every departure time was read as India time, approval needed an Indian PAN, and 5% GST was added to every transfer and tour.
-- **Decision Made**:
-  - **Listings open in Thailand now; the UAE later.** Dubai stays in signup but can't hold a product yet.
-  - **Times are local to the product's city.** A Bangkok supplier's 09:00 means 09:00 in Bangkok (`Asia/Bangkok`); cutoffs, free-cancellation deadlines and alerts use that time.
-  - **Thai suppliers upload Thai documents**, approved by an admin by hand (no Cashfree check): company registration certificate (DBD affidavit), TAT tour operator licence, passport or Thai ID of the authorised director, and for transfer suppliers a commercial vehicle registration or public transport permit.
-  - **No GST on products in Thailand** (0%). Indian products keep their current GST.
-  - **Suppliers enter prices in INR**, matching INR payouts (ADR 022).
-- **Consequences**: Delivered in steps L1–L5 (city and country, local time, documents by country, tax, traveler side); progress is recorded here as each lands. L1 (done): the city decides the product's country; both product-create routes accept Thai catalogue cities and refuse Dubai ("open soon"), a country that disagrees with the city is refused, `GET /api/cities` marks each city `listing_open`, and the supplier city picker groups cities by country with Dubai shown as coming soon. Covered by `integration/listingCountries.test.js`. L2 (done): cutoffs, free-cancellation and refund windows, slot start times, dispatch windows and missed-pickup checks read a trip's date and time in its city's zone (`productTime` in `backend/src/lib/localTime.js`; India when the city is unknown). Dispatch messages, missed-pickup alerts, the driver trip page, traveler tracking, the dispatch queue and the dispatch timeline show that zone (`ICT` for Thailand) instead of a fixed IST. A driver's clashing trips are each read in their own city's time. Not changed: the pickup OTP's expiry (at least 24 hours past pickup, so a zone offset does not matter), the supplier departures list's default date (India's today), and times not tied to a trip (office hours, refund-credit dates). L3 (done): KYB documents follow the country of the supplier's base city (`KYB_COUNTRY_RULES` in `supplierVerificationService.js`). India is unchanged. Thailand requires the company registration certificate, TAT licence and director's passport or Thai ID, plus the vehicle registration or permit once the supplier lists a transfer; no PAN, and approval is by an admin only. Cashfree GSTIN/PAN checks and automatic approval are India-only (other countries get `400 CASHFREE_INDIA_ONLY`). A country with no document list yet (the UAE) needs at least one uploaded document before an admin can approve (owner confirmed 2026-09-21). A Thai supplier can save a transfer as a draft but can't publish it (create, publish or bulk publish) until the vehicle document is uploaded, even after KYB approval (owner decision 2026-09-21; `409 TRANSFER_DOCUMENT_REQUIRED`). The supplier compliance page and the admin review show the country's documents and hide GSTIN, PAN and Cashfree outside India. L4 (done): a product in Thailand quotes with no GST (0%), in every path that adds it: the booking quote (variant `tax_percentage` is ignored there), the native-hold price check and OCTO bookings (`isGstFreeProduct` in `backend/src/lib/productTax.js`, reading the product's city). Indian products keep their GST. Covered by `integration/thaiProductTax.test.js`. L5 (done): travelers see a Thai product's own time and no GST wording. `GET /api/activities/:id` returns `country`, `timeZone`, `timeLabel` and `gstFree`; departure slots take their zone from the city rather than the stored `time_zone` (which defaulted to India), and the departure picker names it ("Thailand time (ICT)"). A transfer's "Fastag tolls and GST included" line, the checkout GST row and the "GST invoice" promise change for Thai products. A Thai booking's invoice document is a **Booking receipt** (`RCP-` number, no GSTIN, no tax row; owner decision 2026-09-21), and its voucher shows the pickup time with its zone (`09:00 ICT`; Indian vouchers now show `IST`). Not changed: search and home copy ("across India"), a Thailand filter, and a THB display currency. Covered by `integration/thaiTravelerSide.test.js`. Thailand discovery (done, after L5): search filters by country (`GET /api/search?country=Thailand`, a Country filter on Search, `facets.countries`), a search for "thailand" finds Thai products, and Thai destination links work (they go by city name; the API also accepts the `city_th_*` id). `/search?country=Thailand` is an indexable landing once Thailand has a live product. Home links to it only then. Thai cities are pinned correctly on the search map. Traveler, supplier, affiliate and newsletter copy says "India and Thailand" (the supplier directory too). The sitemap lists each listing country with a live product (`liveCountries` in `seo.js`). **THB** is a display currency (฿, whole baht) at a fixed **2.87 INR per baht** (owner decision 2026-09-21), set in code beside the other rates (`currencyService.js`, `frontend/src/lib/currency.jsx`). A live XE rate was considered; it needs a paid XE API key and is not built. Payment stays in INR. Travelers see the rate in rupees (`1 THB = ₹2.87`, likewise for every foreign currency) in the currency picker and in the checkout note that the payment settles in INR. Home now shows real bestsellers and features the cities with the most live products (before, it read the search response as a list, failed, and always showed built-in sample tours with invented ratings; those samples are removed). Covered by `integration/thailandDiscovery.test.js`, `test/seo.test.js`, `test/currencyService.test.js` and `frontend/src/lib/destinations.test.js` (run with `node --test`; not part of `npm run check`).
-
----
-
-## ADR 024: Cross-Border Listings, Asian Countries, Individual Vehicle Owners
-- **Date**: 2026-09-22
-- **Context**: Indian suppliers want to list products abroad, more countries are wanted, and single cab owners without GST can't join. Plan: [`plans/supplier-expansion.md`](plans/supplier-expansion.md).
-- **Decision Made**:
-  - **Order of work:** A1–A2 (cross-border listing, documents by product country), then C1–C3 (individual owners), then Asian countries, then Europe last.
-  - **Asian country order:** UAE, Singapore, Thailand (already live), Indonesia, Maldives, Bhutan, Japan, Vietnam, China, Nepal.
-  - **Indian supplier selling a product abroad: 18% GST** on the booking. **No TDS** (online booking).
-  - **Individual owners:** approved automatically when every check passes and the names match; if anything fails or is missing, an admin approves by hand.
-- **Decision Made** (continued, 2026-09-22):
-  - **Selling abroad:** an Indian supplier sells in any listing country on its Indian KYB (verified GSTIN + PAN, optional CIN, or admin approval); no foreign licence or vehicle document.
-  - **UAE, Singapore, Indonesia, the Maldives, Bhutan, Japan, Vietnam and Nepal open**, each with its own KYB documents approved by an admin; a local supplier there pays 0%, an Indian supplier 18% GST. SGD displays at a fixed 78 INR, IDR at 190 rupiah per rupee, JPY at 1.7 yen per rupee, VND at 295 dong per rupee, NPR at the 1.6 peg. **China is skipped** for now (WhatsApp is blocked there; Chinese data law limits sending supplier data abroad). **Europe is skipped** for now (owner decision, 2026-09-22); only its time zones, with summer time, are in `localTime.js`. **USD is fixed at 97 INR** site-wide (was 86.50); the Maldives uses USD, not MVR; Bhutan shows INR (the ngultrum is pegged 1:1). Bhutan's Sustainable Development Fee is in the supplier's own price.
-  - **Owners' Aadhaar:** only a masked copy; the full number is never stored.
-- **Consequences**: Built: A1, A3, A4, C1–C4, UAE, Singapore, Indonesia, Maldives, Bhutan, Japan, Vietnam, Nepal. Step-by-step record, open questions and tests: [`plans/supplier-expansion.md`](plans/supplier-expansion.md) §Progress. Cashfree DL/RC checks run in simulation until the plan and field names are confirmed in the sandbox.
-
----
-
-## ADR 031: Product City Comes From the Catalogue
-- **Date**: 2026-09-23
-- **Context**: The product builder took City and State / Region as free text. A typo ("Gorahpur" for Gorakhpur) was only refused at Publish, because the backend already accepts catalogue cities only (`resolveCatalogLocation`).
-- **Decision Made**: The supplier picks the city from the catalogue list, grouped by country (open listing countries only), as at supplier signup. The state is filled from the city and can't be edited. A missing city is added to the catalogue by Idea Holiday; there is no free-text fallback (owner decision 2026-09-23).
-- **Consequences**: Production (Postgres) never runs the `INDIA_CITIES` refresh in `db.js`, which is SQLite-only, so a new Indian city needs a migration as well as a line in `backend/src/data/indiaCities.js`. Migration `060_more_india_cities.sql` adds Gorakhpur, Prayagraj and 27 other airport, pilgrimage and hill-station cities, and hides the old seed row `dest_goa`, which showed Goa twice. A saved draft whose city isn't in the catalogue has its city cleared, and the supplier is asked to choose again. Products already saved with a misspelled city are not changed.
-
----
-
 ## ADR 032: Indian Suppliers Verify PAN and GSTIN, Then Upload Those Two Documents
 - **Date**: 2026-09-23
 - **Context**: Suppliers could not tell which KYB documents mattered, and a failed upload only said "please try again".
@@ -330,5 +279,15 @@ This document records significant technical and product architectural decisions.
 
 ---
 
+## ADR 056: Analytics Show Only Real Counts; KYB "Verified" Needs Real Checks
+- **Date**: 2026-10-01
+- **Context**: Two findings from the branch-coverage pass (ROADMAP NEXT 1) waited for the owner. The admin conversion funnel filled missing searches and product views with bookings × 15 and × 5 once any matching audit event existed, and its "views" matched every review action. `runComprehensiveSupplierKyb` reported `overallVerified: true` for a supplier with neither PAN nor bank details, because a check that never ran counted as passed.
+- **Decision Made** (owner, 2026-10-01):
+  1. **The funnel shows only real counts.** Searches and Product Views appear only with their own recorded events (`search`, `product_view`), never estimated from bookings; reviews are not views. Nothing records those events today, so the funnel starts at Bookings Created and says searches and views aren't tracked (same rule as ADR 038 for suppliers).
+  2. **KYB `overallVerified` needs PAN and bank account both checked and valid.** A missing check is listed in `missing` (`PAN`, `BANK_ACCOUNT`), never a pass.
+- **Consequences**: Approval still uses its own readiness check (ADR 009, 032), so no supplier's status changes. Adding real search and view tracking is separate work, not started.
+
+---
+
 ## ADR 025+ by area
-[`DECISIONS_SEO.md`](DECISIONS_SEO.md), [`DECISIONS_OPERATOR.md`](DECISIONS_OPERATOR.md), [`DECISIONS_MOBILE.md`](DECISIONS_MOBILE.md), [`DECISIONS_B2B.md`](DECISIONS_B2B.md).
+[`DECISIONS_SEO.md`](DECISIONS_SEO.md), [`DECISIONS_OPERATOR.md`](DECISIONS_OPERATOR.md), [`DECISIONS_MOBILE.md`](DECISIONS_MOBILE.md), [`DECISIONS_B2B.md`](DECISIONS_B2B.md); countries (022–024, 031): [`DECISIONS_COUNTRIES.md`](DECISIONS_COUNTRIES.md).

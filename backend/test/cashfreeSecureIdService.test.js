@@ -321,6 +321,7 @@ test("runComprehensiveSupplierKyb performs full multi-point audit and persists r
     assert.equal(report.pan?.valid, true);
     assert.equal(report.bank?.valid, true);
     assert.equal(report.overallVerified, true);
+    assert.deepEqual(report.missing, []);
 
     const verifications = db.prepare("SELECT * FROM supplier_kyb_verifications WHERE supplier_id = ?").all(supplierId);
     assert.equal(verifications.length >= 3, true);
@@ -749,5 +750,17 @@ test("a full KYB audit records each failed check as an error without marking any
   await withEnv({ ...DEV, CASHFREE_SECUREID_SIMULATE: "true" }, async () => {
     const report = await runComprehensiveSupplierKyb(db, { supplierId: "sup_kyb_fail" });
     assert.deepEqual([report.gstin, report.bank, report.pan.valid], [null, null, true]);
+    // A bank account never checked is missing, not a pass (ADR 056).
+    assert.equal(report.overallVerified, false);
+    assert.deepEqual(report.missing, ["BANK_ACCOUNT"]);
+  });
+
+  // Neither PAN nor bank details on file: nothing checked, so not verified.
+  db.prepare("UPDATE suppliers SET pan_number = NULL, payout_bank_details = NULL WHERE id = 'sup_kyb_fail'").run();
+  await withEnv({ ...DEV, CASHFREE_SECUREID_SIMULATE: "true" }, async () => {
+    const report = await runComprehensiveSupplierKyb(db, { supplierId: "sup_kyb_fail" });
+    assert.deepEqual([report.pan, report.bank], [null, null]);
+    assert.equal(report.overallVerified, false);
+    assert.deepEqual(report.missing, ["PAN", "BANK_ACCOUNT"]);
   });
 });

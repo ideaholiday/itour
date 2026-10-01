@@ -297,3 +297,20 @@ test("the overview counts refunds and the breakdown groups revenue by city on th
   const breakdown = getRevenueBreakdown(db, { days: 30 });
   assert.deepEqual(breakdown.byDestination, [{ destination: "Goa", bookings: 2, revenue: 4000, share: 100 }]);
 });
+
+test("the funnel never estimates searches or views, and reviews aren't views (ADR 056)", t => {
+  const { db, addBookings } = emptyAnalyticsDb(t);
+  addBookings(1, 2, { status: "confirmed" });
+  const event = db.prepare("INSERT INTO audit_logs (id, action, resource_type) VALUES (?, ?, 'product')");
+  event.run("al_r1", "TRAVEL_AGENCY_REVIEWED");
+  event.run("al_r2", "HELD_FOR_REVIEW");
+  let funnel = getConversionFunnel(db);
+  assert.equal(funnel.stages[0].name, "Bookings Created", "review actions don't add a views stage");
+  assert.deepEqual([funnel.searchesTracked, funnel.viewsTracked], [false, false]);
+
+  for (let i = 0; i < 6; i++) event.run(`al_s${i}`, "search");
+  funnel = getConversionFunnel(db);
+  assert.deepEqual(funnel.stages.slice(0, 2).map((stage) => [stage.name, stage.count]), [["Searches", 6], ["Bookings Created", 2]],
+    "no made-up Product Views between searches and bookings");
+  assert.deepEqual([funnel.searchesTracked, funnel.viewsTracked], [true, false]);
+});

@@ -328,15 +328,17 @@ export function getRevenueBreakdown(database, { days = 30 } = {}) {
  * @param {{ days?: number }} opts
  */
 export function getConversionFunnel(database, { days = 30 } = {}) {
-  // Search/view events from audit log (if available)
+  // Search and product-view events, counted only when recorded under these exact
+  // action names. A fuzzy LIKE '%view%' also counted every review action, and
+  // nothing records searches or views today, so these are usually 0 (ADR 056).
   const auditSearches = database.prepare(`
     SELECT COUNT(*) AS count FROM audit_logs
-    WHERE action LIKE '%search%' AND created_at >= ${sqliteDate(days)}
+    WHERE LOWER(action) = 'search' AND created_at >= ${sqliteDate(days)}
   `).get().count || 0;
 
   const auditViews = database.prepare(`
     SELECT COUNT(*) AS count FROM audit_logs
-    WHERE action LIKE '%view%' AND created_at >= ${sqliteDate(days)}
+    WHERE LOWER(action) = 'product_view' AND created_at >= ${sqliteDate(days)}
   `).get().count || 0;
 
   // Booking funnel stages from actual data
@@ -367,13 +369,10 @@ export function getConversionFunnel(database, { days = 30 } = {}) {
     { name: "Completed", count: completed },
   ];
 
-  // Add top-of-funnel if audit data exists
-  if (auditSearches > 0 || auditViews > 0) {
-    stages.unshift(
-      { name: "Searches", count: auditSearches || totalCreated * 15 },
-      { name: "Product Views", count: auditViews || totalCreated * 5 }
-    );
-  }
+  // A top-of-funnel stage appears only with its own real events, never an
+  // estimate from bookings (ADR 038, 056: real numbers or "not enough data").
+  if (auditViews > 0) stages.unshift({ name: "Product Views", count: auditViews });
+  if (auditSearches > 0) stages.unshift({ name: "Searches", count: auditSearches });
 
   // Calculate conversion rates between stages
   for (let i = 1; i < stages.length; i++) {
@@ -390,6 +389,8 @@ export function getConversionFunnel(database, { days = 30 } = {}) {
     days,
     overallConversion: round2((bottomCount / topCount) * 100),
     stages,
+    searchesTracked: auditSearches > 0,
+    viewsTracked: auditViews > 0,
   };
 }
 

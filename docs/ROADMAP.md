@@ -81,7 +81,7 @@ Do not rebuild these. Extend them if asked.
 - **B2 — built 2026-10-01, not deployed:** agent price on the listing, checkout and circuits (`IH_B2B`, out of commission, no coupons); the agency gets the invoice, the guest the voucher. Needs migration 083.
 - **B3 — built 2026-10-01, not deployed:** agent dashboard at `/agents/dashboard`: bookings by guest and date, voucher and invoice, cancel, statement CSV.
 - **B4 — built 2026-10-01, not deployed:** the client's voucher names the agency and its phone, no price; links last to a week after the trip; "Send to client" on WhatsApp and copy from the dashboard. All four phases of the plan are built.
-- **GST and white-label — built 2026-10-01, not deployed (ADR 055):** 18% GST on our service fee added for agents; the client's voucher and emails in the agency's brand with its logo. Needs migration 084. SAC 998551 is on the invoice. Owner: set `WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE=agent_guest_update` once Meta approves it (submitted 2026-10-01, pending).
+- **GST and white-label — deployed 2026-10-01 (ADR 055):** 18% GST on our service fee added for agents; the client's voucher and emails in the agency's brand with its logo. Needs migration 084. SAC 998551 is on the invoice. Owner: the neutral WhatsApp template `agent_guest_update` was approved by Meta and set in production on 2026-10-01.
 
 Standing obligations that apply to every change:
 
@@ -102,14 +102,9 @@ don't exist; bookings dropping to zero raised no alert). The named services are
 done; what remains is the six unimplemented adapters, which need provider
 credentials (item 2).
 
-Found during the pass, left for later (owner to decide):
-- The conversion funnel on `/admin/analytics` fills a missing search or view
-  count with bookings × 15 or × 5 once any audit event exists, so it can show
-  made-up numbers (`getConversionFunnel` in `analyticsService.js`). Show only
-  real counts?
-- `runComprehensiveSupplierKyb` reports `overallVerified: true` when a supplier
-  has neither PAN nor bank details. Nothing reads it today (approval uses its
-  own readiness check), so it is harmless until something does.
+Found during the pass and fixed 2026-10-01 (ADR 056): the conversion funnel no
+longer estimates searches or views, and KYB `overallVerified` needs PAN and bank
+both checked.
 
 A lesson worth keeping: the OCTo bugs were all masked by a unit-test fixture that
 hand-rolled a `bookings` table not matching production, and the analytics bugs
