@@ -154,12 +154,13 @@ export function renderGuestDocument(documentType, booking) {
   const businessGstin = process.env.BUSINESS_GSTIN || "GSTIN available on request";
   // An agent booking (ADR 054, 055): IdeaHoliday invoices the agency for the trip at
   // its agent price, with 18% GST on IdeaHoliday's service fee added, under the
-  // travel-agent SAC 998551 (owner's CA, 2026-10-01; BUSINESS_AGENT_SAC overrides it).
+  // SAC 998555 (owner's CA, 2026-10-01; 998552 is the broader alternative;
+  // BUSINESS_AGENT_SAC overrides it).
   if (booking.agency_id && booking.agency_name) {
     const agentPrice = total + walletCredit - Number(booking.agent_service_gst_inr || 0);
     const serviceFee = Number(booking.agent_service_fee_inr || 0);
     const serviceGst = Number(booking.agent_service_gst_inr || 0);
-    const sac = String(process.env.BUSINESS_AGENT_SAC || "998551").trim();
+    const sac = String(process.env.BUSINESS_AGENT_SAC || "998555").trim();
     const body = `<h1>Tax invoice</h1><div class="grid"><div class="card"><span class="label">Invoice number</span><strong>INV-${escapeHtml(String(booking.ref).replace(/^IH-/, ""))}</strong><br><span class="muted">Issued ${escapeHtml(String(booking.created_at || "").slice(0, 10))}</span></div><div class="card"><span class="label">Payment</span><strong>${escapeHtml(booking.payment_status)} · ${escapeHtml(booking.payment_method)}</strong><br><span class="muted">${escapeHtml(booking.cashfree_payment_id || booking.razorpay_payment_id || "Recorded by Idea Holiday")}</span></div><div class="card"><span class="label">Billed to</span>${billedTo}</div><div class="card"><span class="label">Issued by</span><strong>${escapeHtml(businessName)}</strong><br>${escapeHtml(businessGstin)}<br>${escapeHtml(process.env.BUSINESS_ADDRESS || "India")}</div></div><section class="section"><h2>Invoice items</h2><div class="row"><span>${escapeHtml(booking.product_title || booking.product_type)} · ${escapeHtml(booking.activity_date)} · website price</span><strong>${money(agentPrice + agentDiscount)}</strong></div>${agentRow}<div class="row"><span>Agent price</span><strong>${money(agentPrice)}</strong></div><div class="row"><span>of which Idea Holiday service fee${sac ? ` (SAC ${escapeHtml(sac)})` : ""}</span><strong>${money(serviceFee)}</strong></div><div class="row"><span>GST @ 18% on the service fee</span><strong>+ ${money(serviceGst)}</strong></div>${walletCredit > 0 ? `<div class="row"><span>Idea Holiday wallet credit</span><strong>− ${money(walletCredit)}</strong></div>` : ""}<div class="row total"><span>Total paid</span><span>${money(total)}</span></div>${Number(booking.refunded_amount || 0) > 0 ? `<div class="row"><span>Refunded</span><strong>− ${money(booking.refunded_amount)}</strong></div>` : ""}</section><p class="muted">Travel services are provided by ${escapeHtml(booking.supplier_name || "the operator")}; taxes on the trip are included in its price. Idea Holiday's service fee is invoiced to your agency with GST at 18%.</p>`;
     return documentShell(`Invoice ${booking.ref}`, booking, body);
   }

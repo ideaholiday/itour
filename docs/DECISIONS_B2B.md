@@ -23,7 +23,7 @@
 - **Context**: B1–B4 of ADR 054 were deployed and checked by the owner on 2026-10-01. The GST invoice to agents was UNKNOWN, and the client's voucher still carried IdeaHoliday's brand.
 - **Decision Made** (owner, 2026-10-01, GST advice from the owner's CA):
   1. **GST on the agent invoice is 18% on IdeaHoliday's service fee, added on top** of the agent price. The service fee is the booking's commission less the agent discount. Agents pay the agent price plus that GST; supplier payouts don't change.
-  2. **SAC 998551** on the service fee (owner's CA, given 2026-10-01). The code defaults to it; `BUSINESS_AGENT_SAC` overrides it.
+  2. **SAC 998555 at 18%** on the service fee (owner's CA, 2026-10-01; 998552 is the CA's broader alternative). The CA first gave 998551, then confirmed 998555 the same day for tours, packages and transfers alike. The code defaults to it; `BUSINESS_AGENT_SAC` overrides it.
   3. **White-label for the agent's client: the voucher and the guest's messages.** The voucher shows the agency's logo (or name) and contact, never IdeaHoliday. Guest emails come in the agency's name with replies to the agency; the text never names IdeaHoliday.
   4. **Agency logo** uploaded by the agent (PNG, JPG or WEBP), shown on the voucher; without one, the agency's name.
 - **Consequences**: Migration 084 adds the fee, GST and logo columns. WhatsApp can only send Meta-approved wording from IdeaHoliday's number, and the approved templates name IdeaHoliday, so the client's WhatsApp is white-label only once the owner gets a neutral template approved and sets `WHATSAPP_TEMPLATE_AGENT_GUEST_UPDATE`. The link domain stays ideaholiday.in. The tax invoice stays IdeaHoliday's, billed to the agency.

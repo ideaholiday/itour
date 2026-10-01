@@ -100,7 +100,7 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.ok(html.includes("Awadh Holidays") && html.includes("09ABCDE1234F1Z5"), "billed to the agency with its GSTIN");
     assert.ok(html.includes("Agent discount (8%)"));
     assert.ok(html.includes("GST @ 18% on the service fee"), "GST on our service fee is invoiced to the agency");
-    assert.ok(html.includes("Idea Holiday service fee (SAC 998551)"), "the travel-agent SAC the owner's CA gave");
+    assert.ok(html.includes("Idea Holiday service fee (SAC 998555)"), "the SAC the owner's CA gave");
 
     const deliveries = await waitFor(
       () => withDatabase((database) => database.prepare("SELECT recipient_address, body FROM notification_deliveries WHERE event_type = 'BOOKING_CONFIRMED' AND channel = 'EMAIL' AND event_key LIKE ?").all(`${bookingId}:%`)),
