@@ -18,7 +18,7 @@ function Bullets({ items }) {
 export default function PrivacyPolicyPage() {
   return (
     <ContentPageLayout
-      eyebrow="Legal & Compliance · Last Updated: 30 September 2026"
+      eyebrow="Legal & Compliance · Last Updated: 1 October 2026"
       title="Privacy Policy"
       intro="How Idea Holiday Private Limited collects, uses, shares and protects personal data when you book, list a business, drive a trip or browse ideaholiday.in, and the rights you have under the Digital Personal Data Protection Act, 2023."
       badgeText="Your Data, Your Rights"
@@ -50,7 +50,7 @@ export default function PrivacyPolicyPage() {
           ]} />
           <p><strong>Suppliers, drivers and creators</strong></p>
           <Bullets items={[
-            "Business and contact details, GSTIN, PAN, bank account for payouts and business documents such as licences, used to verify the business and pay it.",
+            "Business and contact details, GSTIN, PAN, bank account for payouts and business documents such as licences, used to verify the business and pay it. For individual owners, a live selfie taken with the camera, which our team compares with the PAN and licence.",
             "Drivers: name, mobile number and, only during an accepted, active trip after you are told who will see it, your phone's location.",
             "Idea Holiday Driver app (Android): your phone's precise location, from when you tap On the way until you complete the trip, including while you use Maps, the app is closed or the screen is locked. A notification shows the whole time, and sharing stops by itself when the trip is completed. The app asks only for location while in use (never all-the-time access) and collects no location outside an active trip. It shows the same trip page as the website, so the device and usage data below also apply.",
             "Creators and affiliates: PAN and payout details, required for tax deduction and payment.",

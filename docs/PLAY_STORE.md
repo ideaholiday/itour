@@ -8,7 +8,7 @@ Both apps show the live website (ADR 052), so they collect what the website coll
 ## Open before submitting
 
 1. **Google Tag Manager tags: UNKNOWN.** `GTM-KV6P5HRR` loads on every page, inside the apps too. Which tags it fires is configured in GTM, not in this repo. If a Meta (Facebook) or Google Ads tag fires, add **App activity → App interactions: Shared, Advertising or marketing** to both forms below. If only Google Analytics fires, the forms are right as written.
-2. **The KYB selfie is missing from the privacy policy.** The supplier app takes a live selfie for individual owners and stores it for an admin to compare with the PAN ([`SelfieCapture.jsx`](../frontend/src/components/supplier/SelfieCapture.jsx)). The policy's supplier section lists documents but not the selfie. Suggested addition to that bullet: *"and, for individual owners, a live selfie taken in the app, which our team compares with your PAN and licence."*
+2. **The KYB selfie** is in the privacy policy since 2026-10-01 (supplier section). Deploy the frontend before submitting, so the live policy matches the form.
 3. **App access needs test accounts.** The supplier app is entirely behind sign-in, and traveler booking needs it. Create a reviewer traveler account and a reviewer supplier account with one sample listing, and enter the credentials **only in Play Console** (App content → App access), never in the repo.
 
 ## Traveler app: `in.ideaholiday.app`
