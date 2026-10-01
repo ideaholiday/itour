@@ -102,6 +102,17 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.ok(toGuest.body.includes("Voucher:") && !toGuest.body.includes("Invoice"), "the guest never sees the invoice or price");
     assert.ok(toGuest.body.includes("Booked for you by Awadh Holidays"));
     assert.ok(toAgent.body.includes("Invoice (for Awadh Holidays)"));
+    assert.ok(toGuest.body.includes("(+919876522233): contact them for changes"), "the guest knows whom to call");
+
+    // The client's voucher, opened from the link in their message: the agency, never a price.
+    const voucherUrl = toGuest.body.match(/Voucher: (\S+)/)[1];
+    const voucher = await fetch(`${api.baseUrl}${new URL(voucherUrl).pathname}${new URL(voucherUrl).search}`);
+    assert.equal(voucher.status, 200);
+    const voucherHtml = await voucher.text();
+    assert.ok(voucherHtml.includes("Booked through") && voucherHtml.includes("Awadh Holidays") && voucherHtml.includes("+919876522233"));
+    assert.ok(voucherHtml.includes("Meera Kapoor"));
+    assert.ok(!voucherHtml.includes("₹") && !voucherHtml.includes("INR"), "no price on the client's voucher");
+    assert.ok(!voucherHtml.includes("Travelling with friends"), "no agent referral link");
   });
 
   await t.test("the dashboard lists the agency's bookings, totals and CSV statement", async () => {

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { AlertCircle, Download, FileText, RefreshCw, RotateCcw, Search, Ticket } from "lucide-react";
+import { AlertCircle, Copy, Download, FileText, MessageCircle, RefreshCw, RotateCcw, Search, Ticket } from "lucide-react";
 import SeoHead from "../components/SeoHead.jsx";
 import CancellationRefundModal from "../components/checkout/CancellationRefundModal.jsx";
 import { api } from "../lib/api.js";
@@ -70,6 +70,41 @@ export default function AgentDashboardPage() {
     } catch (err) {
       tab?.close();
       setError(err.message || "The document couldn't be opened");
+    } finally {
+      setOpening(null);
+    }
+  };
+
+  // The client's voucher, without the price, sent on WhatsApp or copied (plan B4).
+  const voucherMessage = (booking, url) => [
+    `Hello ${booking.guestName},`,
+    `Your booking is confirmed: ${booking.productTitle} on ${booking.tripDate}${booking.pickupTime ? ` at ${booking.pickupTime}` : ""}.`,
+    `Booking reference: ${booking.ref}`,
+    `Your voucher: ${url}`,
+    `Show it at pickup. For any change, contact us.`,
+    agency?.agencyName ? `- ${agency.agencyName}` : "",
+  ].filter(Boolean).join("\n");
+
+  const sendVoucher = async (booking, how) => {
+    setOpening(`${booking.ref}:${how}`);
+    setError("");
+    const tab = how === "whatsapp" ? window.open("", "_blank") : null;
+    try {
+      const res = await api.getBookingDocuments(booking.ref);
+      const url = res.documents?.voucherUrl;
+      if (!url) throw new Error("The voucher isn't available yet");
+      const text = voucherMessage(booking, url);
+      if (how === "whatsapp") {
+        const phone = String(booking.guestPhone || "").replace(/\D/g, "");
+        const link = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+        if (tab) tab.location.href = link; else window.location.href = link;
+      } else {
+        await navigator.clipboard.writeText(text);
+        setMessage(`Copied ${booking.guestName}'s voucher message. Paste it into email or chat.`);
+      }
+    } catch (err) {
+      tab?.close();
+      setError(err.message || "The voucher couldn't be shared");
     } finally {
       setOpening(null);
     }
@@ -192,6 +227,16 @@ export default function AgentDashboardPage() {
                   <button onClick={() => openDocument(booking, "voucher")} disabled={opening === `${booking.ref}:voucher`} className="flex items-center gap-1.5 rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-bold hover:bg-stone-100 disabled:opacity-50">
                     <Ticket className="h-3.5 w-3.5" aria-hidden="true" /> Voucher for client
                   </button>
+                  {booking.status !== "cancelled" && (
+                    <>
+                      <button onClick={() => sendVoucher(booking, "whatsapp")} disabled={!booking.guestPhone || opening === `${booking.ref}:whatsapp`} className="flex items-center gap-1.5 rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">
+                        <MessageCircle className="h-3.5 w-3.5" aria-hidden="true" /> Send to client
+                      </button>
+                      <button onClick={() => sendVoucher(booking, "copy")} disabled={opening === `${booking.ref}:copy`} className="flex items-center gap-1.5 rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-bold hover:bg-stone-100 disabled:opacity-50">
+                        <Copy className="h-3.5 w-3.5" aria-hidden="true" /> Copy voucher message
+                      </button>
+                    </>
+                  )}
                   <button onClick={() => openDocument(booking, "invoice")} disabled={opening === `${booking.ref}:invoice`} className="flex items-center gap-1.5 rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-bold hover:bg-stone-100 disabled:opacity-50">
                     <FileText className="h-3.5 w-3.5" aria-hidden="true" /> Invoice
                   </button>

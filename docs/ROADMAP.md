@@ -80,7 +80,7 @@ Do not rebuild these. Extend them if asked.
 - **B1 — built 2026-10-01, not deployed:** `/agents` sign-up (GSTIN or PAN), admin approval at `/admin/agencies` with a 5–10% discount, emails. Needs migration 082 (applied automatically on the next deploy).
 - **B2 — built 2026-10-01, not deployed:** agent price on the listing, checkout and circuits (`IH_B2B`, out of commission, no coupons); the agency gets the invoice, the guest the voucher. Needs migration 083.
 - **B3 — built 2026-10-01, not deployed:** agent dashboard at `/agents/dashboard`: bookings by guest and date, voucher and invoice, cancel, statement CSV.
-- B4: client vouchers without the price.
+- **B4 — built 2026-10-01, not deployed:** the client's voucher names the agency and its phone, no price; links last to a week after the trip; "Send to client" on WhatsApp and copy from the dashboard. All four phases of the plan are built.
 
 Standing obligations that apply to every change:
 

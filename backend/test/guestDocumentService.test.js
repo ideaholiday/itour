@@ -64,3 +64,15 @@ test("guest document links use the provided base URL", () => {
   const voucherToken = new URL(links.voucherUrl).searchParams.get("token");
   assert.equal(verifyGuestDocumentToken(voucherToken, { bookingId: booking.id, bookingRef: booking.ref, documentType: "VOUCHER" }), true);
 });
+
+test("an agent's client keeps a voucher link until a week after a far-off trip", () => {
+  const day = 86_400_000;
+  const trip = new Date(Date.now() + 100 * day).toISOString().slice(0, 10);
+  const token = (booking) => new URL(guestDocumentLinks(booking, { baseUrl: "https://ideaholiday.in" }).voucherUrl).searchParams.get("token");
+  const scope = { bookingId: "bk_agent", bookingRef: "IH-AGENT1", documentType: "VOUCHER" };
+  const agentToken = token({ id: "bk_agent", ref: "IH-AGENT1", agency_id: "agy_1", activity_date: trip });
+  assert.equal(verifyGuestDocumentToken(agentToken, scope, Date.now() + 105 * day), true, "still valid after the trip");
+  assert.equal(verifyGuestDocumentToken(agentToken, scope, Date.now() + 110 * day), false, "but not forever");
+  const travelerToken = token({ id: "bk_agent", ref: "IH-AGENT1", activity_date: trip });
+  assert.equal(verifyGuestDocumentToken(travelerToken, scope, Date.now() + 40 * day), false, "other links keep 30 days");
+});

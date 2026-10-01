@@ -107,7 +107,7 @@ export async function notifyBookingConfirmed(database, bookingId) {
   // An agent booking (ADR 054): the agency that paid gets the invoice; the guest,
   // the agent's client, gets the voucher only, never what the agent paid.
   const agencyContact = agencyRecipient(database, booking.agency_id);
-  const agency = agencyContact ? database.prepare("SELECT agency_name FROM travel_agencies WHERE id = ?").get(booking.agency_id) : null;
+  const agency = agencyContact ? database.prepare("SELECT agency_name, phone FROM travel_agencies WHERE id = ?").get(booking.agency_id) : null;
   const agent = agencyContact ? { ...agencyContact, agent: true } : null;
   const recipients = uniqueRecipients([...(agent ? [agent] : []), traveler, supplier, ...operations.map((user) => ({ ...user, role: String(user.role).toUpperCase() }))]);
 
@@ -119,7 +119,7 @@ export async function notifyBookingConfirmed(database, bookingId) {
     if (recipient.agent) {
       message = `Hello ${recipient.name || "there"},\n\nPayment confirmed for your client ${booking.traveler_name}. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher (for your client): ${documents.voucherUrl}\nInvoice (for ${agency.agency_name}): ${documents.invoiceUrl}\n\nYour client also gets the voucher by email and WhatsApp, without the price.`;
     } else if (guestOfAgent) {
-      message = `Hello ${recipient.name || "Traveler"},\n\nYour booking is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\n\nBooked for you by ${agency.agency_name}. ${booking.confirmation_type === "INSTANT" ? "Show your voucher when you arrive." : "Your supplier is confirming the booking."}`;
+      message = `Hello ${recipient.name || "Traveler"},\n\nYour booking is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\n\nBooked for you by ${agency.agency_name}${agency.phone ? ` (${agency.phone})` : ""}: contact them for changes. ${booking.confirmation_type === "INSTANT" ? "Show your voucher when you arrive." : "Your supplier is confirming the booking."}`;
     } else if (recipient.role === "TRAVELER") {
       message = `Hello ${recipient.name || "Traveler"},\n\nYour payment is confirmed. ${common}\nPickup: ${booking.pickup_location}\n\nVoucher: ${documents.voucherUrl}\nInvoice: ${documents.invoiceUrl}\n\n${booking.confirmation_type === "INSTANT" ? "Your booking is confirmed. Show your voucher when you arrive." : "Your supplier is confirming the booking."} Your private pickup OTP is available only in My Trips.`;
     } else if (recipient.role === "SUPPLIER") {

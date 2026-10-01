@@ -866,8 +866,8 @@ router.get("/:ref/documents/:type", (req, res) => {
     // An agent booking's voucher goes to the agent's client: no referral link. Its
     // invoice is billed to the agency, which paid (ADR 054).
     if (booking.agency_id) {
-      const agency = db.prepare("SELECT agency_name, gstin, address, city, state FROM travel_agencies WHERE id = ?").get(booking.agency_id);
-      if (agency) Object.assign(booking, { agency_name: agency.agency_name, agency_gstin: agency.gstin, agency_address: [agency.address, agency.city, agency.state].filter(Boolean).join(", ") });
+      const agency = db.prepare("SELECT agency_name, phone, gstin, address, city, state FROM travel_agencies WHERE id = ?").get(booking.agency_id);
+      if (agency) Object.assign(booking, { agency_name: agency.agency_name, agency_phone: agency.phone, agency_gstin: agency.gstin, agency_address: [agency.address, agency.city, agency.state].filter(Boolean).join(", ") });
     }
     if (documentType === "VOUCHER" && booking.user_id && !booking.agency_id) {
       try {

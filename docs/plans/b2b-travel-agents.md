@@ -1,7 +1,7 @@
 # Plan: IdeaHoliday B2B Travel Agents on ideaholiday.in
 
 > **Summary:** Travel agents sign up on the traveler website, are approved by IdeaHoliday, and then book listings for their clients at an agent price, in the same site and app travelers use.
-> **Read when:** building the B2B agent portal. **Status:** APPROVED by the owner 2026-10-01 ([ADR 054](../DECISIONS_B2B.md)). On the ROADMAP as NOW; B1–B3 built 2026-10-01, B4 next.
+> **Read when:** building the B2B agent portal. **Status:** APPROVED by the owner 2026-10-01 ([ADR 054](../DECISIONS_B2B.md)). On the ROADMAP as NOW; B1–B4 built 2026-10-01; deploy needs migrations 082 and 083.
 
 This is **IdeaHoliday's own** B2B channel. It is not the supplier's own agents
 (ADR 039), who stay in the supplier extranet and pay the supplier offline.
