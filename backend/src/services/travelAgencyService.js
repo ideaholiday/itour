@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import { toE164 } from "../lib/phone.js";
 import { sendEmail } from "./emailService.js";
 import { csvCell } from "./supplierDepartureService.js";
+import { decryptPickupOtp } from "./bookingService.js";
 
 /**
  * IdeaHoliday B2B travel agents (ADR 054). An agent is a traveler account with
@@ -304,6 +305,11 @@ function bookingRow(row, today) {
     netInr: paidInr - refundInr,
     circuitOrderId: row.circuit_order_id || null,
     supplierRescheduleStatus: row.supplier_reschedule_status || null,
+    // The client's pickup code: the agency owns the booking, so it shares the code
+    // with its client (the white-label voucher says so). Hidden once used or over.
+    pickupCode: paid && !["cancelled", "completed"].includes(status) && !row.otp_verified_at && String(row.activity_date) >= today
+      ? decryptPickupOtp(row.otp_encrypted) || row.otp_code || null
+      : null,
     // Single bookings are cancelled from the dashboard; circuit legs from the circuit's page.
     canCancel: paid && row.payment_status === "PAID" && !["cancelled", "completed", "in_progress"].includes(status)
       && String(row.activity_date) >= today && !row.circuit_order_id,

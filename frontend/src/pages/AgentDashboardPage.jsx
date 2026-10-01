@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { AlertCircle, Copy, Download, FileText, MessageCircle, RefreshCw, RotateCcw, Search, Ticket } from "lucide-react";
+import { AlertCircle, Copy, Download, FileText, KeyRound, MessageCircle, RefreshCw, RotateCcw, Search, Ticket } from "lucide-react";
 import SeoHead from "../components/SeoHead.jsx";
 import CancellationRefundModal from "../components/checkout/CancellationRefundModal.jsx";
 import { api } from "../lib/api.js";
@@ -82,6 +82,7 @@ export default function AgentDashboardPage() {
     `Booking reference: ${booking.ref}`,
     `Your voucher: ${url}`,
     `Show it at pickup. For any change, contact us.`,
+    booking.pickupCode ? `Pickup code: ${booking.pickupCode}. If a driver picks you up, give this code only after checking the driver and the vehicle number.` : "",
     agency?.agencyName ? `- ${agency.agencyName}` : "",
   ].filter(Boolean).join("\n");
 
@@ -211,6 +212,14 @@ export default function AgentDashboardPage() {
                     {booking.tripDate}{booking.pickupTime ? ` · ${booking.pickupTime}` : ""} · {booking.guestName} · {booking.adults + booking.children} guest{booking.adults + booking.children === 1 ? "" : "s"}
                   </p>
                   <p className="text-xs text-stone-400">Booked {String(booking.bookedAt || "").slice(0, 10)}{booking.guestPhone ? ` · ${booking.guestPhone}` : ""}</p>
+                  {booking.pickupCode && (
+                    <p className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+                      <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
+                      Pickup code <strong className="font-mono text-sm tracking-widest">{booking.pickupCode}</strong>
+                      <button type="button" onClick={() => navigator.clipboard?.writeText(booking.pickupCode).then(() => setMessage(`Copied ${booking.guestName}'s pickup code.`)).catch(() => {})} className="font-bold underline">Copy</button>
+                      <span className="basis-full text-[11px] text-amber-800">Share with your client. The driver asks for it at pickup; it isn't on the voucher.</span>
+                    </p>
+                  )}
                 </div>
                 <div className="text-sm sm:text-right">
                   {booking.paid ? (

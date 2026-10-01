@@ -100,7 +100,7 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.ok(html.includes("Awadh Holidays") && html.includes("09ABCDE1234F1Z5"), "billed to the agency with its GSTIN");
     assert.ok(html.includes("Agent discount (8%)"));
     assert.ok(html.includes("GST @ 18% on the service fee"), "GST on our service fee is invoiced to the agency");
-    assert.ok(!html.includes("SAC"), "no SAC until the owner sets BUSINESS_AGENT_SAC");
+    assert.ok(html.includes("Idea Holiday service fee (SAC 998551)"), "the travel-agent SAC the owner's CA gave");
 
     const deliveries = await waitFor(
       () => withDatabase((database) => database.prepare("SELECT recipient_address, body FROM notification_deliveries WHERE event_type = 'BOOKING_CONFIRMED' AND channel = 'EMAIL' AND event_key LIKE ?").all(`${bookingId}:%`)),
@@ -172,6 +172,11 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.equal(row.guestName, "Meera Kapoor");
     assert.equal(row.paid, true);
     assert.equal(row.canCancel, true);
+    // The agency shares the client's pickup code (it isn't on the white-label voucher).
+    assert.match(String(row.pickupCode), /^\d{4,8}$/);
+    const ownerView = await requestJson(api.baseUrl, "/api/bookings", { token: agent.token });
+    const mine = (ownerView.data.bookings || ownerView.data).find((booking) => booking.id === bookingId);
+    assert.equal(row.pickupCode, mine.pickupOtp, "the same code the booking owner sees");
     assert.equal(row.websitePriceInr - row.agentDiscountInr + row.serviceGstInr, row.paidInr);
     assert.ok(row.serviceGstInr > 0);
     assert.deepEqual(
@@ -190,6 +195,7 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.match(lines[0], /^Reference,Booked on,Trip date/);
     assert.ok(lines[1].includes("Meera Kapoor"));
     assert.ok(lines.at(-1).startsWith("Total,"));
+    assert.ok(!/pickup|code/i.test(lines[0]) && lines[1].split(",").length === lines[0].split(",").length, "no pickup code column in the spreadsheet");
   });
 
   await t.test("the agency cancels its booking and hears about the refund", async () => {
@@ -199,6 +205,7 @@ test("an approved agency books at its agent price, single and circuit", async (t
     assert.equal(listed.data.bookings.length, 1);
     const [row] = listed.data.bookings;
     assert.equal(row.canCancel, false);
+    assert.equal(row.pickupCode, null, "no code once cancelled");
     assert.equal(row.netInr, row.paidInr - row.refundInr);
     const refundTo = await waitFor(
       () => withDatabase((database) => database.prepare(`SELECT d.recipient_address FROM notification_deliveries d JOIN refunds r ON d.event_key LIKE r.id || ':%'
