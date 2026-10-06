@@ -120,6 +120,39 @@ test("an admin cannot approve a supplier whose required documents are missing or
   database.close();
 });
 
+test("an admin can approve an Indian business supplier who has uploaded a CIN document and has a PAN on file", async () => {
+  const database = verificationDatabase();
+  // Only a CIN doc — no GSTIN doc, no Cashfree checks.
+  await addDocument(database, "doc-cin", "CIN");
+
+  const readiness = getKybApprovalReadiness(database, supplierRow(database));
+  assert.equal(readiness.cinAndPanApproval, true, "cinAndPanApproval should be true");
+  assert.equal(readiness.canApprove, true, "canApprove should be true via CIN+PAN path");
+
+  // Admin can actually save the approval.
+  const result = saveSupplierVerification(database, { supplierId: "supplier-1", action: "APPROVED" });
+  assert.equal(result.supplier.kyb_status, "APPROVED");
+  assert.equal(result.supplier.is_verified, 1);
+
+  // Without a PAN number the path is closed.
+  const noPanDb = verificationDatabase();
+  noPanDb.prepare("UPDATE suppliers SET pan_number = NULL").run();
+  await addDocument(noPanDb, "doc-cin2", "CIN");
+  const noPanReadiness = getKybApprovalReadiness(noPanDb, noPanDb.prepare("SELECT * FROM suppliers WHERE id = 'supplier-1'").get());
+  assert.equal(noPanReadiness.cinAndPanApproval, false, "cinAndPanApproval should be false without a PAN");
+  noPanDb.close();
+
+  // Without a CIN document the path is closed.
+  const noCinDb = verificationDatabase();
+  const noCinReadiness = getKybApprovalReadiness(noCinDb, noCinDb.prepare("SELECT * FROM suppliers WHERE id = 'supplier-1'").get());
+  assert.equal(noCinReadiness.cinAndPanApproval, false, "cinAndPanApproval should be false without a CIN doc");
+  noCinDb.close();
+
+  database.close();
+});
+
+
+
 test("an admin can approve without documents once Cashfree has verified the GSTIN and PAN", () => {
   const database = verificationDatabase({ status: "SUSPENDED" });
   addCheck(database, "GSTIN");

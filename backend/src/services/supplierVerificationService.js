@@ -425,6 +425,8 @@ export function getOwnerIdentityStatus(database, supplier) {
  * What an admin needs to decide on a supplier: which of their country's required
  * documents have a real uploaded file and, for Indian suppliers, whether Cashfree
  * has verified their GSTIN and PAN. An admin may approve once either is complete.
+ * A third path (cinAndPanApproval) applies to Indian business suppliers who have
+ * uploaded a CIN document and have a PAN number on file (owner decision 2026-10-06).
  */
 export function getKybApprovalReadiness(database, supplier) {
   const country = supplierCountry(database, supplier);
@@ -449,6 +451,13 @@ export function getKybApprovalReadiness(database, supplier) {
     licence: { number: latestValidNumber(database, supplier.id, "DRIVING_LICENSE", "licenseNumber"), name: latestValidCheck(database, supplier.id, "DRIVING_LICENSE", (r) => r.name)?.name || null },
     vehicle: { number: latestValidNumber(database, supplier.id, "VEHICLE_RC", "registrationNumber"), name: latestValidCheck(database, supplier.id, "VEHICLE_RC", (r) => r.owner)?.name || null },
   } : null;
+  // An Indian business supplier who has uploaded a CIN document and has a PAN
+  // number on file can be approved by an admin even if the GSTIN document is
+  // missing and Cashfree SecureID has not been run yet (owner decision 2026-10-06).
+  const cinAndPanApproval = !owner
+    && country === "India"
+    && Boolean(normalizeId(supplier.pan_number))
+    && withFile.some((doc) => normalizeId(doc.doc_type) === "CIN");
   return {
     country,
     supplierKind: isIndividualOwner(supplier) ? "INDIVIDUAL_OWNER" : "BUSINESS",
@@ -458,7 +467,8 @@ export function getKybApprovalReadiness(database, supplier) {
     missingDocuments,
     identity,
     ownerChecks,
-    canApprove: missingDocuments.length === 0 || Boolean(identity?.verified),
+    cinAndPanApproval,
+    canApprove: missingDocuments.length === 0 || Boolean(identity?.verified) || cinAndPanApproval,
   };
 }
 
